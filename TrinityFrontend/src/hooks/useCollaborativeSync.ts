@@ -6,7 +6,7 @@ import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useAuth } from '@/contexts/AuthContext';
 
 // WebSocket message types
-export type WSMessageType = 
+export type WSMessageType =
   | 'connect'
   | 'state_update'
   | 'card_update'  // New: granular card-level update
@@ -14,6 +14,10 @@ export type WSMessageType =
   | 'card_blur'    // New: user unfocused from a card
   | 'full_sync'
   | 'ack'
+  | 'resume'
+  | 'resume_ack'
+  | 'session_ack'
+  | 'close_session'
   | 'error'
   | 'heartbeat'
   | 'user_list_update';
@@ -25,6 +29,11 @@ export interface WSMessage {
   version?: string;
   timestamp?: string;
   client_id?: string;
+  session_id?: string;
+  sequence?: number;
+  last_acked_sequence?: number;
+  op?: 'ping' | 'pong';
+  reason?: string;
   user_email?: string;
   user_name?: string;
   project_context?: {
@@ -100,10 +109,13 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   const clientIdRef = useRef<string>(`client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
   const isApplyingRemoteUpdateRef = useRef(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const manualCloseRef = useRef(false);
   const hasInitialFullSyncRef = useRef(false);
   const initialFullSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionIdRef = useRef<string>('');
+  const lastAckSequenceRef = useRef<number>(0);
   
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [cardEditors, setCardEditors] = useState<Map<string, CardEditor>>(new Map());
@@ -136,11 +148,51 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       hash = email.charCodeAt(i) + ((hash << 5) - hash);
     }
     return colors[Math.abs(hash) % colors.length];
-  }, []);
+  }, [sendMessage]);
 
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  const getSessionStorageKey = useCallback(() => {
+    const projectContext = getActiveProjectContext();
+    if (!projectContext) {
+      return 'lab_ws_session_global';
+    }
+    return `lab_ws_session_${projectContext.client_name}_${projectContext.app_name}_${projectContext.project_name}`;
+  }, []);
+
+  const loadSessionState = useCallback(() => {
+    if (typeof window === 'undefined') return '';
+
+    const storageKey = getSessionStorageKey();
+    let sessionId = sessionStorage.getItem(storageKey);
+
+    if (!sessionId) {
+      sessionId =
+        (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+          ? crypto.randomUUID()
+          : `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      sessionStorage.setItem(storageKey, sessionId);
+    }
+
+    sessionIdRef.current = sessionId;
+
+    const lastAck = Number(sessionStorage.getItem(`${storageKey}_lastAck`) || '0');
+    lastAckSequenceRef.current = Number.isFinite(lastAck) ? lastAck : 0;
+
+    return sessionId;
+  }, [getSessionStorageKey]);
+
+  const persistLastAck = useCallback(
+    (sequence?: number) => {
+      if (!sequence || sequence <= 0 || typeof window === 'undefined') return;
+      const storageKey = getSessionStorageKey();
+      sessionStorage.setItem(`${storageKey}_lastAck`, sequence.toString());
+      lastAckSequenceRef.current = sequence;
+    },
+    [getSessionStorageKey],
+  );
 
   const onErrorRef = useRef(onError);
   const onConnectedRef = useRef(onConnected);
@@ -216,9 +268,15 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       baseUrl = `${protocol}//${host}:${resolvedFastapiPort}`;
     }
 
-    const wsUrl = `${baseUrl}/api/laboratory/sync/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+    const sessionId = sessionIdRef.current || loadSessionState();
+    const params = new URLSearchParams({
+      session_id: sessionId,
+      resume: '1',
+    });
+
+    const wsUrl = `${baseUrl}/api/laboratory/sync/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}?${params.toString()}`;
     return wsUrl;
-  }, []);
+  }, [loadSessionState]);
 
   // Serialize current state
   const serializeState = useCallback(() => {
@@ -248,7 +306,11 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   const sendMessage = useCallback((message: WSMessage) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
-        wsRef.current.send(JSON.stringify(message));
+        const payload: WSMessage = {
+          session_id: sessionIdRef.current || undefined,
+          ...message,
+        };
+        wsRef.current.send(JSON.stringify(payload));
       } catch (error) {
         onErrorRef.current(error as Error);
       }
@@ -396,6 +458,10 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     try {
       const message: WSMessage = JSON.parse(event.data);
 
+      if (typeof message.sequence === 'number') {
+        persistLastAck(message.sequence);
+      }
+
       // Ignore messages from self
       if (message.client_id === clientIdRef.current) {
         console.log('[CollaborativeSync] Ignoring self-echo message:', {
@@ -407,6 +473,22 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       }
 
       switch (message.type) {
+        case 'session_ack':
+          if (message.session_id) {
+            sessionIdRef.current = message.session_id;
+            const storageKey = getSessionStorageKey();
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem(storageKey, message.session_id);
+            }
+          }
+          break;
+
+        case 'resume_ack':
+          if (typeof message.last_acked_sequence === 'number') {
+            persistLastAck(message.last_acked_sequence);
+          }
+          break;
+
         case 'card_update':
           // Apply single card update
           if (message.card_id && message.payload) {
@@ -541,8 +623,10 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
           break;
 
         case 'heartbeat':
-          // Respond to heartbeat
-          sendMessage({ type: 'heartbeat', client_id: clientIdRef.current });
+          // Respond to heartbeat ping
+          if (message.op === 'ping') {
+            sendMessage({ type: 'heartbeat', op: 'pong', client_id: clientIdRef.current });
+          }
           break;
 
         default:
@@ -551,7 +635,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     } catch (error) {
       onErrorRef.current(error as Error);
     }
-  }, [setCards, serializeState, sendMessage]);
+  }, [getSessionStorageKey, persistLastAck, serializeState, sendMessage, setCards]);
 
   const handleMessageRef = useRef(handleMessage);
   useEffect(() => {
@@ -568,6 +652,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     if (!enabled) return;
 
     try {
+      const sessionId = loadSessionState();
       const wsUrl = getWebSocketUrl();
       console.log('[CollaborativeSync] Connecting to:', wsUrl);
 
@@ -579,7 +664,17 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
         console.log('[CollaborativeSync] Connected');
         setIsConnected(true);
         hasInitialFullSyncRef.current = false;
+        reconnectAttemptsRef.current = 0;
         onConnectedRef.current?.();
+
+        // Attempt resume before sending additional data
+        sendMessage({
+          type: 'resume',
+          session_id: sessionId || sessionIdRef.current,
+          last_acked_sequence: lastAckSequenceRef.current,
+          client_id: clientIdRef.current,
+          timestamp: new Date().toISOString(),
+        });
 
         // Send initial connection message with user info
         const projectContext = getActiveProjectContext();
@@ -613,8 +708,8 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
 
         // Start heartbeat
         heartbeatIntervalRef.current = setInterval(() => {
-          sendMessage({ type: 'heartbeat', client_id: clientIdRef.current });
-        }, 15000); // 15 seconds
+          sendMessage({ type: 'heartbeat', op: 'pong', client_id: clientIdRef.current });
+        }, 20000); // 20 seconds
       };
 
       ws.onmessage = (event) => handleMessageRef.current(event);
@@ -624,11 +719,19 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
         onErrorRef.current(new Error('WebSocket connection error'));
       };
 
-      ws.onclose = () => {
-        console.log('[CollaborativeSync] Disconnected');
+      ws.onclose = (event) => {
+        console.log('[CollaborativeSync] Disconnected', event.code, event.reason);
         setIsConnected(false);
         hasInitialFullSyncRef.current = false;
         onDisconnectedRef.current?.();
+
+        if (typeof window !== 'undefined' && event.code === 4001) {
+          const storageKey = getSessionStorageKey();
+          sessionStorage.removeItem(storageKey);
+          sessionStorage.removeItem(`${storageKey}_lastAck`);
+          sessionIdRef.current = '';
+          lastAckSequenceRef.current = 0;
+        }
 
         // Clear timers
         if (fullSyncTimerRef.current) {
@@ -642,24 +745,31 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
 
         // Attempt reconnection after 3 seconds
         if (!manualCloseRef.current && enabled) {
+          const attempt = reconnectAttemptsRef.current + 1;
+          reconnectAttemptsRef.current = attempt;
+          const baseDelay = Math.min(30000, Math.pow(2, attempt) * 1000);
+          const jitter = Math.random() * 500;
           reconnectTimeoutRef.current = setTimeout(() => {
-            console.log('[CollaborativeSync] Attempting reconnection...');
+            console.log('[CollaborativeSync] Attempting reconnection...', { attempt, delay: baseDelay + jitter });
             connect();
-          }, 3000);
+          }, baseDelay + jitter);
         }
       };
     } catch (error) {
       onErrorRef.current(error as Error);
     }
-  }, [enabled, fullSyncIntervalMs, getWebSocketUrl, sendMessage]);
+  }, [enabled, fullSyncIntervalMs, getSessionStorageKey, getWebSocketUrl, loadSessionState, sendMessage]);
 
   // Disconnect from WebSocket
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback((endSession = false, reason = 'client_closed') => {
     manualCloseRef.current = true;
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      if (endSession) {
+        sendMessage({ type: 'close_session', reason });
+      }
+      wsRef.current.close(endSession ? 1000 : undefined, reason);
     }
+    wsRef.current = null;
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -787,6 +897,20 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     triggerFullSync();
   }, [enabled, isConnected, cards]);
 
+  const endSession = useCallback(
+    (reason = 'session ended') => {
+      disconnect(true, reason);
+      if (typeof window !== 'undefined') {
+        const storageKey = getSessionStorageKey();
+        sessionStorage.removeItem(storageKey);
+        sessionStorage.removeItem(`${storageKey}_lastAck`);
+      }
+      sessionIdRef.current = '';
+      lastAckSequenceRef.current = 0;
+    },
+    [disconnect, getSessionStorageKey],
+  );
+
   return {
     isConnected,
     clientId: clientIdRef.current,
@@ -795,6 +919,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     notifyCardFocus,
     notifyCardBlur,
     disconnect,
+    endSession,
     reconnect: connect,
   };
 }
