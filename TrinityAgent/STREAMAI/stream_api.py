@@ -217,11 +217,14 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 async def _generate_text_reply_direct(prompt):
                     return "I apologize, but I couldn't process your request."
 
-        # Extract session_id early for intent caching
+        # Extract session identifiers early for intent caching and websocket scoping
         session_id = message.get("session_id", None)  # Frontend chat session ID
+        websocket_session_id = message.get("websocket_session_id") or message.get("websocketSessionId")
         chat_id = message.get("chat_id", None)  # Frontend chat ID
         if not session_id:
             session_id = f"ws_{uuid.uuid4().hex[:8]}"
+        if not websocket_session_id:
+            websocket_session_id = f"ws_conn_{uuid.uuid4().hex[:12]}"
         available_files = message.get("available_files", [])
 
         # Laboratory intent routing
@@ -489,7 +492,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
         if routing_payload is not None:
             project_context["intent_routing"] = routing_payload
 
-        logger.info(f"🔑 Session ID: {session_id}, Chat ID: {chat_id}")
+        # Attach websocket session id for downstream components that need strict scoping
+        project_context["websocket_session_id"] = websocket_session_id
+
+        logger.info(f"🔑 Session ID: {session_id}, WebSocket Session: {websocket_session_id}, Chat ID: {chat_id}")
         
         # Execute workflow with real-time events (intent detection already done above - NOT called again)
         try:
@@ -501,6 +507,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 user_id=user_id,
                 frontend_session_id=session_id,
                 frontend_chat_id=chat_id,
+                websocket_session_id=websocket_session_id,
                 history_override=history_summary,
                 chat_file_names=mentioned_files,
                 intent_route=routing_payload,

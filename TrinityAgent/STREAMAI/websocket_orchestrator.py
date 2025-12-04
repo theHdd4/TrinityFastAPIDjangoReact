@@ -2659,13 +2659,14 @@ WORKFLOW PLANNING:
         user_id: str,
         frontend_session_id: Optional[str] = None,
         frontend_chat_id: Optional[str] = None,
+        websocket_session_id: Optional[str] = None,
         history_override: Optional[str] = None,
         chat_file_names: Optional[List[str]] = None,
         intent_route: Optional[Dict[str, Any]] = None,
     ):
         """
         Execute complete workflow with WebSocket events.
-        
+
         Uses frontend session ID for proper context isolation between chats.
         
         Sends events:
@@ -2678,8 +2679,13 @@ WORKFLOW PLANNING:
         - workflow_completed: All steps done
         - error: Error occurred
         """
-        sequence_id = frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
-        logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
+        sequence_id = websocket_session_id or frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
+        logger.info(
+            "🔑 Using session ID: %s (Chat ID: %s, WebSocket Session: %s)",
+            sequence_id,
+            frontend_chat_id,
+            websocket_session_id,
+        )
         available_files = list(available_files or [])
         existing_files = self._sequence_available_files.get(sequence_id)
         if existing_files:
