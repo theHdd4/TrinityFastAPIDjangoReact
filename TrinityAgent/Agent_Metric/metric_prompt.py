@@ -112,7 +112,7 @@ class MetricPromptBuilder:
             "method": "divide",  # REQUIRED - operation type (add, subtract, multiply, divide, lag, lead, etc.)
             "columns": ["column1", "column2"],  # REQUIRED - array of column names, use actual column names from available files
             "rename": "new_column_name",  # Optional - new column name
-            "parameters": {},  # Optional - operation-specific parameters
+            "parameters": {},  # Optional - operation-specific parameters. For datetime: use {"to_year": true} format. For others: use actual values like {"period": 1} or {"exponent": 2}
             "identifiers": []  # Optional - for grouped operations
         },
         "metrics_json": {

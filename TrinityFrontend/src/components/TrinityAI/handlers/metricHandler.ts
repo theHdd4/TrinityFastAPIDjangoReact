@@ -1156,12 +1156,28 @@ export const metricHandler: AtomHandler = {
           formData.append(`${operationKey}_rename`, rename.trim());
         }
         
-        // Add additional parameters (format: {method}_0_{paramName})
-        Object.entries(parameters).forEach(([key, value]) => {
-          if (value !== null && value !== undefined) {
-            formData.append(`${operationKey}_${key}`, String(value));
+        // Add additional parameters
+        // Special handling for datetime: backend expects {method}_0_param with the parameter name as value
+        if (method === 'datetime') {
+          // For datetime, find the parameter key that is true (e.g., "to_year": true -> param = "to_year")
+          const paramKey = Object.keys(parameters).find(key => parameters[key] === true || parameters[key] === 'true');
+          if (paramKey) {
+            formData.append(`${operationKey}_param`, paramKey);
+          } else {
+            // Fallback: use first parameter key if no boolean true found
+            const firstParam = Object.keys(parameters)[0];
+            if (firstParam) {
+              formData.append(`${operationKey}_param`, firstParam);
+            }
           }
-        });
+        } else {
+          // For other operations, use standard format: {method}_0_{paramName}
+          Object.entries(parameters).forEach(([key, value]) => {
+            if (value !== null && value !== undefined) {
+              formData.append(`${operationKey}_${key}`, String(value));
+            }
+          });
+        }
         
         // Add options field (required) - operation type
         formData.append('options', method);

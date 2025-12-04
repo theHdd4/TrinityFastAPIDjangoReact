@@ -43,8 +43,9 @@
 - `compute_metrics_within_group`, `group_share_of_total`, `group_contribution`, `filter_top_n_per_group`
 
 **Requires Parameters:**
-- `power`: param (exponent number)
-- `datetime`: param (to_year/to_month/to_week/to_day/to_day_name/to_month_name)
+- `power`: param (exponent number, e.g., 2, 0.5, 3)
+- `datetime`: param (string value: "to_year", "to_month", "to_week", "to_day", "to_day_name", or "to_month_name")
+  - In JSON, use: `{"parameters": {"to_year": true}}` - the handler will extract "to_year" as the param value
 - `lag/lead/diff`: param (period integer)
 - `growth_rate`: param (period integer) or JSON with frequency/comparison_type
 - `rolling_mean/sum/min/max`: param (window integer)
