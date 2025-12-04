@@ -70,8 +70,9 @@ if (!FASTAPI_BASE_URL) {
       // Use localhost with port for local development
       FASTAPI_BASE_URL = `${protocol}//${hostname}:${aiPort}`;
     } else {
-      // Use IP address with port for direct IP access
-      FASTAPI_BASE_URL = `${protocol}//${hostIp}:${aiPort}`;
+      // Use the current IP unless an override is provided via VITE_HOST_IP
+      const targetHost = import.meta.env.VITE_HOST_IP || hostname;
+      FASTAPI_BASE_URL = `${protocol}//${targetHost}:${aiPort}`;
     }
   } else {
     // Server-side fallback
