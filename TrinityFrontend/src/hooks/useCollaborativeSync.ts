@@ -254,7 +254,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       hash = email.charCodeAt(i) + ((hash << 5) - hash);
     }
     return colors[Math.abs(hash) % colors.length];
-  }, [sendMessage]);
+  }, []);
 
   useEffect(() => {
     userRef.current = user;
