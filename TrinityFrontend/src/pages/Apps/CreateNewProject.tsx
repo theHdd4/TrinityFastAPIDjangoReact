@@ -45,6 +45,7 @@ interface CreateNewProjectProps {
   onOpenChange: (open: boolean) => void;
   apps?: App[];
   appMap?: Record<string, number>;
+  tenantName?: string | null;
 }
 
 interface Project {
@@ -55,7 +56,7 @@ interface Project {
   baseTemplate?: string | null;
 }
 
-const CreateNewProject: React.FC<CreateNewProjectProps> = ({ open, onOpenChange, apps = [], appMap = {} }) => {
+const CreateNewProject: React.FC<CreateNewProjectProps> = ({ open, onOpenChange, apps = [], appMap = {}, tenantName = null }) => {
   const navigate = useNavigate();
   const [projectName, setProjectName] = useState('');
   const [selectedApp, setSelectedApp] = useState<string>('');
@@ -474,7 +475,7 @@ const CreateNewProject: React.FC<CreateNewProjectProps> = ({ open, onOpenChange,
                         >
                           <div className="flex items-center gap-2">
                             <Plus className="w-4 h-4" />
-                            <span className="text-sm font-medium">Custom Applications</span>
+                            <span className="text-sm font-medium">{tenantName || 'Custom'} Applications</span>
                           </div>
                           <span className="flex items-center">
                             {collapsedCustom ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
@@ -506,7 +507,7 @@ const CreateNewProject: React.FC<CreateNewProjectProps> = ({ open, onOpenChange,
                         >
                           <div className="flex items-center gap-2">
                             <Sparkles className="w-4 h-4" />
-                            <span className="text-sm font-medium">All Applications</span>
+                            <span className="text-sm font-medium">QM Applications</span>
                           </div>
                           <span className="flex items-center">
                             {collapsedAll ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}

@@ -9,6 +9,7 @@ interface SidebarProps {
   setActiveTab: (tab: 'workspace' | 'my-projects') => void;
   userName: string | null;
   user: { username: string } | null;
+  tenantName: string | null;
   myProjectsCount: number;
   recentProjectsCount: number;
   appsCount: number;
@@ -21,6 +22,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   userName,
   user,
+  tenantName,
   myProjectsCount,
   recentProjectsCount,
   appsCount,
@@ -83,7 +85,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               )}
             >
               <Building2 className="w-4 h-4 shrink-0 text-blue-400" />
-              <span className="truncate">Companies Workspace</span>
+              <span className="truncate">{tenantName || 'Companies'} Workspace</span>
             </button>
             
             {/* Divider */}
@@ -103,7 +105,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-foreground hover:bg-muted"
             >
               <Plus className="w-4 h-4 shrink-0" />
-              <span className="truncate">Custom Application</span>
+              <span className="truncate">{tenantName || 'Custom'} Application</span>
             </button>
             <button
               onClick={() => {
@@ -118,7 +120,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-foreground hover:bg-muted"
             >
               <Sparkles className="w-4 h-4 shrink-0" />
-              <span className="truncate">All Application</span>
+              <span className="truncate">QM Application</span>
             </button>
           </div>
 
