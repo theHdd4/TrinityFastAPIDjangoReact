@@ -10,6 +10,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle, ChevronUp, ChevronDown, Plug, Wrench, Brain } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
+import {
+  CLARIFICATION_REQUEST,
+  CLARIFICATION_RESPONSE,
+  type ClarificationRequestMessage,
+  type ClarificationStatusUpdate,
+} from '@/types/streaming';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
 import StreamWorkflowPreview from './StreamWorkflowPreview';
@@ -144,6 +150,8 @@ interface Message {
   timestamp: Date;
   type?: 'text' | 'workflow_preview' | 'workflow_monitor' | 'step_approval';
   data?: any; // For storing workflow/step data
+  requestId?: string;
+  expectedFields?: string[];
 }
 
 interface Chat {
@@ -152,7 +160,10 @@ interface Chat {
   messages: Message[];
   createdAt: Date;
   sessionId?: string; // Backend session ID for this chat
+  pendingClarification?: ClarificationRequest | null;
 }
+
+type ClarificationRequest = ClarificationRequestMessage;
 
 interface TrinityAIBackgroundStatus {
   isProcessing: boolean;
@@ -244,7 +255,29 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const agentModeEnabledRef = useRef(isAgentMode);
   
   // Laboratory store
-  const { setCards, updateCard } = useLaboratoryStore();
+  const { setCards, updateCard, isLaboratorySession, pendingClarification, setPendingClarification } = useLaboratoryStore();
+  const isClarificationEnabled = (import.meta.env.VITE_ENABLE_STREAM_AI_CLARIFICATION ?? 'true') !== 'false';
+
+  // Clarification state (laboratory-only)
+  const [clarificationRequest, setClarificationRequest] = useState<ClarificationRequest | null>(
+    isClarificationEnabled && isLaboratorySession && pendingClarification ? pendingClarification : null
+  );
+  const [clarificationValues, setClarificationValues] = useState<Record<string, string>>({});
+  const [isPaused, setIsPaused] = useState(false);
+
+  useEffect(() => {
+    if (isClarificationEnabled && isLaboratorySession && pendingClarification) {
+      setClarificationRequest(prev => prev ?? pendingClarification);
+      setIsPaused(true);
+      if (pendingClarification.expected_fields?.length) {
+        const initialValues = pendingClarification.expected_fields.reduce((acc, field) => {
+          acc[field] = '';
+          return acc;
+        }, {} as Record<string, string>);
+        setClarificationValues(initialValues);
+      }
+    }
+  }, [isClarificationEnabled, isLaboratorySession, pendingClarification]);
 
   const safeSetLocalStorage = useCallback((key: string, value: string) => {
     try {
@@ -462,6 +495,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       metadata.sessionId ||
       `session_${createdAt.getTime()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    const pendingClarification: ClarificationRequest | null = metadata.pendingClarification
+      ? metadata.pendingClarification
+      : null;
+
     const messages = (record.messages || []).map((msg, index) => ({
       ...msg,
       id: msg.id || `mem-${record.chatId}-${index}`,
@@ -479,6 +516,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       messages,
       createdAt,
       sessionId,
+      pendingClarification,
     };
   }, []);
 
@@ -491,6 +529,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           title: chat.title,
           createdAt: chat.createdAt.toISOString(),
           sessionId: chat.sessionId,
+          pendingClarification: chat.pendingClarification || undefined,
         },
         append: false, // Replace all messages to ensure consistency
       });
@@ -694,8 +733,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     if (chat) {
       memoryPersistSkipRef.current = true;
       // Ensure messages are never empty - use chat messages or fallback to initial message
-      const chatMessages = chat.messages && chat.messages.length > 0 
-        ? chat.messages 
+      const chatMessages = chat.messages && chat.messages.length > 0
+        ? chat.messages
         : [{
             id: '1',
             content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
@@ -704,7 +743,21 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           }];
       setMessages(chatMessages);
       setCurrentSessionId(chat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-      
+
+      if (chat.pendingClarification && isLaboratorySession) {
+        setClarificationRequest(chat.pendingClarification);
+        const initialValues = (chat.pendingClarification.expected_fields || []).reduce((acc, field) => {
+          acc[field] = '';
+          return acc;
+        }, {} as Record<string, string>);
+        setClarificationValues(initialValues);
+        setIsPaused(true);
+      } else {
+        setClarificationRequest(null);
+        setClarificationValues({});
+        setIsPaused(false);
+      }
+
       // Close existing WebSocket and reset workflow state when switching chats
       if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
         wsConnection.close();
@@ -1252,10 +1305,131 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       return [];
     }
   };
+
+  const sendClarificationEnvelope = useCallback(async (
+    payload: { message: string; values?: Record<string, string> }
+  ) => {
+    if (!clarificationRequest) return;
+
+    const envelope = {
+      type: CLARIFICATION_RESPONSE,
+      requestId: clarificationRequest.requestId,
+      message: payload.message,
+      values: payload.values && Object.keys(payload.values).length > 0 ? payload.values : undefined,
+      session_id: currentSessionId,
+      chat_id: currentChatId,
+    };
+
+    try {
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        wsConnection.send(JSON.stringify(envelope));
+      } else {
+        await fetch(`${FASTAPI_BASE_URL}/trinityai/clarification/respond`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(envelope),
+        });
+      }
+      setIsLoading(true);
+    } catch (error) {
+      console.error('Failed to send clarification response:', error);
+      const errorMsg: Message = {
+        id: `clarification-error-${Date.now()}`,
+        content: '❌ Failed to send clarification. Please try again.',
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMsg]);
+      setIsLoading(false);
+    }
+  }, [FASTAPI_BASE_URL, clarificationRequest, currentChatId, currentSessionId, wsConnection]);
+
+  const handleClarificationSubmit = useCallback(async () => {
+    if (!clarificationRequest) return;
+
+    const responseSummary = clarificationRequest.expected_fields?.length
+      ? clarificationRequest.expected_fields
+          .map((field) => `${field}: ${clarificationValues[field] || ''}`)
+          .join('\n')
+      : clarificationValues.__freeform || 'Providing clarification to continue.';
+
+    const userMsg: Message = {
+      id: `clarification-response-${Date.now()}`,
+      content: responseSummary,
+      sender: 'user',
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMsg]);
+
+    await sendClarificationEnvelope({
+      message: responseSummary,
+      values: clarificationValues,
+    });
+  }, [clarificationRequest, clarificationValues, sendClarificationEnvelope]);
+
+  const handleClarificationCancel = useCallback(async () => {
+    const cancelMessage = 'User skipped clarification. Continue with best effort.';
+    await sendClarificationEnvelope({ message: cancelMessage, values: {} });
+  }, [sendClarificationEnvelope]);
+
+  const handleIncomingClarification = useCallback(
+    (request: ClarificationRequest) => {
+      if (!isLaboratorySession || !isClarificationEnabled) {
+        console.warn('Ignoring clarification request because session is not laboratory mode or feature is disabled');
+        return;
+      }
+
+      stopAutoRun();
+      setIsPaused(true);
+      setClarificationRequest(request);
+      setPendingClarification(request);
+      const initialValues = (request.expected_fields || []).reduce((acc, field) => {
+        acc[field] = '';
+        return acc;
+      }, {} as Record<string, string>);
+      setClarificationValues(initialValues);
+
+      const clarificationMessage: Message = {
+        id: `clarification-${Date.now()}`,
+        content: request.message || 'The assistant needs clarification before proceeding.',
+        sender: 'ai',
+        timestamp: new Date(),
+        type: 'text',
+        requestId: request.requestId,
+        expectedFields: request.expected_fields,
+      };
+
+      setMessages(prev => {
+        const withoutProgress = prev.filter(msg => !msg.id.startsWith('progress-'));
+        return [...withoutProgress, clarificationMessage];
+      });
+
+      setChats(prev => prev.map(chat =>
+        chat.id === currentChatId
+          ? { ...chat, pendingClarification: request }
+          : chat
+      ));
+
+      const currentChat = chats.find(c => c.id === currentChatId);
+      if (currentChat) {
+        const updatedChat: Chat = {
+          ...currentChat,
+          pendingClarification: request,
+          messages: currentChat.messages.some(m => m.id === clarificationMessage.id)
+            ? currentChat.messages
+            : [...currentChat.messages, clarificationMessage],
+        };
+        persistChatToMemory(updatedChat).catch(err =>
+          console.error('Failed to persist clarification request:', err)
+        );
+      }
+    },
+    [chats, currentChatId, isLaboratorySession, persistChatToMemory, stopAutoRun]
+  );
   
   // WebSocket message handler (EXACT SuperAgent pattern)
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return;
+    if (!inputValue.trim() || isLoading || isPaused) return;
     
     // Store input value immediately to prevent loss
     const messageContent = inputValue.trim();
@@ -1389,10 +1563,27 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       }
       
       // Create WebSocket connection
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = window.location.hostname;
-      const wsPort = window.location.port ? `:${window.location.port}` : '';
-      const wsUrl = `${wsProtocol}//${wsHost}${wsPort}/streamai/execute-ws`;
+      const buildWebSocketUrl = () => {
+        const baseUrlString = (FASTAPI_BASE_URL || '').replace(/\/$/, '');
+
+        if (baseUrlString) {
+          try {
+            const baseUrl = new URL(baseUrlString);
+            baseUrl.protocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+            baseUrl.pathname = `${baseUrl.pathname.replace(/\/$/, '')}/streamai/execute-ws`;
+            return baseUrl.toString();
+          } catch (err) {
+            console.warn('⚠️ Failed to build WebSocket URL from FASTAPI_BASE_URL, falling back to window location', err);
+          }
+        }
+
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsHost = window.location.hostname;
+        const wsPort = window.location.port ? `:${window.location.port}` : '';
+        return `${wsProtocol}//${wsHost}${wsPort}/streamai/execute-ws`;
+      };
+
+      const wsUrl = buildWebSocketUrl();
       
       console.log('🔗 Connecting to Trinity AI WebSocket:', wsUrl);
       const ws = new WebSocket(wsUrl);
@@ -1445,7 +1636,64 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       ws.onmessage = async (event) => {
         const data = JSON.parse(event.data);
         console.log('📨 WebSocket event:', data.type, data);
-        
+
+        if (data.type === CLARIFICATION_REQUEST) {
+          handleIncomingClarification(data as ClarificationRequestMessage);
+          return;
+        }
+
+        const isClarificationStatus =
+          (data.type === 'clarification_status' || data.type === 'clarification_update') && data.status;
+        if (isClarificationStatus) {
+          const statusEvent = data as ClarificationStatusUpdate;
+          if (statusEvent.status === 'resumed') {
+            setIsPaused(false);
+            setClarificationRequest(null);
+            setClarificationValues({});
+            setPendingClarification(null);
+
+            const resumedMsg: Message = {
+              id: `resumed-${Date.now()}`,
+              content: '✅ Resumed after clarification.',
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, resumedMsg]);
+            setChats(prev => prev.map(chat =>
+              chat.id === currentChatId
+                ? { ...chat, pendingClarification: null }
+                : chat
+            ));
+
+            const chat = chats.find(c => c.id === currentChatId);
+            if (chat) {
+              const updatedChat: Chat = { ...chat, pendingClarification: null, messages: [...chat.messages, resumedMsg] };
+              persistChatToMemory(updatedChat).catch(err =>
+                console.error('Failed to persist resumed chat state', err)
+              );
+            }
+          }
+          return;
+        }
+
+          const chat = chats.find(c => c.id === currentChatId);
+          if (chat) {
+            const updatedChat: Chat = { ...chat, pendingClarification: null, messages: [...chat.messages, resumedMsg] };
+            persistChatToMemory(updatedChat).catch(err =>
+              console.error('Failed to persist resumed status:', err)
+            );
+          }
+        }
+
+        if (data.status === 'paused_for_clarification' && data.requestId) {
+          handleIncomingClarification({
+            requestId: data.requestId,
+            message: data.message || 'The assistant needs clarification before proceeding.',
+            expected_fields: data.expected_fields,
+            payload: data.payload,
+          });
+        }
+
         switch (data.type) {
           case 'connected':
             console.log('✅ Trinity AI connected');
@@ -1466,8 +1714,30 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             );
             break;
 
+          case 'clarification_request': {
+            handleIncomingClarification({
+              requestId: data.requestId,
+              message: data.message,
+              expected_fields: data.expected_fields,
+              payload: data.payload,
+            });
+            setIsLoading(false);
+            break;
+          }
+
           case 'clarification_required': {
             console.warn('🛑 Clarification requested before continuing', data);
+            if (data.requestId) {
+              handleIncomingClarification({
+                requestId: data.requestId,
+                message: data.message,
+                expected_fields: data.expected_fields,
+                payload: data.payload,
+              });
+              setIsLoading(false);
+              break;
+            }
+
             stopAutoRun();
 
             const clarificationMessage: Message = {
@@ -2494,6 +2764,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           inputValue={inputValue}
           setInputValue={setInputValue}
           isLoading={isLoading}
+          isPaused={isPaused}
           onSendMessage={handleSendMessage}
           selectedAgent={selectedAgent}
           setSelectedAgent={setSelectedAgent}
@@ -2641,17 +2912,23 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         }}
         isAutoRunning={isAutoRunning}
         parseMarkdown={parseMarkdown}
-        autoSize={autoSize}
-        canvasAreaWidth={canvasAreaWidth}
-        canvasAreaLeft={canvasAreaLeft}
-        onStop={() => {
-          if (wsConnection) {
-            wsConnection.close();
-          }
-          setIsLoading(false);
-          stopAutoRun();
-        }}
-      />
+          autoSize={autoSize}
+          canvasAreaWidth={canvasAreaWidth}
+          canvasAreaLeft={canvasAreaLeft}
+          onStop={() => {
+            if (wsConnection) {
+              wsConnection.close();
+            }
+            setIsLoading(false);
+            stopAutoRun();
+          }}
+          clarificationRequest={clarificationRequest}
+          clarificationValues={clarificationValues}
+          onClarificationValueChange={(field, value) => setClarificationValues(prev => ({ ...prev, [field]: value }))}
+          onClarificationSubmit={handleClarificationSubmit}
+          onClarificationCancel={handleClarificationCancel}
+          isLaboratoryMode={isLaboratorySession}
+        />
       
       {/* Settings Panel for Horizontal Layout */}
       {showSettings && (
@@ -3804,6 +4081,59 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         </div>
       </ScrollArea>
       
+      {isPaused && clarificationRequest && isLaboratorySession && (
+        <div className="mx-5 mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl shadow-sm animate-fade-in">
+          <div className="flex items-start gap-2">
+            <Bot className="w-5 h-5 text-amber-700 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-800">Clarification needed</p>
+              <p className="text-sm text-amber-900 mt-1">{clarificationRequest.message}</p>
+              <div className="mt-3 space-y-2">
+                {clarificationRequest.expected_fields && clarificationRequest.expected_fields.length > 0 ? (
+                  clarificationRequest.expected_fields.map((field) => (
+                    <div key={field} className="space-y-1">
+                      <label className="text-xs font-medium text-amber-800">{field}</label>
+                      <input
+                        className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        value={clarificationValues[field] || ''}
+                        onChange={(e) => setClarificationValues(prev => ({ ...prev, [field]: e.target.value }))}
+                        placeholder={`Provide ${field}`}
+                      />
+                    </div>
+                  ))
+                ) : (
+                  <Textarea
+                    placeholder="Add more context so the AI can resume"
+                    value={clarificationValues.__freeform || ''}
+                    onChange={(e) => setClarificationValues(prev => ({ ...prev, __freeform: e.target.value }))}
+                    className="bg-white border-amber-200 focus-visible:ring-amber-300"
+                  />
+                )}
+              </div>
+              <div className="flex gap-2 mt-3">
+                <Button
+                  size="sm"
+                  onClick={handleClarificationSubmit}
+                  disabled={isLoading}
+                  className="bg-amber-500 hover:bg-amber-600 text-white"
+                >
+                  Submit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleClarificationCancel}
+                  disabled={isLoading}
+                  className="border-amber-300 text-amber-800 hover:bg-amber-100"
+                >
+                  Cancel / Skip
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="border-t-2 border-gray-200 bg-gradient-to-b from-white to-gray-50 p-5 backdrop-blur-sm relative">
         <div className="flex items-center gap-2 mb-4">
@@ -3934,7 +4264,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 scrollbarWidth: 'thin',
                 scrollbarColor: '#d1d5db transparent'
               }}
-              disabled={isLoading}
+              disabled={isLoading || isPaused}
               rows={1}
             />
           </div>
@@ -3955,7 +4285,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           )}
           <Button
             onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isLoading}
+            disabled={!inputValue.trim() || isLoading || isPaused}
             className="h-12 w-12 bg-[#FEEB99] hover:bg-[#FFBD59] text-gray-800 shadow-lg shadow-[#FFBD59]/30 hover:shadow-xl hover:shadow-[#FFBD59]/40 transition-all duration-300 hover:scale-110 rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             size="icon"
           >

@@ -15,6 +15,7 @@ import json
 import time
 import os
 import sys
+import uuid
 from typing import Dict, Any, List, Optional, Callable
 from pathlib import Path
 from datetime import datetime
@@ -100,6 +101,7 @@ class StreamOrchestrator:
         """Initialize the orchestrator"""
         # Use centralized settings
         self.config = settings.get_llm_config() if hasattr(settings, 'get_llm_config') else {}
+        self.clarification_enabled = (os.getenv("ENABLE_STREAM_AI_CLARIFICATION", "true") or "true").lower() != "false"
         
         # Base URLs for different services (use centralized settings)
         # For atom execution, we need to call the Trinity AI service itself (where we're running)
@@ -129,6 +131,10 @@ class StreamOrchestrator:
                 logger.info("✅ Result storage initialized")
             except Exception as e:
                 logger.warning(f"⚠️ Could not initialize result storage: {e}")
+
+        # In-memory clarification tracking for human-in-the-loop pauses
+        self._clarification_waiters: Dict[str, asyncio.Future] = {}
+        self._clarification_metadata: Dict[str, Dict[str, Any]] = {}
 
         # Shared file context utilities
         self.file_loader: Optional[FileLoader] = None
@@ -181,6 +187,19 @@ class StreamOrchestrator:
             self.file_context_resolver = FileContextResolver()
 
         logger.info("✅ StreamOrchestrator initialized")
+
+    async def _emit_progress(self, progress_callback: Optional[Callable], payload: Dict[str, Any]) -> None:
+        """Safely invoke the progress callback, awaiting coroutines when needed."""
+
+        if not progress_callback:
+            return
+
+        try:
+            result = progress_callback(payload)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:
+            logger.debug("Progress callback raised an exception: %s", exc)
     
     async def execute_sequence(
         self,
@@ -231,6 +250,9 @@ class StreamOrchestrator:
         
         atoms = sequence.get("sequence", [])
         total_atoms = len(atoms)
+
+        # Mode flag (laboratory vs workflow) defaults to laboratory for HITL
+        mode = (sequence.get("mode") or "laboratory").lower()
         
         results = {
             "session_id": session_id,
@@ -251,17 +273,51 @@ class StreamOrchestrator:
             logger.info(f"{'='*80}")
             
             # Update progress
-            if progress_callback:
-                progress_callback({
-                    "type": "atom_start",
-                    "atom_index": i,
-                    "total_atoms": total_atoms,
-                    "atom_id": atom_id,
-                    "purpose": atom.get("purpose", "")
-                })
+            await self._emit_progress(progress_callback, {
+                "type": "atom_start",
+                "atom_index": i,
+                "total_atoms": total_atoms,
+                "atom_id": atom_id,
+                "purpose": atom.get("purpose", "")
+            })
             
             try:
                 # Execute 3-step pattern
+                if mode != "workflow" and self.clarification_enabled and progress_callback:
+                    clarification = self._detect_clarification_need(atom, atom_index=i)
+                    if clarification:
+                        request_id = clarification.get("requestId") or f"clarify-{uuid.uuid4().hex}"
+                        clarification["requestId"] = request_id
+                        clarification.update({
+                            "session_id": session_id,
+                            "atom_id": atom_id,
+                        })
+
+                        await self._emit_progress(progress_callback, {
+                            "type": "clarification_request",
+                            "status": "paused_for_clarification",
+                            **clarification
+                        })
+
+                        response_payload = await self._pause_for_clarification(
+                            session_id=session_id,
+                            request_id=request_id,
+                            atom=atom,
+                            clarification=clarification,
+                            progress_callback=progress_callback,
+                        )
+
+                        if response_payload:
+                            await self._emit_progress(progress_callback, {
+                                "type": "clarification_update",
+                                "status": "resumed",
+                                "requestId": request_id,
+                                "session_id": session_id,
+                                "atom_id": atom_id,
+                                "message": response_payload.get("message", "")
+                            })
+                            atom = self._apply_clarification_response(atom, response_payload)
+
                 atom_result = await self._execute_atom_3_steps(
                     atom=atom,
                     session_id=session_id,
@@ -333,13 +389,12 @@ class StreamOrchestrator:
         results["end_time"] = datetime.now().isoformat()
         
         # Final progress update
-        if progress_callback:
-            progress_callback({
-                "type": "sequence_complete",
-                "completed_atoms": results["completed_atoms"],
-                "failed_atoms": results["failed_atoms"],
-                "total_atoms": total_atoms
-            })
+        await self._emit_progress(progress_callback, {
+            "type": "sequence_complete",
+            "completed_atoms": results["completed_atoms"],
+            "failed_atoms": results["failed_atoms"],
+            "total_atoms": total_atoms
+        })
         
         logger.info(f"\n{'='*80}")
         logger.info(f"🎉 Sequence execution complete")
@@ -376,14 +431,13 @@ class StreamOrchestrator:
         
         # Step 1: Add Card
         logger.info(f"  📝 Step 1/3: Creating laboratory card...")
-        if progress_callback:
-            progress_callback({
-                "type": "step_update",
-                "atom_index": atom_index,
-                "step": 1,
-                "total_steps": 3,
-                "description": "Creating card"
-            })
+        await self._emit_progress(progress_callback, {
+            "type": "step_update",
+            "atom_index": atom_index,
+            "step": 1,
+            "total_steps": 3,
+            "description": "Creating card"
+        })
         
         card_result = await self._step1_add_card(atom_id, session_id)
         if not card_result.get("success"):
@@ -398,14 +452,13 @@ class StreamOrchestrator:
         
         # Step 2: Fetch Atom
         logger.info(f"  🔍 Step 2/3: Fetching atom...")
-        if progress_callback:
-            progress_callback({
-                "type": "step_update",
-                "atom_index": atom_index,
-                "step": 2,
-                "total_steps": 3,
-                "description": "Fetching atom"
-            })
+        await self._emit_progress(progress_callback, {
+            "type": "step_update",
+            "atom_index": atom_index,
+            "step": 2,
+            "total_steps": 3,
+            "description": "Fetching atom"
+        })
         
         fetch_result = await self._step2_fetch_atom(atom_id)
         if not fetch_result.get("success"):
@@ -419,14 +472,13 @@ class StreamOrchestrator:
         
         # Step 3: Execute Atom
         logger.info(f"  🚀 Step 3/3: Executing atom...")
-        if progress_callback:
-            progress_callback({
-                "type": "step_update",
-                "atom_index": atom_index,
-                "step": 3,
-                "total_steps": 3,
-                "description": "Executing atom"
-            })
+        await self._emit_progress(progress_callback, {
+            "type": "step_update",
+            "atom_index": atom_index,
+            "step": 3,
+            "total_steps": 3,
+            "description": "Executing atom"
+        })
         
         # Inject previous results into prompt
         prompt = atom.get("prompt", "")
@@ -486,6 +538,180 @@ class StreamOrchestrator:
             "duration": duration,
             "insight": insight_text
         }
+
+    def _detect_clarification_need(self, atom: Dict[str, Any], atom_index: int = 0) -> Optional[Dict[str, Any]]:
+        """Check for low-confidence or incomplete inputs before executing an atom."""
+
+        required_inputs = atom.get("required_inputs") or atom.get("requiredParameters") or []
+        if isinstance(required_inputs, str):
+            required_inputs = [required_inputs]
+        provided_inputs = atom.get("inputs") or atom.get("parameters") or {}
+        missing_inputs = [field for field in required_inputs if not provided_inputs.get(field)]
+
+        if missing_inputs:
+            message = "I need a bit more info before running this atom."
+            return {
+                "type": "clarification_request",
+                "message": message,
+                "expected_fields": missing_inputs,
+                "payload": {
+                    "reason": "missing_inputs",
+                    "atom_index": atom_index,
+                    "missing": missing_inputs,
+                },
+            }
+
+        low_confidence = None
+        for key in ("llm_confidence", "confidence", "prompt_confidence"):
+            if atom.get(key) is not None:
+                low_confidence = atom.get(key)
+                break
+
+        if low_confidence is not None and isinstance(low_confidence, (int, float)) and low_confidence < 0.45:
+            return {
+                "type": "clarification_request",
+                "message": "My earlier reasoning felt uncertain. Can you confirm the details below?",
+                "expected_fields": list((atom.get("inputs") or {}).keys()),
+                "payload": {
+                    "reason": "low_confidence",
+                    "confidence": low_confidence,
+                    "atom_index": atom_index,
+                },
+            }
+
+        if self._last_context_selection:
+            selection = self._last_context_selection
+            total_relevant = len(selection.relevant_files or {})
+            if total_relevant != 1:
+                message = "Which file or column should I use before I run this step?"
+                expected = list(selection.relevant_files.keys()) or list(selection.other_files)
+                return {
+                    "type": "clarification_request",
+                    "message": message,
+                    "expected_fields": expected,
+                    "payload": {
+                        "reason": "ambiguous_context",
+                        "atom_index": atom_index,
+                        "relevant_files": selection.relevant_files,
+                        "other_files": selection.other_files,
+                        "matched_columns": selection.matched_columns,
+                    },
+                }
+
+        return None
+
+    async def _pause_for_clarification(
+        self,
+        session_id: str,
+        request_id: str,
+        atom: Dict[str, Any],
+        clarification: Dict[str, Any],
+        progress_callback: Optional[Callable],
+    ) -> Optional[Dict[str, Any]]:
+        """Pause execution until a clarification response is supplied."""
+
+        key = f"{session_id}:{request_id}"
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+        resume_event = asyncio.Event()
+        self._clarification_waiters[key] = future
+        self._clarification_metadata[key] = {
+            "atom": atom,
+            "clarification": clarification,
+            "created_at": datetime.utcnow().isoformat(),
+            "session_id": session_id,
+            "atom_id": atom.get("atom_id"),
+            "resume_event": resume_event,
+            "progress_callback": progress_callback,
+        }
+
+        if self.storage:
+            try:
+                self.storage.store_result(
+                    session_id,
+                    f"clarification_{request_id}",
+                    clarification,
+                    "clarification_request",
+                    {"atom": atom.get("atom_id"), "request_id": request_id},
+                )
+            except Exception as exc:
+                logger.debug("Could not persist clarification to storage: %s", exc)
+
+        await self._emit_progress(progress_callback, {
+            "type": "clarification_status",
+            "status": "paused_for_clarification",
+            "requestId": request_id,
+            "session_id": session_id,
+            "atom_id": atom.get("atom_id"),
+        })
+
+        try:
+            response_payload = await future
+        except asyncio.CancelledError:
+            logger.warning("Clarification wait was cancelled for %s", key)
+            return None
+        finally:
+            self._clarification_waiters.pop(key, None)
+            self._clarification_metadata.pop(key, None)
+
+        return response_payload
+
+    def _apply_clarification_response(self, atom: Dict[str, Any], response: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge clarified values back into the atom definition."""
+
+        values = response.get("values") or {}
+        if values:
+            inputs = atom.get("inputs") or {}
+            inputs.update(values)
+            atom["inputs"] = inputs
+
+            params = atom.get("parameters")
+            if isinstance(params, dict):
+                params.update(values)
+                atom["parameters"] = params
+
+        return atom
+
+    async def resume_clarification(self, session_id: str, request_id: str, message: str, values: Optional[Dict[str, Any]] = None) -> bool:
+        """Resume a paused sequence using the user's clarification response."""
+
+        key = f"{session_id}:{request_id}"
+        waiter = self._clarification_waiters.get(key)
+        metadata = self._clarification_metadata.get(key, {})
+        resume_event: Optional[asyncio.Event] = metadata.get("resume_event")
+        if resume_event and resume_event.is_set():
+            return True
+
+        payload = {
+            "type": "clarification_response",
+            "requestId": request_id,
+            "session_id": session_id,
+            "message": message,
+            "values": values or {},
+        }
+
+        if resume_event:
+            resume_event.set()
+
+        if waiter and not waiter.done():
+            waiter.set_result(payload)
+        elif not waiter:
+            return False
+
+        progress_callback = metadata.get("progress_callback")
+        if progress_callback:
+            try:
+                await self._emit_progress(progress_callback, {
+                    "type": "clarification_status",
+                    "status": "resumed",
+                    "requestId": request_id,
+                    "session_id": session_id,
+                    "atom_id": metadata.get("atom_id"),
+                })
+            except Exception as exc:
+                logger.debug("Could not emit resumed status: %s", exc)
+
+        return True
     
     async def _step1_add_card(self, atom_id: str, session_id: str) -> Dict[str, Any]:
         """
