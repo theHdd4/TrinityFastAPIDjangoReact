@@ -35,6 +35,39 @@ async def _safe_close_websocket(websocket: WebSocket, code: int = 1000, reason: 
     except Exception as close_error:  # pragma: no cover - defensive
         logger.debug(f"WebSocket close failed (code={code}, reason={reason}): {close_error}")
 
+
+def _is_websocket_connected(websocket: WebSocket) -> bool:
+    """Return True if the websocket is still open from the server perspective."""
+    if getattr(websocket, "close_code", None):
+        return False
+    if hasattr(websocket, "client_state") and websocket.client_state.name == "DISCONNECTED":
+        return False
+    if hasattr(websocket, "application_state") and websocket.application_state.name == "DISCONNECTED":
+        return False
+    return True
+
+
+async def _safe_send_json(websocket: WebSocket, payload: dict) -> bool:
+    """Send a JSON message if the websocket is still open.
+
+    Returns False when the connection is no longer available so callers can
+    gracefully stop sending additional messages.
+    """
+    if not _is_websocket_connected(websocket):
+        return False
+
+    try:
+        await websocket.send_text(json.dumps(payload))
+        return True
+    except WebSocketDisconnect:
+        return False
+    except RuntimeError as runtime_error:
+        logger.debug(f"WebSocket send failed after close: {runtime_error}")
+        return False
+    except Exception as send_error:  # pragma: no cover - defensive
+        logger.warning(f"WebSocket send failed: {send_error}")
+        return False
+
 # Initialize components (will be set by main_api.py)
 rag_engine = None
 parameter_generator = None
@@ -129,12 +162,12 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 values=incoming.get("values") or {},
             )
             if accepted:
-                await websocket.send_text(json.dumps({
+                await _safe_send_json(websocket, {
                     "type": "clarification_status",
                     "status": "resumed",
                     "requestId": incoming.get("requestId"),
                     "session_id": incoming.get("session_id"),
-                }))
+                })
             return True
 
         async def clarification_router():
@@ -161,11 +194,14 @@ async def execute_workflow_websocket(websocket: WebSocket):
         logger.info("=" * 80)
         
         # Step 1: Send "Analyzing the query..." message immediately
-        await websocket.send_text(json.dumps({
+        if not await _safe_send_json(websocket, {
             "type": "status",
             "message": "Analyzing the query...",
             "status": "analyzing"
-        }))
+        }):
+            close_code = 1001
+            close_reason = "client_disconnected"
+            return
         
         # Step 2: Intent Detection (BEFORE any workflow processing)
         try:
@@ -181,11 +217,14 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 async def _generate_text_reply_direct(prompt):
                     return "I apologize, but I couldn't process your request."
 
-        # Extract session_id early for intent caching
+        # Extract session identifiers early for intent caching and websocket scoping
         session_id = message.get("session_id", None)  # Frontend chat session ID
+        websocket_session_id = message.get("websocket_session_id") or message.get("websocketSessionId")
         chat_id = message.get("chat_id", None)  # Frontend chat ID
         if not session_id:
             session_id = f"ws_{uuid.uuid4().hex[:8]}"
+        if not websocket_session_id:
+            websocket_session_id = f"ws_conn_{uuid.uuid4().hex[:12]}"
         available_files = message.get("available_files", [])
 
         # Laboratory intent routing
@@ -223,47 +262,46 @@ async def execute_workflow_websocket(websocket: WebSocket):
             routing_payload["intent_record"] = intent_record.to_dict()
             routing_payload["session_id"] = session_id
             routing_payload["routing_snapshot"] = routing_snapshot
-            await websocket.send_text(
-                json.dumps(
-                    {
-                        "type": "intent_debug",
-                        "path": decision.path,
-                        "intent_record": intent_record.to_dict(),
-                        "rationale": decision.rationale,
-                    }
-                )
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "intent_debug",
+                    "path": decision.path,
+                    "intent_record": intent_record.to_dict(),
+                    "rationale": decision.rationale,
+                },
             )
 
             if decision.clarifications:
-                await websocket.send_text(json.dumps({
+                await _safe_send_json(websocket, {
                     "type": "clarification_required",
                     "message": "Please confirm: " + "; ".join(decision.clarifications),
                     "intent_record": intent_record.to_dict(),
-                }))
-                await websocket.send_text(json.dumps({
+                })
+                await _safe_send_json(websocket, {
                     "type": "status",
                     "status": "awaiting_clarification",
                     "message": "Awaiting user confirmation before continuing.",
-                }))
+                })
                 close_code = 1000
                 close_reason = "clarification_required"
                 return
 
             if policy_flip:
-                await websocket.send_text(json.dumps({
+                await _safe_send_json(websocket, {
                     "type": "policy_shift",
                     "message": "Detected a change in execution path; please confirm before continuing.",
-                }))
+                })
                 close_code = 1000
                 close_reason = "policy_shift"
                 return
 
             if decision.requires_files and not available_files:
-                await websocket.send_text(json.dumps({
+                await _safe_send_json(websocket, {
                     "type": "clarification_required",
                     "message": "I need a dataset or file to run Atom Agents. Upload a file and try again.",
                     "intent_record": intent_record.to_dict(),
-                }))
+                })
                 close_code = 1000
                 close_reason = "missing_files"
                 return
@@ -302,13 +340,16 @@ async def execute_workflow_websocket(websocket: WebSocket):
         if intent == "text_reply":
             # Handle as text reply - direct LLM response
             logger.info("📝 Routing to text reply handler")
-            
+
             # Send "Generating answer..." message
-            await websocket.send_text(json.dumps({
+            if not await _safe_send_json(websocket, {
                 "type": "status",
                 "message": "Generating answer...",
                 "status": "thinking"
-            }))
+            }):
+                close_code = 1001
+                close_reason = "client_disconnected"
+                return
             
             # Generate text reply
             text_response = await _generate_text_reply_direct(user_prompt)
@@ -316,36 +357,39 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
             if intent_service:
                 intent_service.update_scratchpad(session_id, "Answered via LLM-only path (websocket)")
-            
+
             # Send the answer
-            await websocket.send_text(json.dumps({
+            await _safe_send_json(websocket, {
                 "type": "text_reply",
                 "message": text_response,
                 "intent": "text_reply",
                 "session_id": message.get("session_id", "unknown")
-            }))
-            
+            })
+
             # Send completion
-            await websocket.send_text(json.dumps({
+            await _safe_send_json(websocket, {
                 "type": "complete",
                 "status": "completed",
                 "intent": "text_reply"
-            }))
-            
+            })
+
             logger.info("✅ Text reply sent, closing connection")
-            await websocket.close()
+            await _safe_close_websocket(websocket, code=1000, reason="text_reply_complete")
             return
         
         # Step 4: Handle as workflow (intent already detected above - no need to detect again)
         logger.info("🔄 Routing to workflow handler")
         logger.info("ℹ️ Intent detection already done - proceeding with workflow execution (will NOT detect intent again)")
-        
+
         # Send "Processing workflow..." message
-        await websocket.send_text(json.dumps({
+        if not await _safe_send_json(websocket, {
             "type": "status",
             "message": "Processing workflow...",
             "status": "processing"
-        }))
+        }):
+            close_code = 1001
+            close_reason = "client_disconnected"
+            return
         
         # Extract remaining parameters for workflow
         # Note: session_id and chat_id already extracted above for intent caching
@@ -448,7 +492,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
         if routing_payload is not None:
             project_context["intent_routing"] = routing_payload
 
-        logger.info(f"🔑 Session ID: {session_id}, Chat ID: {chat_id}")
+        # Attach websocket session id for downstream components that need strict scoping
+        project_context["websocket_session_id"] = websocket_session_id
+
+        logger.info(f"🔑 Session ID: {session_id}, WebSocket Session: {websocket_session_id}, Chat ID: {chat_id}")
         
         # Execute workflow with real-time events (intent detection already done above - NOT called again)
         try:
@@ -460,6 +507,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 user_id=user_id,
                 frontend_session_id=session_id,
                 frontend_chat_id=chat_id,
+                websocket_session_id=websocket_session_id,
                 history_override=history_summary,
                 chat_file_names=mentioned_files,
                 intent_route=routing_payload,
@@ -477,39 +525,39 @@ async def execute_workflow_websocket(websocket: WebSocket):
                "cannot infer atom_id" in error_msg.lower():
                 # Fallback to text reply
                 logger.info("⚠️ Workflow cannot handle request, falling back to text reply")
-                
-                await websocket.send_text(json.dumps({
+
+                await _safe_send_json(websocket, {
                     "type": "status",
                     "message": "Generating answer...",
                     "status": "thinking"
-                }))
-                
+                })
+
                 text_response = await _generate_text_reply_direct(user_prompt)
-                
-                await websocket.send_text(json.dumps({
+
+                await _safe_send_json(websocket, {
                     "type": "text_reply",
                     "message": text_response,
                     "intent": "text_reply",
                     "session_id": session_id
-                }))
-                
-                await websocket.send_text(json.dumps({
+                })
+
+                await _safe_send_json(websocket, {
                     "type": "complete",
                     "status": "completed",
                     "intent": "text_reply"
-                }))
+                })
                 close_code = 1000
                 close_reason = "fallback_text_reply"
             else:
                 # Real error - send error message
-                await websocket.send_text(json.dumps({
+                await _safe_send_json(websocket, {
                     "type": "error",
                     "message": f"I encountered an error: {error_msg}",
                     "error": error_msg
-                }))
+                })
                 close_code = 1011
                 close_reason = "workflow_error"
-        
+
     except WebSocketDisconnect as ws_exc:
         logger.info("🔌 WebSocket disconnected")
         close_code = ws_exc.code or close_code
@@ -521,11 +569,11 @@ async def execute_workflow_websocket(websocket: WebSocket):
         close_code = 1011
         close_reason = str(e)[:120] or "websocket_error"
         try:
-            await websocket.send_text(json.dumps({
+            await _safe_send_json(websocket, {
                 "type": "error",
                 "error": str(e),
                 "message": "Workflow execution failed"
-            }))
+            })
         except:
             pass
     finally:
