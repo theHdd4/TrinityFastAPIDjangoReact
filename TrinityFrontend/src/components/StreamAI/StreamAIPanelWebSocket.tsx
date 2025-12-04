@@ -2200,8 +2200,94 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                   },
                 };
               }
+                return msg;
+            }));
+
+            break;
+          }
+
+          case 'react_loop_detected': {
+            console.warn('♻️ ReAct loop detected:', data);
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const loopMessage = data.message || `Loop detected at step ${stepNumber}.`;
+            const progressUpdate = `\n\n♻️ Workflow stopped: ${loopMessage}`;
+            updateProgress(progressUpdate);
+
+            setIsLoading(false);
+            stopAutoRun();
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: 'stopped',
+                  atom_id: data.repeated_atom || steps[existingIndex]?.atom_id,
+                  description: loopMessage,
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
               return msg;
             }));
+
+            // Close the socket so the UI doesn't wait for more events
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close(1011, 'ReAct loop detected');
+            }
+
+            break;
+          }
+
+          case 'react_stalled': {
+            console.warn('⏸️ ReAct stalled:', data);
+            const attempts = data.attempts ?? '?';
+            const stallMessage = data.message || `Workflow stalled after ${attempts} attempts.`;
+            const progressUpdate = `\n\n⏸️ Workflow stalled: ${stallMessage}`;
+            updateProgress(progressUpdate);
+
+            setIsLoading(false);
+            stopAutoRun();
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const updatedSteps = steps.map((s: any) => ({
+                  ...s,
+                  status: s.status === 'completed' ? s.status : 'stalled',
+                }));
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    steps: updatedSteps,
+                    status: 'stalled',
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close(1011, 'Workflow stalled');
+            }
 
             break;
           }
