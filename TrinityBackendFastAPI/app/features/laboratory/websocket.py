@@ -830,6 +830,11 @@ async def handle_laboratory_sync(
 
     except WebSocketDisconnect:
         logger.info(f"Client disconnected from {client_name}/{app_name}/{project_name}")
+    except asyncio.CancelledError:
+        logger.info(
+            "WebSocket handler cancelled; treating as disconnect for "
+            f"{client_name}/{app_name}/{project_name}"
+        )
     except Exception as e:
         logger.error(f"Error in WebSocket handler: {e}")
         try:
