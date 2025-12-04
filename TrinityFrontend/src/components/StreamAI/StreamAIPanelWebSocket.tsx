@@ -229,6 +229,16 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
   // WebSocket connection
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
+  const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour session timeout
+  const sessionTimeoutRef = useRef<number | null>(null);
+
+  const clearSessionTimeout = useCallback(() => {
+    if (sessionTimeoutRef.current) {
+      clearTimeout(sessionTimeoutRef.current);
+      sessionTimeoutRef.current = null;
+    }
+  }, []);
+
   const closeSocketSafely = useCallback(
     (socket: WebSocket | null, code: number = 1000, reason = 'client_closed') => {
       if (!socket) return;
@@ -245,14 +255,28 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     []
   );
 
+  const scheduleSessionTimeout = useCallback(
+    (socket: WebSocket | null) => {
+      clearSessionTimeout();
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        sessionTimeoutRef.current = window.setTimeout(() => {
+          console.warn('⌛ StreamAI WebSocket session timed out after 1 hour');
+          closeSocketSafely(socket, 1000, 'session_timeout');
+        }, SESSION_TIMEOUT_MS);
+      }
+    },
+    [SESSION_TIMEOUT_MS, clearSessionTimeout, closeSocketSafely]
+  );
+
   const closeActiveConnection = useCallback(
     (code: number = 1000, reason = 'client_closed') => {
+      clearSessionTimeout();
       setWsConnection(prev => {
         closeSocketSafely(prev, code, reason);
         return null;
       });
     },
-    [closeSocketSafely]
+    [clearSessionTimeout, closeSocketSafely]
   );
   const [availableFiles, setAvailableFiles] = useState<any[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
@@ -779,8 +803,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         setIsPaused(false);
       }
 
-      // Close existing WebSocket and reset workflow state when switching chats
-      closeActiveConnection(1000, 'chat_switched');
+      // Keep WebSocket alive across chat switches; only reset workflow indicators
       setCurrentWorkflowMessageId(null);
       setIsLoading(false);
     }
@@ -1076,12 +1099,13 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   // Cleanup WebSocket ONLY on unmount, NOT on collapse
   useEffect(() => {
     return () => {
+      clearSessionTimeout();
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         console.log('🧹 Trinity AI unmounting, closing WebSocket');
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [clearSessionTimeout]);
   
   // Auto-scroll
   useEffect(() => {
@@ -1450,12 +1474,6 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     // Store input value immediately to prevent loss
     const messageContent = inputValue.trim();
     
-    // CRITICAL: Close any existing WebSocket before creating new one
-    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-      console.log('🔌 Closing existing WebSocket before new prompt');
-      closeActiveConnection(1000, 'new_prompt_started');
-    }
-    
     // Reset workflow tracking for new prompt
     setCurrentWorkflowMessageId(null);
     
@@ -1626,6 +1644,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       
       ws.onopen = () => {
         console.log('✅ WebSocket connected');
+        scheduleSessionTimeout(ws);
         updateProgress('\n\n✅ Connected! Generating plan...');
         
         // Store original prompt for ADD functionality
@@ -1659,6 +1678,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       ws.onmessage = async (event) => {
         const data = JSON.parse(event.data);
         console.log('📨 WebSocket event:', data.type, data);
+        scheduleSessionTimeout(ws);
 
         if (data.type === CLARIFICATION_REQUEST) {
           handleIncomingClarification(data as ClarificationRequestMessage);
@@ -2640,6 +2660,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       
       ws.onerror = (error) => {
         console.error('❌ WebSocket error:', error);
+        clearSessionTimeout();
         updateProgress('\n\n❌ Connection error');
         
         // CRITICAL: Add error message to chat so user knows what happened
@@ -2677,6 +2698,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       
       ws.onclose = (event) => {
         console.log('🔌 WebSocket closed', { code: event.code, reason: event.reason, wasClean: event.wasClean });
+        clearSessionTimeout();
         stopAutoRun();
         setWsConnection(null);
 
