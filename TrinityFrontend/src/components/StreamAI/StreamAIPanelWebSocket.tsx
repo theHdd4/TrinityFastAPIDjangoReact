@@ -228,6 +228,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const resizeRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const backgroundStatusRef = useRef<TrinityAIBackgroundStatus | null>(null);
+  const hasLoadedChatsRef = useRef(false);
 
   // WebSocket connection
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
@@ -578,7 +579,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       console.error('Failed to persist new chat:', error);
       setMemoryError('Unable to save chat history to server.');
     }
-  }, [MEMORY_API_BASE, toSerializableMessage, wsConnection]);
+  }, [MEMORY_API_BASE, resolveSessionId, resolveWebsocketSessionId, toSerializableMessage]);
 
   const mapRecordToChat = useCallback((record: MemoryChatResponse): Chat => {
     const metadata = record.metadata || {};
@@ -648,6 +649,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   }, [MEMORY_API_BASE, toSerializableMessage]);
   
   useEffect(() => {
+    if (hasLoadedChatsRef.current) return;
+    hasLoadedChatsRef.current = true;
+
     // Set initial welcome message immediately so UI is never blank
     const initialMessage: Message = {
       id: '1',
