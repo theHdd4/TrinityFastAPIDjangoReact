@@ -238,14 +238,28 @@ class ConnectionManager:
 
     async def send_to_websocket(self, websocket: WebSocket, message: dict, buffer: bool = True) -> None:
         """Send a JSON message with sequencing and buffering for resumption."""
+        # Skip sends if the application has already initiated close
+        websocket_state = getattr(websocket, "client_state", WebSocketState.DISCONNECTED)
+        app_state = getattr(websocket, "application_state", WebSocketState.DISCONNECTED)
+
+        if websocket_state != WebSocketState.CONNECTED or app_state != WebSocketState.CONNECTED:
+            return
+
         session_id = self.websocket_sessions.get(websocket)
         if not session_id:
-            await websocket.send_json(message)
+            try:
+                await websocket.send_json(message)
+            except RuntimeError:
+                # A close frame was already initiated; treat as best-effort
+                return
             return
 
         session = self.sessions.get(session_id)
         if not session:
-            await websocket.send_json(message)
+            try:
+                await websocket.send_json(message)
+            except RuntimeError:
+                return
             return
 
         seq = session.next_sequence
@@ -259,7 +273,11 @@ class ConnectionManager:
         if buffer:
             session.buffer_message(message_with_meta)
 
-        await websocket.send_json(message_with_meta)
+        try:
+            await websocket.send_json(message_with_meta)
+        except RuntimeError:
+            # Ignore late sends after close was initiated
+            return
 
     async def replay_missed_messages(self, session: SessionEntry, last_acked: int) -> None:
         """Replay buffered messages newer than the last acked sequence."""
