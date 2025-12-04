@@ -68,6 +68,25 @@ async def _safe_send_json(websocket: WebSocket, payload: dict) -> bool:
         logger.warning(f"WebSocket send failed: {send_error}")
         return False
 
+
+async def _wait_for_clarification_response(websocket: WebSocket) -> dict | None:
+    """Block until a clarification response arrives or the socket closes."""
+
+    while True:
+        try:
+            incoming = await websocket.receive_text()
+            parsed = json.loads(incoming)
+        except WebSocketDisconnect:
+            return None
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug("Clarification wait aborted: %s", exc)
+            return None
+
+        if parsed.get("type") == "clarification_response":
+            return parsed
+
+        logger.debug("Ignoring non-clarification message while waiting: %s", parsed)
+
 # Initialize components (will be set by main_api.py)
 rag_engine = None
 parameter_generator = None
@@ -233,78 +252,106 @@ async def execute_workflow_websocket(websocket: WebSocket):
         policy_flip = False
         routing_payload = None
         if intent_service:
-            previous_record = intent_service._intent_cache.get(session_id)
-            intent_record = intent_service.infer_intent(
-                user_prompt,
-                session_id=session_id,
-                available_files=available_files,
-                mode="laboratory",
-            )
-            decision = intent_service.build_atom_binding(
-                session_id,
-                intent_record,
-                available_files=available_files,
-            )
-            policy_flip = intent_service.detect_policy_flip(
-                session_id, decision, previous_record=previous_record, available_files=available_files
-            )
+            while True:
+                previous_record = intent_service._intent_cache.get(session_id)
+                intent_record = intent_service.infer_intent(
+                    user_prompt,
+                    session_id=session_id,
+                    available_files=available_files,
+                    mode="laboratory",
+                )
+                decision = intent_service.build_atom_binding(
+                    session_id,
+                    intent_record,
+                    available_files=available_files,
+                )
+                policy_flip = intent_service.detect_policy_flip(
+                    session_id, decision, previous_record=previous_record, available_files=available_files
+                )
 
-            routing_snapshot = {
-                "path": decision.path,
-                "rationale": decision.rationale,
-                "goal_type": intent_record.goal_type,
-                "required_tools": sorted(intent_record.required_tools),
-                "output_format": intent_record.output_format,
-            }
-            logger.info("🧭 Intent routing snapshot: %s", routing_snapshot)
-
-            routing_payload = asdict(decision)
-            routing_payload["intent_record"] = intent_record.to_dict()
-            routing_payload["session_id"] = session_id
-            routing_payload["routing_snapshot"] = routing_snapshot
-            await _safe_send_json(
-                websocket,
-                {
-                    "type": "intent_debug",
+                routing_snapshot = {
                     "path": decision.path,
-                    "intent_record": intent_record.to_dict(),
                     "rationale": decision.rationale,
-                },
-            )
+                    "goal_type": intent_record.goal_type,
+                    "required_tools": sorted(intent_record.required_tools),
+                    "output_format": intent_record.output_format,
+                }
+                logger.info("🧭 Intent routing snapshot: %s", routing_snapshot)
 
-            if decision.clarifications:
-                await _safe_send_json(websocket, {
-                    "type": "clarification_required",
-                    "message": "Please confirm: " + "; ".join(decision.clarifications),
-                    "intent_record": intent_record.to_dict(),
-                })
-                await _safe_send_json(websocket, {
-                    "type": "status",
-                    "status": "awaiting_clarification",
-                    "message": "Awaiting user confirmation before continuing.",
-                })
-                close_code = 1000
-                close_reason = "clarification_required"
-                return
+                routing_payload = asdict(decision)
+                routing_payload["intent_record"] = intent_record.to_dict()
+                routing_payload["session_id"] = session_id
+                routing_payload["routing_snapshot"] = routing_snapshot
+                await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "intent_debug",
+                        "path": decision.path,
+                        "intent_record": intent_record.to_dict(),
+                        "rationale": decision.rationale,
+                    },
+                )
 
-            if policy_flip:
-                await _safe_send_json(websocket, {
-                    "type": "policy_shift",
-                    "message": "Detected a change in execution path; please confirm before continuing.",
-                })
-                close_code = 1000
-                close_reason = "policy_shift"
-                return
+                if decision.clarifications:
+                    await _safe_send_json(websocket, {
+                        "type": "clarification_required",
+                        "message": "Please confirm: " + "; ".join(decision.clarifications),
+                        "intent_record": intent_record.to_dict(),
+                    })
+                    await _safe_send_json(websocket, {
+                        "type": "status",
+                        "status": "awaiting_clarification",
+                        "message": "Awaiting user confirmation before continuing.",
+                    })
 
-            if decision.requires_files and not available_files:
-                await _safe_send_json(websocket, {
-                    "type": "clarification_required",
-                    "message": "I need a dataset or file to run Atom Agents. Upload a file and try again.",
-                    "intent_record": intent_record.to_dict(),
-                })
-                close_code = 1000
-                close_reason = "missing_files"
-                return
+                    clarification_response = await _wait_for_clarification_response(websocket)
+                    if not clarification_response:
+                        close_code = 1001
+                        close_reason = "clarification_aborted"
+                        return
+
+                    clarification_parts = []
+                    if clarification_response.get("message"):
+                        clarification_parts.append(clarification_response["message"])
+                    values = clarification_response.get("values") or {}
+                    if values:
+                        clarification_parts.append(
+                            " | ".join(f"{k}: {v}" for k, v in values.items())
+                        )
+
+                    if clarification_parts:
+                        user_prompt = f"{user_prompt}\n\nUser clarification: {'; '.join(clarification_parts)}"
+
+                    await _safe_send_json(websocket, {
+                        "type": "status",
+                        "status": "clarification_received",
+                        "message": "Thanks for the clarification. Continuing analysis.",
+                    })
+
+                    # Restart intent inference with the clarified prompt
+                    continue
+
+                if policy_flip:
+                    await _safe_send_json(websocket, {
+                        "type": "policy_shift",
+                        "message": "Detected a change in execution path; please confirm before continuing.",
+                    })
+                    close_code = 1000
+                    close_reason = "policy_shift"
+                    return
+
+                if decision.requires_files and not available_files:
+                    await _safe_send_json(websocket, {
+                        "type": "clarification_required",
+                        "message": "I need a dataset or file to run Atom Agents. Upload a file and try again.",
+                        "intent_record": intent_record.to_dict(),
+                    })
+                    close_code = 1000
+                    close_reason = "missing_files"
+                    return
+
+                # Exit loop if no additional clarifications are required
+                break
 
         # Step 2: Intent Detection (ONCE at the start - like 28_NOV)
         # This is the ONLY place intent detection should happen for this WebSocket request
