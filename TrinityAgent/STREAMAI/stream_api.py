@@ -6,6 +6,8 @@ Provides WebSocket endpoint for Trinity AI sequential execution.
 Follows the Trinity AI streaming pattern for proper card and result handling.
 """
 
+import asyncio
+import contextlib
 import logging
 import json
 import uuid
@@ -82,6 +84,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
     close_code = 1000
     close_reason = "workflow_complete"
+    clarification_task = None
 
     try:
         # Import components
@@ -108,6 +111,47 @@ async def execute_workflow_websocket(websocket: WebSocket):
         
         message = json.loads(message_data)
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
+
+        # Start clarification response listener (non-blocking) so lab-mode clients can resume pauses
+        from STREAMAI.main_app import get_orchestrator  # Lazy import to avoid circular deps
+
+        orchestrator = get_orchestrator()
+
+        async def handle_clarification_response(incoming: dict) -> bool:
+            if incoming.get("type") != "clarification_response":
+                return False
+            if not orchestrator:
+                return True
+            accepted = await orchestrator.resume_clarification(
+                session_id=incoming.get("session_id"),
+                request_id=incoming.get("requestId"),
+                message=incoming.get("message", ""),
+                values=incoming.get("values") or {},
+            )
+            if accepted:
+                await websocket.send_text(json.dumps({
+                    "type": "clarification_status",
+                    "status": "resumed",
+                    "requestId": incoming.get("requestId"),
+                    "session_id": incoming.get("session_id"),
+                }))
+            return True
+
+        async def clarification_router():
+            while True:
+                try:
+                    router_message = await websocket.receive_text()
+                    parsed_router = json.loads(router_message)
+                    handled = await handle_clarification_response(parsed_router)
+                    if not handled:
+                        logger.debug("Received non-clarification message during stream: %s", parsed_router)
+                except WebSocketDisconnect:
+                    break
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.debug("Clarification router stopped: %s", exc)
+                    break
+
+        clarification_task = asyncio.create_task(clarification_router())
         
         # Extract user prompt first
         user_prompt = message.get("message", "")
@@ -485,6 +529,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
         except:
             pass
     finally:
+        if clarification_task:
+            clarification_task.cancel()
+            with contextlib.suppress(Exception):
+                await clarification_task
         await _safe_close_websocket(websocket, code=close_code, reason=close_reason)
 
 

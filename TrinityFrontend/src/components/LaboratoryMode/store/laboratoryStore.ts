@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
+import { ClarificationRequestMessage as ClarificationRequest } from "@/types/streaming";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -1962,10 +1963,12 @@ interface LaboratoryStore {
   auxiliaryMenuLeftOpen: boolean;
   metricsInputs: MetricsInputSettings;
   isLaboratorySession: boolean;
+  pendingClarification?: ClarificationRequest | null;
   setCards: (cards: LayoutCard[]) => void;
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
   setAuxiliaryMenuLeftOpen: (open: boolean) => void;
   setIsLaboratorySession: (active: boolean) => void;
+  setPendingClarification: (payload: ClarificationRequest | null) => void;
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
@@ -1991,6 +1994,18 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   isLaboratorySession: typeof window !== 'undefined'
     ? window.location.pathname.toLowerCase().includes('laboratory')
     : true,
+  pendingClarification: typeof window !== 'undefined'
+    ? (() => {
+        const stored = localStorage.getItem('trinity_lab_pending_clarification');
+        if (!stored) return null;
+        try {
+          return JSON.parse(stored);
+        } catch (error) {
+          console.warn('Failed to parse pending clarification from storage', error);
+          return null;
+        }
+      })()
+    : null,
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   setCards: (cards: LayoutCard[]) => {
     // FIX: Ensure cards is always an array
@@ -2019,6 +2034,21 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
 
   setIsLaboratorySession: (active: boolean) => {
     set({ isLaboratorySession: active });
+  },
+
+  setPendingClarification: (payload: ClarificationRequest | null) => {
+    set({ pendingClarification: payload });
+    if (typeof window !== 'undefined') {
+      try {
+        if (payload) {
+          localStorage.setItem('trinity_lab_pending_clarification', safeStringify(payload));
+        } else {
+          localStorage.removeItem('trinity_lab_pending_clarification');
+        }
+      } catch (error) {
+        console.warn('Failed to persist pending clarification', error);
+      }
+    }
   },
 
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => {
@@ -2171,6 +2201,13 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   reset: () => {
-    set({ cards: [], metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS });
+    set({
+      cards: [],
+      metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
+      pendingClarification: null,
+    });
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('trinity_lab_pending_clarification');
+    }
   },
 }));
