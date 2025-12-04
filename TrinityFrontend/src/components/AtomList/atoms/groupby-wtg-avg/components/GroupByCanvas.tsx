@@ -534,12 +534,12 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
         identifiers,
         aggregations,
         dataSource: settings.dataSource,
-        validator_atom_id: settings.validator_atom_id
+        validator_atom_id: atomId
       });
       
       // Prepare form data
       const formData = new FormData();
-      formData.append('validator_atom_id', settings.validator_atom_id || '');
+      formData.append('validator_atom_id', atomId);
       formData.append('file_key', settings.dataSource || '');
       formData.append('bucket_name', 'trinity');
       formData.append('object_names', settings.dataSource || '');
@@ -895,15 +895,19 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     );
   }
 
+  // Get showCardinalityView setting from global store
+  const showCardinalityView = settings.showCardinalityView || false;
+
   return (
-    <div className="p-6 space-y-6 h-full overflow-auto bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="p-2 space-y-2 h-full overflow-auto bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Cardinality View */}
-      {cardinalityLoading ? (
+      {showCardinalityView && (cardinalityLoading ? (
         <div className="p-4 text-blue-600">Loading cardinality data...</div>
       ) : cardinalityError ? (
         <div className="p-4 text-red-600">{cardinalityError}</div>
       ) : cardinalityData && cardinalityData.length > 0 ? (
         <Table
+            key={`cardinality-view-${showCardinalityView}`}
             headers={[
               <ContextMenu key="Column">
                 <ContextMenuTrigger asChild>
@@ -1034,14 +1038,26 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
               "Sample values"
             ]}
             colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
-            bodyClassName="max-h-[484px] overflow-y-auto"
-            defaultMinimized={true}
+            bodyClassName="max-h-[350px] overflow-y-auto"
+            defaultMinimized={!showCardinalityView}
             borderColor={`border-${groupbyWtgAvg.color.replace('bg-', '')}`}
             customHeader={{
-              title: "Cardinality View",
-              subtitle: "Click Here to View Data",
-              subtitleClickable: !!inputFileName && !!atomId,
-              onSubtitleClick: handleViewDataClick
+              title: (
+                <span className="flex items-center gap-1">
+                  <span>Data Summary</span>
+                  <span className="text-slate-400">|</span>
+                  <span
+                    className="text-blue-500 cursor-pointer hover:text-blue-700 hover:underline"
+                    onClick={handleViewDataClick}
+                  >
+                    Data in detail
+                  </span>
+                </span>
+              ),
+              subtitle: undefined,
+              subtitleClickable: false,
+              onSubtitleClick: handleViewDataClick,
+              compactHeader: true
             }}
           >
             {displayedCardinality.map((col, index) => (
@@ -1092,10 +1108,10 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
               </tr>
             ))}
           </Table>
-      ) : null}
+      ) : null)}
       
       {/* Group By Section */}
-      <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
+      <Card className="hidden shadow-lg border-0 bg-white/80 backdrop-blur-sm">
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <div className="flex items-center space-x-2">
             <Settings2 className="h-5 w-5 text-green-500" />
@@ -1113,7 +1129,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
         {!configCollapsed && (
         <CardContent className="p-6 space-y-6">
           {/* Level Header and Row (only once) */}
-          <div className="bg-emerald-50 rounded-lg p-3 shadow-sm">
+          <div className="hidden bg-emerald-50 rounded-lg p-3 shadow-sm">
             <div className="flex flex-wrap gap-1 items-center">
               <div className="font-semibold text-green-600 mr-2 text-sm">Level:</div>
                {selectedIdentifiers.map((identifier: string) => (
@@ -1258,7 +1274,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       ) : resultsError ? (
         <div className="p-4 text-red-600">{resultsError}</div>
       ) : results && results.length > 0 ? (
-        <div className="mt-8">
+        <div className="mt-0">
           <Table
             headers={resultsHeaders.map((header, index) => (
               <ContextMenu key={header}>
@@ -1305,24 +1321,24 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
               </ContextMenu>
             ))}
             colClasses={resultsHeaders.map(() => "w-auto")}
-            bodyClassName="max-h-[400px] overflow-y-auto"
+            bodyClassName="max-h-[300px] overflow-y-auto"
             borderColor={`border-${groupbyWtgAvg.color.replace('bg-', '')}`}
             customHeader={{
               title: "Results",
               controls: (
-                <div className="flex items-center gap-3">
-                  <span className="inline-block bg-green-50 border border-green-200 text-green-700 text-sm font-semibold px-3 py-1 rounded">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-2 py-0.5 rounded">
                     {allFilteredData.length.toLocaleString()} rows • {resultsHeaders.length} columns
                   </span>
                   <Button
                     onClick={handleSaveDataFrame}
                     disabled={saveLoading}
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-7 px-3"
                   >
                     {saveLoading ? 'Saving...' : 'Save As'}
                   </Button>
-                  {saveError && <span className="text-red-600 text-sm">{saveError}</span>}
-                  {saveSuccess && <span className="text-green-600 text-sm">Saved!</span>}
+                  {saveError && <span className="text-red-600 text-xs">{saveError}</span>}
+                  {saveSuccess && <span className="text-green-600 text-xs">Saved!</span>}
                 </div>
               )
             }}
@@ -1330,7 +1346,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
             {displayedData.map((row, rowIndex) => (
               <tr key={rowIndex} className="table-row">
                 {resultsHeaders.map((header, colIndex) => (
-                  <td key={colIndex} className="table-cell text-center font-medium text-gray-700">
+                  <td key={colIndex} className="table-cell font-medium text-gray-700">
                     {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
                       typeof row[header] === 'number' ? row[header] : String(row[header])
                     ) : (
@@ -1344,10 +1360,10 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           
           {/* Pagination */}
           {totalPages > 1 && (
-            <Card className="mt-4">
-              <CardContent className="p-4">
+            <Card className="mt-2">
+              <CardContent className="p-2">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm text-gray-600">
+                  <div className="text-xs text-gray-600">
                     Page {currentPage} of {totalPages}
                   </div>
                   <Pagination>
@@ -1355,7 +1371,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                       <PaginationItem>
                         <PaginationPrevious
                           onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
-                          className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                          className={`cursor-pointer text-xs h-7 ${currentPage === 1 ? 'pointer-events-none opacity-50' : ''}`}
                         />
                       </PaginationItem>
                       {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
@@ -1374,7 +1390,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                             <PaginationLink
                               onClick={() => handlePageChange(pageNum)}
                               isActive={currentPage === pageNum}
-                              className="cursor-pointer"
+                              className="cursor-pointer text-xs h-7 w-7"
                             >
                               {pageNum}
                             </PaginationLink>
@@ -1384,7 +1400,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                       <PaginationItem>
                         <PaginationNext
                           onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
-                          className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                          className={`cursor-pointer text-xs h-7 ${currentPage === totalPages ? 'pointer-events-none opacity-50' : ''}`}
                         />
                       </PaginationItem>
                     </PaginationContent>

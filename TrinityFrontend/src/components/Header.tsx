@@ -91,18 +91,16 @@ const Header: React.FC<HeaderProps> = ({ projectCount = 0, sidebarOpen = false, 
 
   return (
     <header
-      data-primary-menu="true"
-      className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shadow-sm"
+       data-primary-menu="true"
+      className="bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-between shadow-sm"
     >
-      <div className="flex items-center space-x-10">
-        <div className="flex items-center space-x-3">
-          <Link to="/apps" className="flex items-center space-x-3 group">
-            <TrinityAssets.AnimatedLogo className="w-12 h-12 group-hover:shadow-xl transition-all duration-300" />
-            <TrinityAssets.LogoText />
-          </Link>
-        </div>
+      <div className="flex items-center space-x-8">
+        <Link to="/apps" className="flex items-center space-x-3 group">
+          <TrinityAssets.AnimatedLogo className="w-8 h-8 group-hover:shadow-xl transition-all duration-300" />
+          <TrinityAssets.LogoText />
+        </Link>
         
-        {!simpleHeader && <Navigation />}
+        {!simpleHeader && <div className="ml-4"><Navigation /></div>}
       </div>
 
       <div className="flex items-center space-x-4">
@@ -128,12 +126,12 @@ const Header: React.FC<HeaderProps> = ({ projectCount = 0, sidebarOpen = false, 
               <div className="flex items-center space-x-2">
                 <span className="text-sm font-medium text-gray-800">{appInfo.title}</span>
                 <div
-                  className={`w-8 h-8 rounded-lg bg-gradient-to-r ${appInfo.color} flex items-center justify-center shadow-md`}
+                  className={`w-7 h-7 rounded-lg bg-gradient-to-r ${appInfo.color} flex items-center justify-center shadow-md`}
                 >
                   <IconComp className="w-4 h-4 text-white" />
                 </div>
               </div>
-              <button type="button" onClick={handleGoBack} className="p-2" title="Back to Apps">
+              <button type="button" onClick={handleGoBack} className="p-1.5" title="Back to Apps">
                 <TrinityAssets.BackToAppsIcon className="w-5 h-5" />
               </button>
             </div>

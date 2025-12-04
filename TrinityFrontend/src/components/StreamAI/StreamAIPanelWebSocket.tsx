@@ -630,6 +630,33 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     // Use current messages state directly to avoid stale data
     const chat = chats.find(c => c.id === currentChatId);
     if (!chat) {
+      // 🔧 CRITICAL FIX: Don't create a new chat if websocket just closed after insights
+      // Check if this is happening right after a websocket close (insights were just added)
+      // If messages contain insights (workflow_insight type or "Workflow Insights" content),
+      // this means we're updating an existing chat, not creating a new one
+      const hasInsightMessage = messages.some(m => 
+        m.content.includes('Workflow Insights') || 
+        m.content.includes('📊 **Workflow Insights**') ||
+        m.id?.includes('insight-')
+      );
+      
+      // CRITICAL FIX: Only create a new chat if currentChatId is valid and we have messages
+      // Don't create a new chat if we're just updating an existing one (e.g., after insight)
+      // Check if messages already contain user messages - if so, this is likely an update, not a new chat
+      const hasUserMessages = messages.some(m => m.sender === 'user');
+      
+      // If we have insight messages but no chat exists, this is likely a race condition
+      // where the chat state hasn't updated yet. Skip creating a new chat in this case.
+      if (hasInsightMessage && hasUserMessages) {
+        console.warn('⚠️ Chat not found but messages contain insights - likely race condition, skipping new chat creation');
+        return;
+      }
+      
+      if (!hasUserMessages) {
+        // No user messages yet, this might be initial state - don't create chat yet
+        return;
+      }
+      
       // Chat doesn't exist, create it with current messages
       const newChat: Chat = {
         id: currentChatId,
@@ -1333,11 +1360,11 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     setIsLoading(true);
     
-    // Create progress message
+    // Create progress message - will be updated by status events
     const progressMessageId = `progress-${Date.now()}`;
     const progressMessage: Message = {
       id: progressMessageId,
-      content: '🔄 Analyzing request and generating workflow plan...',
+      content: '🔄 Analyzing the query...',
       sender: 'ai',
       timestamp: new Date()
     };
@@ -1423,7 +1450,100 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           case 'connected':
             console.log('✅ Trinity AI connected');
             break;
-            
+
+          case 'intent_debug':
+            console.log(
+              '🧭 Intent detected:',
+              data.intent_record?.goal_type,
+              '| tools=',
+              data.intent_record?.required_tools,
+              '| output=',
+              data.intent_record?.output_format,
+              '| path=',
+              data.path,
+              '| rationale=',
+              data.rationale
+            );
+            break;
+
+          case 'clarification_required': {
+            console.warn('🛑 Clarification requested before continuing', data);
+            stopAutoRun();
+
+            const clarificationMessage: Message = {
+              id: `clarification-${Date.now()}`,
+              content: data.message || 'The assistant needs clarification before proceeding.',
+              sender: 'ai',
+              timestamp: new Date(),
+              type: 'text'
+            };
+
+            setMessages(prev => {
+              const withoutProgress = prev.filter(msg => msg.id !== progressMessageId);
+              return [...withoutProgress, clarificationMessage];
+            });
+
+            // Persist clarification into the active chat history so the user can respond
+            try {
+              const currentChat = chats.find(c => c.id === currentChatId);
+              if (currentChat) {
+                const filteredMessages = currentChat.messages.filter(m => m.id !== progressMessageId);
+                const updatedChat: Chat = {
+                  ...currentChat,
+                  messages: [...filteredMessages, clarificationMessage],
+                };
+                memoryPersistSkipRef.current = false;
+                persistChatToMemory(updatedChat).catch(err =>
+                  console.error('Failed to persist clarification message:', err)
+                );
+              }
+            } catch (persistError) {
+              console.error('Failed to persist chat after clarification:', persistError);
+            }
+
+            // If the backend closes the socket after asking for clarification, don't treat it as an error
+            setIsLoading(false);
+            break;
+          }
+
+          case 'policy_shift': {
+            console.warn('⚠️ Policy shift detected, awaiting confirmation', data);
+            stopAutoRun();
+
+            const policyShiftMessage: Message = {
+              id: `policy-shift-${Date.now()}`,
+              content: data.message || 'Execution path changed; please confirm before proceeding.',
+              sender: 'ai',
+              timestamp: new Date(),
+              type: 'text'
+            };
+
+            setMessages(prev => {
+              const withoutProgress = prev.filter(msg => msg.id !== progressMessageId);
+              return [...withoutProgress, policyShiftMessage];
+            });
+
+            try {
+              const currentChat = chats.find(c => c.id === currentChatId);
+              if (currentChat) {
+                const filteredMessages = currentChat.messages.filter(m => m.id !== progressMessageId);
+                const updatedChat: Chat = {
+                  ...currentChat,
+                  messages: [...filteredMessages, policyShiftMessage],
+                };
+                memoryPersistSkipRef.current = false;
+                persistChatToMemory(updatedChat).catch(err =>
+                  console.error('Failed to persist policy shift message:', err)
+                );
+              }
+            } catch (persistError) {
+              console.error('Failed to persist chat after policy shift:', persistError);
+            }
+
+            setIsLoading(false);
+            break;
+          }
+
           case 'plan_generated':
             console.log('📋 Plan generated:', data.plan);
             
@@ -1748,10 +1868,22 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               if (shouldAutoApprove) {
                 console.log('⏩ Auto-run enqueueing queueAutoApprove for step', data.step);
                 queueAutoApprove(data.step, data.sequence_id);
+                // Keep loading true - more steps are coming
+                setIsLoading(true);
               } else if (autoRunRef.current && !hasNextStep) {
-                setIsLoading(false);
+                // Last step in auto-run mode - but wait for workflow_completed
+                // Keep loading true until workflow_completed event
+                setIsLoading(true);
               } else {
-                setIsLoading(false);
+                // Manual mode - waiting for user approval
+                // Keep loading true if there are more steps, only stop if this is the last step
+                if (!hasNextStep) {
+                  // This is the last step, but wait for workflow_completed event
+                  setIsLoading(true);
+                } else {
+                  // More steps coming - keep loading
+                  setIsLoading(true);
+                }
               }
             }
             break;
@@ -1784,18 +1916,28 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               type: 'text'
             };
             
-            // CRITICAL: Add insight to messages and persist immediately
-            setMessages(prev => {
-              const updated = [...prev, insightMessage];
-              console.log(`💾 Total messages after insight: ${updated.length}`);
-              
-              // Persist immediately with insight included
-              const currentChat = chats.find(c => c.id === currentChatId);
+            // CRITICAL: Update both messages and chats state together
+            // This prevents the useEffect from creating a new chat when it sees the updated messages
+            if (!currentChatId) {
+              console.warn('⚠️ No currentChatId when insight received, skipping insight message');
+              break;
+            }
+            
+            // 🔧 CRITICAL FIX: Set skip flag to prevent useEffect from creating new chat
+            // This prevents race condition where useEffect runs before chats state is updated
+            memoryPersistSkipRef.current = true;
+            
+            // Update chats state first to ensure chat exists
+            setChats(prevChats => {
+              const currentChat = prevChats.find(c => c.id === currentChatId);
               if (currentChat) {
+                const updatedMessages = [...currentChat.messages, insightMessage];
                 const updatedChat: Chat = {
                   ...currentChat,
-                  messages: updated,
+                  messages: updatedMessages,
                 };
+                
+                // Persist immediately with insight included
                 memoryPersistSkipRef.current = false;
                 persistChatToMemory(updatedChat).then(result => {
                   if (result) {
@@ -1806,13 +1948,25 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 }).catch(err => {
                   console.error('❌ Failed to persist insight:', err);
                 });
+                
+                // Return updated chats array
+                return prevChats.map(chat => 
+                  chat.id === currentChatId ? updatedChat : chat
+                );
               }
-              
+              return prevChats;
+            });
+            
+            // Update messages state
+            setMessages(prev => {
+              const updated = [...prev, insightMessage];
+              console.log(`💾 Total messages after insight: ${updated.length}`);
               return updated;
             });
             
             updateProgress('\n\n✅ Insights generated!');
-            setIsLoading(false);
+            // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+            // The loading icon will be hidden when ws.onclose fires
             // Now close the connection after insight is received
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.close();
@@ -1822,7 +1976,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           case 'workflow_insight_failed':
             console.warn('⚠️ Workflow insight failed:', data.error);
             updateProgress(`\n\n⚠️ Insight generation failed: ${data.error || 'Unknown error'}`);
-            setIsLoading(false);
+            // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+            // The loading icon will be hidden when ws.onclose fires
             // Close connection even if insight failed
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.close();
@@ -1831,21 +1986,300 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
           case 'workflow_rejected':
             stopAutoRun();
-            setIsLoading(false);
+            // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+            // The loading icon will be hidden when ws.onclose fires
             updateProgress(`\n\n❌ Workflow stopped: ${data?.message || 'Rejected by backend'}`);
             if (agentModeEnabledRef.current) {
               autoRunRef.current = true;
+            }
+            // Close the connection
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close();
             }
             break;
             
           case 'error':
             updateProgress(`\n\n❌ Error: ${data.error}`);
-            setIsLoading(false);
+            // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+            // The loading icon will be hidden when ws.onclose fires
             stopAutoRun();
             if (agentModeEnabledRef.current) {
               autoRunRef.current = true;
             }
-            ws.close();
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+            break;
+            
+          case 'status':
+            // Handle status updates (Analyzing, Processing, Thinking, etc.)
+            console.log('📊 Status update:', data.message, data.status);
+            const statusMessage = data.message || 'Processing...';
+            
+            // Update the progress message with new status
+            setMessages(prev => prev.map(msg => 
+              msg.id === progressMessageId 
+                ? { ...msg, content: statusMessage }
+                : msg
+            ));
+            break;
+
+          case 'workflow_progress': {
+            console.log('⏳ Workflow progress:', data);
+            const stepLabel = data.total_steps
+              ? `${data.current_step}/${data.total_steps}`
+              : `${data.current_step}/?`;
+            const percentLabel =
+              typeof data.progress_percent === 'number'
+                ? ` (${data.progress_percent}%)`
+                : '';
+            const progressUpdate = `\n\n⏳ Workflow progress: step ${stepLabel}${percentLabel}\n${data.message || 'Processing...'}`;
+            updateProgress(progressUpdate);
+            break;
+          }
+
+          case 'react_generation_status': {
+            console.log('🧠 ReAct generation status:', data);
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const attemptLabel = data.attempt ? ` (attempt ${data.attempt})` : '';
+            const timeoutLabel = data.timed_out ? ' (timeout; replanning...)' : '';
+            const elapsedLabel = typeof data.elapsed_seconds === 'number'
+              ? ` after ${data.elapsed_seconds}s`
+              : '';
+            const progressUpdate = `\n\n🧠 Planning step ${stepNumber}${attemptLabel}${elapsedLabel}: ${data.message || 'Generating next action...'}${timeoutLabel}`;
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: data.timed_out ? 'retrying' : 'thinking',
+                  description: data.message || steps[existingIndex]?.description || 'Planning next action...',
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
+          case 'react_validation_blocked': {
+            console.warn('⛔ ReAct validation blocked:', data);
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const blockMessage = data.message || 'Validation blocked this step.';
+            const progressUpdate = `\n\n⛔ Validation blocked for step ${stepNumber}: ${blockMessage}`;
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: 'blocked',
+                  atom_id: data.atom_id || steps[existingIndex]?.atom_id,
+                  description: blockMessage,
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
+          case 'react_thought': {
+            console.log('🧠 ReAct thought event:', data);
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const thoughtMessage = data.message || 'Thinking...';
+            const progressUpdate = `\n\n🧠 Step ${stepNumber} thinking: ${thoughtMessage}`;
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: data.loading ? 'thinking' : steps[existingIndex]?.status || 'running',
+                  atom_id: data.atom_id || steps[existingIndex]?.atom_id,
+                  description: thoughtMessage,
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
+          case 'react_action': {
+            console.log('⚡ ReAct action event:', data);
+
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const description = data.description || data.message || data.atom_id || 'Running step...';
+            const progressUpdate = `\n\n⚡ Executing step ${stepNumber}: ${description}`;
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: 'running',
+                  atom_id: data.atom_id || steps[existingIndex]?.atom_id,
+                  description,
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
+          case 'text_reply':
+            // Handle direct text reply (for general questions)
+            console.log('💬 Text reply received:', data.message);
+            
+            // Remove progress message and add the actual reply
+            setMessages(prev => {
+              // Remove progress message
+              const filtered = prev.filter(msg => msg.id !== progressMessageId);
+              
+              // Add text reply message
+              const replyMessage: Message = {
+                id: `text-reply-${Date.now()}`,
+                content: data.message || 'No response received',
+                sender: 'ai',
+                timestamp: new Date(),
+                type: 'text'
+              };
+              
+              return [...filtered, replyMessage];
+            });
+            
+            setIsLoading(false);
+            stopAutoRun();
+            
+            // Persist the reply to memory
+            try {
+              const currentChat = chats.find(c => c.id === currentChatId);
+              if (currentChat) {
+                const updatedMessages = [...currentChat.messages];
+                // Remove progress message if it exists
+                const filteredMessages = updatedMessages.filter(m => m.id !== progressMessageId);
+                // Add reply message
+                const replyMessage: Message = {
+                  id: `text-reply-${Date.now()}`,
+                  content: data.message || 'No response received',
+                  sender: 'ai',
+                  timestamp: new Date(),
+                  type: 'text'
+                };
+                filteredMessages.push(replyMessage);
+                
+                const updatedChat: Chat = {
+                  ...currentChat,
+                  messages: filteredMessages,
+                };
+                memoryPersistSkipRef.current = false;
+                await persistChatToMemory(updatedChat);
+                console.log('✅ Text reply persisted to memory');
+              }
+            } catch (persistError) {
+              console.error('⚠️ Failed to persist text reply:', persistError);
+            }
+            break;
+            
+          case 'complete':
+            // Handle completion event
+            console.log('✅ Workflow/request completed:', data.status, data.intent);
+            
+            // If it's a text_reply completion, we've already handled it above
+            // If it's a workflow completion, the workflow_completed case handles it
+            if (data.intent === 'text_reply') {
+              setIsLoading(false);
+              stopAutoRun();
+            }
+            
+            // Close WebSocket connection
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+            break;
+            
+          default:
+            // Log unhandled event types for debugging
+            console.log('⚠️ Unhandled WebSocket event type:', data.type, data);
             break;
         }
       };
@@ -1882,7 +2316,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           console.error('Failed to persist message on WebSocket error:', persistError);
         }
         
-        setIsLoading(false);
+        // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+        // The loading icon will be hidden when ws.onclose fires
         stopAutoRun();
       };
       
@@ -1890,7 +2325,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         console.log('🔌 WebSocket closed', { code: event.code, reason: event.reason, wasClean: event.wasClean });
         stopAutoRun();
         setWsConnection(null);
-        
+
+        // Treat missing close code (1005) as a clean shutdown and inform the user
+        if (event.code === 1005 && event.wasClean) {
+          updateProgress('\n\nℹ️ Connection finished without a close code. Ready for the next prompt.');
+        }
+
         // CRITICAL: If connection closed unexpectedly (not clean), ensure message is saved
         if (!event.wasClean && event.code !== 1000) {
           console.warn('⚠️ WebSocket closed unexpectedly, ensuring message is persisted');
@@ -1899,12 +2339,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             if (currentChat) {
               const updatedChat: Chat = {
                 ...currentChat,
-                messages: currentChat.messages.some(m => m.id === userMessage.id) 
-                  ? currentChat.messages 
+                messages: currentChat.messages.some(m => m.id === userMessage.id)
+                  ? currentChat.messages
                   : [...currentChat.messages, userMessage],
               };
               memoryPersistSkipRef.current = false;
-              persistChatToMemory(updatedChat).catch(err => 
+              persistChatToMemory(updatedChat).catch(err =>
                 console.error('Failed to persist on close:', err)
               );
             }
@@ -1912,9 +2352,11 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             console.error('Failed to persist message on WebSocket close:', persistError);
           }
         }
-        
-        // 🔧 CRITICAL FIX: Always set loading to false when connection closes
+
+        // 🔧 CRITICAL FIX: Set loading to false ONLY when WebSocket connection closes
+        // This ensures the loading icon tracks the complete process until the connection is fully closed
         setIsLoading(false);
+        console.log('✅ Loading stopped - WebSocket connection closed');
       };
       
     } catch (error) {

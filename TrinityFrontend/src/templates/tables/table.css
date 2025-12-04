@@ -31,7 +31,7 @@
 }
 
 .table-base {
-  @apply min-w-[700px] w-full border-collapse text-sm;
+  @apply min-w-[700px] w-full border-collapse text-xs;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed !important; /* Ensure consistent column widths */
@@ -46,7 +46,7 @@
 }
 
 .table-header-cell {
-  @apply px-5 py-3 text-left font-bold text-black bg-white;
+  @apply px-5 py-2 text-left font-bold text-black bg-white text-sm;
   width: 150px; /* Default column width - removed !important to allow dynamic changes */
   min-width: 50px;
   max-width: 500px;
@@ -61,7 +61,7 @@
 }
 
 .table-cell {
-  @apply px-5 py-3 text-slate-700 text-left;
+  @apply px-5 py-2 text-slate-700 text-left;
   width: 150px; /* Default column width - removed !important to allow dynamic changes */
   min-width: 50px;
   max-width: 500px;
@@ -71,7 +71,7 @@
 }
 
 .table-cell-primary {
-  @apply px-5 py-3 whitespace-nowrap text-slate-800;
+  @apply px-5 py-2 whitespace-nowrap text-slate-800;
 }
 
 /* Minimizable table styles */
@@ -274,7 +274,7 @@
 .table-base td,
 .table-base th {
   margin: 0 !important;
-  padding: 12px 20px !important; /* Consistent padding */
+  padding: 8px 20px !important; /* Consistent padding */
   border-spacing: 0 !important;
 }
 

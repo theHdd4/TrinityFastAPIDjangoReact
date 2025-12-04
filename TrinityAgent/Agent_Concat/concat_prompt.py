@@ -34,9 +34,7 @@ class ConcatPromptBuilder:
             "file2": ["exact_filename2.csv"],
             "concat_direction": "vertical"
         },
-        "response": "Raw thinking and reasoning from LLM about the concatenation operation, including why these files were selected, why this direction was chosen, and any considerations made",
-        "smart_response": "I've configured the concatenation operation for you. The files will be combined using the specified direction. You can now proceed with the concatenation or make adjustments as needed.",
-        "reasoning": "Found all required components with context from history",
+        "reasoning": "Detailed explanation of why the Concat atom was chosen, including: analysis of the user's request, why these specific files were selected, why this concatenation direction was chosen, alternatives considered, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "used_memory": True
     }
     
@@ -51,9 +49,7 @@ class ConcatPromptBuilder:
             "To complete concatenation, specify: files + direction + optional column alignment",
             "Or say 'yes' to use my suggestions"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what files are available, what the user might want, analysis of the request, and recommendations based on available data",
-        "smart_response": "I'd be happy to help you with concatenation operations! Tell me which files you'd like to combine and whether you prefer stacking rows (vertical) or adding columns side by side (horizontal).",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why the Concat atom was chosen, including: analysis of the current situation, what files are available, what the user might want, analysis of the request, why Concat is appropriate, what information is needed, recommendations based on available data, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "file_analysis": {
             "total_files": "number",
             "recommended_pairs": ["file1 + file2"],
@@ -168,6 +164,8 @@ def build_concat_prompt(
         other_files=other_files,
         matched_columns=matched_columns
     )
+
+
 
 
 

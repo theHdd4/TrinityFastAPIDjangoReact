@@ -6,6 +6,7 @@ import { createColumnHandler } from './createColumnHandler';
 import { groupbyHandler } from './groupbyHandler';
 import { chartMakerHandler } from './chartMakerHandler';
 import { exploreHandler } from './exploreHandler';
+import { correlationHandler } from './correlationHandler';
 import { dfValidateHandler } from './dfValidateHandler';
 
 // Registry of all atom handlers
@@ -14,9 +15,11 @@ export const atomHandlers: Record<string, AtomHandler> = {
   'merge': mergeHandler,
   'dataframe-operations': dataframeOperationsHandler,
   'create-column': createColumnHandler,
+  'create-transform': createColumnHandler, // create-transform uses the same handler as create-column
   'groupby-wtg-avg': groupbyHandler,
   'chart-maker': chartMakerHandler,
   'explore': exploreHandler,
+  'correlation': correlationHandler,
   'data-upload-validate': dfValidateHandler,
 };
 
@@ -40,6 +43,7 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
       case 'merge':
         return !!(data.merge_json);
       case 'create-column':
+      case 'create-transform':
         return !!(data.json);
       case 'groupby-wtg-avg':
         return !!(data.groupby_json);
@@ -47,6 +51,8 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
         return !!(data.chart_json);
       case 'explore':
         return !!(data.exploration_config);
+      case 'correlation':
+        return !!(data.correlation_config);
       case 'dataframe-operations':
         return !!(data.dataframe_config);
       case 'data-upload-validate':
@@ -63,6 +69,7 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
     case 'merge':
       return !!(data.merge_json);
     case 'create-column':
+    case 'create-transform':
       return !!(data.json);
     case 'groupby-wtg-avg':
       return !!(data.groupby_json);
@@ -70,6 +77,8 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
       return !!(data.chart_json);
     case 'explore':
       return !!(data.exploration_config);
+    case 'correlation':
+      return !!(data.correlation_config);
     case 'dataframe-operations':
       return !!(data.dataframe_config);
     case 'data-upload-validate':
@@ -88,5 +97,6 @@ export {
   groupbyHandler, 
   chartMakerHandler, 
   exploreHandler,
+  correlationHandler,
   dfValidateHandler 
 };

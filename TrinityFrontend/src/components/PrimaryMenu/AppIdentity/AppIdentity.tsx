@@ -95,7 +95,7 @@ const AppIdentity: React.FC<AppIdentityProps> = ({ projectName, onGoBack, onRena
           {appName && <span className="text-gray-400">/</span>}
           {editing ? (
             <input
-              className="border rounded px-1 py-0.5 text-sm"
+              className="border rounded px-2 py-1 text-sm"
               value={name}
               onChange={e => setName(e.target.value)}
               onBlur={submit}
@@ -116,7 +116,7 @@ const AppIdentity: React.FC<AppIdentityProps> = ({ projectName, onGoBack, onRena
           <button
             type="button"
             onClick={onGoBack}
-            className="p-2 text-black"
+            className="p-1.5 text-black"
             title="Go back to projects menu"
           >
             <BackToAppsIcon className="w-5 h-5" />

@@ -332,16 +332,24 @@ async def classify_columns(
         col_type = column_types.get(col, "string")
         
         # Auto-classify remaining columns
+        # 1. Check keyword matches first
         if any(keyword in col_lower for keyword in identifier_keywords):
             auto_identifiers.append(col)
             final_identifiers.append(col)
         elif any(keyword in col_lower for keyword in measure_keywords):
             auto_measures.append(col)
             final_measures.append(col)
+        # 2. If no keyword match, classify by data type
+        # Datetime → identifiers
+        elif "datetime" in col_type.lower() or col_type in ["datetime64[ns]", "datetime64", "date"]:
+            auto_identifiers.append(col)
+            final_identifiers.append(col)
+        # Categorical/string/object → identifiers
         elif col_type in ["object", "category", "string"]:
             auto_identifiers.append(col)
             final_identifiers.append(col)
-        elif col_type in ["numeric", "integer", "float64"]:
+        # Numerical → measures
+        elif "int" in col_type.lower() or "float" in col_type.lower() or col_type in ["numeric", "integer", "float64", "float32", "int64", "int32"]:
             auto_measures.append(col)
             final_measures.append(col)
         else:
@@ -352,15 +360,18 @@ async def classify_columns(
     confidence_scores = {}
     for col in all_columns:
         col_lower = col.lower()
+        col_type = column_types.get(col, "string")
         if col in user_classified_columns:
             confidence_scores[col] = 1.0  # User specified = 100% confidence
         elif any(keyword in col_lower for keyword in identifier_keywords):
             confidence_scores[col] = 0.9
         elif any(keyword in col_lower for keyword in measure_keywords):
             confidence_scores[col] = 0.9
-        elif column_types.get(col) in ["object", "category", "string"]:
+        elif "datetime" in col_type.lower() or col_type in ["datetime64[ns]", "datetime64", "date"]:
             confidence_scores[col] = 0.7
-        elif column_types.get(col) in ["numeric", "integer", "float64"]:
+        elif col_type in ["object", "category", "string"]:
+            confidence_scores[col] = 0.7
+        elif "int" in col_type.lower() or "float" in col_type.lower() or col_type in ["numeric", "integer", "float64", "float32", "int64", "int32"]:
             confidence_scores[col] = 0.7
         else:
             confidence_scores[col] = 0.5
@@ -735,32 +746,38 @@ async def get_config(
     app_name: str,
     project_name: str,
     file_name: Optional[str] = None,
+    bypass_cache: str = "false",
 ):
     """Retrieve saved column classifier configuration."""
-    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
-    decoded_file = unquote(file_name) if file_name else None
-    specific_key = None
-    if decoded_file:
-        safe_file = quote(decoded_file, safe="")
-        specific_key = f"{key}:{safe_file}"
-        cached_specific = redis_client.get(specific_key)
-        if cached_specific:
-            return {
-                "status": "success",
-                "source": "redis",
-                "data": json.loads(cached_specific),
-            }
-
-    cached = redis_client.get(key)
-    if cached:
-        data = json.loads(cached)
+    should_bypass_cache = bypass_cache.lower() == "true"
+    
+    if not should_bypass_cache:
+        key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+        decoded_file = unquote(file_name) if file_name else None
+        specific_key = None
         if decoded_file:
-            stored_file = data.get("file_name")
-            if stored_file and stored_file != decoded_file:
-                data = None
-        if data is not None:
-            return {"status": "success", "source": "redis", "data": data}
+            safe_file = quote(decoded_file, safe="")
+            specific_key = f"{key}:{safe_file}"
+            cached_specific = redis_client.get(specific_key)
+            if cached_specific:
+                return {
+                    "status": "success",
+                    "source": "redis",
+                    "data": json.loads(cached_specific),
+                }
 
+        cached = redis_client.get(key)
+        if cached:
+            data = json.loads(cached)
+            if decoded_file:
+                stored_file = data.get("file_name")
+                if stored_file and stored_file != decoded_file:
+                    data = None
+            if data is not None:
+                return {"status": "success", "source": "redis", "data": data}
+
+    # Bypass cache or cache miss - fetch from MongoDB
+    decoded_file = unquote(file_name) if file_name else None
     mongo_data = get_classifier_config_from_mongo(
         client_name,
         app_name,
@@ -768,8 +785,12 @@ async def get_config(
         decoded_file,
     )
     if mongo_data:
+        # Update cache for future requests
+        key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
         redis_client.setex(key, 3600, json.dumps(mongo_data, default=str))
-        if specific_key:
+        if decoded_file:
+            safe_file = quote(decoded_file, safe="")
+            specific_key = f"{key}:{safe_file}"
             redis_client.setex(specific_key, 3600, json.dumps(mongo_data, default=str))
         return {"status": "success", "source": "mongo", "data": mongo_data}
 

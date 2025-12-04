@@ -287,7 +287,21 @@ def cleanup_on_delete(sender, instance, **kwargs):
         tenant_env.replace(" ", "_"),
     }
     app_slug = instance.app.slug if instance.app else ""
+    
+    # Delete chat history and sessions from MinIO for all tenant candidates
     for client_slug in tenant_candidates:
+        # Delete chat history stored in trinity_ai_memory prefix
+        memory_prefix = f"trinity_ai_memory/{client_slug}/{app_slug}/{instance.name}"
+        remove_prefix(f"{memory_prefix}/chats")
+        remove_prefix(f"{memory_prefix}/sessions")
+        
+        # Also try with slug in case it was stored that way
+        if instance.slug and instance.slug != instance.name:
+            memory_prefix_slug = f"trinity_ai_memory/{client_slug}/{app_slug}/{instance.slug}"
+            remove_prefix(f"{memory_prefix_slug}/chats")
+            remove_prefix(f"{memory_prefix_slug}/sessions")
+        
+        # Remove project data files
         remove_prefix(f"{client_slug}/{app_slug}/{instance.name}")
         remove_prefix(f"{client_slug}/{app_slug}/{instance.slug}")
 def _mongo_auth_kwargs() -> dict:
