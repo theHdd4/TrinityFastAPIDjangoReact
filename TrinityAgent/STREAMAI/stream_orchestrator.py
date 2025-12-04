@@ -101,6 +101,7 @@ class StreamOrchestrator:
         """Initialize the orchestrator"""
         # Use centralized settings
         self.config = settings.get_llm_config() if hasattr(settings, 'get_llm_config') else {}
+        self.clarification_enabled = (os.getenv("ENABLE_STREAM_AI_CLARIFICATION", "true") or "true").lower() != "false"
         
         # Base URLs for different services (use centralized settings)
         # For atom execution, we need to call the Trinity AI service itself (where we're running)
@@ -282,7 +283,7 @@ class StreamOrchestrator:
             
             try:
                 # Execute 3-step pattern
-                if mode != "workflow" and progress_callback:
+                if mode != "workflow" and self.clarification_enabled and progress_callback:
                     clarification = self._detect_clarification_need(atom, atom_index=i)
                     if clarification:
                         request_id = clarification.get("requestId") or f"clarify-{uuid.uuid4().hex}"
@@ -612,11 +613,16 @@ class StreamOrchestrator:
         key = f"{session_id}:{request_id}"
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
+        resume_event = asyncio.Event()
         self._clarification_waiters[key] = future
         self._clarification_metadata[key] = {
             "atom": atom,
             "clarification": clarification,
             "created_at": datetime.utcnow().isoformat(),
+            "session_id": session_id,
+            "atom_id": atom.get("atom_id"),
+            "resume_event": resume_event,
+            "progress_callback": progress_callback,
         }
 
         if self.storage:
@@ -671,8 +677,10 @@ class StreamOrchestrator:
 
         key = f"{session_id}:{request_id}"
         waiter = self._clarification_waiters.get(key)
-        if not waiter:
-            return False
+        metadata = self._clarification_metadata.get(key, {})
+        resume_event: Optional[asyncio.Event] = metadata.get("resume_event")
+        if resume_event and resume_event.is_set():
+            return True
 
         payload = {
             "type": "clarification_response",
@@ -682,8 +690,27 @@ class StreamOrchestrator:
             "values": values or {},
         }
 
-        if not waiter.done():
+        if resume_event:
+            resume_event.set()
+
+        if waiter and not waiter.done():
             waiter.set_result(payload)
+        elif not waiter:
+            return False
+
+        progress_callback = metadata.get("progress_callback")
+        if progress_callback:
+            try:
+                await self._emit_progress(progress_callback, {
+                    "type": "clarification_status",
+                    "status": "resumed",
+                    "requestId": request_id,
+                    "session_id": session_id,
+                    "atom_id": metadata.get("atom_id"),
+                })
+            except Exception as exc:
+                logger.debug("Could not emit resumed status: %s", exc)
+
         return True
     
     async def _step1_add_card(self, atom_id: str, session_id: str) -> Dict[str, Any]:

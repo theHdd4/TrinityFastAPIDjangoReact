@@ -10,6 +10,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle, ChevronUp, ChevronDown, Plug, Wrench, Brain } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
+import {
+  CLARIFICATION_REQUEST,
+  CLARIFICATION_RESPONSE,
+  type ClarificationRequestMessage,
+  type ClarificationStatusUpdate,
+} from '@/types/streaming';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
 import StreamWorkflowPreview from './StreamWorkflowPreview';
@@ -157,12 +163,7 @@ interface Chat {
   pendingClarification?: ClarificationRequest | null;
 }
 
-interface ClarificationRequest {
-  requestId: string;
-  message: string;
-  expected_fields?: string[];
-  payload?: Record<string, any>;
-}
+type ClarificationRequest = ClarificationRequestMessage;
 
 interface TrinityAIBackgroundStatus {
   isProcessing: boolean;
@@ -254,12 +255,29 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const agentModeEnabledRef = useRef(isAgentMode);
   
   // Laboratory store
-  const { setCards, updateCard, isLaboratorySession } = useLaboratoryStore();
+  const { setCards, updateCard, isLaboratorySession, pendingClarification, setPendingClarification } = useLaboratoryStore();
+  const isClarificationEnabled = (import.meta.env.VITE_ENABLE_STREAM_AI_CLARIFICATION ?? 'true') !== 'false';
 
   // Clarification state (laboratory-only)
-  const [clarificationRequest, setClarificationRequest] = useState<ClarificationRequest | null>(null);
+  const [clarificationRequest, setClarificationRequest] = useState<ClarificationRequest | null>(
+    isClarificationEnabled && isLaboratorySession && pendingClarification ? pendingClarification : null
+  );
   const [clarificationValues, setClarificationValues] = useState<Record<string, string>>({});
   const [isPaused, setIsPaused] = useState(false);
+
+  useEffect(() => {
+    if (isClarificationEnabled && isLaboratorySession && pendingClarification) {
+      setClarificationRequest(prev => prev ?? pendingClarification);
+      setIsPaused(true);
+      if (pendingClarification.expected_fields?.length) {
+        const initialValues = pendingClarification.expected_fields.reduce((acc, field) => {
+          acc[field] = '';
+          return acc;
+        }, {} as Record<string, string>);
+        setClarificationValues(initialValues);
+      }
+    }
+  }, [isClarificationEnabled, isLaboratorySession, pendingClarification]);
 
   const safeSetLocalStorage = useCallback((key: string, value: string) => {
     try {
@@ -1294,7 +1312,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     if (!clarificationRequest) return;
 
     const envelope = {
-      type: 'clarification_response',
+      type: CLARIFICATION_RESPONSE,
       requestId: clarificationRequest.requestId,
       message: payload.message,
       values: payload.values && Object.keys(payload.values).length > 0 ? payload.values : undefined,
@@ -1356,14 +1374,15 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
   const handleIncomingClarification = useCallback(
     (request: ClarificationRequest) => {
-      if (!isLaboratorySession) {
-        console.warn('Ignoring clarification request because session is not laboratory mode');
+      if (!isLaboratorySession || !isClarificationEnabled) {
+        console.warn('Ignoring clarification request because session is not laboratory mode or feature is disabled');
         return;
       }
 
       stopAutoRun();
       setIsPaused(true);
       setClarificationRequest(request);
+      setPendingClarification(request);
       const initialValues = (request.expected_fields || []).reduce((acc, field) => {
         acc[field] = '';
         return acc;
@@ -1601,23 +1620,44 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         const data = JSON.parse(event.data);
         console.log('📨 WebSocket event:', data.type, data);
 
-        if (data.status === 'resumed') {
-          setIsPaused(false);
-          setClarificationRequest(null);
-          setClarificationValues({});
+        if (data.type === CLARIFICATION_REQUEST) {
+          handleIncomingClarification(data as ClarificationRequestMessage);
+          return;
+        }
 
-          const resumedMsg: Message = {
-            id: `resumed-${Date.now()}`,
-            content: '✅ Resumed after clarification.',
-            sender: 'ai',
-            timestamp: new Date(),
-          };
-          setMessages(prev => [...prev, resumedMsg]);
-          setChats(prev => prev.map(chat =>
-            chat.id === currentChatId
-              ? { ...chat, pendingClarification: null }
-              : chat
-          ));
+        const isClarificationStatus =
+          (data.type === 'clarification_status' || data.type === 'clarification_update') && data.status;
+        if (isClarificationStatus) {
+          const statusEvent = data as ClarificationStatusUpdate;
+          if (statusEvent.status === 'resumed') {
+            setIsPaused(false);
+            setClarificationRequest(null);
+            setClarificationValues({});
+            setPendingClarification(null);
+
+            const resumedMsg: Message = {
+              id: `resumed-${Date.now()}`,
+              content: '✅ Resumed after clarification.',
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, resumedMsg]);
+            setChats(prev => prev.map(chat =>
+              chat.id === currentChatId
+                ? { ...chat, pendingClarification: null }
+                : chat
+            ));
+
+            const chat = chats.find(c => c.id === currentChatId);
+            if (chat) {
+              const updatedChat: Chat = { ...chat, pendingClarification: null, messages: [...chat.messages, resumedMsg] };
+              persistChatToMemory(updatedChat).catch(err =>
+                console.error('Failed to persist resumed chat state', err)
+              );
+            }
+          }
+          return;
+        }
 
           const chat = chats.find(c => c.id === currentChatId);
           if (chat) {
