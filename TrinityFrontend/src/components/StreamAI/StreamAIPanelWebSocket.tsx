@@ -1674,15 +1674,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             }
           }
           return;
-        }
 
-          const chat = chats.find(c => c.id === currentChatId);
-          if (chat) {
-            const updatedChat: Chat = { ...chat, pendingClarification: null, messages: [...chat.messages, resumedMsg] };
-            persistChatToMemory(updatedChat).catch(err =>
-              console.error('Failed to persist resumed status:', err)
-            );
-          }
         }
 
         if (data.status === 'paused_for_clarification' && data.requestId) {
@@ -1694,7 +1686,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           });
         }
 
-        switch (data.type) {
+          switch (data.type) {
           case 'connected':
             console.log('✅ Trinity AI connected');
             break;
