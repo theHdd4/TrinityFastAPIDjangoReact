@@ -196,7 +196,13 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     "message": "Please confirm: " + "; ".join(decision.clarifications),
                     "intent_record": intent_record.to_dict(),
                 }))
-                await websocket.close()
+                await websocket.send_text(json.dumps({
+                    "type": "status",
+                    "status": "awaiting_clarification",
+                    "message": "Awaiting user confirmation before continuing.",
+                }))
+                close_code = 1000
+                close_reason = "clarification_required"
                 return
 
             if policy_flip:
@@ -204,7 +210,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     "type": "policy_shift",
                     "message": "Detected a change in execution path; please confirm before continuing.",
                 }))
-                await websocket.close()
+                close_code = 1000
+                close_reason = "policy_shift"
                 return
 
             if decision.requires_files and not available_files:
@@ -213,7 +220,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     "message": "I need a dataset or file to run Atom Agents. Upload a file and try again.",
                     "intent_record": intent_record.to_dict(),
                 }))
-                await websocket.close()
+                close_code = 1000
+                close_reason = "missing_files"
                 return
 
         # Step 2: Intent Detection (ONCE at the start - like 28_NOV)
