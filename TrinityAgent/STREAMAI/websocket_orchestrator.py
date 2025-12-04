@@ -6521,34 +6521,38 @@ WORKFLOW PLANNING:
                     logger.error("❌ BaseAgent.FileReader not available - cannot retrieve file metadata")
                     return metadata_dict
             
-            # Extract filenames from paths
-            file_names = []
+            # Extract filenames from paths for display purposes
             path_to_filename = {}
             for file_path in file_paths:
                 # Extract filename from path
                 filename = file_path.split('/')[-1] if '/' in file_path else file_path
                 filename = filename.split('\\')[-1] if '\\' in filename else filename
-                file_names.append(filename)
                 path_to_filename[file_path] = filename
             
             # Get file details using BaseAgent.FileReader (standardized)
-            if file_names:
+            # 🔧 CRITICAL FIX: Use full file_path instead of just filename for S3 access
+            if file_paths:
                 file_details_dict = {}
                 try:
                     file_reader = FileReader()
-                    for filename in file_names:
+                    for file_path in file_paths:
                         try:
-                            columns = file_reader.get_file_columns(filename)
-                            file_details_dict[filename] = {
-                                "object_name": filename,
+                            # Use full file_path for S3 access, not just filename
+                            columns = file_reader.get_file_columns(file_path)
+                            filename = path_to_filename.get(file_path, file_path)
+                            file_details_dict[file_path] = {
+                                "object_name": file_path,  # Store full path as object_name
+                                "display_name": filename,  # Store filename for display
                                 "columns": columns,
                                 "column_count": len(columns) if columns else 0
                             }
                         except Exception as e:
-                            logger.debug(f"⚠️ Could not get columns for {filename}: {e}")
+                            logger.error(f"⚠️ Could not get columns for {file_path}: {e}")
+                            filename = path_to_filename.get(file_path, file_path)
                             # Still add entry with empty columns
-                            file_details_dict[filename] = {
-                                "object_name": filename,
+                            file_details_dict[file_path] = {
+                                "object_name": file_path,
+                                "display_name": filename,
                                 "columns": [],
                                 "column_count": 0
                             }
@@ -6559,30 +6563,9 @@ WORKFLOW PLANNING:
                     file_details_dict = {}
                 
                 if file_details_dict:
-                    # Map back to original file paths
-                    for file_path, filename in path_to_filename.items():
-                        # Try to find matching metadata
-                        for key, metadata in file_details_dict.items():
-                            # Check if key matches filename or file_path
-                            if (key == filename or 
-                                key == file_path or 
-                                filename in key or 
-                                file_path in key or
-                                key in filename or
-                                key in file_path):
-                                metadata_dict[file_path] = metadata
-                                break
-                        
-                        # If not found, try to find by object_name
-                        if file_path not in metadata_dict:
-                            for key, metadata in file_details_dict.items():
-                                obj_name = metadata.get("object_name", "")
-                                if (obj_name == filename or 
-                                    obj_name == file_path or
-                                    filename in obj_name or
-                                    file_path in obj_name):
-                                    metadata_dict[file_path] = metadata
-                                    break
+                    # Direct mapping since we're using file_path as key
+                    for file_path, metadata in file_details_dict.items():
+                        metadata_dict[file_path] = metadata
                     
                     # Log what metadata was retrieved
                     for file_path, metadata in metadata_dict.items():
@@ -6592,7 +6575,7 @@ WORKFLOW PLANNING:
                     
                     logger.info(f"✅ Retrieved metadata for {len(metadata_dict)}/{len(file_paths)} files")
                 else:
-                    logger.warning(f"⚠️ Could not retrieve metadata for files: {file_names}")
+                    logger.warning(f"⚠️ Could not retrieve metadata for files: {file_paths}")
         except Exception as e:
             # Log as debug since this is non-critical (files can still be accessed via FileReader)
             logger.debug(f"⚠️ Failed to get file metadata: {e} (non-critical - files accessible via other means)")

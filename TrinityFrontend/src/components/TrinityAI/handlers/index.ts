@@ -8,6 +8,7 @@ import { chartMakerHandler } from './chartMakerHandler';
 import { exploreHandler } from './exploreHandler';
 import { correlationHandler } from './correlationHandler';
 import { dfValidateHandler } from './dfValidateHandler';
+import { metricHandler } from './metricHandler';
 
 // Registry of all atom handlers
 export const atomHandlers: Record<string, AtomHandler> = {
@@ -21,6 +22,8 @@ export const atomHandlers: Record<string, AtomHandler> = {
   'explore': exploreHandler,
   'correlation': correlationHandler,
   'data-upload-validate': dfValidateHandler,
+  'metric': metricHandler,
+  'metrics': metricHandler, // Support both singular and plural
 };
 
 // Helper function to check if an atom type has a specific handler
@@ -57,6 +60,9 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
         return !!(data.dataframe_config);
       case 'data-upload-validate':
         return !!(data.validate_json);
+      case 'metric':
+      case 'metrics':
+        return !!(data.operation_type || data.operation_config || data.metrics_json);
       default:
         return false;
     }
@@ -83,6 +89,9 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
       return !!(data.dataframe_config);
     case 'data-upload-validate':
       return !!(data.validate_json);
+    case 'metric':
+    case 'metrics':
+      return !!(data.operation_type || data.operation_config || data.metrics_json);
     default:
       return false;
   }
@@ -98,5 +107,6 @@ export {
   chartMakerHandler, 
   exploreHandler,
   correlationHandler,
-  dfValidateHandler 
+  dfValidateHandler,
+  metricHandler 
 };
