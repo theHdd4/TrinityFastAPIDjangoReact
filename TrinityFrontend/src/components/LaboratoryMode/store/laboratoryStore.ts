@@ -1961,9 +1961,11 @@ interface LaboratoryStore {
   auxPanelActive: 'settings' | 'frames' | null;
   auxiliaryMenuLeftOpen: boolean;
   metricsInputs: MetricsInputSettings;
+  isLaboratorySession: boolean;
   setCards: (cards: LayoutCard[]) => void;
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
   setAuxiliaryMenuLeftOpen: (open: boolean) => void;
+  setIsLaboratorySession: (active: boolean) => void;
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
@@ -1986,6 +1988,9 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
   auxPanelActive: null,
   auxiliaryMenuLeftOpen: true,
+  isLaboratorySession: typeof window !== 'undefined'
+    ? window.location.pathname.toLowerCase().includes('laboratory')
+    : true,
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   setCards: (cards: LayoutCard[]) => {
     // FIX: Ensure cards is always an array
@@ -2010,6 +2015,10 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
 
   setAuxiliaryMenuLeftOpen: (open: boolean) => {
     set({ auxiliaryMenuLeftOpen: open });
+  },
+
+  setIsLaboratorySession: (active: boolean) => {
+    set({ isLaboratorySession: active });
   },
 
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => {

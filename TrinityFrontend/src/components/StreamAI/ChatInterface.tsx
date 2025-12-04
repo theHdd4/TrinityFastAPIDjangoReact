@@ -55,6 +55,7 @@ interface ChatInterfaceProps {
   inputValue: string;
   setInputValue: (value: string) => void;
   isLoading: boolean;
+  isPaused?: boolean;
   onSendMessage: () => void;
   selectedAgent: string;
   setSelectedAgent: (agent: string) => void;
@@ -100,6 +101,12 @@ interface ChatInterfaceProps {
   canvasAreaLeft?: number | null;
   // Stop handler
   onStop?: () => void;
+  clarificationRequest?: { message: string; expected_fields?: string[] } | null;
+  clarificationValues?: Record<string, string>;
+  onClarificationValueChange?: (field: string, value: string) => void;
+  onClarificationSubmit?: () => void;
+  onClarificationCancel?: () => void;
+  isLaboratoryMode?: boolean;
 }
 
 const BRAND_GREEN = '#50C878';
@@ -110,6 +117,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   inputValue,
   setInputValue,
   isLoading,
+  isPaused = false,
   onSendMessage,
   selectedAgent,
   setSelectedAgent,
@@ -148,6 +156,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   canvasAreaWidth = null,
   canvasAreaLeft = null,
   onStop,
+  clarificationRequest = null,
+  clarificationValues = {},
+  onClarificationValueChange,
+  onClarificationSubmit,
+  onClarificationCancel,
+  isLaboratoryMode = false,
 }) => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isPanelHidden, setIsPanelHidden] = useState(false);
@@ -170,7 +184,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   // Removed auto-open behavior so only chat box opens when AI panel is opened
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isPaused) {
       e.preventDefault();
       onSendMessage();
     }
@@ -418,8 +432,60 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </AnimatePresence>
           </CollapsibleContent>
 
+          {isPaused && clarificationRequest && isLaboratoryMode && (
+            <div className="mb-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl shadow-sm">
+              <div className="flex items-start gap-2">
+                <Bot className="w-5 h-5 text-amber-700 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-amber-800">Clarification needed</p>
+                  <p className="text-sm text-amber-900 mt-1">{clarificationRequest.message}</p>
+                  <div className="mt-3 space-y-2">
+                    {clarificationRequest.expected_fields?.length ? (
+                      clarificationRequest.expected_fields.map((field) => (
+                        <div key={field} className="space-y-1">
+                          <label className="text-xs font-medium text-amber-800">{field}</label>
+                          <input
+                            className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            value={clarificationValues?.[field] || ''}
+                            onChange={(e) => onClarificationValueChange?.(field, e.target.value)}
+                          />
+                        </div>
+                      ))
+                    ) : (
+                      <Textarea
+                        placeholder="Add more context so the AI can resume"
+                        value={clarificationValues?.__freeform || ''}
+                        onChange={(e) => onClarificationValueChange?.('__freeform', e.target.value)}
+                        className="bg-white border-amber-200 focus-visible:ring-amber-300"
+                      />
+                    )}
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <Button
+                      size="sm"
+                      onClick={onClarificationSubmit}
+                      disabled={isLoading}
+                      className="bg-amber-500 hover:bg-amber-600 text-white"
+                    >
+                      Submit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={onClarificationCancel}
+                      disabled={isLoading}
+                      className="border-amber-300 text-amber-800 hover:bg-amber-100"
+                    >
+                      Cancel / Skip
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Chat Input */}
-          <motion.div 
+          <motion.div
             className={cn(
               "bg-white border border-border/50 shadow-[0_8px_30px_rgba(0,0,0,0.12)] overflow-hidden",
               isHistoryOpen ? "rounded-b-3xl" : "rounded-3xl"
@@ -451,7 +517,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 onKeyDown={handleKeyPress}
                 placeholder="Send a message..."
                 className="min-h-[52px] max-h-[130px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-foreground placeholder:text-muted-foreground/60 text-sm leading-relaxed flex-1"
-                disabled={isLoading}
+                disabled={isLoading || isPaused}
               />
             </div>
 
@@ -648,7 +714,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 {onVoiceTranscript && (
                   <VoiceInputButton
                     onTranscript={onVoiceTranscript}
-                    disabled={isLoading}
+                    disabled={isLoading || isPaused}
                     className="h-9 w-9 p-0 rounded-xl"
                     size="sm"
                     variant="ghost"
@@ -693,7 +759,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 
                 <Button
                   onClick={onSendMessage}
-                  disabled={!inputValue.trim() || isLoading}
+                  disabled={!inputValue.trim() || isLoading || isPaused}
                   size="sm"
                   className="h-10 w-10 p-0 rounded-2xl bg-[#FEEB99] hover:bg-[#FFBD59] text-gray-800 shadow-lg shadow-[#FFBD59]/30 hover:shadow-xl hover:shadow-[#FFBD59]/40 transition-all duration-300 hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
