@@ -405,6 +405,8 @@ async def get_atom_list_configuration(
             "mode": mode
         }
         
+        logger.info(f"🔍 [BACKEND DIAGNOSIS] MongoDB query for get_atom_list_configuration: {query}")
+        
         # Exclude workflow metadata documents from atom query
         # Workflow metadata documents have is_workflow_metadata: True and don't have atom_name
         query_without_metadata = {
@@ -415,9 +417,15 @@ async def get_atom_list_configuration(
             ]
         }
         
+        logger.info(f"🔍 [BACKEND DIAGNOSIS] Query without metadata: {query_without_metadata}")
+        
         # Get all atom configurations for this project/mode (excluding workflow metadata)
         cursor = coll.find(query_without_metadata).sort([("canvas_position", 1), ("atom_positions", 1)])
         atom_configs = await cursor.to_list(length=None)
+        
+        logger.info(f"🔍 [BACKEND DIAGNOSIS] Found {len(atom_configs)} atom configs for mode={mode}")
+        if atom_configs:
+            logger.info(f"🔍 [BACKEND DIAGNOSIS] Atom names in response: {[ac.get('atom_name') for ac in atom_configs[:10]]}")
         
         # Try to get workflow_molecules from a separate document in the same collection
         # We'll store workflow_molecules as a separate document with a special marker
@@ -503,6 +511,8 @@ async def get_atom_list_configuration(
             logger.info(f"🔍 DEBUG: Retrieving atom {atom_config.get('atom_name')} with molecule_id: {molecule_id}, molecule_title: {molecule_title}")
             
             # Create atom object with all necessary fields including molecule information
+            # Include both "settings" (for laboratory mode) and "metadata" (for shared/exhibition views)
+            atom_configs_data = atom_config.get("atom_configs", {})
             atom_obj = {
                 "id": atom_config.get("mode_meta", {}).get("atom_id", f"atom-{atom_config['atom_name']}-{canvas_pos}-{atom_pos}"),
                 "atomId": atom_config.get("atom_name"),
@@ -510,7 +520,8 @@ async def get_atom_list_configuration(
                 "category": "Atom",  # Default category
                 "color": "bg-gray-400",  # Default color
                 "source": "manual",
-                "settings": atom_config.get("atom_configs", {}),
+                "settings": atom_configs_data,  # For laboratory mode compatibility
+                "metadata": atom_configs_data,  # For shared dashboard/exhibition rendering
                 "moleculeId": molecule_id,
                 "moleculeTitle": molecule_title
             }

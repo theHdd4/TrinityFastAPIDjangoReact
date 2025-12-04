@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
-import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
+import { sanitizeLabConfig, persistLaboratoryConfig, getWorkflowMoleculesKey, getWorkflowSelectedAtomsKey, getWorkflowDataKey } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Plus, Grid3X3, Trash2, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
@@ -47,6 +47,7 @@ import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAto
 import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import PivotTableAtom from '@/components/AtomList/atoms/pivot-table/PivotTableAtom';
 import UnpivotAtom from '@/components/AtomList/atoms/unpivot/UnpivotAtom';
+import TableAtom from '@/components/AtomList/atoms/table/TableAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -74,6 +75,7 @@ import {
   DEFAULT_PIVOT_TABLE_SETTINGS,
   DEFAULT_UNPIVOT_SETTINGS,
   DASHBOARD_ALLOWED_ATOMS,
+  LaboratorySubMode,
 } from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule, buildUnifiedRenderArray, UnifiedRenderItem } from './helpers';
 import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
@@ -192,8 +194,9 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
 
   return rawCards.map((card: any) => ({
     id: card.id,
-    atoms: Array.isArray(card.atoms)
-      ? card.atoms.map((atom: any) => hydrateDroppedAtom(atom))
+    // CRITICAL FIX: Enforce one atom per card - keep only first atom
+    atoms: Array.isArray(card.atoms) && card.atoms.length > 0
+      ? [hydrateDroppedAtom(card.atoms[0])]
       : [],
     isExhibited: !!card.isExhibited,
     moleculeId: card.moleculeId,
@@ -211,22 +214,24 @@ const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashbo
   workflowMolecules: WorkflowMolecule[];
   autosaveEnabled?: boolean;
 } | null> => {
+  // Determine mode value based on subMode (outside try block for catch block access)
+  const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+  
   try {
     const projectContext = getActiveProjectContext();
     if (!projectContext) {
-      console.warn('[Laboratory API] No project context available for MongoDB fetch');
+      console.warn('[🔍 DIAGNOSIS] No project context available for MongoDB fetch');
       return null;
     }
-
-    // Determine mode value based on subMode
-    const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
     const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}?mode=${mode}`;
 
-    console.info('[Laboratory API] Fetching atom configurations from MongoDB', {
+    console.info('🔍 [DIAGNOSIS] ========== MONGODB FETCH START ==========');
+    console.info('🔍 [DIAGNOSIS] Fetching atom configurations from MongoDB', {
       url: requestUrl,
       project: projectContext.project_name,
       subMode,
       mode,
+      timestamp: new Date().toISOString(),
     });
 
     const response = await fetch(requestUrl, {
@@ -243,13 +248,27 @@ const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashbo
     }
 
     const data = await response.json();
-    console.log('[Laboratory API] MongoDB response data:', data);
+    console.log('🔍 [DIAGNOSIS] MongoDB raw response data:', JSON.stringify(data, null, 2));
 
     if (data.status === 'ok' && data.cards && Array.isArray(data.cards)) {
-      console.info('[Laboratory API] Successfully fetched atom configurations from MongoDB', {
+      console.info('🔍 [DIAGNOSIS] ✅ Successfully fetched atom configurations from MongoDB', {
         cardsCount: data.cards.length,
         workflowMoleculesCount: data.workflow_molecules?.length || 0,
+        subMode,
+        mode,
       });
+      
+      // DETAILED LOGGING: Log each card's atoms
+      console.log('🔍 [DIAGNOSIS] Cards from MongoDB (detailed):', data.cards.map((card: any) => ({
+        cardId: card.id,
+        atoms: (card.atoms || []).map((a: any) => ({
+          atomId: a.atomId,
+          title: a.title,
+          isDashboardAllowed: DASHBOARD_ALLOWED_ATOMS.includes(a.atomId as any)
+        })),
+        moleculeId: card.moleculeId,
+        mode: mode
+      })));
 
       // The backend already returns cards in the correct format, so we can use them directly
       // FIX: Ensure data.cards is an array before mapping
@@ -369,13 +388,34 @@ const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashbo
       // Return autosaveEnabled if available (will be handled by parent component)
       const autosaveEnabled = data.autosaveEnabled !== undefined ? data.autosaveEnabled : true;
 
+      console.info('🔍 [DIAGNOSIS] ========== MONGODB FETCH SUCCESS ==========');
+      console.info('🔍 [DIAGNOSIS] Returning data:', {
+        cardsCount: cards.length,
+        workflowMoleculesCount: workflowMolecules.length,
+        subMode,
+        mode,
+        cardAtomIds: cards.map(c => c.atoms.map(a => a.atomId)).flat()
+      });
+      
       return { cards, workflowMolecules, autosaveEnabled };
     } else {
-      console.warn('[Laboratory API] Invalid response format from MongoDB fetch', data);
+      console.warn('🔍 [DIAGNOSIS] ❌ Invalid response format from MongoDB fetch', {
+        status: data.status,
+        hasCards: !!data.cards,
+        cardsIsArray: Array.isArray(data.cards),
+        subMode,
+        mode,
+        data
+      });
       return null;
     }
   } catch (error) {
-    console.error('[Laboratory API] Error fetching atom configurations from MongoDB', error);
+    console.error('🔍 [DIAGNOSIS] ❌ Error fetching atom configurations from MongoDB', {
+      error,
+      subMode,
+      mode,
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return null;
   }
 };
@@ -1119,18 +1159,110 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       fromMongoDB: boolean = false, // Flag to indicate if cards are from MongoDB
     ) => {
       if (!isMounted) {
+        console.warn('🔍 [DIAGNOSIS] applyInitialCards: Component not mounted, skipping');
         return;
       }
 
-      console.log('[Laboratory API] applyInitialCards called with:', {
+      console.log('🔍 [DIAGNOSIS] ========== APPLY INITIAL CARDS START ==========');
+      console.log('🔍 [DIAGNOSIS] applyInitialCards called with:', {
         cardsCount: cards?.length || 0,
         workflowOverrideCount: workflowOverride?.length || 0,
         fromMongoDB,
-        cards: cards
+        subMode,
+        timestamp: new Date().toISOString(),
+        cards: cards?.map(c => ({
+          id: c.id,
+          atoms: c.atoms.map(a => ({ atomId: a.atomId, title: a.title })),
+          moleculeId: c.moleculeId
+        }))
       });
 
-      const normalizedCards = Array.isArray(cards) ? cards : [];
-      console.log('[Laboratory API] Normalized cards:', normalizedCards);
+      let normalizedCards = Array.isArray(cards) ? cards : [];
+      
+      // CRITICAL FIX: Enforce one atom per card - keep only first atom from each card
+      normalizedCards = normalizedCards.map(card => ({
+        ...card,
+        atoms: Array.isArray(card.atoms) && card.atoms.length > 0 ? [card.atoms[0]] : []
+      }));
+      
+      // CRITICAL FIX: Filter cards based on current mode to ensure data separation
+      if (normalizedCards.length > 0) {
+        if (subMode === 'dashboard') {
+          // Dashboard mode: Only allow dashboard-specific atoms
+          const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+          const filteredCards: LayoutCard[] = [];
+          
+          for (const card of normalizedCards) {
+            // Filter atoms in this card to only include allowed ones
+            const allowedAtoms = (card.atoms || []).filter(atom => 
+              allowedAtomIdsSet.has(atom.atomId as any)
+            );
+            
+            // CRITICAL FIX: Allow empty cards OR cards with allowed atoms
+            // Empty cards must be preserved for "Add New Card" functionality in dashboard mode
+            if (allowedAtoms.length > 0 || (card.atoms || []).length === 0) {
+              filteredCards.push({
+                ...card,
+                atoms: allowedAtoms  // Will be empty array for empty cards, which is correct
+              });
+            }
+          }
+          
+          if (filteredCards.length !== normalizedCards.length) {
+            const removedCount = normalizedCards.length - filteredCards.length;
+            console.warn(`🔍 [DIAGNOSIS] ⚠️ Filtered out ${removedCount} card(s) containing atoms not allowed in dashboard mode. Remaining: ${filteredCards.length}`);
+            console.log('🔍 [DIAGNOSIS] Removed cards:', normalizedCards.filter(card => {
+              const allowedAtoms = (card.atoms || []).filter(atom => 
+                allowedAtomIdsSet.has(atom.atomId as any)
+              );
+              return allowedAtoms.length === 0;
+            }).map(c => ({
+              id: c.id,
+              atoms: c.atoms.map(a => a.atomId)
+            })));
+          }
+          
+          normalizedCards = filteredCards;
+          console.log('🔍 [DIAGNOSIS] After dashboard filtering:', {
+            originalCount: cards?.length || 0,
+            filteredCount: normalizedCards.length,
+            cards: normalizedCards.map(c => ({
+              id: c.id,
+              atomIds: c.atoms.map(a => a.atomId)
+            }))
+          });
+        } else {
+          // Analytics mode: Log detailed info about loaded cards
+          console.log('🔍 [DIAGNOSIS] Analytics mode - checking loaded cards');
+          const dashboardOnlyAtoms = new Set(DASHBOARD_ALLOWED_ATOMS);
+          const cardsWithDashboardAtoms = normalizedCards.filter(card => 
+            (card.atoms || []).some(atom => dashboardOnlyAtoms.has(atom.atomId as any))
+          );
+          
+          if (cardsWithDashboardAtoms.length > 0) {
+            console.warn('🔍 [DIAGNOSIS] ⚠️ Analytics mode loaded cards containing dashboard atoms:', {
+              count: cardsWithDashboardAtoms.length,
+              fromMongoDB,
+              subMode,
+              cards: cardsWithDashboardAtoms.map(c => ({
+                id: c.id,
+                atoms: c.atoms.map(a => ({
+                  atomId: a.atomId,
+                  title: a.title,
+                  isDashboardAtom: dashboardOnlyAtoms.has(a.atomId as any)
+                }))
+              }))
+            });
+            
+            if (fromMongoDB) {
+              console.error('🔍 [DIAGNOSIS] ❌ DATA LEAKAGE DETECTED: Dashboard atoms loaded from MongoDB in Analytics mode!');
+              console.error('🔍 [DIAGNOSIS] This indicates backend returned wrong mode data or data was saved incorrectly.');
+            }
+          }
+        }
+      }
+      
+      console.log('[Laboratory API] Normalized cards after mode filtering:', normalizedCards);
 
       // Debug: Check molecule info in cards
       const cardsWithMoleculeInfo = normalizedCards.filter(card => card.moleculeId);
@@ -1186,18 +1318,55 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
               console.log('[Laboratory API] Updated cards with MongoDB molecule info:', updatedCards);
 
+              // CRITICAL FIX: Apply mode filtering to updated cards before setting them
+              let filteredUpdatedCards = updatedCards;
+              if (subMode === 'dashboard' && filteredUpdatedCards.length > 0) {
+                const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+                filteredUpdatedCards = filteredUpdatedCards.filter(card => {
+                  const allowedAtoms = (card.atoms || []).filter(atom => 
+                    allowedAtomIdsSet.has(atom.atomId as any)
+                  );
+                  if (allowedAtoms.length > 0) {
+                    card.atoms = allowedAtoms;
+                    return true;
+                  }
+                  return false;
+                });
+              }
+
               // Use workflow molecules from MongoDB if available
               if (mongoData.workflowMolecules && mongoData.workflowMolecules.length > 0) {
                 console.log('[Laboratory API] Using workflow molecules from MongoDB:', mongoData.workflowMolecules);
                 workflow = mongoData.workflowMolecules;
+                
+                // CRITICAL FIX: Filter workflow molecules for dashboard mode
+                if (subMode === 'dashboard' && workflow.length > 0) {
+                  const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+                  workflow = workflow.map(molecule => ({
+                    ...molecule,
+                    atoms: (molecule.atoms || []).filter((atom: any) => {
+                      const atomId = typeof atom === 'string' ? atom : atom.atomName || atom.atomId;
+                      return atomId && allowedAtomIdsSet.has(atomId as any);
+                    })
+                  })).filter(molecule => (molecule.atoms || []).length > 0);
+                }
 
                 // Set cards directly - no assignment needed
-                setLayoutCards(updatedCards);
+                setLayoutCards(filteredUpdatedCards);
               } else {
-                setLayoutCards(updatedCards);
+                setLayoutCards(filteredUpdatedCards);
               }
             } else {
-              console.log('[Laboratory API] No MongoDB data found, using cards as-is');
+              console.log('🔍 [DIAGNOSIS] No MongoDB data found, using cards as-is');
+              console.log('🔍 [DIAGNOSIS] Setting cards from localStorage fallback:', {
+                count: normalizedCards.length,
+                subMode,
+                cards: normalizedCards.map(c => ({
+                  id: c.id,
+                  atomIds: c.atoms.map(a => a.atomId)
+                }))
+              });
+              // NOTE: Store's setCards will apply additional filtering for dashboard mode
               setLayoutCards(normalizedCards);
             }
           })
@@ -1213,7 +1382,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       // Check for saved workflowMolecules in localStorage if no override provided
       let workflow = workflowOverride;
       if (!workflow) {
-        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
         if (storedWorkflowMolecules) {
           try {
             workflow = JSON.parse(storedWorkflowMolecules);
@@ -1227,6 +1396,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       }
 
       console.log('[Laboratory API] Setting workflow molecules:', workflow);
+
+      // CRITICAL FIX: Filter workflow molecules to only include atoms allowed in current mode
+      if (subMode === 'dashboard' && workflow.length > 0) {
+        const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+        workflow = workflow.map(molecule => ({
+          ...molecule,
+          atoms: (molecule.atoms || []).filter((atom: any) => {
+            // atom can be a string (atomId) or an object with atomName
+            const atomId = typeof atom === 'string' ? atom : atom.atomName || atom.atomId;
+            return atomId && allowedAtomIdsSet.has(atomId as any);
+          })
+        })).filter(molecule => (molecule.atoms || []).length > 0); // Remove molecules with no allowed atoms
+        
+        console.log('[Laboratory API] Filtered workflow molecules for dashboard mode:', workflow);
+      }
 
       // Debug: Compare molecule IDs between workflow molecules and cards
       const workflowMoleculeIds = workflow.map(m => m.moleculeId);
@@ -1512,54 +1696,97 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       // Set cards with validated/fixed orders
       // FIX: Ensure fixedCards is always an array
       if (!Array.isArray(fixedCards)) {
-        console.error('[Laboratory API] fixedCards is not an array:', fixedCards);
+        console.error('🔍 [DIAGNOSIS] ❌ fixedCards is not an array:', fixedCards);
         setLayoutCards([]);
         return;
       }
+      
+      console.log('🔍 [DIAGNOSIS] ========== SETTING CARDS TO STORE ==========');
+      console.log('🔍 [DIAGNOSIS] About to set cards:', {
+        count: fixedCards.length,
+        subMode,
+        fromMongoDB,
+        cards: fixedCards.map(c => ({
+          id: c.id,
+          atomIds: c.atoms.map(a => a.atomId),
+          moleculeId: c.moleculeId
+        }))
+      });
+      
       setLayoutCards(fixedCards);
+      
+      console.log('🔍 [DIAGNOSIS] ========== APPLY INITIAL CARDS COMPLETE ==========');
 
       markLoadingComplete();
     };
 
     // PRIORITY: Fetch from MongoDB FIRST, then fall back to localStorage if MongoDB fails
-    console.info('[Laboratory API] Starting data load - prioritizing MongoDB over localStorage', { subMode });
+    console.info('🔍 [DIAGNOSIS] ========== DATA LOAD START ==========');
+    console.info('🔍 [DIAGNOSIS] Starting data load - prioritizing MongoDB over localStorage', { 
+      subMode,
+      timestamp: new Date().toISOString()
+    });
 
     hasPendingAsyncLoad = true;
     fetchAtomConfigurationsFromMongoDB(subMode)
       .then((mongoData) => {
         if (!isMounted) {
+          console.warn('🔍 [DIAGNOSIS] Component unmounted during MongoDB fetch');
           return;
         }
 
+        console.log('🔍 [DIAGNOSIS] MongoDB fetch completed:', {
+          hasData: !!mongoData,
+          hasCards: !!(mongoData && mongoData.cards),
+          cardsCount: mongoData?.cards?.length || 0,
+          subMode
+        });
+
         if (mongoData && mongoData.cards && mongoData.cards.length > 0) {
-          console.info('[Laboratory API] ✅ Successfully loaded data from MongoDB (primary source)', {
+          console.info('🔍 [DIAGNOSIS] ✅ Successfully loaded data from MongoDB (primary source)', {
             cardsCount: mongoData.cards.length,
-            workflowMoleculesCount: mongoData.workflowMolecules?.length || 0
+            workflowMoleculesCount: mongoData.workflowMolecules?.length || 0,
+            subMode,
+            cardAtomIds: mongoData.cards.map(c => c.atoms.map(a => a.atomId)).flat()
           });
           applyInitialCards(mongoData.cards, mongoData.workflowMolecules || [], true); // fromMongoDB = true
           return; // Successfully loaded from MongoDB, no need to check localStorage
         } else {
           // FIX: If MongoDB returns empty cards array, clear workflow data and return to regular laboratory mode
           if (mongoData && Array.isArray(mongoData.cards) && mongoData.cards.length === 0) {
-            console.info('[Laboratory API] ⚠️ MongoDB returned empty cards array - clearing workflow data and returning to regular laboratory mode');
-            // Clear workflow-related localStorage items
-            localStorage.removeItem('workflow-molecules');
-            localStorage.removeItem('workflow-selected-atoms');
-            localStorage.removeItem('workflow-data');
+            console.info('🔍 [DIAGNOSIS] ⚠️ MongoDB returned empty cards array - clearing workflow data and returning to regular laboratory mode', {
+              subMode
+            });
+            // Clear workflow-related localStorage items (mode-specific)
+            const moleculesKey = getWorkflowMoleculesKey(subMode);
+            const atomsKey = getWorkflowSelectedAtomsKey(subMode);
+            const dataKey = getWorkflowDataKey(subMode);
+            console.log('🔍 [DIAGNOSIS] Clearing localStorage keys:', { moleculesKey, atomsKey, dataKey });
+            localStorage.removeItem(moleculesKey);
+            localStorage.removeItem(atomsKey);
+            localStorage.removeItem(dataKey);
             // Apply empty cards with no workflow molecules to return to regular laboratory mode
             applyInitialCards([], [], true); // fromMongoDB = true, empty cards and workflow molecules
             return;
           }
-          console.info('[Laboratory API] ⚠️ MongoDB returned no data, falling back to localStorage');
+          console.info('🔍 [DIAGNOSIS] ⚠️ MongoDB returned no data, falling back to localStorage', {
+            subMode,
+            mongoData: mongoData ? 'exists but no cards' : 'null/undefined'
+          });
           // MongoDB returned null/undefined, fall back to localStorage
           return loadFromLocalStorage();
         }
       })
       .catch((error) => {
         if (!isMounted) {
+          console.warn('🔍 [DIAGNOSIS] Component unmounted during MongoDB fetch error');
           return;
         }
-        console.warn('[Laboratory API] ⚠️ MongoDB fetch failed, falling back to localStorage', error);
+        console.warn('🔍 [DIAGNOSIS] ⚠️ MongoDB fetch failed, falling back to localStorage', {
+          error,
+          subMode,
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
         // MongoDB fetch failed, fall back to localStorage
         return loadFromLocalStorage();
       });
@@ -1567,14 +1794,89 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     // Helper function to load from localStorage (fallback only)
     function loadFromLocalStorage() {
       if (!isMounted) {
+        console.warn('🔍 [DIAGNOSIS] Component not mounted, skipping localStorage load');
         return;
       }
 
-      console.info('[Laboratory API] Attempting to load from localStorage (fallback)');
+      console.info('🔍 [DIAGNOSIS] ========== LOCALSTORAGE FALLBACK START ==========');
+      console.info('🔍 [DIAGNOSIS] Attempting to load from localStorage (fallback)', {
+        subMode,
+        timestamp: new Date().toISOString()
+      });
 
-      // Check for both workflow-selected-atoms and workflow-data
-      const storedAtoms = localStorage.getItem('workflow-selected-atoms');
-      const storedWorkflowData = localStorage.getItem('workflow-data');
+      // Migration: Move old shared keys to mode-specific keys
+      const migrateOldLocalStorageKeys = (currentSubMode: LaboratorySubMode) => {
+        console.log('🔍 [DIAGNOSIS] Checking for old shared localStorage keys');
+        const sharedMolecules = localStorage.getItem('workflow-molecules');
+        const sharedAtoms = localStorage.getItem('workflow-selected-atoms');
+        const sharedData = localStorage.getItem('workflow-data');
+        
+        console.log('🔍 [DIAGNOSIS] Old shared keys found:', {
+          hasMolecules: !!sharedMolecules,
+          hasAtoms: !!sharedAtoms,
+          hasData: !!sharedData,
+          currentSubMode
+        });
+        
+        if (sharedMolecules || sharedAtoms || sharedData) {
+          console.warn('🔍 [DIAGNOSIS] ⚠️ Found old shared localStorage keys - migrating to mode-specific keys for mode:', currentSubMode);
+          
+          const moleculesKey = getWorkflowMoleculesKey(currentSubMode);
+          const atomsKey = getWorkflowSelectedAtomsKey(currentSubMode);
+          const dataKey = getWorkflowDataKey(currentSubMode);
+          
+          console.log('🔍 [DIAGNOSIS] Migration keys:', { moleculesKey, atomsKey, dataKey });
+          
+          if (sharedMolecules) {
+            console.log('🔍 [DIAGNOSIS] Migrating workflow-molecules:', {
+              from: 'workflow-molecules',
+              to: moleculesKey,
+              data: JSON.parse(sharedMolecules)
+            });
+            localStorage.setItem(moleculesKey, sharedMolecules);
+            localStorage.removeItem('workflow-molecules');
+          }
+          if (sharedAtoms) {
+            console.log('🔍 [DIAGNOSIS] Migrating workflow-selected-atoms:', {
+              from: 'workflow-selected-atoms',
+              to: atomsKey
+            });
+            localStorage.setItem(atomsKey, sharedAtoms);
+            localStorage.removeItem('workflow-selected-atoms');
+          }
+          if (sharedData) {
+            console.log('🔍 [DIAGNOSIS] Migrating workflow-data:', {
+              from: 'workflow-data',
+              to: dataKey
+            });
+            localStorage.setItem(dataKey, sharedData);
+            localStorage.removeItem('workflow-data');
+          }
+          
+          console.info('🔍 [DIAGNOSIS] Migration complete');
+        } else {
+          console.log('🔍 [DIAGNOSIS] No old shared keys found - checking mode-specific keys');
+          const moleculesKey = getWorkflowMoleculesKey(currentSubMode);
+          const atomsKey = getWorkflowSelectedAtomsKey(currentSubMode);
+          const dataKey = getWorkflowDataKey(currentSubMode);
+          
+          console.log('🔍 [DIAGNOSIS] Mode-specific keys status:', {
+            moleculesKey,
+            hasMolecules: !!localStorage.getItem(moleculesKey),
+            atomsKey,
+            hasAtoms: !!localStorage.getItem(atomsKey),
+            dataKey,
+            hasData: !!localStorage.getItem(dataKey)
+          });
+        }
+      };
+      
+      // Run migration first
+      migrateOldLocalStorageKeys(subMode);
+
+      // Check for both workflow-selected-atoms and workflow-data (now mode-specific)
+      const storedAtoms = localStorage.getItem(getWorkflowSelectedAtomsKey(subMode));
+      const storedWorkflowData = localStorage.getItem(getWorkflowDataKey(subMode));
       let workflowAtoms: {
         atomName: string;
         moleculeId: string;
@@ -1637,7 +1939,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             } as LayoutCard;
           });
 
-          localStorage.removeItem('workflow-selected-atoms');
+          localStorage.removeItem(getWorkflowSelectedAtomsKey(subMode));
           console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-selected-atoms)');
           if (initialCards && initialCards.length > 0) {
             applyInitialCards(initialCards, initialWorkflow);
@@ -1691,8 +1993,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             const molecules = Array.from(moleculeMap.values());
             if (molecules.length > 0) {
               initialWorkflow = molecules;
-              // Save the molecules to workflow-molecules localStorage for future switches
-              localStorage.setItem('workflow-molecules', JSON.stringify(molecules));
+              // Save the molecules to workflow-molecules localStorage for future switches (mode-specific)
+              localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(molecules));
             }
 
             const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
@@ -1722,7 +2024,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               } as LayoutCard;
             });
 
-            localStorage.removeItem('workflow-data');
+            localStorage.removeItem(getWorkflowDataKey(subMode));
             console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-data)');
             if (initialCards && initialCards.length > 0) {
               applyInitialCards(initialCards, initialWorkflow);
@@ -1731,7 +2033,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           }
         } catch (e) {
           console.error('Failed to parse workflow-data', e);
-          localStorage.removeItem('workflow-data');
+          localStorage.removeItem(getWorkflowDataKey(subMode));
         }
       }
 
@@ -1744,9 +2046,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             const raw = JSON.parse(storedLayout);
             initialCards = hydrateLayoutCards(raw);
 
-            // Check for workflow molecules in localStorage
+            // Check for workflow molecules in localStorage (mode-specific)
             if (!initialWorkflow) {
-              const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+              const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
               if (storedWorkflowMolecules) {
                 try {
                   initialWorkflow = JSON.parse(storedWorkflowMolecules);
@@ -1771,9 +2073,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         console.info('[Laboratory API] No data found in MongoDB or localStorage');
         markLoadingComplete();
       } else {
-        // We have initialCards from workflow data, but need to check for workflow molecules
+        // We have initialCards from workflow data, but need to check for workflow molecules (mode-specific)
         if (!initialWorkflow) {
-          const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+          const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
           if (storedWorkflowMolecules) {
             try {
               initialWorkflow = JSON.parse(storedWorkflowMolecules);
@@ -1854,18 +2156,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   //   setCards(layoutCards);
   // }, [layoutCards, setCards]);
 
-  // Persist workflowMolecules to localStorage only when we have cards with molecule info
+  // Persist workflowMolecules to localStorage only when we have cards with molecule info (mode-specific)
   useEffect(() => {
     const hasCardsWithMoleculeId = Array.isArray(layoutCards) &&
       layoutCards.some(card => card.moleculeId);
 
     if (workflowMolecules.length > 0 && hasCardsWithMoleculeId) {
-      localStorage.setItem('workflow-molecules', JSON.stringify(workflowMolecules));
+      localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(workflowMolecules));
     } else if (!hasCardsWithMoleculeId && workflowMolecules.length === 0) {
-      // Clear workflow molecules from localStorage when in regular laboratory mode
-      localStorage.removeItem('workflow-molecules');
+      // Clear workflow molecules from localStorage when in regular laboratory mode (mode-specific)
+      localStorage.removeItem(getWorkflowMoleculesKey(subMode));
     }
-  }, [workflowMolecules, layoutCards]);
+  }, [workflowMolecules, layoutCards, subMode]);
 
   // Derive workflow molecules from layout cards when they change
   useEffect(() => {
@@ -1951,8 +2253,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       layoutCards.some(card => card.moleculeId);
 
     if (hasCardsWithMoleculeId && workflowMolecules.length === 0) {
-      // Try to restore workflow molecules from localStorage
-      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+      // Try to restore workflow molecules from localStorage (mode-specific)
+      const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
       if (storedWorkflowMolecules) {
         try {
           const molecules = JSON.parse(storedWorkflowMolecules);
@@ -2014,12 +2316,17 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
       // Find the card to get its moleculeId and current atom count
       const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+      
+      // CRITICAL FIX: Prevent replacing existing atom - show warning instead
+      // If card already has an atom, don't allow replacement (one atom per card policy)
       if (card && Array.isArray(card.atoms) && card.atoms.length >= 1) {
+        const existingAtom = card.atoms[0];
         toast({
-          title:
-            'Already one atom is present in the card - please remove atom and then try adding an atom.',
+          title: 'Card already has an atom',
+          description: `This card already contains "${existingAtom.title}" atom. Please add a new card to use "${info?.title || atom.title}" atom.`,
+          variant: 'destructive',
         });
-        return;
+        return; // Stop execution - don't replace the atom
       }
 
       const newAtom: DroppedAtom = {
@@ -2103,10 +2410,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         }
       }
 
+      // CRITICAL FIX: Replace atom instead of appending (enforce one atom per card)
       setLayoutCards(
         (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
           card.id === cardId
-            ? { ...card, atoms: [...card.atoms, newAtom] }
+            ? { ...card, atoms: [newAtom] }
             : card
         )
       );
@@ -2763,7 +3071,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       payload?.atoms && Array.isArray(payload.atoms) && payload.atoms.length > 0
         ? payload.atoms
         : [{ atomId: fallbackAtomId }];
-    const atoms = atomsPayload.map(atom => buildAtomFromApiPayload(atom.atomId ?? fallbackAtomId, atom));
+    const allAtoms = atomsPayload.map(atom => buildAtomFromApiPayload(atom.atomId ?? fallbackAtomId, atom));
+    // CRITICAL FIX: Enforce one atom per card - keep only the first atom
+    const atoms = allAtoms.slice(0, 1);
     const moleculeId = payload?.moleculeId ?? fallbackMoleculeId;
     const moleculeInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
 
@@ -3018,8 +3328,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     newMolecules.splice(targetIndex, 0, draggedMolecule);
 
     setWorkflowMolecules(newMolecules);
-    // Update localStorage
-    localStorage.setItem('workflow-molecules', JSON.stringify(newMolecules));
+    // Update localStorage (mode-specific)
+    localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(newMolecules));
     setDraggedMoleculeId(null);
   };
 
@@ -3071,12 +3381,16 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     // Find the card to get its moleculeId and current atom count
     const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
 
+    // CRITICAL FIX: Prevent replacing existing atom - show warning instead
+    // If card already has an atom, don't allow replacement (one atom per card policy)
     if (card && Array.isArray(card.atoms) && card.atoms.length >= 1) {
+      const existingAtom = card.atoms[0];
       toast({
-        title:
-          'Already one atom is present in the card - please remove atom and then try adding an atom.',
+        title: 'Card already has an atom',
+        description: `This card already contains "${existingAtom.title}" atom. Please add a new card to use "${info.title}" atom.`,
+        variant: 'destructive',
       });
-      return;
+      return; // Stop execution - don't replace the atom
     }
 
     const newAtom = buildAtomFromApiPayload(info.id, {
@@ -3135,9 +3449,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       }
     }
 
+    // CRITICAL FIX: Replace atom instead of appending (enforce one atom per card)
     setLayoutCards(
       (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
-        card.id === cardId ? { ...card, atoms: [...card.atoms, newAtom] } : card
+        card.id === cardId ? { ...card, atoms: [newAtom] } : card
       )
     );
 
@@ -3402,11 +3717,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           : mol
       );
 
-      // Update localStorage
+      // Update localStorage (mode-specific)
       if (updatedMolecules.length > 0) {
-        localStorage.setItem('workflow-molecules', JSON.stringify(updatedMolecules));
+        localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(updatedMolecules));
       } else {
-        localStorage.removeItem('workflow-molecules');
+        localStorage.removeItem(getWorkflowMoleculesKey(subMode));
       }
 
       // No need to recalculate orders - standalone cards keep their original order values
@@ -4491,6 +4806,14 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     </button>
                                                   </div>
 
+                                                  {(() => {
+                                                    console.log('🔍 [CANVASAREA] Rendering atom:', {
+                                                      atomId: atom.atomId,
+                                                      id: atom.id,
+                                                      title: atom.title
+                                                    });
+                                                    return null;
+                                                  })()}
                                                   {atom.atomId === 'text-box' ? (
                                                     <TextBoxEditor textId={atom.id} />
                                                   ) : atom.atomId === 'data-upload-validate' ? (
@@ -4513,6 +4836,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     <ColumnClassifierAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'dataframe-operations' ? (
                                                     <DataFrameOperationsAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'table' ? (
+                                                    <TableAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'create-column' ? (
                                                     <CreateColumnAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'groupby-wtg-avg' ? (
@@ -4795,6 +5120,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                     <ColumnClassifierAtom atomId={atom.id} />
                                   ) : atom.atomId === 'dataframe-operations' ? (
                                     <DataFrameOperationsAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'table' ? (
+                                    <TableAtom atomId={atom.id} />
                                   ) : atom.atomId === 'create-column' ? (
                                     <CreateColumnAtom atomId={atom.id} />
                                   ) : atom.atomId === 'groupby-wtg-avg' ? (
@@ -4995,6 +5322,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <ColumnClassifierAtom atomId={atom.id} />
                               ) : atom.atomId === 'dataframe-operations' ? (
                                 <DataFrameOperationsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'table' ? (
+                                <TableAtom atomId={atom.id} />
                               ) : atom.atomId === 'create-column' ? (
                                 <CreateColumnAtom atomId={atom.id} />
                               ) : atom.atomId === 'groupby-wtg-avg' ? (
@@ -5282,6 +5611,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <ColumnClassifierAtom atomId={atom.id} />
                               ) : atom.atomId === 'dataframe-operations' ? (
                                 <DataFrameOperationsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'table' ? (
+                                <TableAtom atomId={atom.id} />
                               ) : atom.atomId === 'create-column' ? (
                                 <CreateColumnAtom atomId={atom.id} />
                               ) : atom.atomId === 'groupby-wtg-avg' ? (
@@ -5472,6 +5803,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <ColumnClassifierAtom atomId={atom.id} />
                               ) : atom.atomId === 'dataframe-operations' ? (
                                 <DataFrameOperationsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'table' ? (
+                                <TableAtom atomId={atom.id} />
                               ) : atom.atomId === 'create-column' ? (
                                 <CreateColumnAtom atomId={atom.id} />
                               ) : atom.atomId === 'groupby-wtg-avg' ? (

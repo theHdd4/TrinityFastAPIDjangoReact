@@ -8,6 +8,7 @@ import type { DroppedAtom } from '../store/exhibitionStore';
 import FeatureOverview from './atoms/FeatureOverview';
 import ChartMaker from './atoms/ChartMaker';
 import EvaluateModelsFeature from './atoms/EvaluateModelsFeature';
+import Correlation from './atoms/Correlation';
 
 interface ExhibitedAtomRendererProps {
   atom: DroppedAtom;
@@ -982,6 +983,10 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
 
   if (atom.atomId === 'evaluate-models-feature') {
     return <EvaluateModelsFeature metadata={atom.metadata} variant={variant} />;
+  }
+
+  if (atom.atomId === 'correlation') {
+    return <Correlation metadata={atom.metadata} variant={variant} />;
   }
 
   const previewImage = typeof metadata?.['previewImage'] === 'string' ? (metadata['previewImage'] as string) : undefined;

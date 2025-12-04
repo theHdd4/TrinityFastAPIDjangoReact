@@ -5,8 +5,11 @@ import { safeStringify } from '@/utils/safeStringify';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useAuth } from '@/contexts/AuthContext';
 
+// Type alias to avoid circular dependency
+type LaboratorySubMode = 'analytics' | 'dashboard';
+
 // WebSocket message types
-export type WSMessageType = 
+export type WSMessageType =
   | 'connect'
   | 'state_update'
   | 'card_update'  // New: granular card-level update
@@ -27,6 +30,7 @@ export interface WSMessage {
   client_id?: string;
   user_email?: string;
   user_name?: string;
+  mode?: string; // Add mode to message for filtering
   project_context?: {
     client_name: string;
     app_name: string;
@@ -67,7 +71,7 @@ const DEFAULT_OPTIONS: Required<CollaborativeSyncOptions> = {
   onError: (error) => console.error('[CollaborativeSync]', error),
   onConnected: () => console.log('[CollaborativeSync] Connected'),
   onDisconnected: () => console.log('[CollaborativeSync] Disconnected'),
-  onUsersChanged: () => {},
+  onUsersChanged: () => { },
 };
 
 /**
@@ -104,20 +108,21 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   const manualCloseRef = useRef(false);
   const hasInitialFullSyncRef = useRef(false);
   const initialFullSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
+
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [cardEditors, setCardEditors] = useState<Map<string, CardEditor>>(new Map());
   const [isConnected, setIsConnected] = useState(false);
-  
+
   const cards = useLaboratoryStore(state => state.cards);
   const setCards = useLaboratoryStore(state => state.setCards);
   const updateCard = useLaboratoryStore(state => state.updateCard);
   const auxiliaryMenuLeftOpen = useLaboratoryStore(state => state.auxiliaryMenuLeftOpen);
   const setAuxiliaryMenuLeftOpen = useLaboratoryStore(state => state.setAuxiliaryMenuLeftOpen);
   const subMode = useLaboratoryStore(state => state.subMode);
+  const previousSubModeRef = useRef<LaboratorySubMode | undefined>(subMode);
   const { user } = useAuth();
   const userRef = useRef(user);
-  
+
   // Generate consistent color for user
   const getUserColor = useCallback((email: string) => {
     const colors = [
@@ -130,7 +135,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       '#14B8A6', // teal
       '#F97316', // orange
     ];
-    
+
     // Simple hash function to get consistent color per email
     let hash = 0;
     for (let i = 0; i < email.length; i++) {
@@ -175,13 +180,13 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const hostIp = (import.meta as any).env?.VITE_HOST_IP;
     const host = window.location.hostname;
-    
+
     let baseUrl: string;
-    
+
     // Production: Use domain without port (reverse proxy handles routing)
     if (host.includes('quantmatrixai.com') || host.includes('trinity')) {
       baseUrl = `${protocol}//${host}`;
-    } 
+    }
     // Local development with HOST_IP
     else if (hostIp) {
       const resolvedFastapiPort = (() => {
@@ -198,7 +203,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
         return '8001';
       })();
       baseUrl = `${protocol}//${hostIp}:${resolvedFastapiPort}`;
-    } 
+    }
     // Local development without HOST_IP
     else {
       const resolvedFastapiPort = (() => {
@@ -236,7 +241,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
         mode: mode, // Include mode in WebSocket payload
         timestamp: new Date().toISOString(),
       };
-      
+
       const sanitized = sanitizeLabConfig(labConfig);
       return {
         config: sanitized,
@@ -264,9 +269,9 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   const notifyCardFocus = useCallback((cardId: string) => {
     const projectContext = getActiveProjectContext();
     const currentUser = userRef.current;
-    
+
     if (!projectContext || !currentUser) return;
-    
+
     const message: WSMessage = {
       type: 'card_focus',
       card_id: cardId,
@@ -276,16 +281,16 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       project_context: projectContext,
       timestamp: new Date().toISOString(),
     };
-    
+
     sendMessage(message);
   }, [sendMessage]);
 
   // Notify that user unfocused from a card
   const notifyCardBlur = useCallback((cardId: string) => {
     const projectContext = getActiveProjectContext();
-    
+
     if (!projectContext) return;
-    
+
     const message: WSMessage = {
       type: 'card_blur',
       card_id: cardId,
@@ -293,7 +298,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       project_context: projectContext,
       timestamp: new Date().toISOString(),
     };
-    
+
     sendMessage(message);
   }, [sendMessage]);
 
@@ -301,14 +306,14 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   const getChangedCards = useCallback(() => {
     const currentCards = cards || [];
     const previousCards = lastCardsRef.current || [];
-    
+
     // If card count changed (add/delete), return empty to trigger full sync instead
     if (currentCards.length !== previousCards.length) {
       return { changed: [], countChanged: true };
     }
-    
+
     const changed: any[] = [];
-    
+
     // Check for modified cards (same count, different content)
     currentCards.forEach((card) => {
       const prevCard = previousCards.find((c) => c.id === card.id);
@@ -317,40 +322,40 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
         changed.push(card);
         return;
       }
-      
+
       const cardStr = safeStringify(card);
       const prevCardStr = safeStringify(prevCard);
-      
+
       if (cardStr !== prevCardStr) {
         changed.push(card);
       }
     });
-    
+
     return { changed, countChanged: false };
   }, [cards]);
 
   // Send debounced card-level updates
   const sendStateUpdate = useCallback(() => {
     const { changed: changedCards, countChanged } = getChangedCards();
-    
+
     if (changedCards.length === 0 && !countChanged) {
       return;
     }
-    
+
     const projectContext = getActiveProjectContext();
     if (!projectContext) return;
-    
+
     // Record timestamp of this local change
     lastLocalChangeTimestampRef.current = Date.now();
-    
+
     // Update reference BEFORE sending to prevent race condition
     lastCardsRef.current = cards || [];
-    
+
     // If cards were added/deleted, send full sync to avoid conflicts
     if (countChanged) {
       const stateData = serializeState();
       if (!stateData) return;
-      
+
       const message: WSMessage = {
         type: 'full_sync',
         payload: stateData.config,
@@ -358,11 +363,11 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
         client_id: clientIdRef.current,
         project_context: projectContext,
       };
-      
+
       sendMessage(message);
       return;
     }
-    
+
     // Send individual card updates for modifications only
     changedCards.forEach((card) => {
       const message: WSMessage = {
@@ -373,434 +378,540 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
         client_id: clientIdRef.current,
         project_context: projectContext,
       };
-      
+
       sendMessage(message);
     });
-  }, [cards, getChangedCards, sendMessage, serializeState]);
+}, [cards, getChangedCards, sendMessage, serializeState]);
 
-  // Send full sync
-  const sendFullSync = useCallback(() => {
-    const stateData = serializeState();
-    if (!stateData) return;
+// Send full sync
+const sendFullSync = useCallback(() => {
+  const stateData = serializeState();
+  if (!stateData) return;
 
-    lastStateRef.current = stateData.serialized;
+  lastStateRef.current = stateData.serialized;
 
-    const message: WSMessage = {
-      type: 'full_sync',
-      payload: stateData.config,
-      timestamp: new Date().toISOString(),
-      client_id: clientIdRef.current,
-      project_context: stateData.projectContext,
-    };
+  const message: WSMessage = {
+    type: 'full_sync',
+    payload: stateData.config,
+    timestamp: new Date().toISOString(),
+    client_id: clientIdRef.current,
+    project_context: stateData.projectContext,
+  };
 
-    sendMessage(message);
-  }, [serializeState, sendMessage]);
+  sendMessage(message);
+}, [serializeState, sendMessage]);
 
-  // Handle incoming WebSocket messages
-  const handleMessage = useCallback((event: MessageEvent) => {
-    try {
-      const message: WSMessage = JSON.parse(event.data);
+// Handle incoming WebSocket messages
+const handleMessage = useCallback((event: MessageEvent) => {
+  try {
+    const message: WSMessage = JSON.parse(event.data);
 
-      // Ignore messages from self
-      if (message.client_id === clientIdRef.current) {
-        console.log('[CollaborativeSync] Ignoring self-echo message:', {
-          type: message.type,
-          myClientId: clientIdRef.current,
-          messageClientId: message.client_id,
-        });
-        return;
-      }
+    // Ignore messages from self
+    if (message.client_id === clientIdRef.current) {
+      console.log('[CollaborativeSync] Ignoring self-echo message:', {
+        type: message.type,
+        myClientId: clientIdRef.current,
+        messageClientId: message.client_id,
+      });
+      return;
+    }
 
-      switch (message.type) {
-        case 'card_update':
-          // Apply single card update
-          if (message.card_id && message.payload) {
-            // Parse message timestamp
-            const messageTimestamp = message.timestamp ? new Date(message.timestamp).getTime() : 0;
-            
-            // Ignore if we have pending local changes that are newer
-            // Add a 500ms buffer to account for network latency
-            if (lastLocalChangeTimestampRef.current > 0 && 
-                messageTimestamp < lastLocalChangeTimestampRef.current - 500) {
-              console.log('[CollaborativeSync] Ignoring stale card_update', {
+    switch (message.type) {
+      case 'card_update':
+        // Apply single card update
+        if (message.card_id && message.payload) {
+          // CRITICAL FIX: Note - card_update doesn't have mode in payload, but backend filters by mode
+          // We still need to verify the card's atoms are allowed in current mode if in dashboard mode
+          // The backend should already filter broadcasts by mode, but add defensive check here
+
+          // Parse message timestamp
+          const messageTimestamp = message.timestamp ? new Date(message.timestamp).getTime() : 0;
+
+          // Ignore if we have pending local changes that are newer
+          // Add a 500ms buffer to account for network latency
+          if (lastLocalChangeTimestampRef.current > 0 &&
+            messageTimestamp < lastLocalChangeTimestampRef.current - 500) {
+            console.log('[CollaborativeSync] Ignoring stale card_update', {
+              cardId: message.card_id,
+              messageTime: messageTimestamp,
+              lastLocalChange: lastLocalChangeTimestampRef.current,
+            });
+            break;
+          }
+
+          // CRITICAL FIX: Check mode compatibility for card updates
+          // If the message has a mode, ensure it matches our current mode
+          if (message.mode) {
+            const currentMode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+            if (message.mode !== currentMode) {
+              console.log('[CollaborativeSync] Ignoring card_update from different mode:', {
                 cardId: message.card_id,
-                messageTime: messageTimestamp,
-                lastLocalChange: lastLocalChangeTimestampRef.current,
+                messageMode: message.mode,
+                currentMode,
               });
               break;
             }
-            
-            isApplyingRemoteUpdateRef.current = true;
-            
-            // Update only the specific card
-            updateCard(message.card_id, message.payload);
-            
-            // Update lastCardsRef to reflect this change immediately
-            // This prevents detecting this as a "new" change in the next cycle
-            const currentCards = cards || [];
-            lastCardsRef.current = currentCards.map((c) =>
-              c.id === message.card_id ? message.payload : c
-            );
-            
-            // Reset timestamp to allow future updates
-            lastLocalChangeTimestampRef.current = 0;
-            
-            // Reset flag after a brief delay
-            setTimeout(() => {
-              isApplyingRemoteUpdateRef.current = false;
-            }, 100);
           }
-          break;
-        
-        case 'state_update':
-        case 'full_sync':
-          if (message.payload && message.payload.cards) {
-            // Parse message timestamp
-            const messageTimestamp = message.timestamp ? new Date(message.timestamp).getTime() : 0;
-            
-            // Ignore if we have pending local changes that are newer
-            // Add a 500ms buffer to account for network latency
-            if (lastLocalChangeTimestampRef.current > 0 && 
-                messageTimestamp < lastLocalChangeTimestampRef.current - 500) {
-              console.log('[CollaborativeSync] Ignoring stale full_sync', {
-                messageTime: messageTimestamp,
-                lastLocalChange: lastLocalChangeTimestampRef.current,
-              });
-              break;
-            }
-            
-            // Apply remote full update
-            isApplyingRemoteUpdateRef.current = true;
-            setCards(message.payload.cards);
-            lastCardsRef.current = message.payload.cards;
-            
-            // Update auxiliaryMenuLeftOpen if present in payload
-            if (message.payload.auxiliaryMenuLeftOpen !== undefined) {
-              setAuxiliaryMenuLeftOpen(message.payload.auxiliaryMenuLeftOpen);
-            }
-            
-            // Update last state to prevent echo
-            const stateData = serializeState();
-            if (stateData) {
-              lastStateRef.current = stateData.serialized;
-            }
-            
-            // Reset timestamp to allow future updates
-            lastLocalChangeTimestampRef.current = 0;
-            
-            // Reset flag after a brief delay
-            setTimeout(() => {
-              isApplyingRemoteUpdateRef.current = false;
-            }, 100);
-          }
-          break;
 
-        case 'card_focus':
-          // Another user focused on a card
-          if (message.card_id && message.user_email) {
-            setCardEditors((prev) => {
-              const newMap = new Map(prev);
-              const userColor = getUserColor(message.user_email || 'unknown');
-              newMap.set(message.card_id!, {
-                card_id: message.card_id!,
-                user_email: message.user_email!,
-                user_name: message.user_name || message.user_email!,
-                user_color: userColor,
-                client_id: message.client_id!,
-              });
-              return newMap;
+          isApplyingRemoteUpdateRef.current = true;
+
+          // Update only the specific card
+          // Note: The store's setCards will apply mode filtering if in dashboard mode
+          updateCard(message.card_id, message.payload);
+
+          // Update lastCardsRef to reflect this change immediately
+          // This prevents detecting this as a "new" change in the next cycle
+          const currentCards = cards || [];
+          lastCardsRef.current = currentCards.map((c) =>
+            c.id === message.card_id ? message.payload : c
+          );
+
+          // Reset timestamp to allow future updates
+          lastLocalChangeTimestampRef.current = 0;
+
+          // Reset flag after a brief delay
+          setTimeout(() => {
+            isApplyingRemoteUpdateRef.current = false;
+          }, 100);
+        }
+        break;
+
+      case 'state_update':
+      case 'full_sync':
+        if (message.payload && message.payload.cards) {
+          // CRITICAL FIX: Check mode compatibility before applying remote updates
+          const messageMode = message.payload.mode;
+          const currentMode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+
+          if (messageMode && messageMode !== currentMode) {
+            console.warn('[CollaborativeSync] Ignoring message from different mode:', {
+              messageMode,
+              currentMode,
+              subMode,
+              messageType: message.type,
             });
+            break; // Don't apply updates from different mode
           }
-          break;
 
-        case 'card_blur':
-          // Another user unfocused from a card
-          if (message.card_id) {
-            setCardEditors((prev) => {
-              const newMap = new Map(prev);
-              newMap.delete(message.card_id!);
-              return newMap;
+          // Parse message timestamp
+          const messageTimestamp = message.timestamp ? new Date(message.timestamp).getTime() : 0;
+
+          // Ignore if we have pending local changes that are newer
+          // Add a 500ms buffer to account for network latency
+          if (lastLocalChangeTimestampRef.current > 0 &&
+            messageTimestamp < lastLocalChangeTimestampRef.current - 500) {
+            console.log('[CollaborativeSync] Ignoring stale full_sync', {
+              messageTime: messageTimestamp,
+              lastLocalChange: lastLocalChangeTimestampRef.current,
             });
+            break;
           }
-          break;
 
-        case 'user_list_update':
-          if (message.payload && message.payload.users) {
-            const users = message.payload.users as ActiveUser[];
-            // Assign colors to users
-            const usersWithColors = users.map(u => ({
-              ...u,
-              color: getUserColor(u.email),
-            }));
-            setActiveUsers(usersWithColors);
-            onUsersChangedRef.current(usersWithColors);
+          // Apply remote full update
+          isApplyingRemoteUpdateRef.current = true;
+          setCards(message.payload.cards);
+          lastCardsRef.current = message.payload.cards;
+
+          // Update auxiliaryMenuLeftOpen if present in payload
+          if (message.payload.auxiliaryMenuLeftOpen !== undefined) {
+            setAuxiliaryMenuLeftOpen(message.payload.auxiliaryMenuLeftOpen);
           }
-          break;
 
-        case 'ack':
-          // Acknowledgment received
-          break;
-
-        case 'error':
-          onErrorRef.current(new Error(message.payload?.message || 'WebSocket error'));
-          break;
-
-        case 'heartbeat':
-          // Respond to heartbeat
-          sendMessage({ type: 'heartbeat', client_id: clientIdRef.current });
-          break;
-
-        default:
-          console.warn('[CollaborativeSync] Unknown message type:', message.type);
-      }
-    } catch (error) {
-      onErrorRef.current(error as Error);
-    }
-  }, [setCards, serializeState, sendMessage]);
-
-  const handleMessageRef = useRef(handleMessage);
-  useEffect(() => {
-    handleMessageRef.current = handleMessage;
-  }, [handleMessage]);
-
-  const sendFullSyncRef = useRef(sendFullSync);
-  useEffect(() => {
-    sendFullSyncRef.current = sendFullSync;
-  }, [sendFullSync]);
-
-  // Connect to WebSocket
-  const connect = useCallback(() => {
-    if (!enabled) return;
-
-    try {
-      const wsUrl = getWebSocketUrl();
-      console.log('[CollaborativeSync] Connecting to:', wsUrl);
-
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-      manualCloseRef.current = false;
-
-      ws.onopen = () => {
-        console.log('[CollaborativeSync] Connected');
-        setIsConnected(true);
-        hasInitialFullSyncRef.current = false;
-        onConnectedRef.current?.();
-
-        // Send initial connection message with user info
-        const projectContext = getActiveProjectContext();
-        const currentUser = userRef.current;
-        sendMessage({
-          type: 'connect',
-          client_id: clientIdRef.current,
-          user_email: currentUser?.email || 'Anonymous',
-          user_name:
-            currentUser?.username ||
-            currentUser?.email ||
-            'Anonymous User',
-          project_context: projectContext || undefined,
-          timestamp: new Date().toISOString(),
-        });
-
-        // Send initial full sync after a short delay to allow cards to load
-        setTimeout(() => {
-          const latestCards = useLaboratoryStore.getState().cards || [];
-          if (latestCards.length > 0 && !hasInitialFullSyncRef.current) {
-            hasInitialFullSyncRef.current = true;
-            sendFullSyncRef.current();
-            console.log('[CollaborativeSync] Initial full sync sent with', latestCards.length, 'cards');
+          // Update last state to prevent echo
+          const stateData = serializeState();
+          if (stateData) {
+            lastStateRef.current = stateData.serialized;
           }
-        }, 100);
 
-        // Start periodic full sync
-        fullSyncTimerRef.current = setInterval(() => {
-          sendFullSyncRef.current();
-        }, fullSyncIntervalMs);
+          // Reset timestamp to allow future updates
+          lastLocalChangeTimestampRef.current = 0;
 
-        // Start heartbeat
-        heartbeatIntervalRef.current = setInterval(() => {
-          sendMessage({ type: 'heartbeat', client_id: clientIdRef.current });
-        }, 15000); // 15 seconds
-      };
-
-      ws.onmessage = (event) => handleMessageRef.current(event);
-
-      ws.onerror = (error) => {
-        console.error('[CollaborativeSync] WebSocket error:', error);
-        onErrorRef.current(new Error('WebSocket connection error'));
-      };
-
-      ws.onclose = () => {
-        console.log('[CollaborativeSync] Disconnected');
-        setIsConnected(false);
-        hasInitialFullSyncRef.current = false;
-        onDisconnectedRef.current?.();
-
-        // Clear timers
-        if (fullSyncTimerRef.current) {
-          clearInterval(fullSyncTimerRef.current);
-          fullSyncTimerRef.current = null;
+          // Reset flag after a brief delay
+          setTimeout(() => {
+            isApplyingRemoteUpdateRef.current = false;
+          }, 100);
         }
-        if (heartbeatIntervalRef.current) {
-          clearInterval(heartbeatIntervalRef.current);
-          heartbeatIntervalRef.current = null;
+        break;
+
+      case 'card_focus':
+        // Another user focused on a card
+        if (message.card_id && message.user_email) {
+          setCardEditors((prev) => {
+            const newMap = new Map(prev);
+            const userColor = getUserColor(message.user_email || 'unknown');
+            newMap.set(message.card_id!, {
+              card_id: message.card_id!,
+              user_email: message.user_email!,
+              user_name: message.user_name || message.user_email!,
+              user_color: userColor,
+              client_id: message.client_id!,
+            });
+            return newMap;
+          });
         }
+        break;
 
-        // Attempt reconnection after 3 seconds
-        if (!manualCloseRef.current && enabled) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            console.log('[CollaborativeSync] Attempting reconnection...');
-            connect();
-          }, 3000);
+      case 'card_blur':
+        // Another user unfocused from a card
+        if (message.card_id) {
+          setCardEditors((prev) => {
+            const newMap = new Map(prev);
+            newMap.delete(message.card_id!);
+            return newMap;
+          });
         }
-      };
-    } catch (error) {
-      onErrorRef.current(error as Error);
+        break;
+
+      case 'user_list_update':
+        if (message.payload && message.payload.users) {
+          const users = message.payload.users as ActiveUser[];
+          // Assign colors to users
+          const usersWithColors = users.map(u => ({
+            ...u,
+            color: getUserColor(u.email),
+          }));
+          setActiveUsers(usersWithColors);
+          onUsersChangedRef.current(usersWithColors);
+        }
+        break;
+
+      case 'ack':
+        // Acknowledgment received
+        break;
+
+      case 'error':
+        onErrorRef.current(new Error(message.payload?.message || 'WebSocket error'));
+        break;
+
+      case 'heartbeat':
+        // Respond to heartbeat
+        sendMessage({ type: 'heartbeat', client_id: clientIdRef.current });
+        break;
+
+      default:
+        console.warn('[CollaborativeSync] Unknown message type:', message.type);
     }
-  }, [enabled, fullSyncIntervalMs, getWebSocketUrl, sendMessage]);
+  } catch (error) {
+    onErrorRef.current(error as Error);
+  }
+}, [setCards, serializeState, sendMessage]);
 
-  // Disconnect from WebSocket
-  const disconnect = useCallback(() => {
-    manualCloseRef.current = true;
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+const handleMessageRef = useRef(handleMessage);
+useEffect(() => {
+  handleMessageRef.current = handleMessage;
+}, [handleMessage]);
 
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
-    }
+const sendFullSyncRef = useRef(sendFullSync);
+useEffect(() => {
+  sendFullSyncRef.current = sendFullSync;
+}, [sendFullSync]);
 
-    if (fullSyncTimerRef.current) {
-      clearInterval(fullSyncTimerRef.current);
-      fullSyncTimerRef.current = null;
-    }
+// CRITICAL FIX: Notify backend immediately when mode changes (same device scenario)
+// This must be defined AFTER serializeState to avoid "Cannot access before initialization" error
+useEffect(() => {
+  if (!enabled) return;
 
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
+  // Skip on initial mount (when previousSubModeRef is undefined)
+  if (previousSubModeRef.current === undefined) {
+    previousSubModeRef.current = subMode;
+    return;
+  }
 
-    if (initialFullSyncTimeoutRef.current) {
-      clearTimeout(initialFullSyncTimeoutRef.current);
-      initialFullSyncTimeoutRef.current = null;
-    }
+  // Only act if mode actually changed
+  if (previousSubModeRef.current === subMode) {
+    return;
+  }
 
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-  }, []);
+  console.log('[CollaborativeSync] 🔄 Mode changed, updating backend:', {
+    from: previousSubModeRef.current,
+    to: subMode,
+  });
 
-  // Watch for state changes and debounce updates
-  useEffect(() => {
-    if (!enabled) return;
+  // Update ref immediately
+  previousSubModeRef.current = subMode;
 
-    // Skip if applying remote update
-    if (isApplyingRemoteUpdateRef.current) {
-      return;
-    }
-
-    // Record that a local change just happened
-    lastLocalChangeTimestampRef.current = Date.now();
-
-    // Clear existing debounce timer
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    // Set new debounce timer
-    debounceTimerRef.current = setTimeout(() => {
-      sendStateUpdate();
-    }, debounceMs);
-
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-    };
-  }, [cards, enabled, debounceMs, sendStateUpdate]);
-
-  // Connect on mount, disconnect on unmount
-  useEffect(() => {
-    if (enabled) {
-      connect();
-    }
-
-    return () => {
-      disconnect();
-    };
-  }, [enabled, connect, disconnect]);
-
-  // Resend user details when identity information becomes available
-  useEffect(() => {
-    if (!user || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
+  // If WebSocket is connected, send a connect message with new mode to update backend
+  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
     const projectContext = getActiveProjectContext();
+    const currentUser = userRef.current;
+    const currentMode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+
+    // Send connect message with new mode to update backend's tracked mode
     sendMessage({
       type: 'connect',
       client_id: clientIdRef.current,
-      user_email: user.email,
-      user_name: user.username || user.email,
+      user_email: currentUser?.email || 'Anonymous',
+      user_name:
+        currentUser?.username ||
+        currentUser?.email ||
+        'Anonymous User',
       project_context: projectContext || undefined,
+      payload: {
+        mode: currentMode,
+      },
       timestamp: new Date().toISOString(),
     });
-  }, [user, sendMessage]);
 
-  // Ensure the backend receives a full snapshot once cards are loaded
-  useEffect(() => {
+    // Also send a full_sync with current state (empty cards after mode switch) to clear backend's pending state
+    // This ensures backend knows we've switched modes and clears any old mode state
+    setTimeout(() => {
+      const stateData = serializeState();
+      if (stateData && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        console.log('[CollaborativeSync] Sending full_sync after mode switch:', {
+          mode: currentMode,
+          cardsCount: stateData.config.cards?.length || 0,
+        });
+        sendMessage({
+          type: 'full_sync',
+          payload: stateData.config,
+          timestamp: new Date().toISOString(),
+          client_id: clientIdRef.current,
+          project_context: projectContext || undefined,
+        });
+      }
+    }, 100); // Small delay to ensure cards are cleared first
+  }
+}, [subMode, enabled, sendMessage, serializeState]);
+
+// Connect to WebSocket
+const connect = useCallback(() => {
+  if (!enabled) return;
+
+  try {
+    const wsUrl = getWebSocketUrl();
+    console.log('[CollaborativeSync] Connecting to:', wsUrl);
+
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    manualCloseRef.current = false;
+
+    ws.onopen = () => {
+      console.log('[CollaborativeSync] Connected');
+      setIsConnected(true);
+      hasInitialFullSyncRef.current = false;
+      onConnectedRef.current?.();
+
+      // Send initial connection message with user info and mode
+      const projectContext = getActiveProjectContext();
+      const currentUser = userRef.current;
+      const currentMode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+
+      // CRITICAL FIX: Include mode in connect message payload so backend can track client mode
+      sendMessage({
+        type: 'connect',
+        client_id: clientIdRef.current,
+        user_email: currentUser?.email || 'Anonymous',
+        user_name:
+          currentUser?.username ||
+          currentUser?.email ||
+          'Anonymous User',
+        project_context: projectContext || undefined,
+        payload: {
+          mode: currentMode,
+        },
+        timestamp: new Date().toISOString(),
+      });
+
+      // Send initial full sync after a short delay to allow cards to load
+      setTimeout(() => {
+        const latestCards = useLaboratoryStore.getState().cards || [];
+        if (latestCards.length > 0 && !hasInitialFullSyncRef.current) {
+          hasInitialFullSyncRef.current = true;
+          sendFullSyncRef.current();
+          console.log('[CollaborativeSync] Initial full sync sent with', latestCards.length, 'cards');
+        }
+      }, 100);
+
+      // Start periodic full sync
+      fullSyncTimerRef.current = setInterval(() => {
+        sendFullSyncRef.current();
+      }, fullSyncIntervalMs);
+
+      // Start heartbeat
+      heartbeatIntervalRef.current = setInterval(() => {
+        sendMessage({ type: 'heartbeat', client_id: clientIdRef.current });
+      }, 15000); // 15 seconds
+    };
+
+    ws.onmessage = (event) => handleMessageRef.current(event);
+
+    ws.onerror = (error) => {
+      console.error('[CollaborativeSync] WebSocket error:', error);
+      onErrorRef.current(new Error('WebSocket connection error'));
+    };
+
+    ws.onclose = () => {
+      console.log('[CollaborativeSync] Disconnected');
+      setIsConnected(false);
+      hasInitialFullSyncRef.current = false;
+      onDisconnectedRef.current?.();
+
+      // Clear timers
+      if (fullSyncTimerRef.current) {
+        clearInterval(fullSyncTimerRef.current);
+        fullSyncTimerRef.current = null;
+      }
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
+
+      // Attempt reconnection after 3 seconds
+      if (!manualCloseRef.current && enabled) {
+        reconnectTimeoutRef.current = setTimeout(() => {
+          console.log('[CollaborativeSync] Attempting reconnection...');
+          connect();
+        }, 3000);
+      }
+    };
+  } catch (error) {
+    onErrorRef.current(error as Error);
+  }
+}, [enabled, fullSyncIntervalMs, getWebSocketUrl, sendMessage]);
+
+// Disconnect from WebSocket
+const disconnect = useCallback(() => {
+  manualCloseRef.current = true;
+  if (wsRef.current) {
+    wsRef.current.close();
+    wsRef.current = null;
+  }
+
+  if (debounceTimerRef.current) {
+    clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = null;
+  }
+
+  if (fullSyncTimerRef.current) {
+    clearInterval(fullSyncTimerRef.current);
+    fullSyncTimerRef.current = null;
+  }
+
+  if (heartbeatIntervalRef.current) {
+    clearInterval(heartbeatIntervalRef.current);
+    heartbeatIntervalRef.current = null;
+  }
+
+  if (initialFullSyncTimeoutRef.current) {
+    clearTimeout(initialFullSyncTimeoutRef.current);
+    initialFullSyncTimeoutRef.current = null;
+  }
+
+  if (reconnectTimeoutRef.current) {
+    clearTimeout(reconnectTimeoutRef.current);
+    reconnectTimeoutRef.current = null;
+  }
+}, []);
+
+// Watch for state changes and debounce updates
+useEffect(() => {
+  if (!enabled) return;
+
+  // Skip if applying remote update
+  if (isApplyingRemoteUpdateRef.current) {
+    return;
+  }
+
+  // Record that a local change just happened
+  lastLocalChangeTimestampRef.current = Date.now();
+
+  // Clear existing debounce timer
+  if (debounceTimerRef.current) {
+    clearTimeout(debounceTimerRef.current);
+  }
+
+  // Set new debounce timer
+  debounceTimerRef.current = setTimeout(() => {
+    sendStateUpdate();
+  }, debounceMs);
+
+  return () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+  };
+}, [cards, enabled, debounceMs, sendStateUpdate]);
+
+// Connect on mount, disconnect on unmount
+useEffect(() => {
+  if (enabled) {
+    connect();
+  }
+
+  return () => {
+    disconnect();
+  };
+}, [enabled, connect, disconnect]);
+
+// Resend user details when identity information becomes available
+useEffect(() => {
+  if (!user || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  const projectContext = getActiveProjectContext();
+  sendMessage({
+    type: 'connect',
+    client_id: clientIdRef.current,
+    user_email: user.email,
+    user_name: user.username || user.email,
+    project_context: projectContext || undefined,
+    timestamp: new Date().toISOString(),
+  });
+}, [user, sendMessage]);
+
+// Ensure the backend receives a full snapshot once cards are loaded
+useEffect(() => {
+  if (!enabled || !isConnected) {
+    return;
+  }
+
+  if (hasInitialFullSyncRef.current) {
+    return;
+  }
+
+  if (initialFullSyncTimeoutRef.current) {
+    clearTimeout(initialFullSyncTimeoutRef.current);
+    initialFullSyncTimeoutRef.current = null;
+  }
+
+  const triggerFullSync = () => {
     if (!enabled || !isConnected) {
       return;
     }
-
     if (hasInitialFullSyncRef.current) {
       return;
     }
-
-    if (initialFullSyncTimeoutRef.current) {
-      clearTimeout(initialFullSyncTimeoutRef.current);
-      initialFullSyncTimeoutRef.current = null;
-    }
-
-    const triggerFullSync = () => {
-      if (!enabled || !isConnected) {
-        return;
-      }
-      if (hasInitialFullSyncRef.current) {
-        return;
-      }
-      const latestCards = useLaboratoryStore.getState().cards || [];
-      if (!Array.isArray(latestCards) || latestCards.length === 0) {
-        return;
-      }
-      hasInitialFullSyncRef.current = true;
-      sendFullSyncRef.current();
-    };
-
-    if (isApplyingRemoteUpdateRef.current) {
-      if (!initialFullSyncTimeoutRef.current) {
-        initialFullSyncTimeoutRef.current = setTimeout(() => {
-          initialFullSyncTimeoutRef.current = null;
-          triggerFullSync();
-        }, 250);
-      }
+    const latestCards = useLaboratoryStore.getState().cards || [];
+    if (!Array.isArray(latestCards) || latestCards.length === 0) {
       return;
     }
-
-    triggerFullSync();
-  }, [enabled, isConnected, cards]);
-
-  return {
-    isConnected,
-    clientId: clientIdRef.current,
-    activeUsers,
-    cardEditors,
-    notifyCardFocus,
-    notifyCardBlur,
-    disconnect,
-    reconnect: connect,
+    hasInitialFullSyncRef.current = true;
+    sendFullSyncRef.current();
   };
+
+  if (isApplyingRemoteUpdateRef.current) {
+    if (!initialFullSyncTimeoutRef.current) {
+      initialFullSyncTimeoutRef.current = setTimeout(() => {
+        initialFullSyncTimeoutRef.current = null;
+        triggerFullSync();
+      }, 250);
+    }
+    return;
+  }
+
+  triggerFullSync();
+}, [enabled, isConnected, cards]);
+
+return {
+  isConnected,
+  clientId: clientIdRef.current,
+  activeUsers,
+  cardEditors,
+  notifyCardFocus,
+  notifyCardBlur,
+  disconnect,
+  reconnect: connect,
+};
 }
 

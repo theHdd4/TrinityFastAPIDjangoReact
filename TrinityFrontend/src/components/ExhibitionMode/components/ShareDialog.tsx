@@ -27,6 +27,7 @@ import {
 import { toast } from 'sonner';
 import { createExhibitionShareLink } from '@/lib/shareLinks';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface ShareDialogProps {
   open: boolean;
@@ -213,6 +214,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   onOpenChange,
   projectName = 'Exhibition Project',
 }) => {
+  const isMobile = useIsMobile();
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
   const [hideBadge, setHideBadge] = useState(false);
@@ -360,65 +362,65 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-4">
-          <DialogTitle className="text-xl font-semibold flex items-center gap-2">
-            <Share2 className="h-5 w-5" />
-            Share {projectName}
+      <DialogContent className={`max-w-2xl p-0 gap-0 ${isMobile ? 'max-w-[95vw] max-h-[90vh] overflow-y-auto' : ''}`}>
+        <DialogHeader className={`px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4 ${isMobile ? 'sticky top-0 bg-background z-10 border-b' : ''}`}>
+          <DialogTitle className={`text-lg sm:text-xl font-semibold flex items-center gap-2 ${isMobile ? 'text-base' : ''}`}>
+            <Share2 className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="truncate">Share {projectName}</span>
           </DialogTitle>
         </DialogHeader>
 
         <Tabs defaultValue="share" className="w-full">
-          <div className="px-6">
-            <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent">
+          <div className={`px-4 sm:px-6 ${isMobile ? 'sticky top-[73px] bg-background z-10 border-b' : ''}`}>
+            <TabsList className={`w-full ${isMobile ? 'overflow-x-auto' : 'justify-start'} border-b rounded-none h-auto p-0 bg-transparent`}>
               <TabsTrigger
                 value="collaborate"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none"
+                className={`rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none ${isMobile ? 'text-xs px-3 flex-shrink-0' : ''}`}
               >
-                <Users className="h-4 w-4 mr-2" />
-                Collaborate
+                <Users className={`h-3 w-3 sm:h-4 sm:w-4 ${isMobile ? 'mr-1' : 'mr-2'}`} />
+                {!isMobile && 'Collaborate'}
               </TabsTrigger>
               <TabsTrigger
                 value="share"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none"
+                className={`rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none ${isMobile ? 'text-xs px-3 flex-shrink-0' : ''}`}
               >
-                <Share2 className="h-4 w-4 mr-2" />
+                <Share2 className={`h-3 w-3 sm:h-4 sm:w-4 ${isMobile ? 'mr-1' : 'mr-2'}`} />
                 Share
               </TabsTrigger>
               <TabsTrigger
                 value="export"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none"
+                className={`rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none ${isMobile ? 'text-xs px-3 flex-shrink-0' : ''}`}
               >
-                <Download className="h-4 w-4 mr-2" />
-                Export
+                <Download className={`h-3 w-3 sm:h-4 sm:w-4 ${isMobile ? 'mr-1' : 'mr-2'}`} />
+                {!isMobile && 'Export'}
               </TabsTrigger>
               <TabsTrigger
                 value="embed"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none"
+                className={`rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none ${isMobile ? 'text-xs px-3 flex-shrink-0' : ''}`}
               >
-                <Code className="h-4 w-4 mr-2" />
-                Embed
+                <Code className={`h-3 w-3 sm:h-4 sm:w-4 ${isMobile ? 'mr-1' : 'mr-2'}`} />
+                {!isMobile && 'Embed'}
               </TabsTrigger>
             </TabsList>
           </div>
 
-          <TabsContent value="collaborate" className="px-6 py-4 mt-0">
+          <TabsContent value="collaborate" className="px-4 sm:px-6 py-4 mt-0">
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Invite team members to collaborate on this exhibition project.
               </p>
-              <Input placeholder="Enter email addresses..." />
-              <Button className="w-full">Send Invitations</Button>
+              <Input placeholder="Enter email addresses..." className="touch-manipulation" />
+              <Button className="w-full touch-manipulation">Send Invitations</Button>
             </div>
           </TabsContent>
 
-          <TabsContent value="share" className="px-6 py-4 mt-0 space-y-4">
+          <TabsContent value="share" className="px-4 sm:px-6 py-4 mt-0 space-y-4">
             <div className="space-y-4">
-              <div className="flex items-start gap-3 p-4 rounded-lg border bg-muted/50">
-                <Link2 className="h-5 w-5 text-muted-foreground mt-0.5" />
-                <div className="flex-1 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
+              <div className={`flex items-start gap-2 sm:gap-3 p-3 sm:p-4 rounded-lg border bg-muted/50 ${isMobile ? 'flex-col' : ''}`}>
+                <Link2 className={`h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground ${isMobile ? '' : 'mt-0.5'} flex-shrink-0`} />
+                <div className="flex-1 space-y-3 min-w-0">
+                  <div className={`flex items-center justify-between gap-2 sm:gap-3 ${isMobile ? 'flex-col items-start' : ''}`}>
+                    <div className="min-w-0">
                       <p className="font-medium text-sm">Anyone with the link</p>
                       <p className="text-xs text-muted-foreground">
                         {shareError ? 'Link unavailable' : 'Can view'}
@@ -428,7 +430,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className={`${isMobile ? 'h-9 w-9' : 'h-8 w-8'} touch-manipulation flex-shrink-0`}
                       onClick={handleGenerateNewLink}
                       disabled={isGenerating}
                       title="Generate a new share link"
@@ -441,29 +443,29 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                     </Button>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className={`flex gap-2 ${isMobile ? 'flex-col' : ''}`}>
                     <Input
                       value={shareLink}
                       readOnly
                       placeholder={isGenerating ? 'Generating link…' : 'No share link available'}
-                      className="flex-1 h-9 text-sm bg-background"
+                      className={`flex-1 h-9 sm:h-10 text-xs sm:text-sm bg-background touch-manipulation ${isMobile ? 'text-xs' : ''}`}
                       ref={shareLinkInputRef}
                     />
                     <Button
                       onClick={handleCopyLink}
                       variant="secondary"
-                      className="h-9 px-4"
+                      className={`h-9 sm:h-10 px-3 sm:px-4 touch-manipulation ${isMobile ? 'w-full' : ''}`}
                       disabled={!shareLink || isGenerating}
                     >
                       {copied ? (
                         <>
                           <Check className="h-4 w-4 mr-2" />
-                          Copied
+                          {isMobile ? 'Copied' : 'Copied'}
                         </>
                       ) : (
                         <>
                           <Copy className="h-4 w-4 mr-2" />
-                          Copy link
+                          {isMobile ? 'Copy' : 'Copy link'}
                         </>
                       )}
                     </Button>
@@ -549,19 +551,19 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             </div>
           </TabsContent>
 
-          <TabsContent value="export" className="px-6 py-4 mt-0">
+          <TabsContent value="export" className="px-4 sm:px-6 py-4 mt-0">
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">Download your exhibition in various formats.</p>
               <div className="space-y-2">
-                <Button variant="outline" className="w-full justify-start">
+                <Button variant="outline" className="w-full justify-start touch-manipulation">
                   <Download className="h-4 w-4 mr-2" />
                   Export as PowerPoint
                 </Button>
-                <Button variant="outline" className="w-full justify-start">
+                <Button variant="outline" className="w-full justify-start touch-manipulation">
                   <Download className="h-4 w-4 mr-2" />
                   Export as PDF
                 </Button>
-                <Button variant="outline" className="w-full justify-start">
+                <Button variant="outline" className="w-full justify-start touch-manipulation">
                   <Download className="h-4 w-4 mr-2" />
                   Export as Images
                 </Button>
@@ -569,17 +571,17 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             </div>
           </TabsContent>
 
-          <TabsContent value="embed" className="px-6 py-4 mt-0">
+          <TabsContent value="embed" className="px-4 sm:px-6 py-4 mt-0">
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">Embed this exhibition on your website.</p>
-              <div className="bg-muted p-3 rounded-lg font-mono text-xs">
+              <div className={`bg-muted p-3 rounded-lg font-mono ${isMobile ? 'text-[10px] overflow-x-auto' : 'text-xs'}`}>
                 {shareError
                   ? 'Embed code unavailable until a share link is generated.'
                   : embedCode || (isGenerating ? 'Generating embed code...' : 'Generate a share link to view the embed code.')}
               </div>
               <Button
                 variant="secondary"
-                className="w-full"
+                className="w-full touch-manipulation"
                 onClick={handleCopyEmbed}
                 disabled={!embedCode || isGenerating}
               >
@@ -599,13 +601,15 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           </TabsContent>
         </Tabs>
 
-        <div className="px-6 py-4 border-t bg-muted/30">
-          <div className="flex items-center justify-between">
-            <Button variant="ghost" size="sm" className="text-xs">
+        <div className={`px-4 sm:px-6 py-3 sm:py-4 border-t bg-muted/30 ${isMobile ? 'sticky bottom-0' : ''}`}>
+          <div className={`flex items-center ${isMobile ? 'flex-col gap-2' : 'justify-between'}`}>
+            <Button variant="ghost" size="sm" className={`text-xs touch-manipulation ${isMobile ? 'w-full' : ''}`}>
               <BarChart3 className="h-3 w-3 mr-2" />
               View analytics
             </Button>
-            <Button onClick={() => onOpenChange(false)}>Done</Button>
+            <Button onClick={() => onOpenChange(false)} className={`touch-manipulation ${isMobile ? 'w-full' : ''}`}>
+              Done
+            </Button>
           </div>
         </div>
       </DialogContent>

@@ -12,7 +12,15 @@ const HEAVY_CACHE_KEYS = [
   'laboratory-dashboard-config',
   'laboratory-dashboard-layout-cards',
   'workflow-canvas-molecules',
-  'workflow-selected-atoms',
+  'workflow-selected-atoms', // Legacy - kept for migration
+  'workflow-molecules', // Legacy - kept for migration
+  'workflow-data', // Legacy - kept for migration
+  'workflow-molecules-analytics',
+  'workflow-molecules-dashboard',
+  'workflow-selected-atoms-analytics',
+  'workflow-selected-atoms-dashboard',
+  'workflow-data-analytics',
+  'workflow-data-dashboard',
   'column-classifier-config',
 ] as const;
 
@@ -169,6 +177,25 @@ export function saveCurrentProject(project: any): void {
       throw error;
     }
   }
+}
+
+// Helper functions for mode-specific localStorage keys
+export function getWorkflowMoleculesKey(subMode: LaboratorySubMode): string {
+  return subMode === 'analytics' 
+    ? 'workflow-molecules-analytics' 
+    : 'workflow-molecules-dashboard';
+}
+
+export function getWorkflowSelectedAtomsKey(subMode: LaboratorySubMode): string {
+  return subMode === 'analytics'
+    ? 'workflow-selected-atoms-analytics'
+    : 'workflow-selected-atoms-dashboard';
+}
+
+export function getWorkflowDataKey(subMode: LaboratorySubMode): string {
+  return subMode === 'analytics'
+    ? 'workflow-data-analytics'
+    : 'workflow-data-dashboard';
 }
 
 export function persistLaboratoryConfig(config: any, subMode: LaboratorySubMode = 'analytics'): boolean {

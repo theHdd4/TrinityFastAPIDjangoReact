@@ -16,6 +16,7 @@ import Laboratory from "./pages/Laboratory";
 import Exhibition from "./pages/Exhibition";
 import NotFound from "./pages/NotFound";
 import SharedExhibition from "./pages/SharedExhibition";
+import SharedDashboard from "./pages/SharedDashboard";
 import SharedDataFrame from "./pages/SharedDataFrame";
 import Users from "./pages/Users";
 import Clients from "./pages/Clients";
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/home" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/exhibition/shared/:token" element={<SharedExhibition />} />
+            <Route path="/dashboard/shared/:token" element={<SharedDashboard />} />
             <Route path="/dataframe/shared/:token" element={<SharedDataFrame />} />
             <Route path="/dashboard" element={
               <ProtectedRoute>

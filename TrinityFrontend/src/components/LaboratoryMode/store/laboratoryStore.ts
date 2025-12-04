@@ -433,6 +433,9 @@ export interface CorrelationSettings {
     recommended_granularity: string;
     date_format_detected: string;
   };
+  // Note functionality (matching ChartMaker pattern)
+  note?: string;
+  showNote?: boolean;
 }
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
@@ -476,7 +479,9 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   showAllColumns: false,
   filteredFilePath: undefined,
   columnValuesLoading: false,
-  columnValuesError: undefined
+  columnValuesError: undefined,
+  note: '',
+  showNote: false
 };
 
 export interface ColumnClassifierColumn {
@@ -1952,19 +1957,85 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   subMode: 'analytics',  // Default to analytics mode
   setCards: (cards: LayoutCard[]) => {
+    const currentSubMode = get().subMode;
+    
+    console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS CALLED ==========');
+    console.log('🔍 [DIAGNOSIS] setCards called:', {
+      cardsCount: cards?.length || 0,
+      subMode: currentSubMode,
+      cardAtomIds: cards?.map(c => c.atoms.map(a => a.atomId)).flat() || [],
+      timestamp: new Date().toISOString()
+    });
+    
     // FIX: Ensure cards is always an array
     if (!Array.isArray(cards)) {
-      console.error('[Laboratory Store] setCards called with non-array:', cards);
+      console.error('🔍 [DIAGNOSIS] ❌ [Laboratory Store] setCards called with non-array:', cards);
       set({ cards: [] });
       return;
     }
-    const uniqueCards = dedupeCards(cards);
-    if (uniqueCards.length !== cards.length) {
-      console.warn('[Laboratory Store] Deduped cards to avoid duplicates', {
-        incoming: cards.length,
+    
+    // CRITICAL FIX: Enforce one atom per card - normalize all cards to have only first atom
+    let cardsToSet = cards.map(card => ({
+      ...card,
+      atoms: Array.isArray(card.atoms) && card.atoms.length > 0 ? [card.atoms[0]] : []
+    }));
+    
+    // CRITICAL: Apply mode filtering when setting cards in the store
+    // This is a defensive measure - cards should already be filtered, but this ensures no leakage
+    if (currentSubMode === 'dashboard' && cardsToSet.length > 0) {
+      const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+      const filteredCards: LayoutCard[] = [];
+      
+      for (const card of cardsToSet) {
+        const allowedAtoms = (card.atoms || []).filter(atom => 
+          allowedAtomIdsSet.has(atom.atomId as any)
+        );
+        
+        // CRITICAL FIX: Allow empty cards OR cards with allowed atoms
+        // Empty cards must be preserved for "Add New Card" functionality in dashboard mode
+        if (allowedAtoms.length > 0 || (card.atoms || []).length === 0) {
+          // Keep only first allowed atom (one atom per card), or preserve empty array
+          filteredCards.push({
+            ...card,
+            atoms: allowedAtoms.length > 0 ? allowedAtoms.slice(0, 1) : []
+          });
+        }
+      }
+      
+      if (filteredCards.length !== cardsToSet.length) {
+        console.warn('🔍 [DIAGNOSIS] ⚠️ [Laboratory Store] Filtered cards in setCards (dashboard mode):', {
+          original: cardsToSet.length,
+          filtered: filteredCards.length,
+          removed: cardsToSet.length - filteredCards.length,
+          removedCards: cardsToSet.filter(card => {
+            const allowedAtoms = (card.atoms || []).filter(atom => 
+              allowedAtomIdsSet.has(atom.atomId as any)
+            );
+            return allowedAtoms.length === 0;
+          }).map(c => ({
+            id: c.id,
+            atoms: c.atoms.map(a => a.atomId)
+          }))
+        });
+      }
+      cardsToSet = filteredCards;
+    }
+    
+    const uniqueCards = dedupeCards(cardsToSet);
+    if (uniqueCards.length !== cardsToSet.length) {
+      console.warn('🔍 [DIAGNOSIS] [Laboratory Store] Deduped cards to avoid duplicates', {
+        incoming: cardsToSet.length,
         unique: uniqueCards.length,
       });
     }
+    
+    console.log('🔍 [DIAGNOSIS] Setting cards to store:', {
+      count: uniqueCards.length,
+      subMode: currentSubMode,
+      cardAtomIds: uniqueCards.map(c => c.atoms.map(a => a.atomId)).flat()
+    });
+    console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS COMPLETE ==========');
+    
     set({ cards: uniqueCards });
   },
   
@@ -1977,16 +2048,69 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   setSubMode: (mode: LaboratorySubMode) => {
-    set({ subMode: mode });
-    // When switching modes, clear cards (will be reloaded for new mode)
+    const currentMode = get().subMode;
+    const currentCards = get().cards;
+    
+    console.log('🔍 [DIAGNOSIS] ========== MODE SWITCH START ==========');
+    console.log('🔍 [DIAGNOSIS] setSubMode called:', {
+      from: currentMode,
+      to: mode,
+      currentCardsCount: currentCards?.length || 0,
+      currentCardAtomIds: currentCards?.map(c => c.atoms.map(a => a.atomId)).flat() || [],
+      timestamp: new Date().toISOString()
+    });
+    
+    // Clear old mode's localStorage entries before switching
+    if (currentMode && currentMode !== mode) {
+      const oldMoleculesKey = currentMode === 'analytics' 
+        ? 'workflow-molecules-analytics' 
+        : 'workflow-molecules-dashboard';
+      const oldAtomsKey = currentMode === 'analytics'
+        ? 'workflow-selected-atoms-analytics'
+        : 'workflow-selected-atoms-dashboard';
+      const oldDataKey = currentMode === 'analytics'
+        ? 'workflow-data-analytics'
+        : 'workflow-data-dashboard';
+      
+      console.log('🔍 [DIAGNOSIS] Clearing localStorage for old mode:', {
+        oldMode: currentMode,
+        keys: { oldMoleculesKey, oldAtomsKey, oldDataKey },
+        oldMoleculesValue: localStorage.getItem(oldMoleculesKey),
+        oldAtomsValue: localStorage.getItem(oldAtomsKey),
+        oldDataValue: localStorage.getItem(oldDataKey)
+      });
+      
+      localStorage.removeItem(oldMoleculesKey);
+      localStorage.removeItem(oldAtomsKey);
+      localStorage.removeItem(oldDataKey);
+      
+      console.info('🔍 [DIAGNOSIS] Cleared localStorage for old mode:', currentMode);
+    }
+    
+    // CRITICAL: Clear cards FIRST, then set new mode
+    // This ensures cards are cleared before any useEffect hooks fire that depend on subMode
+    console.log('🔍 [DIAGNOSIS] Clearing cards before mode switch');
     set({ cards: [] });
+    set({ subMode: mode });
+    console.info('🔍 [DIAGNOSIS] Switched mode from', currentMode, 'to', mode, '- cards cleared');
+    console.log('🔍 [DIAGNOSIS] ========== MODE SWITCH COMPLETE ==========');
   },
 
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => {
     set((state) => ({
-      cards: state.cards.map((card) =>
-        card.id === cardId ? { ...card, ...updates } : card
-      ),
+      cards: state.cards.map((card) => {
+        if (card.id === cardId) {
+          const updatedCard = { ...card, ...updates };
+          // CRITICAL FIX: Enforce one atom per card - keep only first atom if atoms are being updated
+          if (updates.atoms && Array.isArray(updates.atoms)) {
+            updatedCard.atoms = updates.atoms.slice(0, 1);
+          } else if (updatedCard.atoms && Array.isArray(updatedCard.atoms) && updatedCard.atoms.length > 1) {
+            updatedCard.atoms = [updatedCard.atoms[0]];
+          }
+          return updatedCard;
+        }
+        return card;
+      }),
     }));
   },
 

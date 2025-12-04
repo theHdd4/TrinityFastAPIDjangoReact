@@ -12,6 +12,9 @@ import {
   sanitizeLabConfig,
   saveCurrentProject,
   persistLaboratoryConfig,
+  getWorkflowMoleculesKey,
+  getWorkflowSelectedAtomsKey,
+  getWorkflowDataKey,
 } from '@/utils/projectStorage';
 import CanvasArea, { CanvasAreaRef } from './components/CanvasArea';
 import AuxiliaryMenu from './components/AuxiliaryMenu';
@@ -19,10 +22,10 @@ import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
 import FloatingNavigationList from './components/FloatingNavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
-import { useLaboratoryStore, LayoutCard } from './store/laboratoryStore';
+import { useLaboratoryStore, LayoutCard, DASHBOARD_ALLOWED_ATOMS } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
-import { ShareDialog } from './components/ShareDialog';
+import { DashboardShareDialog } from './components/DashboardShareDialog';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import {
   animateLabElementsIn,
@@ -228,10 +231,13 @@ const LaboratoryMode = () => {
       toast({ title: 'Successfully Loaded Existing Project State' });
     }
 
-    // Hide navigation list when switching from workflow mode
-    const hasWorkflowData = localStorage.getItem('workflow-data') ||
-      localStorage.getItem('workflow-selected-atoms') ||
-      localStorage.getItem('workflow-molecules');
+    // Hide navigation list when switching from workflow mode (check both mode-specific and legacy shared keys for migration)
+    const hasWorkflowData = localStorage.getItem(getWorkflowDataKey(subMode)) ||
+      localStorage.getItem('workflow-data') || // Legacy key for migration
+      localStorage.getItem(getWorkflowSelectedAtomsKey(subMode)) ||
+      localStorage.getItem('workflow-selected-atoms') || // Legacy key for migration
+      localStorage.getItem(getWorkflowMoleculesKey(subMode)) ||
+      localStorage.getItem('workflow-molecules'); // Legacy key for migration
     if (hasWorkflowData) {
       setShowFloatingNavigationList(false);
     }
@@ -371,8 +377,8 @@ const LaboratoryMode = () => {
         const exhibitedCards = (cards || []).filter(card => card.isExhibited);
         setExhibitionCards(cards);
 
-        // Get workflow molecules to sort cards correctly
-        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        // Get workflow molecules to sort cards correctly (mode-specific)
+        const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
         let workflowMolecules: any[] = [];
         if (storedWorkflowMolecules) {
           try {
@@ -382,21 +388,31 @@ const LaboratoryMode = () => {
           }
         }
 
+        // CRITICAL FIX: Filter cards before saving to ensure mode-specific data separation
+        let cardsToSave = cards || [];
+        if (subMode === 'dashboard') {
+          // Dashboard mode: Filter out any analytics-only atoms before saving
+          const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+          cardsToSave = cardsToSave.map(card => {
+            const allowedAtoms = (card.atoms || []).filter(atom => 
+              allowedAtomIdsSet.has(atom.atomId as any)
+            );
+            return {
+              ...card,
+              atoms: allowedAtoms
+            };
+          }).filter(card => (card.atoms || []).length > 0); // Remove cards with no allowed atoms
+          
+          if (cardsToSave.length !== cards.length) {
+            console.warn(`[AUTOSAVE] Filtered out ${cards.length - cardsToSave.length} card(s) with non-dashboard atoms before saving to MongoDB`);
+          }
+        }
+        // Analytics mode: Save all cards (no filtering needed)
+
         // Sort cards in workflow order before saving
         const sortedCards = workflowMolecules.length > 0
-          ? sortCardsInWorkflowOrder(cards || [], workflowMolecules)
-          : cards || [];
-
-        // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
-        const workflowMoleculesForSave = (sortedCards.length === 0)
-          ? []
-          : workflowMolecules.map((molecule, index) => ({
-            moleculeId: molecule.moleculeId,
-            moleculeTitle: molecule.moleculeTitle,
-            atoms: molecule.atoms || [],
-            isActive: molecule.isActive !== false,
-            moleculeIndex: index
-          }));
+          ? sortCardsInWorkflowOrder(cardsToSave, workflowMolecules)
+          : cardsToSave;
 
         // Save the current laboratory configuration with sorted cards
         const labConfig = {
@@ -410,6 +426,17 @@ const LaboratoryMode = () => {
         if (projectContext) {
           const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
           const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+          
+          console.log('🔍 [DIAGNOSIS] ========== AUTOSAVE START ==========');
+          console.log('🔍 [DIAGNOSIS] Autosave details:', {
+            subMode,
+            mode,
+            cardsCount: sanitized.cards?.length || 0,
+            workflowMoleculesCount: workflowMoleculesForSave.length,
+            cardAtomIds: sanitized.cards?.map((c: any) => c.atoms?.map((a: any) => a.atomId)).flat() || [],
+            timestamp: new Date().toISOString()
+          });
+          
           const payload = {
             client_name: projectContext.client_name,
             app_name: projectContext.app_name,
@@ -421,6 +448,14 @@ const LaboratoryMode = () => {
             mode: mode,
           };
 
+          console.log('🔍 [DIAGNOSIS] Payload being sent to MongoDB:', {
+            mode: payload.mode,
+            cardsCount: payload.cards.length,
+            cardDetails: payload.cards.map((c: any) => ({
+              id: c.id,
+              atoms: c.atoms?.map((a: any) => ({ atomId: a.atomId, title: a.title })) || []
+            }))
+          });
           console.log('🔄 [AUTOSAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
           try {
@@ -431,9 +466,22 @@ const LaboratoryMode = () => {
               body: JSON.stringify(payload),
             });
             if (!response.ok) {
-              console.error('[AUTOSAVE] Failed to persist configuration', await response.text());
+              const errorText = await response.text();
+              console.error('🔍 [DIAGNOSIS] ❌ [AUTOSAVE] Failed to persist configuration', {
+                status: response.status,
+                error: errorText,
+                mode,
+                subMode
+              });
             } else {
-              console.log('✅ [AUTOSAVE] Configuration saved successfully');
+              const responseData = await response.json().catch(() => ({}));
+              console.log('🔍 [DIAGNOSIS] ✅ [AUTOSAVE] Configuration saved successfully', {
+                mode,
+                subMode,
+                cardsCount: payload.cards.length,
+                response: responseData
+              });
+              console.log('🔍 [DIAGNOSIS] ========== AUTOSAVE COMPLETE ==========');
             }
           } catch (apiError) {
             console.error('[AUTOSAVE] Error while saving configuration', apiError);
@@ -596,8 +644,8 @@ const LaboratoryMode = () => {
 
       setExhibitionCards(cards);
 
-      // Get workflow molecules to sort cards correctly
-      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+      // Get workflow molecules to sort cards correctly (mode-specific)
+      const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
       let workflowMolecules: any[] = [];
       if (storedWorkflowMolecules) {
         try {
@@ -607,10 +655,31 @@ const LaboratoryMode = () => {
         }
       }
 
+      // CRITICAL FIX: Filter cards before saving to ensure mode-specific data separation
+      let cardsToSave = cards || [];
+      if (subMode === 'dashboard') {
+        // Dashboard mode: Filter out any analytics-only atoms before saving
+        const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+        cardsToSave = cardsToSave.map(card => {
+          const allowedAtoms = (card.atoms || []).filter(atom => 
+            allowedAtomIdsSet.has(atom.atomId as any)
+          );
+          return {
+            ...card,
+            atoms: allowedAtoms
+          };
+        }).filter(card => (card.atoms || []).length > 0); // Remove cards with no allowed atoms
+        
+        if (cardsToSave.length !== cards.length) {
+          console.warn(`[MANUAL SAVE] Filtered out ${cards.length - cardsToSave.length} card(s) with non-dashboard atoms before saving to MongoDB`);
+        }
+      }
+      // Analytics mode: Save all cards (no filtering needed)
+
       // Sort cards in workflow order before saving (ensures order field reflects actual workflow position)
       const sortedCards = workflowMolecules.length > 0
-        ? sortCardsInWorkflowOrder(cards || [], workflowMolecules)
-        : cards || [];
+        ? sortCardsInWorkflowOrder(cardsToSave, workflowMolecules)
+        : cardsToSave;
 
       console.info('[Laboratory API] Sorting cards in workflow order before save:', {
         originalCount: cards?.length || 0,
@@ -638,11 +707,11 @@ const LaboratoryMode = () => {
           moleculeIndex: index // Preserve the original index/position
         }));
 
-      // FIX: Clear workflow-related localStorage items when no cards remain
+      // FIX: Clear workflow-related localStorage items when no cards remain (mode-specific)
       if (sortedCards.length === 0) {
-        localStorage.removeItem('workflow-molecules');
-        localStorage.removeItem('workflow-selected-atoms');
-        localStorage.removeItem('workflow-data');
+        localStorage.removeItem(getWorkflowMoleculesKey(subMode));
+        localStorage.removeItem(getWorkflowSelectedAtomsKey(subMode));
+        localStorage.removeItem(getWorkflowDataKey(subMode));
         console.info('[Laboratory API] Cleared workflow data from localStorage (no cards remaining)');
       }
 
@@ -670,6 +739,17 @@ const LaboratoryMode = () => {
       if (projectContext) {
         const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
         const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+        
+        console.log('🔍 [DIAGNOSIS] ========== MANUAL SAVE START ==========');
+        console.log('🔍 [DIAGNOSIS] Manual save details:', {
+          subMode,
+          mode,
+          cardsCount: sanitized.cards?.length || 0,
+          workflowMoleculesCount: workflowMoleculesForSave.length,
+          cardAtomIds: sanitized.cards?.map((c: any) => c.atoms?.map((a: any) => a.atomId)).flat() || [],
+          timestamp: new Date().toISOString()
+        });
+        
         const payload = {
           client_name: projectContext.client_name,
           app_name: projectContext.app_name,
@@ -681,6 +761,14 @@ const LaboratoryMode = () => {
           mode: mode,
         };
 
+        console.log('🔍 [DIAGNOSIS] Payload being sent to MongoDB:', {
+          mode: payload.mode,
+          cardsCount: payload.cards.length,
+          cardDetails: payload.cards.map((c: any) => ({
+            id: c.id,
+            atoms: c.atoms?.map((a: any) => ({ atomId: a.atomId, title: a.title })) || []
+          }))
+        });
         console.log('💾 [MANUAL SAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
         const requestInit: RequestInit = {
@@ -701,9 +789,21 @@ const LaboratoryMode = () => {
           const response = await fetch(requestUrl, requestInit);
           if (!response.ok) {
             const message = await response.text();
-            console.error('[Laboratory API] Failed to persist configuration', message);
+            console.error('🔍 [DIAGNOSIS] ❌ [Laboratory API] Failed to persist configuration', {
+              status: response.status,
+              error: message,
+              mode,
+              subMode
+            });
           } else {
-            console.info('[Laboratory API] Configuration saved successfully');
+            const responseData = await response.json().catch(() => ({}));
+            console.info('🔍 [DIAGNOSIS] ✅ [Laboratory API] Configuration saved successfully', {
+              mode,
+              subMode,
+              cardsCount: payload.cards.length,
+              response: responseData
+            });
+            console.log('🔍 [DIAGNOSIS] ========== MANUAL SAVE COMPLETE ==========');
           }
         } catch (apiError) {
           console.error('[Laboratory API] Error while saving configuration', apiError);
@@ -1073,10 +1173,10 @@ const LaboratoryMode = () => {
         )}
       </div>
 
-      <ShareDialog
+      <DashboardShareDialog
         open={isShareOpen}
         onOpenChange={setIsShareOpen}
-        projectName={projectContext?.project_name ?? 'Laboratory Project'}
+        projectName={projectContext?.project_name ?? 'Dashboard Project'}
       />
     </div>
   );
