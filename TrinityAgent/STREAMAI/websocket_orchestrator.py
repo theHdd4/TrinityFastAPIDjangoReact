@@ -1815,6 +1815,48 @@ WORKFLOW PLANNING:
             files_used = step_data.get("files_used", [])
             inputs = step_data.get("inputs", [])
             output_alias = step_data.get("output_alias", f"step_{step_number}_output")
+
+            # Guardrail: favor the most recent materialized file when chaining
+            # so we don't accidentally grab the first uploaded dataset.
+            recent_output_file = self._get_latest_materialized_file(
+                sequence_id,
+                execution_history,
+                self._sequence_available_files.get(sequence_id, available_files.copy()),
+            )
+
+            prefers_latest_dataset = self._atom_prefers_latest_dataset(atom_id)
+            prefers_recent_output = (
+                prefers_latest_dataset
+                or (self._atom_produces_dataset(atom_id) and atom_id not in {"merge", "concat"})
+            )
+
+            if prefers_recent_output and recent_output_file:
+                # If no files were provided, default to the newest output
+                if not files_used:
+                    files_used = [recent_output_file]
+                    step_data["files_used"] = files_used
+                    logger.info(
+                        "📁 ReAct: Defaulting files_used to latest output %s for atom %s",
+                        recent_output_file,
+                        atom_id,
+                    )
+                # If the LLM picked an older file, re-prioritize the recent output
+                elif recent_output_file not in files_used:
+                    logger.info(
+                        "📁 ReAct: Reordering files to prioritize latest output %s over %s",
+                        recent_output_file,
+                        files_used,
+                    )
+                    files_used = [recent_output_file] + files_used
+                    step_data["files_used"] = files_used
+
+                # Align inputs with the prioritized file to keep downstream atoms in sync
+                if not inputs:
+                    inputs = files_used.copy()
+                    step_data["inputs"] = inputs
+                elif recent_output_file not in inputs:
+                    inputs = [recent_output_file] + inputs
+                    step_data["inputs"] = inputs
             
             # SPECIAL HANDLING FOR CHART-MAKER: Ensure it uses the most recent output file from previous steps
             if atom_id == "chart-maker" and available_files:
@@ -4019,6 +4061,36 @@ WORKFLOW PLANNING:
             return result.get("output_file") or result.get("saved_path")
 
         return result.get("output_file") or result.get("saved_path")
+
+    def _get_latest_materialized_file(
+        self,
+        sequence_id: str,
+        execution_history: List[Dict[str, Any]],
+        available_files: List[str],
+    ) -> Optional[str]:
+        """
+        Return the most recent materialized file path for a sequence.
+
+        Preference order:
+        1) The newest saved output from execution_history (reverse search)
+        2) The latest entry in the sequence's available_files list
+
+        This prevents the planner from accidentally grabbing the oldest
+        uploaded file when an intermediate atom has already produced the
+        correct dataset for chaining.
+        """
+
+        # Look for the latest saved output by walking history backwards
+        for hist in reversed(execution_history):
+            materialized = self._extract_output_file_from_history(sequence_id, hist)
+            if materialized:
+                return materialized
+
+        # Fallback to the tail of the available files list (latest append)
+        if available_files:
+            return available_files[-1]
+
+        return None
 
     def _extract_row_count(self, result: Dict[str, Any]) -> Optional[float]:
         """Return a simple row-count metric from flat or nested result payloads."""
