@@ -1563,10 +1563,27 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       }
       
       // Create WebSocket connection
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = window.location.hostname;
-      const wsPort = window.location.port ? `:${window.location.port}` : '';
-      const wsUrl = `${wsProtocol}//${wsHost}${wsPort}/streamai/execute-ws`;
+      const buildWebSocketUrl = () => {
+        const baseUrlString = (FASTAPI_BASE_URL || '').replace(/\/$/, '');
+
+        if (baseUrlString) {
+          try {
+            const baseUrl = new URL(baseUrlString);
+            baseUrl.protocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+            baseUrl.pathname = `${baseUrl.pathname.replace(/\/$/, '')}/streamai/execute-ws`;
+            return baseUrl.toString();
+          } catch (err) {
+            console.warn('⚠️ Failed to build WebSocket URL from FASTAPI_BASE_URL, falling back to window location', err);
+          }
+        }
+
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsHost = window.location.hostname;
+        const wsPort = window.location.port ? `:${window.location.port}` : '';
+        return `${wsProtocol}//${wsHost}${wsPort}/streamai/execute-ws`;
+      };
+
+      const wsUrl = buildWebSocketUrl();
       
       console.log('🔗 Connecting to Trinity AI WebSocket:', wsUrl);
       const ws = new WebSocket(wsUrl);
