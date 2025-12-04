@@ -160,6 +160,7 @@ interface Chat {
   messages: Message[];
   createdAt: Date;
   sessionId?: string; // Backend session ID for this chat
+  websocketSessionId?: string; // WebSocket session ID for isolating workflows/atoms
   pendingClarification?: ClarificationRequest | null;
 }
 
@@ -290,6 +291,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const [currentWorkflowMessageId, setCurrentWorkflowMessageId] = useState<string | null>(null);
   const [originalPrompt, setOriginalPrompt] = useState('');
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [currentWebsocketSessionId, setCurrentWebsocketSessionId] = useState<string>('');
   const [completedStepNumber, setCompletedStepNumber] = useState(0);
   const [isAutoRunning, setIsAutoRunning] = useState(false);
   const autoRunRef = useRef(false);
@@ -313,6 +315,52 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   );
   const [clarificationValues, setClarificationValues] = useState<Record<string, string>>({});
   const [isPaused, setIsPaused] = useState(false);
+
+  const generateFrontendSessionId = useCallback(
+    () => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    []
+  );
+  const generateWebsocketSessionId = useCallback(
+    () => `ws_conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    []
+  );
+
+  const resolveSessionId = useCallback(
+    (sessionId?: string) => sessionId || generateFrontendSessionId(),
+    [generateFrontendSessionId]
+  );
+  const resolveWebsocketSessionId = useCallback(
+    (websocketSessionId?: string) => websocketSessionId || generateWebsocketSessionId(),
+    [generateWebsocketSessionId]
+  );
+
+  const appendSessionMetadata = useCallback(
+    (
+      payload: Record<string, any>,
+      overrides?: { sessionId?: string; websocketSessionId?: string; chatId?: string }
+    ) => ({
+      ...payload,
+      session_id: overrides?.sessionId ?? currentSessionId,
+      chat_id: overrides?.chatId ?? currentChatId,
+      websocket_session_id: overrides?.websocketSessionId ?? currentWebsocketSessionId,
+    }),
+    [currentChatId, currentSessionId, currentWebsocketSessionId]
+  );
+
+  const sendWithSession = useCallback(
+    (
+      socket: WebSocket | null,
+      payload: Record<string, any>,
+      overrides?: { sessionId?: string; websocketSessionId?: string; chatId?: string }
+    ) => {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        return false;
+      }
+      socket.send(JSON.stringify(appendSessionMetadata(payload, overrides)));
+      return true;
+    },
+    [appendSessionMetadata]
+  );
 
   useEffect(() => {
     if (isClarificationEnabled && isLaboratorySession && pendingClarification) {
@@ -366,10 +414,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     if (socket && socket.readyState === WebSocket.OPEN) {
       try {
         console.log(`⏩ [Auto-run] Approving step ${stepNumber} (sequence ${sequenceId || 'n/a'}, attempt ${attempt})`);
-        socket.send(JSON.stringify({
+        sendWithSession(socket, {
           type: 'approve_step',
           step_number: stepNumber
-        }));
+        });
         console.log(`✅ [Auto-run] Sent approve_step for step ${stepNumber}`);
 
         const autoApproveMsg: Message = {
@@ -398,7 +446,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         stopAutoRun();
       }
     }
-  }, [setMessages, stopAutoRun]);
+  }, [sendWithSession, setMessages, stopAutoRun]);
 
   useEffect(() => {
     agentModeEnabledRef.current = isAgentMode;
@@ -442,11 +490,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           setIsAutoRunning(true);
         }
         setIsLoading(true);
-        connection.send(
-          JSON.stringify({
-            type: 'approve_plan'
-          })
-        );
+        sendWithSession(connection, { type: 'approve_plan' });
       });
     }
 
@@ -467,12 +511,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       }
       if (connection.readyState === WebSocket.OPEN) {
         setIsLoading(true);
-        connection.send(
-          JSON.stringify({
-            type: 'approve_step',
-            step_number: msg.data?.stepNumber
-          })
-        );
+        sendWithSession(connection, {
+          type: 'approve_step',
+          step_number: msg.data?.stepNumber
+        });
       }
       setMessages((prev) => prev.filter((m) => m.id !== msg.id));
     });
@@ -485,7 +527,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
   const createNewChat = useCallback(async () => {
     const newChatId = `stream_chat_${Date.now()}`;
-    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const newSessionId = resolveSessionId();
+    const newWebsocketSessionId = resolveWebsocketSessionId();
     const createdAt = new Date();
 
     const initialMessage: Message = {
@@ -501,6 +544,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       messages: [initialMessage],
       createdAt,
       sessionId: newSessionId,
+      websocketSessionId: newWebsocketSessionId,
     };
 
     memoryPersistSkipRef.current = true;
@@ -508,6 +552,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     setCurrentChatId(newChatId);
     setMessages([initialMessage]);
     setCurrentSessionId(newSessionId);
+    setCurrentWebsocketSessionId(newWebsocketSessionId);
 
     setCurrentWorkflowMessageId(null);
 
@@ -518,6 +563,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           title: newChat.title,
           createdAt: createdAt.toISOString(),
           sessionId: newSessionId,
+          websocketSessionId: newWebsocketSessionId,
         },
         append: false,
       });
@@ -539,6 +585,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     const sessionId =
       metadata.sessionId ||
       `session_${createdAt.getTime()}_${Math.random().toString(36).substr(2, 9)}`;
+    const websocketSessionId =
+      metadata.websocketSessionId ||
+      metadata.websocket_session_id ||
+      generateWebsocketSessionId();
 
     const pendingClarification: ClarificationRequest | null = metadata.pendingClarification
       ? metadata.pendingClarification
@@ -561,9 +611,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       messages,
       createdAt,
       sessionId,
+      websocketSessionId,
       pendingClarification,
     };
-  }, []);
+  }, [generateWebsocketSessionId]);
 
   const persistChatToMemory = useCallback(async (chat: Chat): Promise<MemoryChatResponse | null> => {
     try {
@@ -574,6 +625,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           title: chat.title,
           createdAt: chat.createdAt.toISOString(),
           sessionId: chat.sessionId,
+          websocketSessionId: chat.websocketSessionId,
           pendingClarification: chat.pendingClarification || undefined,
         },
         append: false, // Replace all messages to ensure consistency
@@ -653,7 +705,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             if (activeChat.messages && activeChat.messages.length > 0) {
               setMessages(activeChat.messages);
             }
-            setCurrentSessionId(activeChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+            const initialSessionId = resolveSessionId(activeChat.sessionId);
+            const initialWebsocketSessionId = resolveWebsocketSessionId(activeChat.websocketSessionId);
+            setCurrentSessionId(initialSessionId);
+            setCurrentWebsocketSessionId(initialWebsocketSessionId);
             memoryPersistSkipRef.current = true;
           } else {
             // All chats were invalid, create new one
@@ -684,7 +739,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     };
 
     loadChats();
-  }, [MEMORY_API_BASE, createNewChat, mapRecordToChat]);
+  }, [MEMORY_API_BASE, createNewChat, mapRecordToChat, resolveSessionId, resolveWebsocketSessionId]);
   
   // Save messages to current chat (UI state only - memory sync happens separately)
   useEffect(() => {
@@ -692,15 +747,16 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       setChats(prev => prev.map(chat => 
         chat.id === currentChatId 
           ? { 
-              ...chat, 
-              messages, 
+              ...chat,
+              messages,
               title: messages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || chat.title,
-              sessionId: currentSessionId || chat.sessionId,
+              sessionId: resolveSessionId(currentSessionId || chat.sessionId),
+              websocketSessionId: resolveWebsocketSessionId(currentWebsocketSessionId || chat.websocketSessionId),
             }
           : chat
       ));
     }
-  }, [messages, currentChatId, currentSessionId]);
+  }, [messages, currentChatId, currentSessionId, currentWebsocketSessionId, resolveSessionId, resolveWebsocketSessionId]);
 
   // Sync to MinIO memory (non-blocking, doesn't affect UI)
   // This is a backup sync - primary persistence happens in handleSendMessage
@@ -747,7 +803,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         title: messages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || 'Trinity AI Chat',
         messages: messages,
         createdAt: new Date(),
-        sessionId: currentSessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        sessionId: resolveSessionId(currentSessionId),
+        websocketSessionId: resolveWebsocketSessionId(currentWebsocketSessionId),
       };
       setChats(prev => [newChat, ...prev]);
       persistChatToMemory(newChat).catch(err => 
@@ -769,7 +826,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         console.error('Failed to persist chat in sync effect:', err)
       );
     }
-  }, [messages, currentChatId, isInitialized, persistChatToMemory, chats, currentSessionId]);
+  }, [messages, currentChatId, isInitialized, persistChatToMemory, chats, currentSessionId, currentWebsocketSessionId, resolveSessionId, resolveWebsocketSessionId]);
   
   // Switch to a different chat
   const switchToChat = (chatId: string) => {
@@ -787,7 +844,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             timestamp: new Date()
           }];
       setMessages(chatMessages);
-      setCurrentSessionId(chat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+      setCurrentSessionId(resolveSessionId(chat.sessionId));
+      setCurrentWebsocketSessionId(resolveWebsocketSessionId(chat.websocketSessionId));
 
       if (chat.pendingClarification && isLaboratorySession) {
         setClarificationRequest(chat.pendingClarification);
@@ -837,8 +895,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       const nextChat = mappedChats[0];
       setCurrentChatId(nextChat.id);
       // Ensure messages are never empty - use chat messages or fallback to initial message
-      const nextMessages = nextChat.messages && nextChat.messages.length > 0 
-        ? nextChat.messages 
+      const nextMessages = nextChat.messages && nextChat.messages.length > 0
+        ? nextChat.messages
         : [{
             id: '1',
             content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
@@ -846,7 +904,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             timestamp: new Date()
           }];
       setMessages(nextMessages);
-      setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+      setCurrentSessionId(resolveSessionId(nextChat.sessionId));
+      setCurrentWebsocketSessionId(resolveWebsocketSessionId(nextChat.websocketSessionId));
     } catch (error) {
       console.error('Failed to reload chats after deletion:', error);
       // Fallback to local state update
@@ -859,8 +918,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       setChats(remainingChats);
       const nextChat = remainingChats[0];
       setCurrentChatId(nextChat.id);
-      const nextMessages = nextChat.messages && nextChat.messages.length > 0 
-        ? nextChat.messages 
+      const nextMessages = nextChat.messages && nextChat.messages.length > 0
+        ? nextChat.messages
         : [{
             id: '1',
             content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
@@ -868,9 +927,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             timestamp: new Date()
           }];
       setMessages(nextMessages);
-      setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+      setCurrentSessionId(resolveSessionId(nextChat.sessionId));
+      setCurrentWebsocketSessionId(resolveWebsocketSessionId(nextChat.websocketSessionId));
     }
-  }, [MEMORY_API_BASE, chats, createNewChat, currentChatId, mapRecordToChat]);
+  }, [MEMORY_API_BASE, chats, createNewChat, currentChatId, mapRecordToChat, resolveSessionId, resolveWebsocketSessionId]);
 
   const clearAllChats = useCallback(async () => {
     if (chats.length === 0) {
@@ -900,8 +960,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         // Switch to first remaining chat
         const firstChat = mappedChats[0];
         setCurrentChatId(firstChat.id);
-        const firstMessages = firstChat.messages && firstChat.messages.length > 0 
-          ? firstChat.messages 
+        const firstMessages = firstChat.messages && firstChat.messages.length > 0
+          ? firstChat.messages
           : [{
               id: '1',
               content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
@@ -909,14 +969,15 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               timestamp: new Date()
             }];
         setMessages(firstMessages);
-        setCurrentSessionId(firstChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+        setCurrentSessionId(resolveSessionId(firstChat.sessionId));
+        setCurrentWebsocketSessionId(resolveWebsocketSessionId(firstChat.websocketSessionId));
       }
       setMemoryError(null);
     } catch (error) {
       console.error('Failed to clear chat history:', error);
       setMemoryError('Unable to clear chat history from server.');
     }
-  }, [MEMORY_API_BASE, chats, createNewChat, mapRecordToChat]);
+  }, [MEMORY_API_BASE, chats, createNewChat, mapRecordToChat, resolveSessionId, resolveWebsocketSessionId]);
 
   const handleCopyChatId = useCallback(async () => {
     if (!currentChatId || !navigator?.clipboard?.writeText) return;
@@ -1131,11 +1192,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     // Send approval message to backend via WebSocket
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-      wsConnection.send(JSON.stringify({
-        type: 'approve_plan',
-        session_id: currentSessionId,
-        chat_id: currentChatId
-      }));
+      sendWithSession(wsConnection, { type: 'approve_plan' });
       
       setShowWorkflowPreview(false);
       setIsLoading(true);
@@ -1158,11 +1215,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     // Send rejection message to backend via WebSocket
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-      wsConnection.send(JSON.stringify({
-        type: 'reject_plan',
-        session_id: currentSessionId,
-        chat_id: currentChatId
-      }));
+      sendWithSession(wsConnection, { type: 'reject_plan' });
       
       // Close WebSocket after rejection
       closeActiveConnection(1000, 'workflow_rejected_by_user');
@@ -1188,12 +1241,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     // Send approval to continue to next step
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-      wsConnection.send(JSON.stringify({
+      sendWithSession(wsConnection, {
         type: 'approve_step',
         step_number: completedStepNumber,
-        session_id: currentSessionId,
-        chat_id: currentChatId
-      }));
+      });
       
       setShowStepApproval(false);
       setIsLoading(true);
@@ -1205,12 +1256,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     // Send rejection
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-      wsConnection.send(JSON.stringify({
+      sendWithSession(wsConnection, {
         type: 'reject_workflow',
         step_number: completedStepNumber,
-        session_id: currentSessionId,
-        chat_id: currentChatId
-      }));
+      });
       
       closeActiveConnection(1000, 'workflow_step_rejected');
     }
@@ -1232,14 +1281,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     // Send ADD message with additional information
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-      wsConnection.send(JSON.stringify({
+      sendWithSession(wsConnection, {
         type: 'add_info',
         step_number: completedStepNumber,
         additional_info: additionalInfo,
         original_prompt: originalPrompt,
-        session_id: currentSessionId,
-        chat_id: currentChatId
-      }));
+      });
       
       setShowStepApproval(false);
       setIsLoading(true);
@@ -1351,14 +1398,14 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   ) => {
     if (!clarificationRequest) return;
 
-    const envelope = {
-      type: CLARIFICATION_RESPONSE,
-      requestId: clarificationRequest.requestId,
-      message: payload.message,
-      values: payload.values && Object.keys(payload.values).length > 0 ? payload.values : undefined,
-      session_id: currentSessionId,
-      chat_id: currentChatId,
-    };
+    const envelope = appendSessionMetadata(
+      {
+        type: CLARIFICATION_RESPONSE,
+        requestId: clarificationRequest.requestId,
+        message: payload.message,
+        values: payload.values && Object.keys(payload.values).length > 0 ? payload.values : undefined,
+      }
+    );
 
     try {
       if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
@@ -1382,7 +1429,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       setMessages(prev => [...prev, errorMsg]);
       setIsLoading(false);
     }
-  }, [FASTAPI_BASE_URL, clarificationRequest, currentChatId, currentSessionId, wsConnection]);
+  }, [FASTAPI_BASE_URL, appendSessionMetadata, clarificationRequest, wsConnection]);
 
   const handleClarificationSubmit = useCallback(async () => {
     if (!clarificationRequest) return;
@@ -1476,6 +1523,11 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     // Reset workflow tracking for new prompt
     setCurrentWorkflowMessageId(null);
+
+    const ensuredSessionId = resolveSessionId(currentSessionId);
+    const ensuredWebsocketSessionId = resolveWebsocketSessionId(currentWebsocketSessionId);
+    setCurrentSessionId(ensuredSessionId);
+    setCurrentWebsocketSessionId(ensuredWebsocketSessionId);
     
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -1505,16 +1557,19 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       if (!currentChat) {
         // Chat doesn't exist, create it
         const newChatId = currentChatId || `stream_chat_${Date.now()}`;
-        const newSessionId = currentSessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const newSessionId = ensuredSessionId;
+        const newWebsocketSessionId = ensuredWebsocketSessionId;
         currentChat = {
           id: newChatId,
           title: 'New Trinity AI Chat',
           messages: latestMessages,
           createdAt: new Date(),
           sessionId: newSessionId,
+          websocketSessionId: newWebsocketSessionId,
         };
         setCurrentChatId(newChatId);
         setCurrentSessionId(newSessionId);
+        setCurrentWebsocketSessionId(newWebsocketSessionId);
         setChats(prev => [currentChat!, ...prev]);
       }
       
@@ -1522,6 +1577,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       const updatedChat: Chat = {
         ...currentChat,
         messages: latestMessages, // Use latest messages including the new user message
+        websocketSessionId: currentChat.websocketSessionId || ensuredWebsocketSessionId,
         title: latestMessages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || currentChat.title,
       };
       
@@ -1649,17 +1705,24 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         
         // Store original prompt for ADD functionality
         setOriginalPrompt(userMessage.content);
-        
+
         try {
           // Send initial message with available files
-          ws.send(JSON.stringify({
-            message: userMessage.content,
-            available_files: fileNames,  // Use freshly loaded files
-            project_context: projectContext,
-            user_id: 'current_user',
-            session_id: currentSessionId,  // Send session ID for chat context
-            chat_id: currentChatId
-          }));
+          const initialPayload = appendSessionMetadata(
+            {
+              message: userMessage.content,
+              available_files: fileNames,  // Use freshly loaded files
+              project_context: projectContext,
+              user_id: 'current_user',
+            },
+            {
+              sessionId: ensuredSessionId,
+              websocketSessionId: ensuredWebsocketSessionId,
+              chatId: currentChatId,
+            }
+          );
+
+          ws.send(JSON.stringify(initialPayload));
           console.log('✅ Message sent to WebSocket');
         } catch (sendError) {
           console.error('❌ Failed to send message to WebSocket:', sendError);
@@ -2834,17 +2897,17 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             // TODO: Implement advanced reasoning functionality
             console.log('Advanced Reasoning clicked');
           }}
-          onWorkflowAccept={() => {
+        onWorkflowAccept={() => {
           stopAutoRun();
           if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-            wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+            sendWithSession(wsConnection, { type: 'approve_plan' });
             setIsLoading(true);
           }
         }}
         onWorkflowReject={() => {
           stopAutoRun();
           if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-            wsConnection.send(JSON.stringify({ type: 'reject_plan' }));
+            sendWithSession(wsConnection, { type: 'reject_plan' });
             closeActiveConnection(1000, 'workflow_rejected_from_panel');
           }
           setIsLoading(false);
@@ -2852,29 +2915,29 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         onWorkflowAdd={(info) => {
           stopAutoRun();
           if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-            wsConnection.send(JSON.stringify({
+            sendWithSession(wsConnection, {
               type: 'add_info',
               step_number: 0,
               additional_info: info,
               original_prompt: originalPrompt
-            }));
+            });
             setIsLoading(true);
           }
         }}
         onWorkflowRunAll={() => {
           if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
             startAutoRun();
-            wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+            sendWithSession(wsConnection, { type: 'approve_plan' });
             setIsLoading(true);
           }
         }}
         onStepAccept={(stepNumber) => {
           stopAutoRun();
           if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-            wsConnection.send(JSON.stringify({
+            sendWithSession(wsConnection, {
               type: 'approve_step',
               step_number: stepNumber
-            }));
+            });
             // Find and remove the step approval message
             setMessages(prev => {
               const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
@@ -2886,10 +2949,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         onStepReject={(stepNumber) => {
           stopAutoRun();
           if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-            wsConnection.send(JSON.stringify({
+            sendWithSession(wsConnection, {
               type: 'reject_workflow',
               step_number: stepNumber
-            }));
+            });
             closeActiveConnection(1000, 'workflow_step_rejected_from_panel');
           }
           // Find and remove the step approval message
@@ -2902,12 +2965,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         onStepAdd={(stepNumber, info) => {
           stopAutoRun();
           if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-            wsConnection.send(JSON.stringify({
+            sendWithSession(wsConnection, {
               type: 'add_info',
               step_number: stepNumber,
               additional_info: info,
               original_prompt: originalPrompt
-            }));
+            });
             // Find and remove the step approval message
             setMessages(prev => {
               const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
@@ -3134,7 +3197,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                                   timestamp: new Date()
                                 }];
                             setMessages(firstMessages);
-                            setCurrentSessionId(firstChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                            setCurrentSessionId(resolveSessionId(firstChat.sessionId));
+                            setCurrentWebsocketSessionId(resolveWebsocketSessionId(firstChat.websocketSessionId));
                           }
                           setMemoryError(null);
                         }
@@ -3257,8 +3321,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                                   } else {
                                     const nextChat = mappedChats[0];
                                     setCurrentChatId(nextChat.id);
-                                    const nextMessages = nextChat.messages && nextChat.messages.length > 0 
-                                      ? nextChat.messages 
+                                    const nextMessages = nextChat.messages && nextChat.messages.length > 0
+                                      ? nextChat.messages
                                       : [{
                                           id: '1',
                                           content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
@@ -3266,7 +3330,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                                           timestamp: new Date()
                                         }];
                                     setMessages(nextMessages);
-                                    setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                                    setCurrentSessionId(resolveSessionId(nextChat.sessionId));
+                                    setCurrentWebsocketSessionId(resolveWebsocketSessionId(nextChat.websocketSessionId));
                                   }
                                 }
                                 setMemoryError(null);
@@ -3553,7 +3618,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                                   timestamp: new Date()
                                 }];
                             setMessages(firstMessages);
-                            setCurrentSessionId(firstChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                            setCurrentSessionId(resolveSessionId(firstChat.sessionId));
+                            setCurrentWebsocketSessionId(resolveWebsocketSessionId(firstChat.websocketSessionId));
                           }
                           setMemoryError(null);
                         }
@@ -3676,8 +3742,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                                   } else {
                                     const nextChat = mappedChats[0];
                                     setCurrentChatId(nextChat.id);
-                                    const nextMessages = nextChat.messages && nextChat.messages.length > 0 
-                                      ? nextChat.messages 
+                                    const nextMessages = nextChat.messages && nextChat.messages.length > 0
+                                      ? nextChat.messages
                                       : [{
                                           id: '1',
                                           content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
@@ -3685,7 +3751,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                                           timestamp: new Date()
                                         }];
                                     setMessages(nextMessages);
-                                    setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                                    setCurrentSessionId(resolveSessionId(nextChat.sessionId));
+                                    setCurrentWebsocketSessionId(resolveWebsocketSessionId(nextChat.websocketSessionId));
                                   }
                                 }
                                 setMemoryError(null);
@@ -3936,14 +4003,14 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                       onAccept={() => {
                         stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                          wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+                          sendWithSession(wsConnection, { type: 'approve_plan' });
                           setIsLoading(true);
                         }
                       }}
                       onReject={() => {
                         stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                          wsConnection.send(JSON.stringify({ type: 'reject_plan' }));
+                          sendWithSession(wsConnection, { type: 'reject_plan' });
                           closeActiveConnection(1000, 'workflow_rejected_from_preview');
                         }
                         setIsLoading(false);
@@ -3951,19 +4018,19 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                       onAdd={(info) => {
                         stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                          wsConnection.send(JSON.stringify({
+                          sendWithSession(wsConnection, {
                             type: 'add_info',
                             step_number: 0,
                             additional_info: info,
                             original_prompt: originalPrompt
-                          }));
+                          });
                           setIsLoading(true);
                         }
                       }}
                       onRunAll={() => {
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                           startAutoRun();
-                          wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+                          sendWithSession(wsConnection, { type: 'approve_plan' });
                           setIsLoading(true);
                           const autoRunMsg: Message = {
                             id: `auto-run-${Date.now()}`,
@@ -4004,10 +4071,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                       onAccept={() => {
                         stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                          wsConnection.send(JSON.stringify({
+                          sendWithSession(wsConnection, {
                             type: 'approve_step',
                             step_number: msg.data.stepNumber
-                          }));
+                          });
                           // Remove this approval message
                           setMessages(prev => prev.filter(m => m.id !== msg.id));
                           setIsLoading(true);
@@ -4016,10 +4083,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                       onReject={() => {
                         stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                          wsConnection.send(JSON.stringify({
+                          sendWithSession(wsConnection, {
                             type: 'reject_workflow',
                             step_number: msg.data.stepNumber
-                          }));
+                          });
                           closeActiveConnection(1000, 'workflow_step_rejected_from_preview');
                         }
                         // Remove this approval message
@@ -4029,12 +4096,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                       onAdd={(info) => {
                         stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                          wsConnection.send(JSON.stringify({
+                          sendWithSession(wsConnection, {
                             type: 'add_info',
                             step_number: msg.data.stepNumber,
                             additional_info: info,
                             original_prompt: originalPrompt
-                          }));
+                          });
                           // Remove this approval message
                           setMessages(prev => prev.filter(m => m.id !== msg.id));
                           setIsLoading(true);
