@@ -100,6 +100,8 @@ class ConnectionManager:
         self.websocket_sessions: Dict[WebSocket, str] = {}
         self.heartbeat_interval = 20  # seconds
         self.heartbeat_timeout = 30  # seconds
+        self.session_sweep_interval = 30  # seconds
+        self._sweeper_task: asyncio.Task | None = None
         
     def _get_project_key(self, client_name: str, app_name: str, project_name: str) -> str:
         """Generate unique key for project room."""
@@ -154,6 +156,47 @@ class ConnectionManager:
         session.record_activity()
         self.websocket_sessions[websocket] = session_id
         return session
+
+    def _start_sweeper(self) -> None:
+        """Ensure the background sweeper is running."""
+        if self._sweeper_task and not self._sweeper_task.done():
+            return
+
+        self._sweeper_task = asyncio.create_task(self._session_sweeper())
+
+    async def _session_sweeper(self) -> None:
+        """Close stale sessions proactively with explicit codes."""
+        try:
+            while True:
+                await asyncio.sleep(self.session_sweep_interval)
+
+                now = datetime.utcnow()
+                for session in list(self.sessions.values()):
+                    # Skip explicitly closed sessions
+                    if session.status == "closed":
+                        continue
+
+                    websocket = session.websocket
+                    last_active = session.last_activity_at
+
+                    if (
+                        websocket
+                        and websocket.client_state == WebSocketState.CONNECTED
+                        and now - last_active > timedelta(seconds=self.heartbeat_timeout)
+                    ):
+                        try:
+                            await websocket.close(code=4000, reason="heartbeat timeout")
+                        finally:
+                            session.status = "stale"
+                            session.websocket = None
+                            session.closed_reason = "heartbeat timeout"
+
+                    if (
+                        (not websocket or websocket.client_state != WebSocketState.CONNECTED)
+                        and now - last_active > timedelta(seconds=self.heartbeat_timeout * 2)
+                    ):
+                        session.status = "stale"
+                        session.closed_reason = session.closed_reason or "idle timeout"
 
     def detach_session(self, websocket: WebSocket) -> None:
         """Detach a websocket from its session without closing the session."""
@@ -269,6 +312,7 @@ class ConnectionManager:
         await websocket.accept()
         project_key = self._get_project_key(client_name, app_name, project_name)
         self.active_connections[project_key].add(websocket)
+        self._start_sweeper()
 
         if session_id:
             await self.attach_websocket_to_session(session_id, websocket, allow_replace=allow_replace)
