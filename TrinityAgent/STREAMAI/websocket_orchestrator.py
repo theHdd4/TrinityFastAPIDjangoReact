@@ -307,10 +307,12 @@ class StreamWebSocketOrchestrator:
         self._sequence_replay_counts: Dict[str, int] = {}
         self._paused_sequences: Set[str] = set()
         self._react_step_guards: Dict[str, Dict[str, Any]] = {}  # Prevent overlapping ReAct steps
+        self._react_stall_watchdogs: Dict[str, Dict[str, Any]] = {}  # Detect stalled ReAct loops without progress
 
         # Safety guards
         self.max_initial_plan_steps: int = 8  # Abort overly long upfront plans
         self.max_react_operations: int = 12  # Stop runaway execution loops
+        self.max_stalled_react_attempts: int = 4  # Prevent tight loops when no new atoms are executed
         self.llm_attempt_timeout_seconds: float = 60.0  # Guardrail for individual LLM attempts
         self.llm_status_interval_seconds: float = 10.0  # Periodic heartbeat interval
 
@@ -2818,8 +2820,43 @@ WORKFLOW PLANNING:
                 execution_history = []
                 previous_results = []
             abort_due_complexity = False
-            
+
             while not react_state.goal_achieved and current_step_number < max_steps:
+                # Watchdog: if we keep looping without adding to execution history, stop to avoid runaway planning
+                watchdog = self._react_stall_watchdogs.setdefault(
+                    sequence_id,
+                    {"last_history_len": len(execution_history), "stalled_attempts": 0},
+                )
+                current_history_len = len(execution_history)
+                if current_history_len > watchdog["last_history_len"]:
+                    watchdog["last_history_len"] = current_history_len
+                    watchdog["stalled_attempts"] = 0
+                else:
+                    watchdog["stalled_attempts"] += 1
+                    if watchdog["stalled_attempts"] >= self.max_stalled_react_attempts:
+                        logger.warning(
+                            "⚠️ ReAct: Detected stalled loop (no new atom executions after %s attempts)",
+                            watchdog["stalled_attempts"],
+                        )
+                        try:
+                            await self._send_event(
+                                websocket,
+                                WebSocketEvent(
+                                    "react_stalled",
+                                    {
+                                        "sequence_id": sequence_id,
+                                        "attempts": watchdog["stalled_attempts"],
+                                        "message": "Workflow stalled without new atoms executing; stopping to prevent a loop.",
+                                    },
+                                ),
+                                "react_stalled event",
+                            )
+                        except (WebSocketDisconnect, Exception) as e:
+                            logger.debug("⚠️ Failed to send react_stalled event: %s", e, exc_info=True)
+
+                        react_state.goal_achieved = True
+                        break
+
                 if sequence_id in self._cancelled_sequences:
                     logger.info(f"🛑 Workflow {sequence_id} cancelled during ReAct loop")
                     self._cancelled_sequences.discard(sequence_id)
@@ -3361,6 +3398,11 @@ WORKFLOW PLANNING:
                         "result": execution_result,
                         "evaluation": evaluation.__dict__
                     })
+                    # Reset stall watchdog now that we have material progress
+                    stall_guard = self._react_stall_watchdogs.get(sequence_id)
+                    if stall_guard is not None:
+                        stall_guard["last_history_len"] = len(execution_history)
+                        stall_guard["stalled_attempts"] = 0
                     previous_results.append(execution_result)
                     
                     # Record in ReAct state (include description and files_used for workflow context)
@@ -5317,6 +5359,7 @@ WORKFLOW PLANNING:
         self._sequence_step_plans.pop(sequence_id, None)
         self._sequence_replay_counts.pop(sequence_id, None)
         self._react_step_guards.pop(sequence_id, None)
+        self._react_stall_watchdogs.pop(sequence_id, None)
 
     def _load_persisted_chat_summary(
         self,
