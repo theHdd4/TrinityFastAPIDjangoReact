@@ -17,6 +17,22 @@ logger = logging.getLogger("trinity.trinityai.api")
 # Create router
 router = APIRouter(prefix="/streamai", tags=["TrinityAI"])
 
+
+async def _safe_close_websocket(websocket: WebSocket, code: int = 1000, reason: str = "") -> None:
+    """Close websocket with a status code while swallowing close errors."""
+    try:
+        # Skip if already closing/closed
+        if getattr(websocket, "close_code", None):
+            return
+        if hasattr(websocket, "client_state") and websocket.client_state.name == "DISCONNECTED":
+            return
+        if hasattr(websocket, "application_state") and websocket.application_state.name == "DISCONNECTED":
+            return
+
+        await websocket.close(code=code, reason=reason[:120])
+    except Exception as close_error:  # pragma: no cover - defensive
+        logger.debug(f"WebSocket close failed (code={code}, reason={reason}): {close_error}")
+
 # Initialize components (will be set by main_api.py)
 rag_engine = None
 parameter_generator = None
@@ -63,7 +79,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
     logger.info("=" * 80)
     logger.info("🔌 NEW WebSocket connection accepted")
     logger.info("=" * 80)
-    
+
+    close_code = 1000
+    close_reason = "workflow_complete"
+
     try:
         # Import components
         from STREAMAI.websocket_orchestrator import StreamWebSocketOrchestrator
@@ -396,7 +415,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
         except Exception as workflow_error:
             error_msg = str(workflow_error)
             logger.warning(f"⚠️ Workflow execution failed: {error_msg}")
-            
+            close_code = 1011
+            close_reason = error_msg[:120] or "workflow_error"
+
             # Check if it's because the request can't be handled as a workflow
             if ("atom_id" in error_msg.lower() and "null" in error_msg.lower()) or \
                "outside the scope" in error_msg.lower() or \
@@ -425,6 +446,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     "status": "completed",
                     "intent": "text_reply"
                 }))
+                close_code = 1000
+                close_reason = "fallback_text_reply"
             else:
                 # Real error - send error message
                 await websocket.send_text(json.dumps({
@@ -432,13 +455,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     "message": f"I encountered an error: {error_msg}",
                     "error": error_msg
                 }))
+                close_code = 1011
+                close_reason = "workflow_error"
         
-    except WebSocketDisconnect:
+    except WebSocketDisconnect as ws_exc:
         logger.info("🔌 WebSocket disconnected")
+        close_code = ws_exc.code or close_code
+        close_reason = ws_exc.reason or "client_disconnected"
     except Exception as e:
         logger.error(f"❌ WebSocket error: {e}")
         import traceback
         traceback.print_exc()
+        close_code = 1011
+        close_reason = str(e)[:120] or "websocket_error"
         try:
             await websocket.send_text(json.dumps({
                 "type": "error",
@@ -447,6 +476,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
             }))
         except:
             pass
+    finally:
+        await _safe_close_websocket(websocket, code=close_code, reason=close_reason)
 
 
 def initialize_stream_ai_components(param_gen, rag):
