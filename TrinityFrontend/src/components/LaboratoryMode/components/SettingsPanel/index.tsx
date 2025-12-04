@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { TRINITY_AI_API } from '@/lib/api';
 import { getAtomHandler } from '@/components/TrinityAI/handlers';
 import { useToast } from '@/hooks/use-toast';
+import { Message } from '@/components/TrinityAI/handlers/types';
 
 import {
   useLaboratoryStore,
@@ -94,7 +95,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [metricPromptOpen, setMetricPromptOpen] = useState(false);
   const [metricPromptText, setMetricPromptText] = useState('');
   const [sendingMetricPrompt, setSendingMetricPrompt] = useState(false);
-  const [metricMessages, setMetricMessages] = useState<any[]>([]);
+  const [metricMessages, setMetricMessages] = useState<Message[]>([]);
 
   const selectedCard = useMemo(
     () => {
@@ -377,7 +378,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     
     setSendingMetricPrompt(true);
     
+    console.log('🚀🚀🚀 handleSendMetricPrompt START');
+    console.log('  - metricPromptText:', metricPromptText);
+    console.log('  - sendingMetricPrompt:', sendingMetricPrompt);
+    
     try {
+      console.log('📋 ENTERING TRY BLOCK');
       // Get environment context
       const envStr = localStorage.getItem('env');
       let client_name = '';
@@ -425,42 +431,43 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       const data = await response.json();
       console.log('✅ Metric API response:', data);
       
-      // Create or find metric atom to handle the response
-      const cards = useLaboratoryStore.getState().cards;
-      let metricAtomId: string | null = null;
-      let metricCardId: string | null = null;
+      // Handle the response using metricHandler - NO CARD CREATION NEEDED
+      // Just update the metrics section UI directly
+      console.log('='.repeat(80));
+      console.log('📋 SETTINGS PANEL - METRIC HANDLER FLOW');
+      console.log('='.repeat(80));
+      console.log('📋 STEP 1: Processing metric response...');
+      console.log('  - data.success:', data.success);
+      console.log('  - data structure:', {
+        hasData: !!data.data,
+        operationType: data.operation_type || data.data?.operation_type,
+        topLevelKeys: Object.keys(data)
+      });
       
-      // Look for existing metric atom
-      for (const card of cards) {
-        if (Array.isArray(card.atoms)) {
-          const metricAtom = card.atoms.find(atom => atom.atomId === 'metric' || atom.atomId === 'metrics');
-          if (metricAtom) {
-            metricAtomId = metricAtom.id;
-            metricCardId = card.id;
-            break;
-          }
-        }
-      }
-      
-      // If no metric atom exists, create one
-      if (!metricAtomId) {
-        const newCard = addCard({
-          title: 'Metric',
-          atoms: [{
-            id: `metric_${Date.now()}`,
-            atomId: 'metric',
-            title: 'Metric',
-            settings: {}
-          }]
-        });
-        metricCardId = newCard.id;
-        metricAtomId = newCard.atoms[0]?.id || null;
-      }
-      
-      // Handle the response using metricHandler
-      if (metricAtomId && data.success !== false) {
+      if (data.success !== false) {
+        // Use selectedAtomId if available, otherwise generate a temporary one
+        const metricAtomId = selectedAtomId || `metric_${Date.now()}`;
+        console.log('📋 STEP 2: Using atomId:', metricAtomId);
+        console.log('📋 STEP 3: Getting metric handler...');
         const metricHandler = getAtomHandler('metric');
+        console.log('  - Handler found:', !!metricHandler);
+        
         if (metricHandler) {
+          // Create a safe wrapper for setMessages
+          const safeSetMessages = (updater: (prev: Message[]) => Message[]) => {
+            if (typeof setMetricMessages !== 'function') {
+              console.warn('⚠️ setMetricMessages is not a function, skipping');
+              return;
+            }
+            setMetricMessages((prev: Message[]) => {
+              if (!Array.isArray(prev)) {
+                return updater([]);
+              }
+              return updater(prev);
+            });
+          };
+          
+          console.log('📋 STEP 4: Creating handler context...');
           const context = {
             atomId: metricAtomId,
             atomType: 'metric',
@@ -469,28 +476,32 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             updateAtomSettings: (id: string, settings: any) => {
               useLaboratoryStore.getState().updateAtomSettings(id, settings);
             },
-            setMessages: (updater: (prev: any[]) => any[]) => {
-              // Use React state setter properly
-              setMetricMessages(updater);
-            }
+            setMessages: safeSetMessages
           };
           
+          console.log('📋 STEP 5: Calling metricHandler.handleSuccess...');
           try {
             await metricHandler.handleSuccess(data, context);
+            console.log('✅ Handler completed successfully');
             
             toast({
               title: "Success",
               description: "Metric operation completed successfully!",
             });
           } catch (handlerError: any) {
-            console.error('Error in metricHandler.handleSuccess:', handlerError);
+            console.error('❌ Error in metricHandler.handleSuccess:', handlerError);
+            console.error('  - Error message:', handlerError?.message);
+            console.error('  - Error stack:', handlerError?.stack);
+            
             toast({
               title: "Error",
               description: handlerError.message || "Failed to process metric operation",
               variant: "destructive",
             });
+            throw handlerError;
           }
         } else {
+          console.error('❌ Metric handler not found');
           toast({
             title: "Error",
             description: "Metric handler not found",
@@ -511,7 +522,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setMetricPromptText('');
       
     } catch (error: any) {
-      console.error('❌ Failed to process metric prompt:', error);
+      console.error('='.repeat(80));
+      console.error('❌ OUTER CATCH: Failed to process metric prompt');
+      console.error('='.repeat(80));
+      console.error('  - Error type:', typeof error);
+      console.error('  - Error name:', error?.name);
+      console.error('  - Error message:', error?.message);
+      console.error('  - Error stack:', error?.stack);
+      console.error('  - Full error:', error);
+      console.error('='.repeat(80));
+      
       toast({
         title: "Error",
         description: error.message || "Failed to process metric request",

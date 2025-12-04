@@ -318,15 +318,62 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         }
 
         // 🔧 UNIFIED HANDLER DISPATCH: Use handler system for all atom types
-        // Check if this atom type has data and a handler available
-        if (hasAtomData(atomType, data)) {
-          console.log(`🔧 ===== ${atomType.toUpperCase()} AI RESPONSE (via handler) =====`);
+        // STEP-BY-STEP DEBUGGING - 10 STEPS
+        
+        console.log('='.repeat(80));
+        console.log('📋 STEP-BY-STEP METRIC HANDLER FLOW');
+        console.log('='.repeat(80));
+        
+        // STEP 1: Check hasAtomData
+        console.log('📋 STEP 1: Checking hasAtomData...');
+        console.log('  - atomType:', atomType);
+        console.log('  - data.success:', data.success);
+        console.log('  - data.operation_type:', data.operation_type);
+        console.log('  - data.data?.operation_type:', data.data?.operation_type);
+        console.log('  - data.operation_config:', !!data.operation_config);
+        console.log('  - data.data?.operation_config:', !!data.data?.operation_config);
+        console.log('  - data.metrics_json:', !!data.metrics_json);
+        
+        const hasData = hasAtomData(atomType, data);
+        console.log('  - hasAtomData result:', hasData);
+        
+        if (hasData) {
+          console.log(`📋 STEP 2: ${atomType.toUpperCase()} has data, proceeding with handler`);
           console.log('📝 User Prompt:', userMsg.content);
           console.log('🔧 AI Response Data:', JSON.stringify(data, null, 2));
           
           try {
+            // STEP 3: Get handler from registry
+            console.log('📋 STEP 3: Getting handler from registry...');
+            console.log('  - Calling getAtomHandler("' + atomType + '")');
             const handler = getAtomHandler(atomType);
+            console.log('  - Handler retrieved:', !!handler);
+            console.log('  - Handler type:', typeof handler);
+            
             if (handler) {
+              console.log('  - handler.handleSuccess exists:', !!handler.handleSuccess);
+              console.log('  - handler.handleSuccess type:', typeof handler.handleSuccess);
+              console.log('  - handler.handleFailure exists:', !!handler.handleFailure);
+              
+              // STEP 4: Validate setMessages BEFORE creating context
+              console.log('📋 STEP 4: Validating setMessages...');
+              console.log('  - setMessages type:', typeof setMessages);
+              console.log('  - setMessages is function:', typeof setMessages === 'function');
+              
+              if (typeof setMessages !== 'function') {
+                console.error('❌ CRITICAL ERROR: setMessages is not a function!');
+                console.error('  - Type:', typeof setMessages);
+                console.error('  - Value:', setMessages);
+                throw new Error('setMessages is not a function - cannot proceed');
+              }
+              
+              // STEP 5: Create handler context
+              console.log('📋 STEP 5: Creating handler context...');
+              console.log('  - atomId:', atomId);
+              console.log('  - atomType:', atomType);
+              console.log('  - updateAtomSettings type:', typeof updateAtomSettings);
+              console.log('  - sessionId:', sessionId);
+              
               const handlerContext: AtomHandlerContext = {
                 atomId,
                 atomType,
@@ -337,13 +384,56 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 isStreamMode: false
               };
               
+              console.log('  - Context created successfully');
+              console.log('  - Context.setMessages type:', typeof handlerContext.setMessages);
+              
+              // STEP 6: Validate handler method exists
+              console.log('📋 STEP 6: Validating handler method...');
+              if (typeof handler.handleSuccess !== 'function') {
+                console.error('❌ CRITICAL ERROR: handler.handleSuccess is not a function!');
+                console.error('  - Type:', typeof handler.handleSuccess);
+                console.error('  - Handler:', handler);
+                throw new Error('handler.handleSuccess is not a function - cannot proceed');
+              }
+              console.log('  - handler.handleSuccess is valid function');
+              
+              // STEP 7: Prepare to call handler
+              console.log('📋 STEP 7: Preparing to call handler...');
+              console.log('  - Data structure:', {
+                hasData: !!data.data,
+                dataKeys: data.data ? Object.keys(data.data) : [],
+                topLevelKeys: Object.keys(data),
+                operationType: data.operation_type || data.data?.operation_type
+              });
+              
               if (data.success !== false) {
-                await handler.handleSuccess(data, handlerContext);
+                // STEP 8: Call handleSuccess
+                console.log('📋 STEP 8: Calling handler.handleSuccess...');
+                console.log('  - About to call: handler.handleSuccess(data, handlerContext)');
+                
+                try {
+                  // This is where the error likely occurs
+                  console.log('  - EXECUTING CALL NOW...');
+                  const result = await handler.handleSuccess(data, handlerContext);
+                  console.log('📋 STEP 9: Handler.handleSuccess completed successfully');
+                  console.log('  - Result:', result);
+                } catch (handleSuccessError: any) {
+                  console.error('📋 STEP 9 ERROR: Error INSIDE handler.handleSuccess');
+                  console.error('  - Error type:', typeof handleSuccessError);
+                  console.error('  - Error name:', handleSuccessError?.name);
+                  console.error('  - Error message:', handleSuccessError?.message);
+                  console.error('  - Error stack:', handleSuccessError?.stack);
+                  console.error('  - Full error object:', handleSuccessError);
+                  throw handleSuccessError; // Re-throw to be caught by outer catch
+                }
               } else {
+                console.log('📋 STEP 8 ALT: Calling handleFailure...');
                 await handler.handleFailure(data, handlerContext);
               }
+              
+              console.log('📋 STEP 10: Handler execution complete');
             } else {
-              console.warn(`⚠️ No handler found for ${atomType}`);
+              console.warn('📋 STEP 3 ERROR: No handler found for', atomType);
               // Fallback to generic message if no specific handler
               const aiMsg: Message = { 
                 id: (Date.now() + 1).toString(), 
@@ -351,17 +441,39 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 sender: 'ai', 
                 timestamp: new Date() 
               };
-              setMessages(prev => [...prev, aiMsg]);
+              setMessages(prev => {
+                if (!Array.isArray(prev)) {
+                  console.warn('⚠️ setMessages prev is not an array in fallback:', prev);
+                  return [aiMsg];
+                }
+                return [...prev, aiMsg];
+              });
             }
-          } catch (handlerError) {
-            console.error(`❌ Error in ${atomType} handler:`, handlerError);
+          } catch (handlerError: any) {
+            console.error(`❌ Error in ${atomType} handler (OUTER CATCH):`, handlerError);
+            console.error(`❌ Error type:`, typeof handlerError);
+            console.error(`❌ Error name:`, handlerError?.name);
+            console.error(`❌ Error message:`, handlerError?.message);
+            console.error(`❌ Error stack:`, handlerError?.stack);
+            console.error(`❌ Full error:`, JSON.stringify(handlerError, Object.getOwnPropertyNames(handlerError)));
+            
             const errorMsg: Message = {
               id: (Date.now() + 1).toString(),
-              content: `❌ Error processing ${atomType} configuration: ${(handlerError as Error).message || 'Unknown error'}`,
+              content: `❌ Error processing ${atomType} configuration: ${(handlerError as Error)?.message || 'Unknown error'}`,
               sender: 'ai',
               timestamp: new Date(),
             };
-            setMessages(prev => [...prev, errorMsg]);
+            try {
+              setMessages(prev => {
+                if (!Array.isArray(prev)) {
+                  console.warn('⚠️ setMessages prev is not an array in error handler:', prev);
+                  return [errorMsg];
+                }
+                return [...prev, errorMsg];
+              });
+            } catch (msgError) {
+              console.error('❌ Failed to set error message:', msgError);
+            }
           }
         } else {
           // Handle AI suggestions when complete info is not available

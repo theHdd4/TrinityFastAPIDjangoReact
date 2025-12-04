@@ -1,14 +1,14 @@
 """
 Standardized Metric Agent using BaseAgent infrastructure
 Connects to backend via FastAPI router
-Handles three operation types: Input, Variables, and Column Ops
+Handles three operation types: Input, Variables, Column Ops
 """
 
 import sys
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, List
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -36,7 +36,7 @@ settings = None
 MetricPromptBuilder = None
 
 logger.info("=" * 80)
-logger.info("ATTEMPTING TO IMPORT BASEAGENT FOR METRIC")
+logger.info("ATTEMPTING TO IMPORT BASEAGENT FOR METRIC AGENT")
 logger.info("=" * 80)
 logger.info(f"Parent directory: {parent_dir}")
 logger.info(f"BaseAgent path: {parent_dir / 'BaseAgent'}")
@@ -152,13 +152,14 @@ except Exception as e:
         
         FileLoadError = TrinityException
         ValidationError = TrinityException
+    # Continue - router is already created and routes will be registered
 
 # Only define MetricAgent if BaseAgent was imported successfully
 if BaseAgent is not None:
     class MetricAgent(BaseAgent):
         """
         Standardized Metric Agent using BaseAgent infrastructure.
-        Handles three operation types: Input, Variables, and Column Ops.
+        Handles three operation types: Input, Variables, Column Ops.
         """
         
         @property
@@ -167,11 +168,16 @@ if BaseAgent is not None:
         
         @property
         def description(self) -> str:
-            return "Performs metric operations including data source selection (Input), variable creation (Variables), and column operations (Column Ops)"
+            return "Performing metric operations including data source selection, variable creation, and column transformations"
         
         def _call_llm(self, prompt: str, temperature: float = 0.1, num_predict: int = 4000) -> str:
-            """Override to add logging for raw LLM response."""
+            """
+            Override to add logging for raw LLM response.
+            """
+            # Call parent method
             llm_response = super()._call_llm(prompt, temperature, num_predict)
+            
+            # Log what we received from LLM
             logger.info("=" * 80)
             logger.info("📥 RECEIVED FROM METRIC LLM:")
             logger.info("=" * 80)
@@ -181,17 +187,24 @@ if BaseAgent is not None:
             logger.info("-" * 80)
             logger.info(llm_response)
             logger.info("=" * 80)
+            
             return llm_response
         
         def _extract_json(self, response: str) -> Optional[Dict[str, Any]]:
-            """Override to add logging for extracted JSON."""
+            """
+            Override to add logging for extracted JSON.
+            """
+            # Call parent method
             result = super()._extract_json(response)
+            
+            # Log what we extracted
             logger.info("=" * 80)
             logger.info("🔍 EXTRACTED JSON FROM LLM RESPONSE:")
             logger.info("=" * 80)
             if result:
                 logger.info("✅ JSON Extraction Successful")
                 logger.info(f"Extracted Keys: {list(result.keys())}")
+                logger.info(f"Operation Type: {result.get('operation_type', 'unknown')}")
                 logger.info("-" * 80)
                 logger.info("EXTRACTED JSON (BEFORE VALIDATION/NORMALIZATION):")
                 logger.info("-" * 80)
@@ -199,7 +212,70 @@ if BaseAgent is not None:
             else:
                 logger.warning("❌ JSON Extraction Failed - No JSON found in response")
             logger.info("=" * 80)
+            
             return result
+        
+        def _filter_existing_files(self, available_files: Dict[str, Any]) -> Dict[str, Any]:
+            """
+            Filter out files that no longer exist in S3.
+            Validates each file exists before including it in the available files list.
+            
+            Args:
+                available_files: Dictionary of files with columns
+                
+            Returns:
+                Filtered dictionary containing only existing files
+            """
+            filtered_files = {}
+            import os
+            
+            for file_path, file_info in available_files.items():
+                try:
+                    # Try to stat the object to verify it exists
+                    self.file_reader.minio_client.stat_object(
+                        bucket_name=self.bucket,
+                        object_name=file_path
+                    )
+                    # File exists, include it
+                    filtered_files[file_path] = file_info
+                except Exception as e:
+                    # File doesn't exist or error accessing it
+                    logger.warning(f"⚠️ File '{file_path}' no longer exists or is inaccessible: {e}")
+                    # Try to find by basename in case path changed
+                    file_basename = os.path.basename(file_path)
+                    found = False
+                    try:
+                        # List objects to find by basename
+                        objects = self.file_reader.minio_client.list_objects(
+                            bucket_name=self.bucket,
+                            prefix=self.file_reader.prefix,
+                            recursive=True
+                        )
+                        for obj in objects:
+                            if os.path.basename(obj.object_name) == file_basename:
+                                # Found file with same basename, verify it exists
+                                try:
+                                    self.file_reader.minio_client.stat_object(
+                                        bucket_name=self.bucket,
+                                        object_name=obj.object_name
+                                    )
+                                    # Update the path and include it
+                                    filtered_files[obj.object_name] = file_info
+                                    found = True
+                                    logger.info(f"✅ Found file by basename: '{file_path}' -> '{obj.object_name}'")
+                                    break
+                                except:
+                                    continue
+                    except:
+                        pass
+                    
+                    if not found:
+                        logger.debug(f"❌ Excluding non-existent file: '{file_path}'")
+            
+            if len(filtered_files) < len(available_files):
+                logger.info(f"🔍 Filtered files: {len(available_files)} -> {len(filtered_files)} (removed {len(available_files) - len(filtered_files)} non-existent files)")
+            
+            return filtered_files
         
         def _build_prompt(
             self,
@@ -207,15 +283,28 @@ if BaseAgent is not None:
             available_files: Dict[str, Any],
             context: str
         ) -> str:
-            """Build metric-specific prompt using MetricPromptBuilder."""
+            """
+            Build metric-specific prompt using MetricPromptBuilder.
+            BaseAgent handles file loading and context building automatically.
+            """
+            # Filter out non-existent files before building prompt
+            filtered_files = self._filter_existing_files(available_files)
+            
+            # Update files_with_columns to only include existing files
+            self.files_with_columns = filtered_files
+            
+            # Use MetricPromptBuilder to build the prompt
+            # BaseAgent's execute() method provides available_files and context
             prompt = MetricPromptBuilder.build_metric_prompt(
                 user_prompt=user_prompt,
-                available_files_with_columns=available_files,
+                available_files_with_columns=filtered_files,  # Use filtered files
                 context=context,
                 file_details={},  # Can be enhanced if needed
                 other_files=[],
                 matched_columns={}
             )
+            
+            # Log what we're sending to LLM
             logger.info("=" * 80)
             logger.info("📤 SENDING TO METRIC LLM:")
             logger.info("=" * 80)
@@ -227,104 +316,143 @@ if BaseAgent is not None:
             logger.info("-" * 80)
             logger.info(prompt)
             logger.info("=" * 80)
+            
             return prompt
         
         def _validate_json(self, result: Dict[str, Any]) -> bool:
-            """Validate metric-specific JSON structure."""
+            """
+            Validate metric-specific JSON structure.
+            BaseAgent handles general validation, this adds metric-specific checks.
+            """
             if not isinstance(result, dict):
                 return False
             
-            # If success is True, must have operation_type and operation_config
+            # If success is True, must have operation_type
             if result.get("success") is True:
                 operation_type = result.get("operation_type", "").lower()
                 
-                if operation_type not in ["input", "variables", "column_ops"]:
-                    logger.warning(f"⚠️ Invalid operation_type: {operation_type}")
-                    return False
-                
-                # Must have operation_config
-                if "operation_config" not in result:
-                    logger.warning("⚠️ Missing operation_config")
-                    return False
-                
-                operation_config = result.get("operation_config", {})
-                if not isinstance(operation_config, dict):
-                    logger.warning("⚠️ operation_config is not a dict")
+                if not operation_type:
                     return False
                 
                 # Validate based on operation type
-                if operation_type == "variables":
-                    variable_type = operation_config.get("variable_type", "").lower()
-                    if variable_type not in ["dataframe", "constant"]:
-                        logger.warning(f"⚠️ Invalid variable_type: {variable_type}")
+                if operation_type == "input":
+                    # Input operation: must have data_source
+                    if "data_source" not in result and "dataSource" not in result:
+                        return False
+                
+                elif operation_type == "variables":
+                    # Variables operation: must have operation_config
+                    if "operation_config" not in result:
+                        return False
+                    op_config = result.get("operation_config", {})
+                    variable_type = op_config.get("variable_type", "").lower()
+                    
+                    if variable_type == "constant":
+                        # Must have assignments
+                        if "assignments" not in op_config:
+                            return False
+                    elif variable_type == "dataframe":
+                        # Must have operations
+                        if "operations" not in op_config:
+                            return False
+                    else:
                         return False
                     
-                    if variable_type == "dataframe":
-                        if "operations" not in operation_config:
-                            logger.warning("⚠️ Missing operations for dataframe variable type")
-                            return False
-                    elif variable_type == "constant":
-                        if "assignments" not in operation_config:
-                            logger.warning("⚠️ Missing assignments for constant variable type")
-                            return False
+                    # Must have api_endpoint (accept both with and without /laboratory prefix)
+                    api_endpoint = result.get("api_endpoint", "")
+                    valid_endpoints = [
+                        "/laboratory/variables/assign", "/laboratory/variables/compute",
+                        "/variables/assign", "/variables/compute"
+                    ]
+                    if not api_endpoint or api_endpoint not in valid_endpoints:
+                        return False
                 
                 elif operation_type == "column_ops":
-                    if "operation_type" not in operation_config:
-                        logger.warning("⚠️ Missing operation_type in column_ops config")
+                    # Column Ops operation: must have operation_config
+                    if "operation_config" not in result:
+                        return False
+                    op_config = result.get("operation_config", {})
+                    
+                    # Must have method and columns
+                    if "method" not in op_config or "columns" not in op_config:
+                        return False
+                    
+                    # Must have api_endpoint and api_endpoint_save
+                    if "api_endpoint" not in result or "api_endpoint_save" not in result:
                         return False
                 
-                elif operation_type == "input":
-                    if "selected_file" not in operation_config:
-                        logger.warning("⚠️ Missing selected_file in input config")
-                        return False
+                else:
+                    # Unknown operation type
+                    return False
             
-            # Reasoning is preferred but not strictly required (will be added in normalization if missing)
+            # Reasoning is preferred but not strictly required
             return True
+        
+        def _validate_file_exists(self, file_path: str) -> Tuple[bool, str]:
+            """
+            Validate that a file exists in the available files list.
+            
+            Args:
+                file_path: File path to validate
+                
+            Returns:
+                Tuple of (is_valid, error_message)
+            """
+            import os
+            
+            # Check if file exists in files_with_columns
+            if file_path in self.files_with_columns:
+                return True, ""
+            
+            # Try to find by basename
+            file_basename = os.path.basename(file_path)
+            for actual_path in self.files_with_columns.keys():
+                if os.path.basename(actual_path) == file_basename:
+                    return True, ""
+            
+            return False, f"File '{file_path}' not found in available files"
         
         def _normalize_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
             """
             Normalize metric result to ensure consistent format.
             BaseAgent handles general normalization.
             """
-            # Extract reasoning - this is the only field we need now
-            reasoning = result.get("reasoning", "")
-            if not reasoning:
-                operation_type = result.get("operation_type", "").lower()
-                if result.get("success") is True:
-                    reasoning = f"Metric atom was chosen because the user requested {operation_type} operations. The configuration has been created successfully based on the user's requirements."
-                else:
-                    reasoning = "Metric atom was chosen to process the metric request. Analyzing available files and columns to determine the best operation configuration."
-            
             normalized = {
                 "success": result.get("success", False),
-                "reasoning": reasoning,
-                "operation_type": result.get("operation_type", "").lower(),
+                "response": result.get("response", ""),  # Raw LLM thinking
+                "smart_response": result.get("smart_response", ""),
             }
             
-            # Add operation_config if present
-            if "operation_config" in result:
-                normalized["operation_config"] = result["operation_config"]
+            # Extract operation type
+            operation_type = result.get("operation_type", "").lower()
+            normalized["operation_type"] = operation_type
             
-            # Add metrics_json if present
-            if "metrics_json" in result:
-                normalized["metrics_json"] = result["metrics_json"]
-            
-            # Add data_source and file_name if present
+            # Add operation-specific fields
             if "data_source" in result:
                 normalized["data_source"] = result["data_source"]
+            elif "dataSource" in result:
+                normalized["data_source"] = result["dataSource"]
             
             if "file_name" in result:
                 normalized["file_name"] = result["file_name"]
             
+            if "operation_config" in result:
+                normalized["operation_config"] = result["operation_config"]
+            
+            if "metrics_json" in result:
+                normalized["metrics_json"] = result["metrics_json"]
+            
+            # Add API endpoint fields
+            if "api_endpoint" in result:
+                normalized["api_endpoint"] = result["api_endpoint"]
+            
+            if "api_endpoint_save" in result:
+                normalized["api_endpoint_save"] = result["api_endpoint_save"]
+            
             # Add other fields
-            if "suggestions" in result:
-                normalized["suggestions"] = result["suggestions"]
-            
-            if "used_memory" in result:
-                normalized["used_memory"] = result["used_memory"]
-            
-            if "next_steps" in result:
-                normalized["next_steps"] = result["next_steps"]
+            for key in ["suggestions", "reasoning", "used_memory", "file_analysis", "next_steps"]:
+                if key in result:
+                    normalized[key] = result[key]
             
             return normalized
         
@@ -345,18 +473,19 @@ if BaseAgent is not None:
             return {
                 "success": False,
                 "response": "Raw thinking: I encountered an issue processing the request. Based on the user's history, I can see they have used these files before. Let me provide helpful suggestions to guide them.",
-                "smart_response": f"I had trouble processing your request. {'Let me suggest based on your previous usage: ' + ', '.join(favorite_files) if favorite_files else 'Please try with specific operation type and details.'}",
+                "smart_response": f"I had trouble processing your request. {'Let me suggest based on your previous usage: ' + ', '.join(favorite_files) if favorite_files else 'Please try with specific file names and operation type.'}",
                 "suggestions": [
                     "I had trouble processing your request",
                     f"Files you've used before: {', '.join(favorite_files) if favorite_files else 'None yet'}",
                     f"Available files: {', '.join(list(self.files_with_columns.keys())[:5])}",
-                    "Example: 'create a variable that sums sales by region' or 'filter rows where channel equals iceland'"
+                    "Example: 'select file.arrow as data source' or 'create a price column by dividing SalesValue by Volume'"
                 ],
                 "recommended_files": favorite_files,
                 "next_steps": [
-                    "Please try with specific operation type (Input, Variables, or Column Ops)",
-                    "Or say 'yes' if you want to use suggested files",
-                    "Or say 'show me available operations' to see all options"
+                    "Please specify which operation you want (Input/Variables/Column Ops)",
+                    "Provide data source file name",
+                    "Specify columns and operations needed",
+                    "Or say 'yes' if you want to use suggested files"
                 ]
             }
 else:
@@ -532,8 +661,10 @@ def metric_operations(request: MetricRequest) -> Dict[str, Any]:
                     config_key="BASEAGENT_IMPORT"
                 )
             
+            # MetricAgent should already be defined at module level if BaseAgent was imported
             if BaseAgent is not None and MetricAgent is None:
                 logger.error("BaseAgent imported but MetricAgent class not found - this should not happen")
+                logger.error("MetricAgent should be defined at module level when BaseAgent is imported")
                 raise ConfigurationError(
                     "MetricAgent class not found after BaseAgent import",
                     config_key="METRICAGENT_CLASS"
@@ -614,7 +745,7 @@ def metric_operations(request: MetricRequest) -> Dict[str, Any]:
         response = {
             "success": result.success,
             "data": result.data,
-            "response": result.data.get("response", ""),
+            "response": result.data.get("response", ""),  # Raw LLM thinking
             "smart_response": result.message or result.data.get("smart_response", ""),
             "error": result.error,
             "artifacts": result.artifacts,
@@ -622,9 +753,18 @@ def metric_operations(request: MetricRequest) -> Dict[str, Any]:
             "processing_time": round(time.time() - start_time, 2)
         }
         
-        # Add metric-specific fields if present
-        if "operation_type" in result.data:
-            response["operation_type"] = result.data["operation_type"]
+        # Extract operation type and add to response
+        operation_type = result.data.get("operation_type", "").lower()
+        response["operation_type"] = operation_type
+        
+        # Add operation-specific fields
+        if "data_source" in result.data:
+            response["data_source"] = result.data["data_source"]
+        elif "dataSource" in result.data:
+            response["data_source"] = result.data["dataSource"]
+        
+        if "file_name" in result.data:
+            response["file_name"] = result.data["file_name"]
         
         if "operation_config" in result.data:
             response["operation_config"] = result.data["operation_config"]
@@ -632,37 +772,135 @@ def metric_operations(request: MetricRequest) -> Dict[str, Any]:
         if "metrics_json" in result.data:
             response["metrics_json"] = result.data["metrics_json"]
         
-        if "data_source" in result.data:
-            response["data_source"] = result.data["data_source"]
+        # Add API endpoint fields
+        if "api_endpoint" in result.data:
+            response["api_endpoint"] = result.data["api_endpoint"]
         
-        if "file_name" in result.data:
-            response["file_name"] = result.data["file_name"]
+        if "api_endpoint_save" in result.data:
+            response["api_endpoint_save"] = result.data["api_endpoint_save"]
         
-        logger.info("=" * 80)
-        logger.info("METRIC RESPONSE:")
-        logger.info("=" * 80)
-        logger.info(f"Success: {response.get('success')}")
-        logger.info(f"Operation Type: {response.get('operation_type', 'N/A')}")
-        logger.info(f"Processing Time: {response.get('processing_time')}s")
-        logger.info("=" * 80)
+        # Add other fields from result.data
+        for key in ["suggestions", "reasoning", "used_memory", "file_analysis", "next_steps"]:
+            if key in result.data:
+                response[key] = result.data[key]
+        
+        logger.info(f"METRIC REQUEST COMPLETED:")
+        logger.info(f"Success: {response.get('success', False)}")
+        logger.info(f"Operation Type: {response.get('operation_type', 'unknown')}")
+        logger.info(f"Processing Time: {response.get('processing_time', 0)}s")
         
         return response
         
+    except (TrinityException, ValidationError, FileLoadError, ConfigurationError) as e:
+        # Re-raise Trinity exceptions to be caught by global handler
+        logger.error(f"METRIC REQUEST FAILED (TrinityException): {e.message if hasattr(e, 'message') else str(e)}", exc_info=True)
+        raise
     except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ ERROR IN METRIC ENDPOINT: {e}", exc_info=True)
-        logger.error("=" * 80)
-        
-        error_response = {
-            "success": False,
-            "error": str(e),
-            "data": {
-                "success": False,
-                "reasoning": f"An error occurred while processing the metric request: {str(e)}",
-                "operation_type": "unknown"
-            },
-            "processing_time": round(time.time() - start_time, 2)
+        # Wrap generic exceptions in AgentExecutionError
+        logger.error(f"METRIC REQUEST FAILED: {e}", exc_info=True)
+        raise AgentExecutionError(
+            f"An error occurred while processing your request: {str(e)}",
+            agent_name="metric"
+        )
+
+
+@router.get("/metric/history/{session_id}")
+def get_history(session_id: str) -> Dict[str, Any]:
+    """Get session history."""
+    if not agent_initialized or agent is None:
+        raise ConfigurationError(
+            "MetricAgent not initialized",
+            config_key="METRICAGENT_INIT"
+        )
+    
+    logger.info(f"Getting history for session: {session_id}")
+    
+    try:
+        history = agent.get_session_history(session_id)
+        return {
+            "success": True,
+            "session_id": session_id,
+            "history": history,
+            "total_interactions": len(history) if isinstance(history, list) else 0
         }
-        
-        return error_response
+    except Exception as e:
+        logger.error(f"Failed to get history: {e}", exc_info=True)
+        raise AgentExecutionError(
+            f"Failed to get session history: {str(e)}",
+            agent_name="metric"
+        )
+
+
+@router.get("/metric/files")
+def list_files() -> Dict[str, Any]:
+    """List available files."""
+    if not agent_initialized or agent is None:
+        raise ConfigurationError(
+            "MetricAgent not initialized",
+            config_key="METRICAGENT_INIT"
+        )
+    
+    logger.info("Listing available files")
+    
+    try:
+        files = agent.files_with_columns
+        return {
+            "success": True,
+            "total_files": len(files) if isinstance(files, dict) else 0,
+            "files": files
+        }
+    except Exception as e:
+        logger.error(f"Failed to list files: {e}", exc_info=True)
+        raise AgentExecutionError(
+            f"Failed to list files: {str(e)}",
+            agent_name="metric"
+        )
+
+
+@router.get("/metric/health")
+def health_check() -> Dict[str, Any]:
+    """Health check endpoint."""
+    if not agent_initialized or agent is None:
+        return {
+            "status": "unhealthy",
+            "service": "metric",
+            "error": "Agent not initialized",
+            "version": "1.0.0"
+        }
+    
+    status = {
+        "status": "healthy",
+        "service": "metric",
+        "agent_name": agent.name if agent else "unknown",
+        "agent_description": agent.description if agent else "unknown",
+        "version": "1.0.0",
+        "active_sessions": len(agent.sessions) if hasattr(agent, "sessions") else 0,
+        "loaded_files": len(agent.files_with_columns) if hasattr(agent, "files_with_columns") else 0
+    }
+    logger.info(f"Health check: {status}")
+    return status
+
+# Log router setup on module load
+logger.info("=" * 80)
+logger.info("METRIC AGENT MODULE LOADED")
+logger.info(f"Router created: {router is not None}")
+logger.info(f"Router type: {type(router)}")
+logger.info(f"Agent initialized: {agent_initialized}")
+if router:
+    try:
+        route_count = len(router.routes)
+        logger.info(f"Router has {route_count} routes")
+        routes = []
+        for r in router.routes:
+            if hasattr(r, 'path') and hasattr(r, 'methods'):
+                routes.append(f"{r.methods} {r.path}")
+            elif hasattr(r, 'path'):
+                routes.append(f"{r.path}")
+        if routes:
+            logger.info(f"Router routes: {routes}")
+        else:
+            logger.warning("⚠️ Router has no routes registered!")
+    except Exception as e:
+        logger.error(f"Error logging routes: {e}")
+logger.info("=" * 80)
 

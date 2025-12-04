@@ -1,7 +1,6 @@
 """
 Agent Metric - Standardized Metric Agent
 Uses BaseAgent infrastructure for all common functionality.
-Handles three task types: Input, Variables, and Column Ops.
 """
 
 import logging
@@ -74,4 +73,3 @@ print(f"Final router status: {router is not None}, routes: {len(router.routes) i
 logger.info(f"Final router status: {router is not None}, routes: {len(router.routes) if router else 0}")
 
 __all__ = ["agent", "router", "agent_initialized"]
-
