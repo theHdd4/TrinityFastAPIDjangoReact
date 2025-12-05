@@ -9,6 +9,7 @@ Orchestrates the execution of atom sequences with the Trinity AI 3-step pattern 
 """
 
 import asyncio
+import hashlib
 import logging
 import aiohttp  # Changed from requests to aiohttp for async
 import json
@@ -16,7 +17,7 @@ import time
 import os
 import sys
 import uuid
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, Set
 from pathlib import Path
 from datetime import datetime
 
@@ -99,10 +100,13 @@ try:
         AtomIdentity,
         AtomMemoizer,
         DedupeBudgetExceeded,
+        LoopSignal,
         WorkstreamContextStore,
+        WorkstreamLoopDetector,
         WorkstreamTelemetry,
         WorkstreamValidator,
         normalize_input,
+        normalize_output,
     )
 except ImportError:
     from STREAMAI.workstream_planner import WorkstreamPlanner, WorkstreamValidationError
@@ -111,10 +115,13 @@ except ImportError:
         AtomIdentity,
         AtomMemoizer,
         DedupeBudgetExceeded,
+        LoopSignal,
         WorkstreamContextStore,
+        WorkstreamLoopDetector,
         WorkstreamTelemetry,
         WorkstreamValidator,
         normalize_input,
+        normalize_output,
     )
 
 
@@ -319,15 +326,14 @@ class StreamOrchestrator:
         sequence["total_atoms"] = total_atoms
 
         # Workstream runtime context
+        mode = (sequence.get("mode") or "laboratory").lower()
         dedupe_budget = int(sequence.get("dedupe_budget", 5))
         telemetry = WorkstreamTelemetry(session_id=session_id, mode=mode)
         context_store = WorkstreamContextStore(dedupe_budget=dedupe_budget, telemetry=telemetry)
         self.execution_policy.telemetry = telemetry
+        loop_detector = WorkstreamLoopDetector(telemetry=telemetry)
         completed_nodes = set()
         last_inputs = context_store.last_inputs
-
-        # Mode flag (laboratory vs workflow) defaults to laboratory for HITL
-        mode = (sequence.get("mode") or "laboratory").lower()
         
         results = {
             "session_id": session_id,
@@ -341,7 +347,11 @@ class StreamOrchestrator:
         }
         
         # Execute each atom
-        for i, atom in enumerate(atoms, 1):
+        last_stable_index = -1
+        atom_index = 0
+        while atom_index < len(atoms):
+            i = atom_index + 1
+            atom = atoms[atom_index]
             atom_id = atom.get("atom_id", "unknown")
             logger.info(f"\n{'='*80}")
             logger.info(f"📍 Executing Atom {i}/{total_atoms}: {atom_id}")
@@ -360,18 +370,44 @@ class StreamOrchestrator:
                 idempotency = atom.get("idempotency", "pure")
                 atom_version = atom.get("version", "v1")
                 normalized_input = normalize_input({"atom": atom, "context": self._current_context})
+                upstream_snapshot = context_store.upstream_snapshot_id(atom.get("depends_on", []))
+                input_hash = hashlib.sha256(f"{atom_id}|{normalized_input}|{upstream_snapshot}".encode("utf-8")).hexdigest()
                 atom_identity = AtomIdentity(atom_id, normalized_input, atom_version)
                 force_execution = bool(atom.get("force"))
+
+                loop_signal = loop_detector.note_attempt(
+                    atom_id=atom_id,
+                    input_hash=input_hash,
+                    completed_nodes=completed_nodes,
+                    stable_index=last_stable_index,
+                )
+                if loop_signal.detected:
+                    handled = await self._handle_loop_detection(
+                        atom=atom,
+                        atom_index=i,
+                        input_hash=input_hash,
+                        loop_signal=loop_signal,
+                        context_store=context_store,
+                        results=results,
+                        completed_nodes=completed_nodes,
+                        progress_callback=progress_callback,
+                    )
+                    if handled:
+                        last_stable_index = max(last_stable_index, atom_index)
+                        loop_detector.mark_stable(atom_index if handled else last_stable_index)
+                        atom_index += 1
+                        continue
+                    break
 
                 input_changed = WorkstreamValidator.runtime_validate(
                     atom,
                     completed_nodes,
-                    normalized_input=normalized_input,
+                    normalized_input=input_hash,
                     previous_inputs=last_inputs,
                     force_execution=force_execution,
                 )
 
-                cached_output = None if force_execution else context_store.should_short_circuit(atom_id, normalized_input)
+                cached_output = None if force_execution else context_store.should_short_circuit(atom_id, input_hash)
                 memoized_result = None if force_execution or idempotency == "effectful" else self.memoizer.get(atom_identity)
 
                 if cached_output is not None:
@@ -388,7 +424,9 @@ class StreamOrchestrator:
                         "skip_reason": "input_unchanged",
                     })
                     completed_nodes.add(atom_id)
-                    context_store.record_input_seen(atom_id, normalized_input)
+                    context_store.record_input_seen(atom_id, input_hash)
+                    loop_detector.mark_stable(atom_index)
+                    atom_index += 1
                     continue
 
                 if memoized_result is not None:
@@ -405,7 +443,9 @@ class StreamOrchestrator:
                         "skip_reason": "memoized",
                     })
                     completed_nodes.add(atom_id)
-                    context_store.record_input_seen(atom_id, normalized_input)
+                    context_store.record_input_seen(atom_id, input_hash)
+                    loop_detector.mark_stable(atom_index)
+                    atom_index += 1
                     continue
 
                 if not input_changed and cached_output is None and memoized_result is None:
@@ -421,8 +461,10 @@ class StreamOrchestrator:
                         "skipped": True,
                         "skip_reason": "unchanged_input",
                     })
-                    context_store.record_input_seen(atom_id, normalized_input)
+                    context_store.record_input_seen(atom_id, input_hash)
                     completed_nodes.add(atom_id)
+                    loop_detector.mark_stable(atom_index)
+                    atom_index += 1
                     continue
 
                 # Execute 3-step pattern
@@ -473,6 +515,7 @@ class StreamOrchestrator:
                 )
 
                 if atom_result.get("success"):
+                    output_hash = normalize_output(atom_result)
                     results["completed_atoms"] += 1
                     results["atoms_executed"].append({
                         "atom_id": atom_id,
@@ -484,7 +527,7 @@ class StreamOrchestrator:
                     })
 
                     try:
-                        context_store.register_execution(atom_id, normalized_input, atom_result)
+                        context_store.register_execution(atom_id, input_hash, atom_result)
                     except DedupeBudgetExceeded as exc:
                         logger.error(str(exc))
                         results["failed_atoms"] += 1
@@ -498,6 +541,17 @@ class StreamOrchestrator:
                     if idempotency != "effectful" and not force_execution:
                         self.memoizer.set(atom_identity, atom_result)
                     completed_nodes.add(atom_id)
+                    last_stable_index = atom_index
+                    loop_detector.mark_stable(atom_index)
+                    loop_detector.note_result(
+                        atom_id=atom_id,
+                        input_hash=input_hash,
+                        output_hash=output_hash,
+                        success=True,
+                        error=None,
+                        completed_nodes=completed_nodes,
+                        stable_index=atom_index,
+                    )
 
                     # Store result
                     if self.storage:
@@ -530,12 +584,32 @@ class StreamOrchestrator:
                         "error": error_msg,
                         "insight": atom_result.get("insight")
                     })
-                    
+
                     logger.error(f"❌ Atom {i}/{total_atoms} failed: {error_msg}")
-                    
+
                     # Decide whether to continue or stop
                     # For now, stop on first error
                     logger.error("⚠️ Stopping sequence execution due to error")
+                    signal = loop_detector.note_result(
+                        atom_id=atom_id,
+                        input_hash=input_hash,
+                        output_hash=None,
+                        success=False,
+                        error=error_msg,
+                        completed_nodes=completed_nodes,
+                        stable_index=last_stable_index,
+                    )
+                    if signal.detected:
+                        await self._handle_loop_detection(
+                            atom=atom,
+                            atom_index=i,
+                            input_hash=input_hash,
+                            loop_signal=signal,
+                            context_store=context_store,
+                            results=results,
+                            completed_nodes=completed_nodes,
+                            progress_callback=progress_callback,
+                        )
                     break
                 
             except Exception as e:
@@ -547,6 +621,8 @@ class StreamOrchestrator:
                     "error": str(e)
                 })
                 break
+
+            atom_index += 1
         
         results["end_time"] = datetime.now().isoformat()
         
@@ -568,11 +644,75 @@ class StreamOrchestrator:
             "retries": telemetry.retries,
             "duplicates": telemetry.duplicates,
             "circuit_trips": telemetry.circuit_trips,
+            "loops": telemetry.loops,
             "dedupe_budget": dedupe_budget,
         }
 
         await self._append_workflow_insight(sequence, results)
         return results
+
+    async def _handle_loop_detection(
+        self,
+        *,
+        atom: Dict[str, Any],
+        atom_index: int,
+        input_hash: str,
+        loop_signal: LoopSignal,
+        context_store: WorkstreamContextStore,
+        results: Dict[str, Any],
+        completed_nodes: Set[str],
+        progress_callback: Optional[Callable],
+    ) -> bool:
+        atom_id = atom.get("atom_id", "unknown")
+        logger.warning(
+            "🌀 Loop detected on atom %s (step %s): %s | details=%s",
+            atom_id,
+            atom_index,
+            loop_signal.reason,
+            loop_signal.details,
+        )
+
+        await self._emit_progress(
+            progress_callback,
+            {
+                "type": "loop_detected",
+                "atom_id": atom_id,
+                "step": atom_index,
+                "reason": loop_signal.reason,
+                "details": loop_signal.details,
+            },
+        )
+
+        snapshot = context_store.latest_snapshot(atom_id)
+        stable_output = snapshot.get("output") if snapshot else None
+        if stable_output is not None:
+            results["completed_atoms"] += 1
+            results["atoms_executed"].append(
+                {
+                    "atom_id": atom_id,
+                    "step": atom_index,
+                    "success": True,
+                    "duration": stable_output.get("duration", 0),
+                    "insight": stable_output.get("insight"),
+                    "skipped": True,
+                    "skip_reason": f"loop_rewind:{loop_signal.reason}",
+                    "loop_details": loop_signal.details,
+                }
+            )
+            completed_nodes.add(atom_id)
+            context_store.record_input_seen(atom_id, input_hash)
+            return True
+
+        results["failed_atoms"] += 1
+        results["errors"].append(
+            {
+                "atom_id": atom_id,
+                "step": atom_index,
+                "error": f"loop_detected:{loop_signal.reason}",
+                "details": loop_signal.details,
+            }
+        )
+        return False
     
     async def _execute_atom_3_steps(
         self,

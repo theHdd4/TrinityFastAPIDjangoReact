@@ -43,6 +43,7 @@ class WorkstreamTelemetry:
     retries: List[Dict[str, Any]] = field(default_factory=list)
     duplicates: List[Dict[str, Any]] = field(default_factory=list)
     circuit_trips: int = 0
+    loops: List[Dict[str, Any]] = field(default_factory=list)
 
     def record_retry(self, atom_identity: AtomIdentity, attempt: int, reason: str) -> None:
         self.retries.append(
@@ -65,6 +66,14 @@ class WorkstreamTelemetry:
 
     def record_circuit_breaker_trip(self) -> None:
         self.circuit_trips += 1
+
+    def record_loop(self, *, atom_id: str, input_hash: str, reason: str, details: Optional[Dict[str, Any]] = None) -> None:
+        self.loops.append({
+            "atom": atom_id,
+            "input_hash": input_hash,
+            "reason": reason,
+            "details": details or {},
+        })
 
 
 @dataclass
@@ -96,6 +105,12 @@ def normalize_input(payload: Any, volatile_fields: Optional[Iterable[str]] = Non
     scrubbed = _scrub(payload)
     serialized = _sorted_json_dumps(scrubbed)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def normalize_output(payload: Any) -> str:
+    """Normalize outputs for hashing."""
+
+    return hashlib.sha256(_sorted_json_dumps(payload).encode("utf-8")).hexdigest()
 
 
 class AtomMemoizer:
@@ -242,6 +257,160 @@ class WorkstreamContextStore:
         if self.telemetry:
             self.telemetry.record_duplicate(atom_id, input_hash, "unchanged_input")
 
+    def latest_snapshot(self, atom_id: str) -> Optional[Dict[str, Any]]:
+        entries = self.snapshots.get(atom_id, [])
+        return entries[-1] if entries else None
+
+    def upstream_snapshot_id(self, deps: Iterable[str]) -> str:
+        """Generate a stable identifier for upstream state."""
+
+        combined = "|".join(sorted(f"{dep}:{self.last_inputs.get(dep, 'none')}" for dep in deps)) or "root"
+        return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class LoopSignal:
+    detected: bool
+    reason: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+    stable_checkpoint: Optional[int] = None
+
+
+class WorkstreamLoopDetector:
+    """Detects looping behavior in workstreams and recommends rewind points."""
+
+    def __init__(
+        self,
+        *,
+        input_repeat_threshold: int = 3,
+        error_repeat_threshold: int = 3,
+        stall_threshold: int = 5,
+        ratio_threshold: float = 3.0,
+        window_seconds: float = 45.0,
+        per_node_time_budget: float = 60.0,
+        telemetry: Optional[WorkstreamTelemetry] = None,
+    ) -> None:
+        self.input_repeat_threshold = input_repeat_threshold
+        self.error_repeat_threshold = error_repeat_threshold
+        self.stall_threshold = stall_threshold
+        self.ratio_threshold = ratio_threshold
+        self.window_seconds = window_seconds
+        self.per_node_time_budget = per_node_time_budget
+        self.telemetry = telemetry
+
+        self.input_counts: Dict[Tuple[str, str], int] = {}
+        self.last_completed_counts: Dict[Tuple[str, str], int] = {}
+        self.input_first_seen: Dict[Tuple[str, str], float] = {}
+        self.error_counts: Dict[Tuple[str, str, str], int] = {}
+        self.output_hashes: Dict[Tuple[str, str], Set[str]] = {}
+        self.attempt_timestamps: List[Tuple[float, str]] = []
+        self.node_visit_log: List[Tuple[float, str]] = []
+        self.executed_atoms_count = 0
+        self.unique_nodes_visited: Set[str] = set()
+        self.attempts_since_progress = 0
+        self.last_progress_time = time.time()
+        self.last_stable_index: int = -1
+
+    def note_attempt(self, *, atom_id: str, input_hash: str, completed_nodes: Set[str], stable_index: int) -> LoopSignal:
+        now = time.time()
+        key = (atom_id, input_hash)
+        self.executed_atoms_count += 1
+        self.input_counts[key] = self.input_counts.get(key, 0) + 1
+        self.input_first_seen.setdefault(key, now)
+        self.last_completed_counts.setdefault(key, len(completed_nodes))
+        self.attempt_timestamps.append((now, atom_id))
+        self._trim_windows(now)
+        self.last_stable_index = max(self.last_stable_index, stable_index)
+
+        if self.input_counts[key] > self.input_repeat_threshold and self.last_completed_counts.get(key, 0) == len(completed_nodes):
+            return self._signal("repeated_identical_input", atom_id, input_hash, {"count": self.input_counts[key]})
+
+        ratio_signal = self._check_ratio(now)
+        if ratio_signal:
+            return self._signal("execution_to_unique_ratio", atom_id, input_hash, ratio_signal)
+
+        if self.attempts_since_progress >= self.stall_threshold:
+            return self._signal("dag_stall", atom_id, input_hash, {"attempts_since_progress": self.attempts_since_progress})
+
+        return LoopSignal(detected=False)
+
+    def note_result(
+        self,
+        *,
+        atom_id: str,
+        input_hash: str,
+        output_hash: Optional[str],
+        success: bool,
+        error: Optional[str],
+        completed_nodes: Set[str],
+        stable_index: int,
+    ) -> LoopSignal:
+        now = time.time()
+        key = (atom_id, input_hash)
+        prev_completed = self.last_completed_counts.get(key, 0)
+        self.last_stable_index = max(self.last_stable_index, stable_index)
+
+        if output_hash:
+            outputs = self.output_hashes.setdefault(key, set())
+            outputs.add(output_hash)
+
+        if success and len(completed_nodes) > len(self.unique_nodes_visited):
+            self.unique_nodes_visited = set(completed_nodes)
+            self.attempts_since_progress = 0
+            self.last_progress_time = now
+            self.node_visit_log.append((now, atom_id))
+            self.last_completed_counts[key] = len(completed_nodes)
+        else:
+            self.attempts_since_progress += 1
+
+        if error:
+            error_key = (atom_id, input_hash, error)
+            self.error_counts[error_key] = self.error_counts.get(error_key, 0) + 1
+            if self.error_counts[error_key] > self.error_repeat_threshold:
+                return self._signal("repeated_error", atom_id, input_hash, {"error": error, "count": self.error_counts[error_key]})
+
+        if output_hash:
+            first_seen = self.input_first_seen.get(key, now)
+            if (now - first_seen) > self.per_node_time_budget and len(self.output_hashes.get(key, set())) == 1:
+                return self._signal(
+                    "time_budget_exceeded",
+                    atom_id,
+                    input_hash,
+                    {"elapsed": now - first_seen, "output_hash": output_hash},
+                )
+
+        if not success and len(completed_nodes) == prev_completed and (now - self.last_progress_time) > self.per_node_time_budget:
+            return self._signal("no_progress_time_budget", atom_id, input_hash, {"elapsed": now - self.last_progress_time})
+
+        return LoopSignal(detected=False)
+
+    def mark_stable(self, index: int) -> None:
+        self.last_stable_index = max(self.last_stable_index, index)
+
+    def _trim_windows(self, now: float) -> None:
+        window_start = now - self.window_seconds
+        self.attempt_timestamps = [(t, a) for t, a in self.attempt_timestamps if t >= window_start]
+        self.node_visit_log = [(t, a) for t, a in self.node_visit_log if t >= window_start]
+
+    def _check_ratio(self, now: float) -> Optional[Dict[str, Any]]:
+        self._trim_windows(now)
+        attempts = len(self.attempt_timestamps)
+        unique = len({a for _, a in self.node_visit_log}) or 1
+        ratio = attempts / unique
+        if ratio > self.ratio_threshold:
+            return {"ratio": ratio, "attempts": attempts, "unique_nodes": unique}
+        return None
+
+    def _signal(self, reason: str, atom_id: str, input_hash: str, details: Dict[str, Any]) -> LoopSignal:
+        if self.telemetry:
+            self.telemetry.record_loop(atom_id=atom_id, input_hash=input_hash, reason=reason, details=details)
+        return LoopSignal(
+            detected=True,
+            reason=reason,
+            details=details,
+            stable_checkpoint=self.last_stable_index,
+        )
+
 
 class WorkstreamValidator:
     """Static and runtime validators for workstream DAGs."""
@@ -314,10 +483,13 @@ __all__ = [
     "AtomExecutionPolicy",
     "CircuitBreaker",
     "DedupeBudgetExceeded",
+    "LoopSignal",
     "RetryPolicy",
+    "WorkstreamLoopDetector",
     "WorkstreamContextStore",
     "WorkstreamTelemetry",
     "WorkstreamValidationError",
     "WorkstreamValidator",
     "normalize_input",
+    "normalize_output",
 ]
