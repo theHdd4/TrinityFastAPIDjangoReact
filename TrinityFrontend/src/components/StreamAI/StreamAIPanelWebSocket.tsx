@@ -18,6 +18,7 @@ import {
 } from '@/types/streaming';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
+import { detectCommand, CommandContext } from '../TrinityAI/handlers/commandHandler';
 import StreamWorkflowPreview from './StreamWorkflowPreview';
 import StreamStepMonitor from './StreamStepMonitor';
 import StreamStepApproval from './StreamStepApproval';
@@ -191,7 +192,27 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const [isInitialized, setIsInitialized] = useState(false);
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [activeCommand, setActiveCommand] = useState<{ name: string; color: string } | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false); // For collapsible chat history in horizontal mode
+  
+  // Detect commands as user types for visual indicator
+  useEffect(() => {
+    if (!inputValue.trim()) {
+      setActiveCommand(null);
+      return;
+    }
+    
+    const commandResult = detectCommand(inputValue);
+    
+    if (commandResult.isCommand && commandResult.indicatorColor) {
+      setActiveCommand({
+        name: commandResult.commandName || '',
+        color: commandResult.indicatorColor
+      });
+    } else {
+      setActiveCommand(null);
+    }
+  }, [inputValue]);
   const [selectedAgent, setSelectedAgent] = useState('Default'); // For agent selection dropdown
   const [panelWidth, setPanelWidth] = useState(320); // Default 320px (w-80) - reduced from 384px
   const [panelHeight, setPanelHeight] = useState(500); // Default height for horizontal mode
@@ -1526,6 +1547,91 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     // Store input value immediately to prevent loss
     const messageContent = inputValue.trim();
     
+    // Check for commands BEFORE WebSocket - commands bypass workflow orchestration
+    const commandResult = detectCommand(messageContent);
+    
+    if (commandResult.isCommand && commandResult.handler) {
+      console.log('🎯 COMMAND DETECTED - Bypassing WebSocket, calling agent directly:', commandResult.commandName);
+      
+      // Handle command - DON'T use WebSocket orchestration, call agent directly
+      const userMessage: Message = {
+        id: `user-${Date.now()}`,
+        content: messageContent,
+        sender: 'user',
+        timestamp: new Date()
+      };
+      
+      setMessages(prev => [...prev, userMessage]);
+      setInputValue('');
+      setIsLoading(true);
+      setActiveCommand(null); // Reset command indicator
+      
+      // Ensure no WebSocket connection is established for commands
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        console.log('🔌 Closing existing WebSocket - command detected, using direct agent call');
+        wsConnection.close();
+        setWsConnection(null);
+      }
+      
+      // Find current card ID for metric operations
+      const cards = useLaboratoryStore.getState().cards;
+      const currentCardId = cards.length > 0 ? cards[0].id : undefined;
+      
+      const commandContext: CommandContext = {
+        cardId: currentCardId,
+        setMessages: (updater) => {
+          console.log('📤 Command context setMessages called');
+          setMessages(prev => {
+            // Handler expects setMessages to work like React state setter
+            // updater receives prev and returns new array
+            const updated = updater(prev);
+            console.log('📤 setMessages updater returned:', updated?.length, 'messages');
+            // Ensure we return an array
+            if (!Array.isArray(updated)) {
+              console.warn('⚠️ setMessages updater did not return an array:', updated);
+              return Array.isArray(prev) ? prev : [];
+            }
+            return updated;
+          });
+        },
+        onAddAtom: (cardId, atomName) => {
+          // Find the card and add atom
+          const card = cards.find(c => c.id === cardId);
+          if (card) {
+            // Add atom logic would go here if needed
+            console.log(`Adding ${atomName} atom to card ${cardId}`);
+          }
+        }
+      };
+      
+      try {
+        console.log('📞 Calling command handler directly (no WebSocket):', commandResult.commandName);
+        await commandResult.handler(commandResult.commandArgs || '', commandContext);
+        console.log('✅ Command handler completed successfully');
+      } catch (error) {
+        console.error('❌ Error executing command:', error);
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          content: `Error executing command: ${(error as Error).message}`,
+          sender: 'ai',
+          timestamp: new Date()
+        }]);
+      }
+      
+      setIsLoading(false);
+      console.log('🛑 Command processing complete - WebSocket was NOT used');
+      return; // CRITICAL: Return early to prevent WebSocket connection
+    }
+    
+    console.log('📡 No command detected - proceeding with WebSocket orchestration');
+    
+    // CRITICAL: Close any existing WebSocket before creating new one
+    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      console.log('🔌 Closing existing WebSocket before new prompt');
+      wsConnection.close();
+      setWsConnection(null);
+    }
+    
     // Reset workflow tracking for new prompt
     setCurrentWorkflowMessageId(null);
 
@@ -1549,6 +1655,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     // CRITICAL: Clear input immediately to prevent double-sending
     setInputValue('');
+    setActiveCommand(null); // Reset command indicator
     
     // CRITICAL: Persist user message to memory IMMEDIATELY before WebSocket connection
     // This ensures the message is never lost even if connection fails
@@ -4388,6 +4495,14 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         
         <div className="flex items-end gap-3">
           <div className="relative flex-1">
+            {activeCommand && (
+              <div 
+                className="absolute top-2 left-3 z-10 px-2 py-1 rounded-md text-xs font-semibold text-white shadow-md"
+                style={{ backgroundColor: activeCommand.color }}
+              >
+                {activeCommand.name}
+              </div>
+            )}
             <Textarea
               ref={textareaRef}
               value={inputValue}
@@ -4398,13 +4513,24 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                   handleSendMessage();
                 }
               }}
-              placeholder="Type your message..."
-              className="min-h-[48px] max-h-[200px] bg-white backdrop-blur-sm border-2 border-gray-200 hover:border-gray-300 focus:border-[#50C878] focus-visible:ring-2 focus-visible:ring-[#50C878]/20 rounded-2xl px-4 py-3 font-medium transition-all duration-200 shadow-sm placeholder:text-gray-500/60 font-inter resize-none overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
+              placeholder="Type your message... (or /metricop for metric operations)"
+              className={`min-h-[48px] max-h-[200px] bg-white backdrop-blur-sm border-2 rounded-2xl px-4 py-3 font-medium transition-all duration-200 shadow-sm placeholder:text-gray-500/60 font-inter resize-none overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400 ${
+                activeCommand 
+                  ? 'focus-visible:ring-2 focus-visible:ring-opacity-30' 
+                  : 'border-gray-200 hover:border-gray-300 focus:border-[#50C878] focus-visible:ring-2 focus-visible:ring-[#50C878]/20'
+              }`}
               style={{ 
                 fontSize: '14px',
                 scrollbarWidth: 'thin',
-                scrollbarColor: '#d1d5db transparent'
-              }}
+                scrollbarColor: '#d1d5db transparent',
+                borderColor: activeCommand ? activeCommand.color : undefined,
+                borderWidth: activeCommand ? '2px' : undefined,
+                paddingTop: activeCommand ? '2.5rem' : undefined,
+                boxShadow: activeCommand ? `0 0 0 3px ${activeCommand.color}40, 0 0 0 1px ${activeCommand.color}` : undefined,
+                ...(activeCommand ? {
+                  '--tw-ring-color': `${activeCommand.color}40`
+                } : {})
+              } as React.CSSProperties}
               disabled={isLoading || isPaused}
               rows={1}
             />
