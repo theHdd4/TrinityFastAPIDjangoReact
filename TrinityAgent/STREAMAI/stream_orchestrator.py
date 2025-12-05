@@ -91,6 +91,30 @@ except ImportError as e:
         RESULT_STORAGE_AVAILABLE = False
         logger.warning(f"⚠️ ResultStorage not available: {e} | {e2}")
 
+# Workstream DAG planner and runtime safety layers
+try:
+    from .workstream_planner import WorkstreamPlanner, WorkstreamValidationError
+    from .workstream_runtime import (
+        AtomExecutionPolicy,
+        AtomIdentity,
+        AtomMemoizer,
+        DedupeBudgetExceeded,
+        WorkstreamContextStore,
+        WorkstreamValidator,
+        normalize_input,
+    )
+except ImportError:
+    from STREAMAI.workstream_planner import WorkstreamPlanner, WorkstreamValidationError
+    from STREAMAI.workstream_runtime import (
+        AtomExecutionPolicy,
+        AtomIdentity,
+        AtomMemoizer,
+        DedupeBudgetExceeded,
+        WorkstreamContextStore,
+        WorkstreamValidator,
+        normalize_input,
+    )
+
 
 class StreamOrchestrator:
     """
@@ -131,6 +155,11 @@ class StreamOrchestrator:
                 logger.info("✅ Result storage initialized")
             except Exception as e:
                 logger.warning(f"⚠️ Could not initialize result storage: {e}")
+
+        # Workstream planning/runtime controls
+        self.planner = WorkstreamPlanner()
+        self.memoizer = AtomMemoizer()
+        self.execution_policy = AtomExecutionPolicy()
 
         # In-memory clarification tracking for human-in-the-loop pauses
         self._clarification_waiters: Dict[str, asyncio.Future] = {}
@@ -240,6 +269,41 @@ class StreamOrchestrator:
             "app_name": app_name,
             "project_name": project_name
         }
+
+        # Instantiate workstream planner if an intent is provided
+        atoms: List[Dict[str, Any]] = []
+        if sequence.get("intent"):
+            try:
+                planned = self.planner.plan(sequence["intent"], sequence.get("request_context", {}))
+                atoms = planned.get("sequence", [])
+                sequence["total_atoms"] = planned.get("total_atoms", len(atoms))
+            except WorkstreamValidationError as exc:
+                logger.error("Workstream planning failed: %s", exc)
+                return {
+                    "session_id": session_id,
+                    "total_atoms": 0,
+                    "completed_atoms": 0,
+                    "failed_atoms": 1,
+                    "errors": [str(exc)],
+                }
+
+        if not atoms:
+            atoms = sequence.get("sequence", [])
+
+        # Validate DAG and reorder to topological order
+        try:
+            topo_order = WorkstreamValidator.validate_dag(atoms)
+            atom_lookup = {atom.get("atom_id"): atom for atom in atoms}
+            atoms = [atom_lookup[node_id] for node_id in topo_order]
+        except WorkstreamValidationError as exc:
+            logger.error("Invalid workstream DAG: %s", exc)
+            return {
+                "session_id": session_id,
+                "total_atoms": len(atoms),
+                "completed_atoms": 0,
+                "failed_atoms": 1,
+                "errors": [str(exc)],
+            }
         
         # Create session in storage
         if self.storage:
@@ -247,9 +311,15 @@ class StreamOrchestrator:
 
         # Refresh file context for this run with context (gets maximum file info)
         self._refresh_file_context(client_name, app_name, project_name)
-        
-        atoms = sequence.get("sequence", [])
+
         total_atoms = len(atoms)
+        sequence["sequence"] = atoms
+        sequence["total_atoms"] = total_atoms
+
+        # Workstream runtime context
+        dedupe_budget = int(sequence.get("dedupe_budget", 5))
+        context_store = WorkstreamContextStore(dedupe_budget=dedupe_budget)
+        completed_nodes = set()
 
         # Mode flag (laboratory vs workflow) defaults to laboratory for HITL
         mode = (sequence.get("mode") or "laboratory").lower()
@@ -271,7 +341,7 @@ class StreamOrchestrator:
             logger.info(f"\n{'='*80}")
             logger.info(f"📍 Executing Atom {i}/{total_atoms}: {atom_id}")
             logger.info(f"{'='*80}")
-            
+
             # Update progress
             await self._emit_progress(progress_callback, {
                 "type": "atom_start",
@@ -280,8 +350,51 @@ class StreamOrchestrator:
                 "atom_id": atom_id,
                 "purpose": atom.get("purpose", "")
             })
-            
+
             try:
+                WorkstreamValidator.runtime_validate(atom, completed_nodes)
+
+                idempotency = atom.get("idempotency", "pure")
+                atom_version = atom.get("version", "v1")
+                normalized_input = normalize_input({"atom": atom, "context": self._current_context})
+                atom_identity = AtomIdentity(atom_id, normalized_input, atom_version)
+                force_execution = bool(atom.get("force"))
+
+                cached_output = None if force_execution else context_store.should_short_circuit(atom_id, normalized_input)
+                memoized_result = None if force_execution or idempotency == "effectful" else self.memoizer.get(atom_identity)
+
+                if cached_output is not None:
+                    logger.info("🔁 Reusing cached snapshot for atom %s (input unchanged)", atom_id)
+                    results["completed_atoms"] += 1
+                    results["atoms_executed"].append({
+                        "atom_id": atom_id,
+                        "step": i,
+                        "success": True,
+                        "output_name": atom.get("output_name"),
+                        "duration": 0,
+                        "insight": cached_output.get("insight"),
+                        "skipped": True,
+                        "skip_reason": "input_unchanged",
+                    })
+                    completed_nodes.add(atom_id)
+                    continue
+
+                if memoized_result is not None:
+                    logger.info("🧠 Memoization hit for atom %s; skipping execution", atom_id)
+                    results["completed_atoms"] += 1
+                    results["atoms_executed"].append({
+                        "atom_id": atom_id,
+                        "step": i,
+                        "success": True,
+                        "output_name": atom.get("output_name"),
+                        "duration": memoized_result.get("duration", 0),
+                        "insight": memoized_result.get("insight"),
+                        "skipped": True,
+                        "skip_reason": "memoized",
+                    })
+                    completed_nodes.add(atom_id)
+                    continue
+
                 # Execute 3-step pattern
                 if mode != "workflow" and self.clarification_enabled and progress_callback:
                     clarification = self._detect_clarification_need(atom, atom_index=i)
@@ -323,9 +436,12 @@ class StreamOrchestrator:
                     session_id=session_id,
                     atom_index=i,
                     total_atoms=total_atoms,
-                    progress_callback=progress_callback
+                    progress_callback=progress_callback,
+                    atom_identity=atom_identity,
+                    idempotency=idempotency,
+                    force_execution=force_execution,
                 )
-                
+
                 if atom_result.get("success"):
                     results["completed_atoms"] += 1
                     results["atoms_executed"].append({
@@ -336,7 +452,16 @@ class StreamOrchestrator:
                         "duration": atom_result.get("duration", 0),
                         "insight": atom_result.get("insight")
                     })
-                    
+
+                    try:
+                        context_store.register_execution(atom_id, normalized_input, atom_result)
+                    except DedupeBudgetExceeded as exc:
+                        logger.warning(str(exc))
+
+                    if idempotency != "effectful" and not force_execution:
+                        self.memoizer.set(atom_identity, atom_result)
+                    completed_nodes.add(atom_id)
+
                     # Store result
                     if self.storage:
                         self.storage.store_result(
@@ -411,18 +536,24 @@ class StreamOrchestrator:
         session_id: str,
         atom_index: int,
         total_atoms: int,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        atom_identity: Optional[AtomIdentity] = None,
+        idempotency: str = "pure",
+        force_execution: bool = False,
     ) -> Dict[str, Any]:
         """
         Execute the 3-step pattern for a single atom.
-        
+
         Args:
             atom: Atom configuration
             session_id: Session identifier
             atom_index: Index of atom in sequence
             total_atoms: Total number of atoms
             progress_callback: Optional callback for progress updates
-            
+            atom_identity: Identity tuple used for memoization/telemetry
+            idempotency: Declared idempotency profile
+            force_execution: When True, bypass memoization and cache reuse
+
         Returns:
             Execution result dict
         """
@@ -503,7 +634,17 @@ class StreamOrchestrator:
         logger.info(prompt)
         logger.info("🔍 ===== STREAM AI PROMPT (END) =====")
         
-        execute_result = await self._step3_execute_atom(atom, prompt)
+        atom_identity = atom_identity or AtomIdentity(atom.get("atom_id", "unknown"), "", atom.get("version", "v1"))
+
+        async def _execute_payload():
+            return await self._step3_execute_atom(atom, prompt)
+
+        execute_result = await self.execution_policy.run(
+            _execute_payload,
+            atom_identity=atom_identity,
+            idempotency=idempotency,
+            force=force_execution,
+        )
         insight_text = await self._generate_step_insight(
             atom=atom,
             atom_index=atom_index,
