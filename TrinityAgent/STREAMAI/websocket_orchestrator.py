@@ -770,32 +770,7 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
    - **DO NOT USE**: If you already created the same transform (use the output file instead)
    - **REQUIRED IN PROMPT**: Specify the file and transformation logic
 
-7. **metric-operations** - Metric Operations Engine
-   - **CAN DO**: Predefined transformations for creating new columns, applying arithmetic, conditional logic, aggregations, normalization, filtering, and advanced derived metrics
-   - **USE WHEN**: User wants to create calculated metrics, apply arithmetic operations, conditional logic, aggregations within groups, normalize data, filter by metrics, or derive advanced business KPIs
-   - **REQUIRES**: One input file with columns to transform
-   - **OUTPUT**: Creates a new file with metric columns added
-   - **KEYWORDS**: metric operation, calculate metric, arithmetic, conditional, aggregate, normalize, filter, derived metric, ratio, percentage, rank, percentile, contribution, growth rate
-   - **OPERATION CATEGORIES**:
-     * Arithmetic: add, subtract, multiply, divide columns or values
-     * Conditional: if-else logic, case-when statements, conditional column creation
-     * Aggregation: sum/mean/std over groups, count/min/max within groups
-     * String: concatenate, split, extract, format string columns
-     * Date: extract date parts, calculate date differences, normalize dates
-     * Derived Metrics: ratios, percentages, ranks, percentiles, contributions, growth rates
-     * Normalization: min-max scaling, z-score standardization, unit conversions
-     * Filtering: filter top N per group, filter by percentile, conditional filtering
-   - **EXAMPLE**: 
-     * "Use metric-operations to create profit column by subtracting cost from revenue"
-     * "Apply metric-operations to calculate average sales per region"
-     * "Use metric-operations to normalize price columns to 0-1 range"
-     * "Apply metric-operations to filter top 10 products by sales per category"
-     * "Use metric-operations to calculate percentage contribution of each region to total sales"
-   - **DO NOT USE**: If you already created the same metric operation (use the output file instead)
-   - **REQUIRED IN PROMPT**: Specify the file, operation type/category, required columns, and operation parameters
-   - **API ENDPOINTS**: POST /api/createcolumn/perform, POST /api/createcolumn/save, GET /api/createcolumn/results
-
-8. **chart-maker** - Create Visualizations
+7. **chart-maker** - Create Visualizations
    - **CAN DO**: Generates charts and visualizations (bar, line, pie, scatter, etc.)
    - **USE WHEN**: User wants to visualize, plot, chart, or show data graphically
    - **REQUIRES**: One input file with data to visualize
@@ -856,7 +831,7 @@ CRITICAL RULES FOR ATOM SELECTION:
 WORKFLOW PLANNING:
 - **Order**: Load → Transform → Merge/Concat → Group/Aggregate → Visualize
 - **Data loading**: Use data-upload-validate FIRST only if files don't exist
-- **Transformations**: Use dataframe-operations, create-column, create-transform, metric-operations for data preparation
+- **Transformations**: Use dataframe-operations, create-column, create-transform for data preparation
 - **Combining data**: Use merge or concat to combine datasets
 - **Summarization**: Use groupby-wtg-avg for aggregations
 - **Visualization**: **MANDATORY** - Use chart-maker at least once (usually at the end) to show results
@@ -4083,7 +4058,7 @@ WORKFLOW PLANNING:
             return result.get("merge_json", {}).get("result_file") or result.get("saved_path")
         if atom_id == "concat" and isinstance(result.get("concat_json"), dict):
             return result.get("concat_json", {}).get("result_file") or result.get("saved_path")
-        if atom_id in {"create-column", "create-transform", "metric-operations", "groupby-wtg-avg", "dataframe-operations"}:
+        if atom_id in {"create-column", "create-transform", "groupby-wtg-avg", "dataframe-operations"}:
             return result.get("output_file") or result.get("saved_path")
 
         return result.get("output_file") or result.get("saved_path")
