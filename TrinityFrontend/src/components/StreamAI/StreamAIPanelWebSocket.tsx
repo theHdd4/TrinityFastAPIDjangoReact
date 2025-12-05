@@ -2566,6 +2566,59 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
           }
 
+          case 'atom_retry': {
+            const stepNumber = data.step ?? data.step_number ?? '?';
+            const attempt = data.attempt ?? 1;
+            const maxAttempts = data.max_attempts ?? data.maxAttempts ?? attempt;
+            const atomId = data.atom_id || 'atom';
+            const reason = data.reason ? ` – ${data.reason}` : '';
+            const progressUpdate = `\n\n🔁 Retrying step ${stepNumber} (${atomId}) attempt ${attempt}/${maxAttempts}${reason}`;
+
+            console.log('🔁 Atom retry scheduled:', {
+              atomId,
+              attempt,
+              maxAttempts,
+              sequenceId: data.sequence_id,
+              stepNumber,
+              reason: data.reason,
+            });
+
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: 'retrying',
+                  atom_id: atomId,
+                  description: `Retry ${attempt}/${maxAttempts}${reason}`.trim(),
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
           case 'react_loop_detected': {
             console.warn('♻️ ReAct loop detected:', data);
             const stepNumber = data.step_number ?? data.step ?? '?';
