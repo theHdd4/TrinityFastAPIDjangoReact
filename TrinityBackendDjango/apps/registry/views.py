@@ -197,6 +197,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         - "tenant": Returns all tenant projects (existing behavior)
         - "user": Returns projects where owner=user OR user appears in ProjectModificationHistory
     - limit: Limit the number of results without pagination
+    - offset: Number of records to skip before returning results (for pagination)
     - ordering: Sort order (e.g., "-updated_at", "name", "created_at")
     - app: Filter by app ID or slug
     
@@ -280,14 +281,15 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         """
-        Override list method to handle limit parameter for recent projects.
-        When limit is provided, return limited results without pagination.
+        Override list method to handle limit and offset parameters for pagination.
+        When limit or offset is provided, return paginated results without standard pagination.
         
         Query Parameters:
         - scope: Filter projects by scope
             - "tenant" (default): Returns all tenant projects
             - "user": Returns projects where owner=user OR user appears in ProjectModificationHistory
         - limit: Limit the number of results (no pagination when provided)
+        - offset: Number of records to skip before returning results (default: 0)
         - ordering: Sort order (e.g., "-updated_at", "name")
         - app: Filter by app ID or slug
         """
@@ -315,19 +317,39 @@ class ProjectViewSet(viewsets.ModelViewSet):
             projects_list = list(queryset.values('id', 'name', 'owner__username', 'app__slug', 'updated_at')[:10])
             logger.info(f"📊 Sample projects (first 10): {projects_list}")
         
-        # Handle limit parameter (for limiting results without pagination)
+        # Handle limit and offset parameters (for pagination)
         limit_param = request.query_params.get("limit")
-        if limit_param:
+        offset_param = request.query_params.get("offset")
+
+        if limit_param or offset_param:
             try:
-                limit = int(limit_param)
-                if limit > 0:
-                    # Apply limit by slicing the queryset (evaluates to list)
-                    limited_queryset = list(queryset[:limit])
-                    serializer = self.get_serializer(limited_queryset, many=True)
-                    logger.info(f"✅ Returning {len(limited_queryset)} projects (limited to {limit})")
-                    return Response(serializer.data)
+                limit = int(limit_param) if limit_param else None
+                offset = int(offset_param) if offset_param else 0
+                
+                # Validate values
+                if limit is not None and limit <= 0:
+                    limit = None
+                if offset < 0:
+                    offset = 0
+                
+                # Apply pagination
+                if limit is not None:
+                    # Both limit and offset provided
+                    paginated_queryset = list(queryset[offset:offset+limit])
+                    logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, limit={limit})")
+                elif offset > 0:
+                    # Only offset provided (no limit)
+                    paginated_queryset = list(queryset[offset:])
+                    logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, no limit)")
+                else:
+                    # Only limit provided (no offset)
+                    paginated_queryset = list(queryset[:limit])
+                    logger.info(f"✅ Returning {len(paginated_queryset)} projects (limit={limit})")
+                
+                serializer = self.get_serializer(paginated_queryset, many=True)
+                return Response(serializer.data)
             except (ValueError, TypeError):
-                # Invalid limit parameter, ignore it and continue with normal pagination
+                # Invalid parameter, ignore it and continue with normal pagination
                 pass
         
         # Normal pagination flow when no limit is provided
