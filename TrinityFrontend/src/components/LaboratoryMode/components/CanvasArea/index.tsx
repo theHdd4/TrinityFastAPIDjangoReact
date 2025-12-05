@@ -1,10 +1,24 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
-import { sanitizeLabConfig, persistLaboratoryConfig, getWorkflowMoleculesKey, getWorkflowSelectedAtomsKey, getWorkflowDataKey } from '@/utils/projectStorage';
+import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
+import {
+  Plus,
+  Grid3X3,
+  Trash2,
+  Settings,
+  ChevronDown,
+  Minus,
+  RefreshCcw,
+  Maximize2,
+  X,
+  HelpCircle,
+  HelpCircleIcon,
+  GripVertical,
+  Type,
+} from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -54,6 +68,8 @@ import {
   registerPrefillController,
   cancelPrefillController,
 } from '@/components/AtomList/atoms/column-classifier/prefillManager';
+import { TextBoxToolbar } from './text-box/TextBoxToolbar';
+import type { TextAlignOption, TextStylePreset } from './text-box/types';
 
 import {
   useLaboratoryStore,
@@ -61,25 +77,97 @@ import {
   DroppedAtom,
   CardVariable,
   DEFAULT_TEXTBOX_SETTINGS,
+  TextBoxConfig,
   createDefaultDataUploadSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  DASHBOARD_ALLOWED_ATOMS,
   DEFAULT_CHART_MAKER_SETTINGS,
   DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_DATA,
+  TextBoxSettings,
   DataUploadSettings,
   ColumnClassifierColumn,
   DEFAULT_EXPLORE_SETTINGS,
   DEFAULT_EXPLORE_DATA,
   DEFAULT_PIVOT_TABLE_SETTINGS,
   DEFAULT_UNPIVOT_SETTINGS,
-  DASHBOARD_ALLOWED_ATOMS,
-  LaboratorySubMode,
 } from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule, buildUnifiedRenderArray, UnifiedRenderItem } from './helpers';
 import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+
+const normalizeTextBoxPlaceholder = (value?: string) => (value ?? '').replace(/\s+/g, ' ').trim();
+
+const normalizeTextBoxValue = (value?: string) =>
+  normalizeTextBoxPlaceholder(
+    value
+      ?.replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<[^>]+>/g, ' '),
+  );
+
+const TEXTBOX_PLACEHOLDER = '';
+const TEXTBOX_PLACEHOLDER_NORMALIZED = '';
+const isPlaceholderContent = (value?: string) => normalizeTextBoxValue(value) === TEXTBOX_PLACEHOLDER_NORMALIZED;
+
+const normalizeTextBoxes = (card: any): TextBoxConfig[] => {
+  const incoming = card?.textBoxes ?? card?.text_boxes;
+  const parsed = Array.isArray(incoming) ? incoming : [];
+
+  if (parsed.length > 0) {
+    return parsed.map((box: any, index: number) => ({
+      id: box.id ?? `text-box-${index + 1}`,
+      title: box.title ?? `Text Box ${index + 1}`,
+      content: box.content ?? box.text ?? card?.textBoxContent ?? '',
+      html: box.html ?? card?.textBoxHtml ?? '',
+      settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? box) },
+    }));
+  }
+
+  if (card?.textBoxEnabled ?? card?.text_box_enabled) {
+    return [
+      {
+        id: 'text-box-1',
+        title: 'Text Box 1',
+        content: card?.textBoxContent ?? card?.text_box_content ?? '',
+        html: card?.textBoxHtml ?? card?.text_box_html ?? '',
+        settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(card?.textBoxSettings ?? card?.text_box_settings ?? {}) },
+      },
+    ];
+  }
+
+  return [];
+};
+
+type NormalizedTextBox = TextBoxConfig & { settings: TextBoxSettings };
+
+const normalizeCardTextBoxes = (card: LayoutCard): NormalizedTextBox[] => {
+  const baseTextBoxes = (Array.isArray(card.textBoxes) && card.textBoxes.length > 0
+    ? card.textBoxes
+    : normalizeTextBoxes(card)) as NormalizedTextBox[];
+
+  const ensuredTextBoxes = baseTextBoxes.length > 0
+    ? baseTextBoxes
+    : [
+        {
+          id: 'text-box-1',
+          title: 'Text Box 1',
+          content: card.textBoxContent ?? '',
+          html: card.textBoxHtml ?? '',
+          settings: { ...DEFAULT_TEXTBOX_SETTINGS },
+        },
+      ];
+
+  return ensuredTextBoxes.map((box, index) => ({
+    ...box,
+    id: box.id ?? `text-box-${index + 1}`,
+    title: box.title ?? `Text Box ${index + 1}`,
+    content: box.content ?? '',
+    html: box.html ?? '',
+    settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? {}) },
+  }));
+};
 
 
 interface CanvasAreaProps {
@@ -115,6 +203,7 @@ const LLM_MAP: Record<string, string> = {
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
   'explore': 'Agent Explore',
+  'correlation': 'Agent Correlation',
   'dataframe-operations': 'Agent DataFrame Operations',
   'pivot-table': 'Agent Pivot Table',
   'data-upload-validate': 'Agent Data Validation',
@@ -194,9 +283,8 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
 
   return rawCards.map((card: any) => ({
     id: card.id,
-    // CRITICAL FIX: Enforce one atom per card - keep only first atom
-    atoms: Array.isArray(card.atoms) && card.atoms.length > 0
-      ? [hydrateDroppedAtom(card.atoms[0])]
+    atoms: Array.isArray(card.atoms)
+      ? card.atoms.map((atom: any) => hydrateDroppedAtom(atom))
       : [],
     isExhibited: !!card.isExhibited,
     moleculeId: card.moleculeId,
@@ -205,33 +293,756 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
     beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
     variables: normalizeCardVariables(card.variables, card.id),
+    textBoxEnabled: card.textBoxEnabled ?? card.text_box_enabled ?? false,
+    textBoxContent: card.textBoxContent ?? card.text_box_content,
+    textBoxHtml: card.textBoxHtml ?? card.text_box_html,
+    textBoxSettings: card.textBoxSettings
+      ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings }
+      : card.text_box_settings
+      ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.text_box_settings }
+      : undefined,
+    textBoxes: normalizeTextBoxes(card),
   }));
 };
 
+interface CardTextBoxCanvasProps {
+  data: { text: string; html: string };
+  settings: TextBoxSettings;
+  onTextChange: (data: { text: string; html: string }) => void;
+  onSettingsChange: (updates: Partial<TextBoxSettings>) => void;
+  onDelete?: () => void;
+}
+
+const clampFontSize = (size: number) => Math.max(8, Math.min(500, size));
+
+/**
+ * Parse markdown to HTML with support for headers (###) and bold (**)
+ * Makes the content interactive and visually appealing
+ */
+const parseMarkdownToHtml = (text: string): string => {
+  if (!text) return '';
+  
+  // Split into lines to process headers properly
+  const lines = text.split(/\r?\n/);
+  const processedLines: string[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    
+    // Escape HTML to prevent XSS
+    line = line
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    
+    // Parse headers (### Header text) - must be at start of line
+    const headerMatch = line.match(/^(\s*)###\s+(.+)$/);
+    if (headerMatch) {
+      const [, indent, headerText] = headerMatch;
+      processedLines.push(`${indent}<h3 class="markdown-h3">${headerText.trim()}</h3>`);
+      continue;
+    }
+    
+    // Parse bold text (**text** or __text__) - handle multiple per line
+    // Process **text** first (before single * which could be italic)
+    line = line.replace(/\*\*([^*]+?)\*\*/g, '<strong class="markdown-bold">$1</strong>');
+    line = line.replace(/__([^_]+?)__/g, '<strong class="markdown-bold">$1</strong>');
+    
+    // Parse italic text (*text* or _text_) - only match single asterisks/underscores
+    // Use a pattern that avoids matching within bold markers
+    // Match *text* where * is not followed or preceded by another *
+    line = line.replace(/\*([^*\n]+?)\*/g, (match, content) => {
+      // Only replace if it's not part of a bold marker (already processed)
+      if (!match.includes('<strong')) {
+        return `<em class="markdown-italic">${content}</em>`;
+      }
+      return match;
+    });
+    
+    // Match _text_ where _ is not part of __
+    line = line.replace(/_([^_\n]+?)_/g, (match, content) => {
+      // Only replace if it's not part of a bold marker (already processed)
+      if (!match.includes('<strong')) {
+        return `<em class="markdown-italic">${content}</em>`;
+      }
+      return match;
+    });
+    
+    // Wrap line in div (empty lines get <br>)
+    if (line.trim() === '') {
+      processedLines.push('<div><br></div>');
+    } else {
+      processedLines.push(`<div>${line}</div>`);
+    }
+  }
+  
+  return processedLines.join('');
+};
+
+const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange, onDelete }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const selectionRef = useRef<Range | null>(null);
+  const [showToolbar, setShowToolbar] = useState(false);
+
+  const logToolbarAction = (action: string, details: Record<string, unknown> = {}) => {
+    const projectContext = getActiveProjectContext();
+
+    console.log('[Laboratory Text Toolbar]', action, {
+      ...details,
+      project: projectContext?.project_name,
+      app: projectContext?.app_name,
+    });
+
+    fetch(`${LABORATORY_PROJECT_STATE_API}/log-text-toolbar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        action,
+        client: projectContext?.client_name,
+        app: projectContext?.app_name,
+        project: projectContext?.project_name,
+        details: {
+          ...details,
+          textLength: data?.text?.length ?? 0,
+        },
+      }),
+    }).catch(() => {
+      /* non-blocking logging */
+    });
+  };
+
+  const hasEditableSelection = () => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : selectionRef.current;
+
+    if (!range || range.collapsed) return false;
+
+    const container = editorRef.current;
+    return container.contains(range.commonAncestorContainer);
+  };
+
+  const LIST_LINE_SEPARATOR = /\r?\n/;
+  const BULLET_PATTERN = /^\s*[•-]\s+/;
+  const NUMBERED_PATTERN = /^\s*\d+[.)]?\s+/;
+
+  const stripListPrefix = (line: string): string => {
+    if (BULLET_PATTERN.test(line)) return line.replace(BULLET_PATTERN, '');
+    if (NUMBERED_PATTERN.test(line)) return line.replace(NUMBERED_PATTERN, '');
+    return line;
+  };
+
+  const toggleBulletedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+
+    if (isBulleted) {
+      return lines.map(line => line.replace(BULLET_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map(line => {
+        const base = stripListPrefix(line).trimStart();
+        return base.length > 0 ? `• ${base}` : '• ';
+      })
+      .join('\n');
+  };
+
+  const toggleNumberedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+    if (isNumbered) {
+      return lines.map(line => line.replace(NUMBERED_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map((line, index) => {
+        const base = stripListPrefix(line).trimStart();
+        const prefix = `${index + 1}. `;
+        return base.length > 0 ? `${prefix}${base}` : prefix;
+      })
+      .join('\n');
+  };
+
+  const replaceSelectionWithHtml = (html: string) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer)) return false;
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+
+    const fragment = document.createDocumentFragment();
+    const nodes = Array.from(wrapper.childNodes);
+
+    nodes.forEach(node => fragment.appendChild(node));
+
+    range.deleteContents();
+    range.insertNode(fragment);
+
+    if (nodes.length > 0) {
+      const newRange = document.createRange();
+      newRange.setStartBefore(nodes[0]);
+      newRange.setEndAfter(nodes[nodes.length - 1]);
+      selection.removeAllRanges();
+      selection.addRange(newRange);
+      selectionRef.current = newRange;
+    }
+
+    handleInput();
+    return true;
+  };
+
+  const decodeHtmlEntities = (value: string): string => {
+    if (typeof window === 'undefined') return value;
+
+    const textarea = window.document.createElement('textarea');
+    textarea.innerHTML = value;
+    return textarea.value;
+  };
+
+  const htmlToPlainText = (rawValue: string): string => {
+    if (!rawValue) return '';
+
+    let working = rawValue
+      .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/(div|p|li)>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '')
+      .replace(/<div[^>]*>/gi, '')
+      .replace(/<p[^>]*>/gi, '')
+      .replace(/<span[^>]*>/gi, '')
+      .replace(/<\/span>/gi, '')
+      .replace(/<\/ul>/gi, '\n')
+      .replace(/<\/ol>/gi, '\n')
+      .replace(/<[^>]+>/g, '');
+
+    working = working.replace(/\u00a0/g, ' ');
+    working = decodeHtmlEntities(working);
+
+    while (working.endsWith('\n')) {
+      working = working.slice(0, -1);
+    }
+
+    return working;
+  };
+
+  const escapeHtml = (value: string): string =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const plainTextToHtml = (value: string): string => {
+    if (!value) return '';
+
+    return value
+      .split(LIST_LINE_SEPARATOR)
+      .map(line => {
+        if (line.length === 0) {
+          return '<div><br></div>';
+        }
+        return `<div>${escapeHtml(line)}</div>`;
+      })
+      .join('');
+  };
+
+  const deriveListTypeFromPlain = (plain: string): TextBoxSettings['list_type'] => {
+    const lines = plain.split(LIST_LINE_SEPARATOR);
+    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+    if (isBulleted) return 'bullet';
+    if (isNumbered) return 'number';
+    return 'none';
+  };
+
+  const applyImmediateStyles = (updates: Partial<TextBoxSettings>) => {
+    if (!editorRef.current) return;
+
+    if (typeof updates.text_color === 'string') {
+      editorRef.current.style.color = updates.text_color;
+    }
+
+    if (typeof updates.background_color === 'string') {
+      editorRef.current.style.backgroundColor = updates.background_color || 'transparent';
+    }
+  };
+
+  useEffect(() => {
+    if (editorRef.current) {
+      // Check if content contains markdown syntax (headers or bold)
+      const hasMarkdown = data.text && (
+        /^(\s*)###\s+/m.test(data.text) || // Headers (###)
+        /\*\*[^*]+\*\*/.test(data.text) || // Bold (**text**)
+        /__[^_]+__/.test(data.text) || // Bold (__text__)
+        (/\*[^*]+\*/.test(data.text) && !/\*\*/.test(data.text)) || // Italic (*text*) but not bold
+        /_[^_]+_/.test(data.text) && !/__/.test(data.text) // Italic (_text_) but not bold
+      );
+      
+      // Check if HTML is already processed (contains markdown classes)
+      const isAlreadyProcessed = data.html && (
+        data.html.includes('markdown-h3') ||
+        data.html.includes('markdown-bold') ||
+        data.html.includes('markdown-italic')
+      );
+      
+      // If markdown is detected and HTML is not already processed, parse it
+      let htmlToSet = data.html;
+      if (hasMarkdown && !isAlreadyProcessed) {
+        htmlToSet = parseMarkdownToHtml(data.text);
+      } else if (!hasMarkdown && !data.html) {
+        // If no markdown and no HTML, create basic HTML from text
+        htmlToSet = data.text ? data.text.replace(/\n/g, '<br>').split('<br>').map(line => 
+          line.trim() === '' ? '<div><br></div>' : `<div>${line}</div>`
+        ).join('') : '';
+      }
+      
+      if (editorRef.current.innerHTML !== htmlToSet) {
+        editorRef.current.innerHTML = htmlToSet;
+      }
+    }
+  }, [data.html, data.text]);
+
+  useEffect(() => {
+    applyImmediateStyles({
+      text_color: settings.text_color,
+      background_color: settings.background_color,
+    });
+  }, [settings.background_color, settings.text_color]);
+
+  const handleInput = () => {
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      const text = editorRef.current.innerText;
+      onTextChange({ text, html });
+    }
+  };
+
+  const saveSelection = () => {
+    if (typeof window === 'undefined' || !editorRef.current) return;
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+
+    const range = selection.getRangeAt(0);
+    if (editorRef.current.contains(range.commonAncestorContainer)) {
+      selectionRef.current = range;
+    }
+  };
+
+  const restoreSelection = () => {
+    if (typeof window === 'undefined' || !editorRef.current) return;
+
+    const selection = window.getSelection();
+    const range = selectionRef.current;
+
+    if (selection && range && editorRef.current.contains(range.commonAncestorContainer)) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  };
+
+  const runCommand = (command: string, value?: string) => {
+    if (typeof document === 'undefined') return false;
+
+    editorRef.current?.focus();
+    restoreSelection();
+
+    try {
+      const executed = document.execCommand(command, false, value ?? undefined);
+
+      if (executed) {
+        handleInput();
+      }
+
+      return executed;
+    } catch {
+      return false;
+    }
+  };
+
+  const applyStyleToSelection = (styles: Partial<CSSStyleDeclaration>) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    restoreSelection();
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer) || range.collapsed) return false;
+
+    const span = document.createElement('span');
+    Object.assign(span.style, styles);
+
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+
+    selection.removeAllRanges();
+    const newRange = document.createRange();
+    newRange.selectNodeContents(span);
+    selection.addRange(newRange);
+    selectionRef.current = newRange;
+
+    handleInput();
+    return true;
+  };
+
+  const applyFontSizeToSelection = (nextSize: number) => {
+    if (!hasEditableSelection() || typeof document === 'undefined') return false;
+
+    editorRef.current?.focus();
+    restoreSelection();
+
+    try {
+      document.execCommand('fontSize', false, '7');
+    } catch {
+      return false;
+    }
+
+    const container = editorRef.current;
+    if (!container) return false;
+
+    const targets = Array.from(container.querySelectorAll('font[size="7"]'));
+    if (targets.length === 0) return false;
+
+    targets.forEach(node => {
+      const span = document.createElement('span');
+      span.style.fontSize = `${nextSize}px`;
+      span.innerHTML = node.innerHTML;
+      node.replaceWith(span);
+    });
+
+    handleInput();
+    return true;
+  };
+
+  useEffect(() => {
+    if (!showToolbar || typeof document === 'undefined') return undefined;
+
+    const handleSelectionChange = () => {
+      if (!editorRef.current) return;
+      const selection = document.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      if (editorRef.current.contains(range.commonAncestorContainer)) {
+        selectionRef.current = range;
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, [showToolbar]);
+
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    editorRef.current.style.color = settings.text_color;
+    editorRef.current.style.backgroundColor = settings.background_color ?? 'transparent';
+    editorRef.current.style.fontFamily = settings.font_family;
+    editorRef.current.style.fontSize = `${settings.font_size}px`;
+    editorRef.current.style.fontWeight = settings.bold ? 'bold' : 'normal';
+    editorRef.current.style.fontStyle = settings.italics ? 'italic' : 'normal';
+    editorRef.current.style.textDecoration = `${settings.underline ? 'underline' : ''} ${settings.strikethrough ? 'line-through' : ''}`.trim();
+    editorRef.current.style.textAlign = settings.text_align;
+
+    editorRef.current.classList.remove('list-disc', 'list-decimal', 'pl-8');
+    if (settings.list_type === 'bullet') {
+      editorRef.current.classList.add('list-disc', 'pl-8');
+      editorRef.current.style.listStyleType = 'disc';
+      editorRef.current.style.paddingLeft = '2rem';
+    } else if (settings.list_type === 'number') {
+      editorRef.current.classList.add('list-decimal', 'pl-8');
+      editorRef.current.style.listStyleType = 'decimal';
+      editorRef.current.style.paddingLeft = '2rem';
+    } else {
+      editorRef.current.style.listStyleType = 'none';
+      editorRef.current.style.paddingLeft = '0';
+    }
+  }, [
+    settings.background_color,
+    settings.text_color,
+    settings.bold,
+    settings.font_family,
+    settings.font_size,
+    settings.italics,
+    settings.list_type,
+    settings.strikethrough,
+    settings.text_align,
+    settings.underline,
+  ]);
+
+  const handleApplyTextStyle = (preset: TextStylePreset) => {
+    logToolbarAction('apply-text-style', { preset: preset.id });
+
+    const updates: Partial<TextBoxSettings> = {
+      font_size: clampFontSize(preset.fontSize),
+    };
+
+    if (typeof preset.bold === 'boolean') updates.bold = preset.bold;
+    if (typeof preset.italic === 'boolean') updates.italics = preset.italic;
+    if (typeof preset.underline === 'boolean') updates.underline = preset.underline;
+    if (typeof preset.strikethrough === 'boolean') updates.strikethrough = preset.strikethrough;
+
+    onSettingsChange(updates);
+  };
+
+  const handleContainerBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget as Node | null;
+    if (!containerRef.current?.contains(nextTarget)) {
+      setShowToolbar(false);
+    }
+  };
+
+  const getListStyle = () => {
+    if (settings.list_type === 'bullet') return 'list-disc pl-8';
+    if (settings.list_type === 'number') return 'list-decimal pl-8';
+    return '';
+  };
+
+  const textDecoration = `${settings.underline ? 'underline' : ''} ${settings.strikethrough ? 'line-through' : ''}`.trim();
+  const toolbarAlign: TextAlignOption = ['left', 'center', 'right'].includes(settings.text_align)
+    ? (settings.text_align as TextAlignOption)
+    : 'left';
+
+  const updateListTypeFromContent = (plainOverride?: string) => {
+    const plain =
+      plainOverride ?? htmlToPlainText(editorRef.current?.innerHTML ?? settings.html ?? settings.content ?? '');
+    onSettingsChange({ list_type: deriveListTypeFromPlain(plain) });
+  };
+
+  const applyListTransformation = (
+    transformer: (value: string) => string,
+    onApplied?: (plain: string) => void,
+  ) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const sourceHtml = editorRef.current.innerHTML ?? '';
+    const plain = htmlToPlainText(sourceHtml);
+    const transformed = transformer(plain);
+    const nextHtml = plainTextToHtml(transformed);
+
+    console.log('[Laboratory Text Toolbar] Applying list transform', {
+      plain,
+      transformed,
+      nextHtml,
+    });
+
+    onApplied?.(transformed);
+
+    if (nextHtml === sourceHtml) return false;
+
+    editorRef.current.innerHTML = nextHtml;
+    handleInput();
+    editorRef.current.focus();
+    return true;
+  };
+
+  const handleToggleStyle = (key: 'bold' | 'italics' | 'underline' | 'strikethrough') => {
+    logToolbarAction('toggle-style', { style: key });
+
+    const commandMap: Record<typeof key, string> = {
+      bold: 'bold',
+      italics: 'italic',
+      underline: 'underline',
+      strikethrough: 'strikeThrough',
+    };
+
+    if (hasEditableSelection()) {
+      const executed = runCommand(commandMap[key]);
+      if (executed) return;
+    }
+
+    onSettingsChange({ [key]: !settings[key] } as Partial<TextBoxSettings>);
+  };
+
+  const handleAlign = (align: TextAlignOption) => {
+    logToolbarAction('align-text', { align });
+
+    if (hasEditableSelection()) {
+      const command = align === 'center' ? 'justifyCenter' : align === 'right' ? 'justifyRight' : 'justifyLeft';
+      runCommand(command);
+    }
+
+    onSettingsChange({ text_align: align });
+  };
+
+  const handleFontFamilyChange = (font: string) => {
+    logToolbarAction('change-font-family', { font });
+
+    if (hasEditableSelection()) {
+      const executed = runCommand('fontName', font);
+      if (executed) return;
+    }
+
+    onSettingsChange({ font_family: font });
+  };
+
+  const handleIncreaseFontSize = () => {
+    const next = clampFontSize(settings.font_size + 1);
+    logToolbarAction('increase-font-size', { next });
+
+    if (applyFontSizeToSelection(next)) return;
+    onSettingsChange({ font_size: next });
+  };
+
+  const handleDecreaseFontSize = () => {
+    const next = clampFontSize(settings.font_size - 1);
+    logToolbarAction('decrease-font-size', { next });
+
+    if (applyFontSizeToSelection(next)) return;
+    onSettingsChange({ font_size: next });
+  };
+
+  const handleColorChange = (color: string) => {
+    logToolbarAction('text-color', { color });
+
+    const hasSelection = hasEditableSelection();
+    const executed = hasSelection ? runCommand('foreColor', color) : false;
+    const styled = executed || (hasSelection ? applyStyleToSelection({ color }) : false);
+
+    if (!styled) {
+      applyImmediateStyles({ text_color: color });
+    }
+
+    onSettingsChange({ text_color: color });
+  };
+
+  const handleBackgroundColorChange = (color: string) => {
+    logToolbarAction('background-color', { color });
+
+    const hasSelection = hasEditableSelection();
+    const executed = hasSelection ? runCommand('hiliteColor', color) || runCommand('backColor', color) : false;
+    const styled = executed || (hasSelection ? applyStyleToSelection({ backgroundColor: color }) : false);
+
+    if (!styled) {
+      applyImmediateStyles({ background_color: color });
+    }
+
+    onSettingsChange({ background_color: color });
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full h-full pt-6"
+      onFocusCapture={() => setShowToolbar(true)}
+      onBlurCapture={handleContainerBlur}
+    >
+      {showToolbar ? (
+        <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full">
+          <TextBoxToolbar
+            fontFamily={settings.font_family}
+            onFontFamilyChange={handleFontFamilyChange}
+            fontSize={settings.font_size}
+            onIncreaseFontSize={handleIncreaseFontSize}
+            onDecreaseFontSize={handleDecreaseFontSize}
+            onApplyTextStyle={handleApplyTextStyle}
+            bold={settings.bold}
+            italic={settings.italics}
+            underline={settings.underline}
+            strikethrough={Boolean(settings.strikethrough)}
+            onToggleBold={() => handleToggleStyle('bold')}
+            onToggleItalic={() => handleToggleStyle('italics')}
+            onToggleUnderline={() => handleToggleStyle('underline')}
+            onToggleStrikethrough={() => handleToggleStyle('strikethrough')}
+            align={toolbarAlign}
+            onAlign={handleAlign}
+            onBulletedList={() => {
+              logToolbarAction('toggle-list', { type: 'bullet' });
+
+              console.log('[Laboratory Text Toolbar] Bullet toggle requested', {
+                currentHtml: editorRef.current?.innerHTML,
+              });
+
+              applyListTransformation(toggleBulletedListContent, transformed => {
+                console.log('[Laboratory Text Toolbar] Bullet transform applied to content', transformed);
+                updateListTypeFromContent(transformed);
+              });
+            }}
+            onNumberedList={() => {
+              logToolbarAction('toggle-list', { type: 'number' });
+
+              console.log('[Laboratory Text Toolbar] Numbered toggle requested', {
+                currentHtml: editorRef.current?.innerHTML,
+              });
+
+              applyListTransformation(toggleNumberedListContent, transformed => {
+                console.log('[Laboratory Text Toolbar] Numbered transform applied to content', transformed);
+                updateListTypeFromContent(transformed);
+              });
+            }}
+            color={settings.text_color}
+            onColorChange={handleColorChange}
+            backgroundColor={settings.background_color ?? 'transparent'}
+            onBackgroundColorChange={handleBackgroundColorChange}
+            onDelete={onDelete}
+          />
+        </div>
+      ) : null}
+
+      <div className="w-full h-full space-y-3">
+        <div
+          ref={editorRef}
+          contentEditable
+          onInput={handleInput}
+          onKeyUp={saveSelection}
+          onMouseUp={saveSelection}
+          suppressContentEditableWarning
+          className={`
+            w-full min-h-[120px] px-4 py-3
+            border border-[#9bbce8] bg-[#f2f7ff]
+            rounded-xl shadow-[0_1px_3px_rgba(69,142,226,0.15)]
+            focus:outline-none focus:border-[#458EE2] focus:ring-2 focus:ring-[#cfe2ff]
+            transition-colors duration-200
+            ${getListStyle()}
+            markdown-content
+          `}
+          style={{
+            fontFamily: settings.font_family,
+            fontSize: `${settings.font_size}px`,
+            fontWeight: settings.bold ? 'bold' : 'normal',
+            fontStyle: settings.italics ? 'italic' : 'normal',
+            textDecoration,
+            textAlign: settings.text_align,
+            color: settings.text_color,
+            backgroundColor: settings.background_color ?? '#f2f7ff',
+          }}
+        />
+
+      </div>
+    </div>
+  );
+};
+
 // Function to fetch atom configurations from MongoDB
-const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashboard' = 'analytics'): Promise<{
+const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
   cards: LayoutCard[];
   workflowMolecules: WorkflowMolecule[];
   autosaveEnabled?: boolean;
 } | null> => {
-  // Determine mode value based on subMode (outside try block for catch block access)
-  const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
-  
   try {
     const projectContext = getActiveProjectContext();
     if (!projectContext) {
-      console.warn('[🔍 DIAGNOSIS] No project context available for MongoDB fetch');
+      console.warn('[Laboratory API] No project context available for MongoDB fetch');
       return null;
     }
-    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}?mode=${mode}`;
 
-    console.info('🔍 [DIAGNOSIS] ========== MONGODB FETCH START ==========');
-    console.info('🔍 [DIAGNOSIS] Fetching atom configurations from MongoDB', {
+    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+
+    console.info('[Laboratory API] Fetching atom configurations from MongoDB', {
       url: requestUrl,
       project: projectContext.project_name,
-      subMode,
-      mode,
-      timestamp: new Date().toISOString(),
     });
 
     const response = await fetch(requestUrl, {
@@ -248,27 +1059,13 @@ const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashbo
     }
 
     const data = await response.json();
-    console.log('🔍 [DIAGNOSIS] MongoDB raw response data:', JSON.stringify(data, null, 2));
+    console.log('[Laboratory API] MongoDB response data:', data);
 
     if (data.status === 'ok' && data.cards && Array.isArray(data.cards)) {
-      console.info('🔍 [DIAGNOSIS] ✅ Successfully fetched atom configurations from MongoDB', {
+      console.info('[Laboratory API] Successfully fetched atom configurations from MongoDB', {
         cardsCount: data.cards.length,
         workflowMoleculesCount: data.workflow_molecules?.length || 0,
-        subMode,
-        mode,
       });
-      
-      // DETAILED LOGGING: Log each card's atoms
-      console.log('🔍 [DIAGNOSIS] Cards from MongoDB (detailed):', data.cards.map((card: any) => ({
-        cardId: card.id,
-        atoms: (card.atoms || []).map((a: any) => ({
-          atomId: a.atomId,
-          title: a.title,
-          isDashboardAllowed: DASHBOARD_ALLOWED_ATOMS.includes(a.atomId as any)
-        })),
-        moleculeId: card.moleculeId,
-        mode: mode
-      })));
 
       // The backend already returns cards in the correct format, so we can use them directly
       // FIX: Ensure data.cards is an array before mapping
@@ -310,6 +1107,15 @@ const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashbo
           afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
           beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
           variables: normalizeCardVariables(card.variables, card.id),
+          textBoxEnabled: card.textBoxEnabled ?? card.text_box_enabled ?? false,
+          textBoxContent: card.textBoxContent ?? card.text_box_content,
+          textBoxHtml: card.textBoxHtml ?? card.text_box_html,
+          textBoxSettings: card.textBoxSettings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings }
+            : card.text_box_settings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.text_box_settings }
+            : undefined,
+          textBoxes: normalizeTextBoxes(card),
         };
 
         // Validation: Log warning if we expected moleculeId but it's missing
@@ -387,35 +1193,14 @@ const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashbo
 
       // Return autosaveEnabled if available (will be handled by parent component)
       const autosaveEnabled = data.autosaveEnabled !== undefined ? data.autosaveEnabled : true;
-
-      console.info('🔍 [DIAGNOSIS] ========== MONGODB FETCH SUCCESS ==========');
-      console.info('🔍 [DIAGNOSIS] Returning data:', {
-        cardsCount: cards.length,
-        workflowMoleculesCount: workflowMolecules.length,
-        subMode,
-        mode,
-        cardAtomIds: cards.map(c => c.atoms.map(a => a.atomId)).flat()
-      });
       
       return { cards, workflowMolecules, autosaveEnabled };
     } else {
-      console.warn('🔍 [DIAGNOSIS] ❌ Invalid response format from MongoDB fetch', {
-        status: data.status,
-        hasCards: !!data.cards,
-        cardsIsArray: Array.isArray(data.cards),
-        subMode,
-        mode,
-        data
-      });
+      console.warn('[Laboratory API] Invalid response format from MongoDB fetch', data);
       return null;
     }
   } catch (error) {
-    console.error('🔍 [DIAGNOSIS] ❌ Error fetching atom configurations from MongoDB', {
-      error,
-      subMode,
-      mode,
-      stack: error instanceof Error ? error.stack : undefined
-    });
+    console.error('[Laboratory API] Error fetching atom configurations from MongoDB', error);
     return null;
   }
 };
@@ -459,7 +1244,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showAtomSuggestion, setShowAtomSuggestion] = useState<Record<string, boolean>>({});
   const [isCanvasLoading, setIsCanvasLoading] = useState(true);
-  const [moleculeToDelete, setMoleculeToDelete] = useState<{ moleculeId: string, moleculeTitle: string } | null>(null);
+  const [moleculeToDelete, setMoleculeToDelete] = useState<{moleculeId: string, moleculeTitle: string} | null>(null);
   const [deleteMoleculeDialogOpen, setDeleteMoleculeDialogOpen] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<{
     deletedMolecules: string[];
@@ -470,9 +1255,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     deletedAtoms: [],
     addedAtoms: []
   });
-  const [atomToDelete, setAtomToDelete] = useState<{ cardId: string, atomId: string, atomTitle: string } | null>(null);
+  const [atomToDelete, setAtomToDelete] = useState<{cardId: string, atomId: string, atomTitle: string} | null>(null);
   const [deleteAtomDialogOpen, setDeleteAtomDialogOpen] = useState(false);
-  const [cardToDelete, setCardToDelete] = useState<{ cardId: string, cardTitle: string } | null>(null);
+  const [cardToDelete, setCardToDelete] = useState<{cardId: string, cardTitle: string} | null>(null);
   const [deleteCardDialogOpen, setDeleteCardDialogOpen] = useState(false);
   const loadingMessages = useMemo(
     () => [
@@ -533,6 +1318,130 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             </div>
           );
         })}
+      </div>
+    );
+  };
+
+  const renderCardTextBox = (card: LayoutCard) => {
+    if (!card.textBoxEnabled) {
+      return null;
+    }
+
+    const normalizedTextBoxes = normalizeCardTextBoxes(card);
+
+    const syncLegacyFields = (boxes: TextBoxConfig[]) => {
+      const primary = boxes[0];
+
+      return {
+        textBoxes: boxes,
+        textBoxContent: primary?.content ?? '',
+        textBoxHtml: primary?.html ?? '',
+        textBoxSettings: primary?.settings
+          ? { ...DEFAULT_TEXTBOX_SETTINGS, ...primary.settings }
+          : card.textBoxSettings,
+      };
+    };
+
+    const updateCardTextBoxes = (updater: (boxes: TextBoxConfig[]) => TextBoxConfig[]) => {
+      if (!Array.isArray(layoutCards)) return;
+
+      setLayoutCards(
+        layoutCards.map(existing => {
+          if (existing.id !== card.id) return existing;
+
+          const current = normalizeCardTextBoxes(existing);
+          const nextBoxes = updater(current);
+          return {
+            ...existing,
+            ...syncLegacyFields(nextBoxes),
+          };
+        }),
+      );
+    };
+
+    const MAX_TEXTBOXES = 5;
+
+    const addTextBoxBelow = () => {
+      updateCardTextBoxes(boxes => {
+        if (boxes.length >= MAX_TEXTBOXES) return boxes;
+
+        const nextIndex = boxes.length + 1;
+        const newBox: TextBoxConfig = {
+          id: `text-box-${nextIndex}-${Date.now()}`,
+          title: `Text Box ${nextIndex}`,
+          content: '',
+          html: '',
+          settings: { ...DEFAULT_TEXTBOX_SETTINGS },
+        };
+
+        return [...boxes, newBox];
+      });
+    };
+
+    const canAddMore = normalizedTextBoxes.length < MAX_TEXTBOXES;
+
+    return (
+      <div className="mt-10 space-y-6">
+        {normalizedTextBoxes.map(box => {
+          const rawTextContent = box.content ?? '';
+          const textContent = isPlaceholderContent(rawTextContent) ? '' : rawTextContent;
+          const rawHtmlContent = box.html?.trim()?.length ? box.html : '';
+          const htmlContent = rawHtmlContent && !isPlaceholderContent(rawHtmlContent)
+            ? rawHtmlContent
+            : textContent.replace(/\n/g, '<br />');
+          const textData = { text: textContent, html: htmlContent };
+
+          return (
+            <CardTextBoxCanvas
+              key={box.id}
+              data={textData}
+              settings={box.settings as TextBoxSettings}
+              onDelete={() =>
+                updateCardTextBoxes(boxes => {
+                  const filtered = boxes.filter(existing => existing.id !== box.id);
+                  return filtered;
+                })
+              }
+              onTextChange={(data) =>
+                updateCardTextBoxes((boxes) =>
+                  boxes.map(existing =>
+                    existing.id === box.id
+                      ? { ...existing, content: data.text, html: data.html }
+                      : existing,
+                  ),
+                )
+              }
+              onSettingsChange={(updates) =>
+                updateCardTextBoxes((boxes) =>
+                  boxes.map(existing =>
+                    existing.id === box.id
+                      ? {
+                          ...existing,
+                          settings: {
+                            ...DEFAULT_TEXTBOX_SETTINGS,
+                            ...(existing.settings ?? {}),
+                            ...updates,
+                          },
+                        }
+                      : existing,
+                  ),
+                )
+              }
+            />
+          );
+        })}
+        {canAddMore ? (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={addTextBoxBelow}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-primary text-primary transition-colors hover:bg-primary/10"
+              aria-label="Add text box"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -1159,110 +2068,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       fromMongoDB: boolean = false, // Flag to indicate if cards are from MongoDB
     ) => {
       if (!isMounted) {
-        console.warn('🔍 [DIAGNOSIS] applyInitialCards: Component not mounted, skipping');
         return;
       }
 
-      console.log('🔍 [DIAGNOSIS] ========== APPLY INITIAL CARDS START ==========');
-      console.log('🔍 [DIAGNOSIS] applyInitialCards called with:', {
+      console.log('[Laboratory API] applyInitialCards called with:', {
         cardsCount: cards?.length || 0,
         workflowOverrideCount: workflowOverride?.length || 0,
         fromMongoDB,
-        subMode,
-        timestamp: new Date().toISOString(),
-        cards: cards?.map(c => ({
-          id: c.id,
-          atoms: c.atoms.map(a => ({ atomId: a.atomId, title: a.title })),
-          moleculeId: c.moleculeId
-        }))
+        cards: cards
       });
 
-      let normalizedCards = Array.isArray(cards) ? cards : [];
-      
-      // CRITICAL FIX: Enforce one atom per card - keep only first atom from each card
-      normalizedCards = normalizedCards.map(card => ({
-        ...card,
-        atoms: Array.isArray(card.atoms) && card.atoms.length > 0 ? [card.atoms[0]] : []
-      }));
-      
-      // CRITICAL FIX: Filter cards based on current mode to ensure data separation
-      if (normalizedCards.length > 0) {
-        if (subMode === 'dashboard') {
-          // Dashboard mode: Only allow dashboard-specific atoms
-          const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
-          const filteredCards: LayoutCard[] = [];
-          
-          for (const card of normalizedCards) {
-            // Filter atoms in this card to only include allowed ones
-            const allowedAtoms = (card.atoms || []).filter(atom => 
-              allowedAtomIdsSet.has(atom.atomId as any)
-            );
-            
-            // CRITICAL FIX: Allow empty cards OR cards with allowed atoms
-            // Empty cards must be preserved for "Add New Card" functionality in dashboard mode
-            if (allowedAtoms.length > 0 || (card.atoms || []).length === 0) {
-              filteredCards.push({
-                ...card,
-                atoms: allowedAtoms  // Will be empty array for empty cards, which is correct
-              });
-            }
-          }
-          
-          if (filteredCards.length !== normalizedCards.length) {
-            const removedCount = normalizedCards.length - filteredCards.length;
-            console.warn(`🔍 [DIAGNOSIS] ⚠️ Filtered out ${removedCount} card(s) containing atoms not allowed in dashboard mode. Remaining: ${filteredCards.length}`);
-            console.log('🔍 [DIAGNOSIS] Removed cards:', normalizedCards.filter(card => {
-              const allowedAtoms = (card.atoms || []).filter(atom => 
-                allowedAtomIdsSet.has(atom.atomId as any)
-              );
-              return allowedAtoms.length === 0;
-            }).map(c => ({
-              id: c.id,
-              atoms: c.atoms.map(a => a.atomId)
-            })));
-          }
-          
-          normalizedCards = filteredCards;
-          console.log('🔍 [DIAGNOSIS] After dashboard filtering:', {
-            originalCount: cards?.length || 0,
-            filteredCount: normalizedCards.length,
-            cards: normalizedCards.map(c => ({
-              id: c.id,
-              atomIds: c.atoms.map(a => a.atomId)
-            }))
-          });
-        } else {
-          // Analytics mode: Log detailed info about loaded cards
-          console.log('🔍 [DIAGNOSIS] Analytics mode - checking loaded cards');
-          const dashboardOnlyAtoms = new Set(DASHBOARD_ALLOWED_ATOMS);
-          const cardsWithDashboardAtoms = normalizedCards.filter(card => 
-            (card.atoms || []).some(atom => dashboardOnlyAtoms.has(atom.atomId as any))
-          );
-          
-          if (cardsWithDashboardAtoms.length > 0) {
-            console.warn('🔍 [DIAGNOSIS] ⚠️ Analytics mode loaded cards containing dashboard atoms:', {
-              count: cardsWithDashboardAtoms.length,
-              fromMongoDB,
-              subMode,
-              cards: cardsWithDashboardAtoms.map(c => ({
-                id: c.id,
-                atoms: c.atoms.map(a => ({
-                  atomId: a.atomId,
-                  title: a.title,
-                  isDashboardAtom: dashboardOnlyAtoms.has(a.atomId as any)
-                }))
-              }))
-            });
-            
-            if (fromMongoDB) {
-              console.error('🔍 [DIAGNOSIS] ❌ DATA LEAKAGE DETECTED: Dashboard atoms loaded from MongoDB in Analytics mode!');
-              console.error('🔍 [DIAGNOSIS] This indicates backend returned wrong mode data or data was saved incorrectly.');
-            }
-          }
-        }
-      }
-      
-      console.log('[Laboratory API] Normalized cards after mode filtering:', normalizedCards);
+      const normalizedCards = Array.isArray(cards) ? cards : [];
+      console.log('[Laboratory API] Normalized cards:', normalizedCards);
 
       // Debug: Check molecule info in cards
       const cardsWithMoleculeInfo = normalizedCards.filter(card => card.moleculeId);
@@ -1283,7 +2100,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         console.log('[Laboratory API] Cards from localStorage - attempting to fetch molecule information from MongoDB');
 
         // Try to fetch molecule information from MongoDB
-        fetchAtomConfigurationsFromMongoDB(subMode)
+        fetchAtomConfigurationsFromMongoDB()
           .then((mongoData) => {
             if (mongoData && mongoData.cards.length > 0) {
               console.log('[Laboratory API] Found MongoDB data with molecule info, updating cards');
@@ -1318,55 +2135,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
               console.log('[Laboratory API] Updated cards with MongoDB molecule info:', updatedCards);
 
-              // CRITICAL FIX: Apply mode filtering to updated cards before setting them
-              let filteredUpdatedCards = updatedCards;
-              if (subMode === 'dashboard' && filteredUpdatedCards.length > 0) {
-                const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
-                filteredUpdatedCards = filteredUpdatedCards.filter(card => {
-                  const allowedAtoms = (card.atoms || []).filter(atom => 
-                    allowedAtomIdsSet.has(atom.atomId as any)
-                  );
-                  if (allowedAtoms.length > 0) {
-                    card.atoms = allowedAtoms;
-                    return true;
-                  }
-                  return false;
-                });
-              }
-
               // Use workflow molecules from MongoDB if available
               if (mongoData.workflowMolecules && mongoData.workflowMolecules.length > 0) {
                 console.log('[Laboratory API] Using workflow molecules from MongoDB:', mongoData.workflowMolecules);
                 workflow = mongoData.workflowMolecules;
-                
-                // CRITICAL FIX: Filter workflow molecules for dashboard mode
-                if (subMode === 'dashboard' && workflow.length > 0) {
-                  const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
-                  workflow = workflow.map(molecule => ({
-                    ...molecule,
-                    atoms: (molecule.atoms || []).filter((atom: any) => {
-                      const atomId = typeof atom === 'string' ? atom : atom.atomName || atom.atomId;
-                      return atomId && allowedAtomIdsSet.has(atomId as any);
-                    })
-                  })).filter(molecule => (molecule.atoms || []).length > 0);
-                }
 
                 // Set cards directly - no assignment needed
-                setLayoutCards(filteredUpdatedCards);
+                setLayoutCards(updatedCards);
               } else {
-                setLayoutCards(filteredUpdatedCards);
+                setLayoutCards(updatedCards);
               }
             } else {
-              console.log('🔍 [DIAGNOSIS] No MongoDB data found, using cards as-is');
-              console.log('🔍 [DIAGNOSIS] Setting cards from localStorage fallback:', {
-                count: normalizedCards.length,
-                subMode,
-                cards: normalizedCards.map(c => ({
-                  id: c.id,
-                  atomIds: c.atoms.map(a => a.atomId)
-                }))
-              });
-              // NOTE: Store's setCards will apply additional filtering for dashboard mode
+              console.log('[Laboratory API] No MongoDB data found, using cards as-is');
               setLayoutCards(normalizedCards);
             }
           })
@@ -1382,7 +2162,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       // Check for saved workflowMolecules in localStorage if no override provided
       let workflow = workflowOverride;
       if (!workflow) {
-        const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
+        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
         if (storedWorkflowMolecules) {
           try {
             workflow = JSON.parse(storedWorkflowMolecules);
@@ -1396,21 +2176,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       }
 
       console.log('[Laboratory API] Setting workflow molecules:', workflow);
-
-      // CRITICAL FIX: Filter workflow molecules to only include atoms allowed in current mode
-      if (subMode === 'dashboard' && workflow.length > 0) {
-        const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
-        workflow = workflow.map(molecule => ({
-          ...molecule,
-          atoms: (molecule.atoms || []).filter((atom: any) => {
-            // atom can be a string (atomId) or an object with atomName
-            const atomId = typeof atom === 'string' ? atom : atom.atomName || atom.atomId;
-            return atomId && allowedAtomIdsSet.has(atomId as any);
-          })
-        })).filter(molecule => (molecule.atoms || []).length > 0); // Remove molecules with no allowed atoms
-        
-        console.log('[Laboratory API] Filtered workflow molecules for dashboard mode:', workflow);
-      }
 
       // Debug: Compare molecule IDs between workflow molecules and cards
       const workflowMoleculeIds = workflow.map(m => m.moleculeId);
@@ -1696,97 +2461,54 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       // Set cards with validated/fixed orders
       // FIX: Ensure fixedCards is always an array
       if (!Array.isArray(fixedCards)) {
-        console.error('🔍 [DIAGNOSIS] ❌ fixedCards is not an array:', fixedCards);
+        console.error('[Laboratory API] fixedCards is not an array:', fixedCards);
         setLayoutCards([]);
         return;
       }
-      
-      console.log('🔍 [DIAGNOSIS] ========== SETTING CARDS TO STORE ==========');
-      console.log('🔍 [DIAGNOSIS] About to set cards:', {
-        count: fixedCards.length,
-        subMode,
-        fromMongoDB,
-        cards: fixedCards.map(c => ({
-          id: c.id,
-          atomIds: c.atoms.map(a => a.atomId),
-          moleculeId: c.moleculeId
-        }))
-      });
-      
       setLayoutCards(fixedCards);
-      
-      console.log('🔍 [DIAGNOSIS] ========== APPLY INITIAL CARDS COMPLETE ==========');
 
       markLoadingComplete();
     };
 
     // PRIORITY: Fetch from MongoDB FIRST, then fall back to localStorage if MongoDB fails
-    console.info('🔍 [DIAGNOSIS] ========== DATA LOAD START ==========');
-    console.info('🔍 [DIAGNOSIS] Starting data load - prioritizing MongoDB over localStorage', { 
-      subMode,
-      timestamp: new Date().toISOString()
-    });
+    console.info('[Laboratory API] Starting data load - prioritizing MongoDB over localStorage');
 
     hasPendingAsyncLoad = true;
-    fetchAtomConfigurationsFromMongoDB(subMode)
+    fetchAtomConfigurationsFromMongoDB()
       .then((mongoData) => {
         if (!isMounted) {
-          console.warn('🔍 [DIAGNOSIS] Component unmounted during MongoDB fetch');
           return;
         }
 
-        console.log('🔍 [DIAGNOSIS] MongoDB fetch completed:', {
-          hasData: !!mongoData,
-          hasCards: !!(mongoData && mongoData.cards),
-          cardsCount: mongoData?.cards?.length || 0,
-          subMode
-        });
-
         if (mongoData && mongoData.cards && mongoData.cards.length > 0) {
-          console.info('🔍 [DIAGNOSIS] ✅ Successfully loaded data from MongoDB (primary source)', {
+          console.info('[Laboratory API] ✅ Successfully loaded data from MongoDB (primary source)', {
             cardsCount: mongoData.cards.length,
-            workflowMoleculesCount: mongoData.workflowMolecules?.length || 0,
-            subMode,
-            cardAtomIds: mongoData.cards.map(c => c.atoms.map(a => a.atomId)).flat()
+            workflowMoleculesCount: mongoData.workflowMolecules?.length || 0
           });
           applyInitialCards(mongoData.cards, mongoData.workflowMolecules || [], true); // fromMongoDB = true
           return; // Successfully loaded from MongoDB, no need to check localStorage
         } else {
           // FIX: If MongoDB returns empty cards array, clear workflow data and return to regular laboratory mode
           if (mongoData && Array.isArray(mongoData.cards) && mongoData.cards.length === 0) {
-            console.info('🔍 [DIAGNOSIS] ⚠️ MongoDB returned empty cards array - clearing workflow data and returning to regular laboratory mode', {
-              subMode
-            });
-            // Clear workflow-related localStorage items (mode-specific)
-            const moleculesKey = getWorkflowMoleculesKey(subMode);
-            const atomsKey = getWorkflowSelectedAtomsKey(subMode);
-            const dataKey = getWorkflowDataKey(subMode);
-            console.log('🔍 [DIAGNOSIS] Clearing localStorage keys:', { moleculesKey, atomsKey, dataKey });
-            localStorage.removeItem(moleculesKey);
-            localStorage.removeItem(atomsKey);
-            localStorage.removeItem(dataKey);
+            console.info('[Laboratory API] ⚠️ MongoDB returned empty cards array - clearing workflow data and returning to regular laboratory mode');
+            // Clear workflow-related localStorage items
+            localStorage.removeItem('workflow-molecules');
+            localStorage.removeItem('workflow-selected-atoms');
+            localStorage.removeItem('workflow-data');
             // Apply empty cards with no workflow molecules to return to regular laboratory mode
             applyInitialCards([], [], true); // fromMongoDB = true, empty cards and workflow molecules
             return;
           }
-          console.info('🔍 [DIAGNOSIS] ⚠️ MongoDB returned no data, falling back to localStorage', {
-            subMode,
-            mongoData: mongoData ? 'exists but no cards' : 'null/undefined'
-          });
+          console.info('[Laboratory API] ⚠️ MongoDB returned no data, falling back to localStorage');
           // MongoDB returned null/undefined, fall back to localStorage
           return loadFromLocalStorage();
         }
       })
       .catch((error) => {
         if (!isMounted) {
-          console.warn('🔍 [DIAGNOSIS] Component unmounted during MongoDB fetch error');
           return;
         }
-        console.warn('🔍 [DIAGNOSIS] ⚠️ MongoDB fetch failed, falling back to localStorage', {
-          error,
-          subMode,
-          errorMessage: error instanceof Error ? error.message : String(error)
-        });
+        console.warn('[Laboratory API] ⚠️ MongoDB fetch failed, falling back to localStorage', error);
         // MongoDB fetch failed, fall back to localStorage
         return loadFromLocalStorage();
       });
@@ -1794,89 +2516,14 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     // Helper function to load from localStorage (fallback only)
     function loadFromLocalStorage() {
       if (!isMounted) {
-        console.warn('🔍 [DIAGNOSIS] Component not mounted, skipping localStorage load');
         return;
       }
 
-      console.info('🔍 [DIAGNOSIS] ========== LOCALSTORAGE FALLBACK START ==========');
-      console.info('🔍 [DIAGNOSIS] Attempting to load from localStorage (fallback)', {
-        subMode,
-        timestamp: new Date().toISOString()
-      });
+      console.info('[Laboratory API] Attempting to load from localStorage (fallback)');
 
-      // Migration: Move old shared keys to mode-specific keys
-      const migrateOldLocalStorageKeys = (currentSubMode: LaboratorySubMode) => {
-        console.log('🔍 [DIAGNOSIS] Checking for old shared localStorage keys');
-        const sharedMolecules = localStorage.getItem('workflow-molecules');
-        const sharedAtoms = localStorage.getItem('workflow-selected-atoms');
-        const sharedData = localStorage.getItem('workflow-data');
-        
-        console.log('🔍 [DIAGNOSIS] Old shared keys found:', {
-          hasMolecules: !!sharedMolecules,
-          hasAtoms: !!sharedAtoms,
-          hasData: !!sharedData,
-          currentSubMode
-        });
-        
-        if (sharedMolecules || sharedAtoms || sharedData) {
-          console.warn('🔍 [DIAGNOSIS] ⚠️ Found old shared localStorage keys - migrating to mode-specific keys for mode:', currentSubMode);
-          
-          const moleculesKey = getWorkflowMoleculesKey(currentSubMode);
-          const atomsKey = getWorkflowSelectedAtomsKey(currentSubMode);
-          const dataKey = getWorkflowDataKey(currentSubMode);
-          
-          console.log('🔍 [DIAGNOSIS] Migration keys:', { moleculesKey, atomsKey, dataKey });
-          
-          if (sharedMolecules) {
-            console.log('🔍 [DIAGNOSIS] Migrating workflow-molecules:', {
-              from: 'workflow-molecules',
-              to: moleculesKey,
-              data: JSON.parse(sharedMolecules)
-            });
-            localStorage.setItem(moleculesKey, sharedMolecules);
-            localStorage.removeItem('workflow-molecules');
-          }
-          if (sharedAtoms) {
-            console.log('🔍 [DIAGNOSIS] Migrating workflow-selected-atoms:', {
-              from: 'workflow-selected-atoms',
-              to: atomsKey
-            });
-            localStorage.setItem(atomsKey, sharedAtoms);
-            localStorage.removeItem('workflow-selected-atoms');
-          }
-          if (sharedData) {
-            console.log('🔍 [DIAGNOSIS] Migrating workflow-data:', {
-              from: 'workflow-data',
-              to: dataKey
-            });
-            localStorage.setItem(dataKey, sharedData);
-            localStorage.removeItem('workflow-data');
-          }
-          
-          console.info('🔍 [DIAGNOSIS] Migration complete');
-        } else {
-          console.log('🔍 [DIAGNOSIS] No old shared keys found - checking mode-specific keys');
-          const moleculesKey = getWorkflowMoleculesKey(currentSubMode);
-          const atomsKey = getWorkflowSelectedAtomsKey(currentSubMode);
-          const dataKey = getWorkflowDataKey(currentSubMode);
-          
-          console.log('🔍 [DIAGNOSIS] Mode-specific keys status:', {
-            moleculesKey,
-            hasMolecules: !!localStorage.getItem(moleculesKey),
-            atomsKey,
-            hasAtoms: !!localStorage.getItem(atomsKey),
-            dataKey,
-            hasData: !!localStorage.getItem(dataKey)
-          });
-        }
-      };
-      
-      // Run migration first
-      migrateOldLocalStorageKeys(subMode);
-
-      // Check for both workflow-selected-atoms and workflow-data (now mode-specific)
-      const storedAtoms = localStorage.getItem(getWorkflowSelectedAtomsKey(subMode));
-      const storedWorkflowData = localStorage.getItem(getWorkflowDataKey(subMode));
+    // Check for both workflow-selected-atoms and workflow-data
+    const storedAtoms = localStorage.getItem('workflow-selected-atoms');
+    const storedWorkflowData = localStorage.getItem('workflow-data');
       let workflowAtoms: {
         atomName: string;
         moleculeId: string;
@@ -1939,7 +2586,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             } as LayoutCard;
           });
 
-          localStorage.removeItem(getWorkflowSelectedAtomsKey(subMode));
+        localStorage.removeItem('workflow-selected-atoms');
           console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-selected-atoms)');
           if (initialCards && initialCards.length > 0) {
             applyInitialCards(initialCards, initialWorkflow);
@@ -1993,8 +2640,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             const molecules = Array.from(moleculeMap.values());
             if (molecules.length > 0) {
               initialWorkflow = molecules;
-              // Save the molecules to workflow-molecules localStorage for future switches (mode-specific)
-              localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(molecules));
+            // Save the molecules to workflow-molecules localStorage for future switches
+            localStorage.setItem('workflow-molecules', JSON.stringify(molecules));
             }
 
             const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
@@ -2024,7 +2671,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               } as LayoutCard;
             });
 
-            localStorage.removeItem(getWorkflowDataKey(subMode));
+          localStorage.removeItem('workflow-data');
             console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-data)');
             if (initialCards && initialCards.length > 0) {
               applyInitialCards(initialCards, initialWorkflow);
@@ -2033,22 +2680,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           }
         } catch (e) {
           console.error('Failed to parse workflow-data', e);
-          localStorage.removeItem(getWorkflowDataKey(subMode));
+        localStorage.removeItem('workflow-data');
         }
       }
 
-      // If still no cards, try stored layout from localStorage (mode-specific)
+      // If still no cards, try stored layout from localStorage
       if (!initialCards || initialCards.length === 0) {
-        const storageKey = subMode === 'analytics' ? 'laboratory-analytics-layout-cards' : 'laboratory-dashboard-layout-cards';
-        const storedLayout = localStorage.getItem(storageKey);
+      const storedLayout = localStorage.getItem(STORAGE_KEY);
         if (storedLayout && storedLayout !== 'undefined') {
           try {
             const raw = JSON.parse(storedLayout);
             initialCards = hydrateLayoutCards(raw);
 
-            // Check for workflow molecules in localStorage (mode-specific)
+            // Check for workflow molecules in localStorage
             if (!initialWorkflow) {
-              const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
+              const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
               if (storedWorkflowMolecules) {
                 try {
                   initialWorkflow = JSON.parse(storedWorkflowMolecules);
@@ -2065,7 +2711,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             }
           } catch (e) {
             console.error('Failed to parse stored laboratory layout', e);
-            localStorage.removeItem(storageKey);
+          localStorage.removeItem(STORAGE_KEY);
           }
         }
 
@@ -2073,9 +2719,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         console.info('[Laboratory API] No data found in MongoDB or localStorage');
         markLoadingComplete();
       } else {
-        // We have initialCards from workflow data, but need to check for workflow molecules (mode-specific)
+        // We have initialCards from workflow data, but need to check for workflow molecules
         if (!initialWorkflow) {
-          const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
+        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
           if (storedWorkflowMolecules) {
             try {
               initialWorkflow = JSON.parse(storedWorkflowMolecules);
@@ -2091,7 +2737,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     return () => {
       isMounted = false;
     };
-  }, [subMode]); // Reload data when subMode changes
+  }, []);
 
 
   useEffect(() => {
@@ -2140,7 +2786,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ project: proj.id, state: stateWithMolecules }),
-          }).catch(() => { });
+          }).catch(() => {});
         } catch {
           /* ignore */
         }
@@ -2156,18 +2802,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   //   setCards(layoutCards);
   // }, [layoutCards, setCards]);
 
-  // Persist workflowMolecules to localStorage only when we have cards with molecule info (mode-specific)
+  // Persist workflowMolecules to localStorage only when we have cards with molecule info
   useEffect(() => {
     const hasCardsWithMoleculeId = Array.isArray(layoutCards) &&
       layoutCards.some(card => card.moleculeId);
 
     if (workflowMolecules.length > 0 && hasCardsWithMoleculeId) {
-      localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(workflowMolecules));
+      localStorage.setItem('workflow-molecules', JSON.stringify(workflowMolecules));
     } else if (!hasCardsWithMoleculeId && workflowMolecules.length === 0) {
-      // Clear workflow molecules from localStorage when in regular laboratory mode (mode-specific)
-      localStorage.removeItem(getWorkflowMoleculesKey(subMode));
+      // Clear workflow molecules from localStorage when in regular laboratory mode
+      localStorage.removeItem('workflow-molecules');
     }
-  }, [workflowMolecules, layoutCards, subMode]);
+  }, [workflowMolecules, layoutCards]);
 
   // Derive workflow molecules from layout cards when they change
   useEffect(() => {
@@ -2253,8 +2899,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       layoutCards.some(card => card.moleculeId);
 
     if (hasCardsWithMoleculeId && workflowMolecules.length === 0) {
-      // Try to restore workflow molecules from localStorage (mode-specific)
-      const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
+      // Try to restore workflow molecules from localStorage
+      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
       if (storedWorkflowMolecules) {
         try {
           const molecules = JSON.parse(storedWorkflowMolecules);
@@ -2302,31 +2948,14 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       const atom = JSON.parse(atomData);
       const info = allAtoms.find(a => a.id === atom.id);
 
-      // Validate atom is allowed in current mode (Dashboard mode restriction)
-      if (subMode === 'dashboard') {
-        if (!DASHBOARD_ALLOWED_ATOMS.includes(atom.id as any)) {
-          toast({
-            title: 'Atom Not Available',
-            description: `"${info?.title || atom.id}" is not available in Dashboard mode. Switch to Analytics mode to use this atom.`,
-            variant: 'destructive',
-          });
-          return;
-        }
-      }
-
       // Find the card to get its moleculeId and current atom count
       const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
-      
-      // CRITICAL FIX: Prevent replacing existing atom - show warning instead
-      // If card already has an atom, don't allow replacement (one atom per card policy)
       if (card && Array.isArray(card.atoms) && card.atoms.length >= 1) {
-        const existingAtom = card.atoms[0];
         toast({
-          title: 'Card already has an atom',
-          description: `This card already contains "${existingAtom.title}" atom. Please add a new card to use "${info?.title || atom.title}" atom.`,
-          variant: 'destructive',
+          title:
+            'Already one atom is present in the card - please remove atom and then try adding an atom.',
         });
-        return; // Stop execution - don't replace the atom
+        return;
       }
 
       const newAtom: DroppedAtom = {
@@ -2410,11 +3039,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         }
       }
 
-      // CRITICAL FIX: Replace atom instead of appending (enforce one atom per card)
       setLayoutCards(
         (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
           card.id === cardId
-            ? { ...card, atoms: [newAtom] }
+            ? { ...card, atoms: [...card.atoms, newAtom] }
             : card
         )
       );
@@ -3071,9 +3699,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       payload?.atoms && Array.isArray(payload.atoms) && payload.atoms.length > 0
         ? payload.atoms
         : [{ atomId: fallbackAtomId }];
-    const allAtoms = atomsPayload.map(atom => buildAtomFromApiPayload(atom.atomId ?? fallbackAtomId, atom));
-    // CRITICAL FIX: Enforce one atom per card - keep only the first atom
-    const atoms = allAtoms.slice(0, 1);
+  const atoms = atomsPayload.map(atom => buildAtomFromApiPayload(atom.atomId ?? fallbackAtomId, atom));
     const moleculeId = payload?.moleculeId ?? fallbackMoleculeId;
     const moleculeInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
 
@@ -3328,8 +3954,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     newMolecules.splice(targetIndex, 0, draggedMolecule);
 
     setWorkflowMolecules(newMolecules);
-    // Update localStorage (mode-specific)
-    localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(newMolecules));
+  // Update localStorage
+  localStorage.setItem('workflow-molecules', JSON.stringify(newMolecules));
     setDraggedMoleculeId(null);
   };
 
@@ -3340,7 +3966,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     if (atom?.atomId === 'data-upload-validate') {
       const vid = (atom.settings as DataUploadSettings)?.validatorId;
       if (vid) {
-        fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => { });
+        fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
       }
     }
     setLayoutCards(
@@ -3381,16 +4007,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     // Find the card to get its moleculeId and current atom count
     const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
 
-    // CRITICAL FIX: Prevent replacing existing atom - show warning instead
-    // If card already has an atom, don't allow replacement (one atom per card policy)
     if (card && Array.isArray(card.atoms) && card.atoms.length >= 1) {
-      const existingAtom = card.atoms[0];
       toast({
-        title: 'Card already has an atom',
-        description: `This card already contains "${existingAtom.title}" atom. Please add a new card to use "${info.title}" atom.`,
-        variant: 'destructive',
+        title:
+          'Already one atom is present in the card - please remove atom and then try adding an atom.',
       });
-      return; // Stop execution - don't replace the atom
+      return;
     }
 
     const newAtom = buildAtomFromApiPayload(info.id, {
@@ -3449,10 +4071,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       }
     }
 
-    // CRITICAL FIX: Replace atom instead of appending (enforce one atom per card)
     setLayoutCards(
       (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
-        card.id === cardId ? { ...card, atoms: [newAtom] } : card
+        card.id === cardId ? { ...card, atoms: [...card.atoms, newAtom] } : card
       )
     );
 
@@ -3533,11 +4154,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
       card.atoms.forEach(atom => {
         if (atom.atomId === 'text-box') {
-          fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => { });
+          fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
         } else if (atom.atomId === 'data-upload-validate') {
           const vid = (atom.settings as DataUploadSettings)?.validatorId;
           if (vid) {
-            fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => { });
+            fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
           }
         }
       });
@@ -3545,7 +4166,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(card)
-      }).catch(() => { });
+      }).catch(() => {});
     }
 
     const current = localStorage.getItem('current-project');
@@ -3619,6 +4240,34 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
   const toggleCardExpand = (id: string) => {
     setExpandedCard(expandedCard === id ? null : id);
+  };
+
+  const toggleCardTextBox = (cardId: string) => {
+    if (!Array.isArray(layoutCards)) return;
+
+    setLayoutCards(
+      layoutCards.map(card => {
+        if (card.id !== cardId) return card;
+
+        if (card.textBoxEnabled) {
+          return { ...card, textBoxEnabled: false };
+        }
+
+        const normalizedTextBoxes = normalizeCardTextBoxes(card);
+        const primary = normalizedTextBoxes[0];
+
+        return {
+          ...card,
+          textBoxEnabled: true,
+          textBoxes: normalizedTextBoxes,
+          textBoxContent: primary?.content ?? '',
+          textBoxHtml: primary?.html ?? '',
+          textBoxSettings: primary?.settings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...primary.settings }
+            : { ...DEFAULT_TEXTBOX_SETTINGS },
+        };
+      }),
+    );
   };
 
   const toggleMoleculeCollapse = (moleculeId: string) => {
@@ -3717,11 +4366,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           : mol
       );
 
-      // Update localStorage (mode-specific)
+      // Update localStorage
       if (updatedMolecules.length > 0) {
-        localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(updatedMolecules));
+        localStorage.setItem('workflow-molecules', JSON.stringify(updatedMolecules));
       } else {
-        localStorage.removeItem(getWorkflowMoleculesKey(subMode));
+        localStorage.removeItem('workflow-molecules');
       }
 
       // No need to recalculate orders - standalone cards keep their original order values
@@ -3743,11 +4392,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         // Handle atom-specific backend deletions
         card.atoms.forEach(atom => {
           if (atom.atomId === 'text-box') {
-            fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => { });
+            fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
           } else if (atom.atomId === 'data-upload-validate') {
             const vid = (atom.settings as DataUploadSettings)?.validatorId;
             if (vid) {
-              fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => { });
+              fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
             }
           }
         });
@@ -3757,7 +4406,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(card)
-        }).catch(() => { });
+        }).catch(() => {});
       }
 
       // Remove from collapsed cards state
@@ -4569,7 +5218,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                   return (
                     <React.Fragment key={molecule.moleculeId}>
                       <Card
-                        className={`bg-white border-2 shadow-lg rounded-xl overflow-hidden transition-all duration-200 ${dragOverMoleculeId === molecule.moleculeId
+                      className={`bg-white border-2 shadow-lg rounded-xl overflow-hidden transition-all duration-200 ${
+                        dragOverMoleculeId === molecule.moleculeId 
                             ? 'border-blue-500 bg-blue-50'
                             : draggedMoleculeId === molecule.moleculeId
                               ? 'opacity-50'
@@ -4629,7 +5279,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               title={isCollapsed ? 'Expand molecule' : 'Collapse molecule'}
                             >
                               <ChevronDown
-                                className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${isCollapsed ? '-rotate-90' : 'rotate-0'
+                      className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${
+                        isCollapsed ? '-rotate-90' : 'rotate-0'
                                   }`}
                               />
                             </button>
@@ -4654,7 +5305,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                     <React.Fragment key={card.id}>
                                       <Card
                                         data-card-id={card.id}
-                                        className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${dragOverCardId === card.id
+                          className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+                            dragOverCardId === card.id
                                             ? 'border-blue-500 bg-blue-50 shadow-lg'
                                             : draggedCardId === card.id
                                               ? 'opacity-50'
@@ -4677,7 +5329,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                           handleDrop(e, card.id); // Keep existing functionality
                                         }}
                                       >
-                                        <div className="flex items-center justify-between py-1.5 px-2 border-b border-gray-100">
+                          <div className="flex items-center justify-between py-1.5 px-2">
                                           <div className="flex items-center space-x-1.5">
                                             {canEdit && (
                                               <div
@@ -4688,15 +5340,27 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                 <GripVertical className="w-3 h-3 text-gray-400" />
                                               </div>
                                             )}
+                              {card.atoms.length > 0 && card.atoms[0].color && (
+                                <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
+                                            )}
                                             <span className="text-xs font-medium text-gray-700">
                                               {cardTitle}
                                             </span>
+                              {card.atoms.length === 0 ? (
                                             <AIChatBot
                                               cardId={card.id}
                                               cardTitle={cardTitle}
                                               onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                                              disabled={card.atoms.length > 0}
-                                            />
+                                />
+                              ) : card.atoms.length > 0 && card.atoms[0] ? (
+                                <AtomAIChatBot
+                                  atomId={card.atoms[0].id}
+                                  atomType={card.atoms[0].atomId}
+                                  atomTitle={card.atoms[0].title}
+                                  disabled={!LLM_MAP[card.atoms[0].atomId]}
+                                  className="transition-transform hover:scale-110"
+                                />
+                              ) : null}
                                             <button
                                               onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                                               className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
@@ -4714,6 +5378,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                               title="Refresh Atom"
                                             >
                                               <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
+                                            </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardTextBox(card.id);
+                                }}
+                                className={`p-1 rounded hover:bg-gray-100 ${
+                                  card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                                }`}
+                                title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                              >
+                                <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                                             </button>
                                           </div>
                                           <div className="flex items-center space-x-1.5">
@@ -4753,7 +5429,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                           </div>
                                         </div>
 
-                                        <div className={`flex-1 flex flex-col p-3 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+                          <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                                           {card.atoms.length === 0 ? (
                                             <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                                               <AtomSuggestion
@@ -4766,7 +5442,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                             </div>
                                           ) : (
                                             <div
-                                              className={`grid gap-4 w-full ${card.atoms.length === 1
+                                className={`grid gap-4 w-full ${
+                                  card.atoms.length === 1
                                                   ? 'grid-cols-1'
                                                   : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
                                                 }`}
@@ -4777,9 +5454,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                   className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                                   onClick={(e) => handleAtomClick(e, atom.id)}
                                                 >
-                                                  <div className="flex items-center justify-between mb-3">
+                                    {/* <div className="flex items-center justify-between mb-3">
                                                     <div className="flex items-center space-x-1">
                                                       <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                        {atom.atomId === 'correlation' && console.log('🎯 CANVAS AREA - Rendering AtomAIChatBot for correlation:', {
+                                          atomId: atom.id,
+                                          atomType: atom.atomId,
+                                          atomTitle: atom.title,
+                                          inLLM_MAP: !!LLM_MAP[atom.atomId],
+                                          LLM_MAP_value: LLM_MAP[atom.atomId],
+                                          disabled: !LLM_MAP[atom.atomId],
+                                          willPassDisabled: !LLM_MAP[atom.atomId]
+                                        })}
                                                       <AtomAIChatBot
                                                         atomId={atom.id}
                                                         atomType={atom.atomId}
@@ -4804,16 +5490,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     >
                                                       <Trash2 className="w-4 h-4 text-gray-400" />
                                                     </button>
-                                                  </div>
+                                    </div> */}
 
-                                                  {(() => {
-                                                    console.log('🔍 [CANVASAREA] Rendering atom:', {
-                                                      atomId: atom.atomId,
-                                                      id: atom.id,
-                                                      title: atom.title
-                                                    });
-                                                    return null;
-                                                  })()}
                                                   {atom.atomId === 'text-box' ? (
                                                     <TextBoxEditor textId={atom.id} />
                                                   ) : atom.atomId === 'data-upload-validate' ? (
@@ -4836,8 +5514,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     <ColumnClassifierAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'dataframe-operations' ? (
                                                     <DataFrameOperationsAtom atomId={atom.id} />
-                                                  ) : atom.atomId === 'table' ? (
-                                                    <TableAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'table' ? (
+                                      <TableAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'create-column' ? (
                                                     <CreateColumnAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'groupby-wtg-avg' ? (
@@ -4873,6 +5551,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                               ))}
                                             </div>
                                           )}
+                            {renderCardTextBox(card)}
                                           {renderAppendedVariables(card)}
                                         </div>
                                       </Card>
@@ -4950,7 +5629,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     <React.Fragment key={card.id}>
                       <Card
                         data-card-id={card.id}
-                        className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${dragOverCardId === card.id
+                      className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+                        dragOverCardId === card.id
                             ? 'border-blue-500 bg-blue-50 shadow-lg'
                             : draggedCardId === card.id
                               ? 'opacity-50'
@@ -4963,17 +5643,29 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, card.id)}
                       >
-                        <div className="flex items-center justify-between py-1.5 px-2 border-b border-gray-100">
+                      <div className="flex items-center justify-between py-1.5 px-2">
                           <div className="flex items-center space-x-1.5">
+                          {card.atoms.length > 0 && card.atoms[0].color && (
+                            <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
+                          )}
                             <span className="text-xs font-medium text-gray-700">
                               {cardTitle}
                             </span>
+                          {card.atoms.length === 0 ? (
                             <AIChatBot
                               cardId={card.id}
                               cardTitle={cardTitle}
                               onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                              disabled={card.atoms.length > 0}
                             />
+                          ) : card.atoms.length > 0 && card.atoms[0] ? (
+                            <AtomAIChatBot
+                              atomId={card.atoms[0].id}
+                              atomType={card.atoms[0].atomId}
+                              atomTitle={card.atoms[0].title}
+                              disabled={!LLM_MAP[card.atoms[0].atomId]}
+                              className="transition-transform hover:scale-110"
+                            />
+                          ) : null}
                             <button
                               onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                               className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
@@ -4991,6 +5683,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               title="Refresh Atom"
                             >
                               <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
+                            </button>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              toggleCardTextBox(card.id);
+                            }}
+                            className={`p-1 rounded hover:bg-gray-100 ${
+                              card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                            }`}
+                            title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                          >
+                            <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                             </button>
                           </div>
                           <div className="flex items-center space-x-1.5">
@@ -5030,7 +5734,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                           </div>
                         </div>
 
-                        <div className={`flex-1 flex flex-col p-3 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+                      <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                           {card.atoms.length === 0 ? (
                             <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                               <AtomSuggestion
@@ -5043,7 +5747,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                             </div>
                           ) : (
                             <div
-                              className={`grid gap-4 w-full ${card.atoms.length === 1
+                            className={`grid gap-4 w-full ${
+                              card.atoms.length === 1
                                   ? 'grid-cols-1'
                                   : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
                                 }`}
@@ -5054,7 +5759,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                   className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                   onClick={(e) => handleAtomClick(e, atom.id)}
                                 >
-                                  <div className="flex items-center justify-between mb-3">
+                                {/* <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center space-x-1">
                                       <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                                       <AtomAIChatBot
@@ -5094,7 +5799,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                     >
                                       <Trash2 className="w-4 h-4 text-gray-400" />
                                     </button>
-                                  </div>
+                                </div> */}
 
                                   {atom.atomId === 'text-box' ? (
                                     <TextBoxEditor textId={atom.id} />
@@ -5155,6 +5860,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               ))}
                             </div>
                           )}
+                        {renderCardTextBox(card)}
                           {renderAppendedVariables(card)}
                         </div>
                       </Card>
@@ -5285,7 +5991,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                                 <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
                               </div>
-                              <button
+                            {/* <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleDeleteAtomClick(card.id, atom.id, atom.title || '');
@@ -5293,7 +5999,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                               >
                                 <Trash2 className="w-4 h-4 text-gray-400" />
-                              </button>
+                            </button> */}
                             </div>
 
                             {/* Atom Content */}
@@ -5417,7 +6123,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 <React.Fragment key={card.id}>
                   <Card
                     data-card-id={card.id}
-                    className={`relative w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${dragOver === card.id
+            className={`relative w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+              dragOver === card.id
                         ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                         : isBeingEdited
                           ? `shadow-lg`
@@ -5450,17 +6157,29 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between py-1.5 px-2 border-b border-gray-100">
+            <div className="flex items-center justify-between py-1.5 px-2">
                       <div className="flex items-center space-x-1.5">
+                {card.atoms.length > 0 && card.atoms[0].color && (
+                  <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
+                )}
                         <span className="text-xs font-medium text-gray-700">
                           {cardTitle}
                         </span>
+                {card.atoms.length === 0 ? (
                         <AIChatBot
                           cardId={card.id}
                           cardTitle={cardTitle}
                           onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                          disabled={card.atoms.length > 0}
-                        />
+                  />
+                ) : card.atoms.length > 0 && card.atoms[0] ? (
+                  <AtomAIChatBot
+                    atomId={card.atoms[0].id}
+                    atomType={card.atoms[0].atomId}
+                    atomTitle={card.atoms[0].title}
+                    disabled={!LLM_MAP[card.atoms[0].atomId]}
+                    className="transition-transform hover:scale-110"
+                  />
+                ) : null}
                         <button
                           onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                           className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
@@ -5478,6 +6197,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                           title="Refresh Atom"
                         >
                           <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleCardTextBox(card.id);
+                  }}
+                  className={`p-1 rounded hover:bg-gray-100 ${
+                    card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                  }`}
+                  title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                >
+                  <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                         </button>
                       </div>
                       <div className="flex items-center space-x-1.5">
@@ -5519,7 +6250,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     </div>
 
                     {/* Card Content */}
-                    <div className={`flex-1 flex flex-col p-3 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+            <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                       {card.atoms.length === 0 ? (
                         <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                           <AtomSuggestion
@@ -5532,7 +6263,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         </div>
                       ) : (
                         <div
-                          className={`grid gap-4 w-full ${card.atoms.length === 1
+                  className={`grid gap-4 w-full ${
+                    card.atoms.length === 1
                               ? 'grid-cols-1'
                               : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
                             }`}
@@ -5544,7 +6276,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               onClick={(e) => handleAtomClick(e, atom.id)}
                             >
                               {/* Atom Header */}
-                              <div className="flex items-center justify-between mb-3">
+                      {/* <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center space-x-1">
                                   <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                                   <AtomAIChatBot
@@ -5584,7 +6316,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 >
                                   <Trash2 className="w-4 h-4 text-gray-400" />
                                 </button>
-                              </div>
+                      </div> */}
 
                               {/* Atom Content */}
                               {atom.atomId === 'text-box' ? (
@@ -5648,6 +6380,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                           ))}
                         </div>
                       )}
+          {renderCardTextBox(card)}
                       {renderAppendedVariables(card)}
                     </div>
                   </Card>
@@ -5766,7 +6499,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                                 <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
                               </div>
-                              <button
+                          {/* <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleDeleteAtomClick(card.id, atom.id, atom.title || '');
@@ -5774,7 +6507,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                               >
                                 <Trash2 className="w-4 h-4 text-gray-400" />
-                              </button>
+                          </button> */}
                             </div>
 
                             {/* Atom Content */}

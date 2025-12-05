@@ -38,9 +38,7 @@ class GroupByPromptBuilder:
                 "column5": "count"
             }
         },
-        "response": "Raw thinking and reasoning from LLM about the group by operation, including why this file was selected, why these group by columns were chosen, why these aggregation functions were selected, and any considerations made",
-        "smart_response": "I've configured the group by operation for you. The data will be grouped by the specified columns with the selected aggregation functions. You can now proceed with the group by operation or make adjustments as needed.",
-        "reasoning": "Found all required components with context from history",
+        "reasoning": "Detailed explanation of why the GroupBy atom was chosen, including: analysis of the user's request, why this specific file was selected, why these group by columns were chosen, why these aggregation functions were selected, alternatives considered, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "used_memory": True
     }
     
@@ -55,9 +53,7 @@ class GroupByPromptBuilder:
             "To complete group by, specify: file + group by columns + aggregation functions",
             "Or say 'yes' to use my suggestions"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what files are available, what the user might want, analysis of the request, and recommendations based on available data",
-        "smart_response": "I'd be happy to help you with GroupBy operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you group your data by specific columns and apply aggregation functions. What file would you like to group?",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why the GroupBy atom was chosen, including: analysis of the current situation, what files are available, what the user might want, analysis of the request, why GroupBy is appropriate, what information is needed, recommendations based on available data, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "file_analysis": {
             "total_files": "number",
             "recommended_files": ["file1"],

@@ -7,7 +7,7 @@ import sys
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, List
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -41,10 +41,24 @@ logger.info(f"Parent directory: {parent_dir}")
 logger.info(f"BaseAgent path: {parent_dir / 'BaseAgent'}")
 logger.info(f"BaseAgent exists: {(parent_dir / 'BaseAgent').exists()}")
 
+# Import exceptions for error handling
+TrinityException = None
+AgentExecutionError = None
+ConfigurationError = None
+FileLoadError = None
+ValidationError = None
+
 try:
     try:
         logger.info("Strategy 1: Importing from BaseAgent.__init__.py (package import)...")
         from BaseAgent import BaseAgent, AgentContext, AgentResult, settings
+        from BaseAgent.exceptions import (
+            TrinityException,
+            AgentExecutionError,
+            ConfigurationError,
+            FileLoadError,
+            ValidationError
+        )
         from .merge_prompt import MergePromptBuilder
         logger.info("✅ Imported BaseAgent from BaseAgent package (__init__.py)")
     except ImportError as e1:
@@ -56,6 +70,13 @@ try:
             from BaseAgent.base_agent import BaseAgent
             from BaseAgent.interfaces import AgentContext, AgentResult
             from BaseAgent.config import settings
+            from BaseAgent.exceptions import (
+                TrinityException,
+                AgentExecutionError,
+                ConfigurationError,
+                FileLoadError,
+                ValidationError
+            )
             from .merge_prompt import MergePromptBuilder
             logger.info("✅ Imported BaseAgent from local BaseAgent modules")
         except ImportError as e2:
@@ -66,6 +87,13 @@ try:
                 # Fallback import
                 logger.info("Strategy 3: Importing from TrinityAgent.BaseAgent (absolute)...")
                 from TrinityAgent.BaseAgent import BaseAgent, AgentContext, AgentResult, settings
+                from TrinityAgent.BaseAgent.exceptions import (
+                    TrinityException,
+                    AgentExecutionError,
+                    ConfigurationError,
+                    FileLoadError,
+                    ValidationError
+                )
                 from .merge_prompt import MergePromptBuilder
                 logger.info("✅ Imported BaseAgent from TrinityAgent.BaseAgent package")
             except ImportError as e3:
@@ -74,6 +102,25 @@ try:
                 logger.error(f"Strategy 3 traceback: {traceback.format_exc()}")
                 logger.error(f"Failed to import BaseAgent from all locations: {e1}, {e2}, {e3}")
                 logger.error("Router will be available but agent functionality will not work")
+                # Fallback: define minimal exceptions if import fails
+                class TrinityException(Exception):
+                    def __init__(self, message: str, code: str = "INTERNAL_ERROR"):
+                        self.message = message
+                        self.code = code
+                        super().__init__(self.message)
+                
+                class AgentExecutionError(TrinityException):
+                    def __init__(self, message: str, agent_name: str = "unknown"):
+                        super().__init__(message, code="AGENT_EXECUTION_ERROR")
+                        self.agent_name = agent_name
+                
+                class ConfigurationError(TrinityException):
+                    def __init__(self, message: str, config_key: str = "unknown"):
+                        super().__init__(message, code="CONFIGURATION_ERROR")
+                        self.config_key = config_key
+                
+                FileLoadError = TrinityException
+                ValidationError = TrinityException
                 # Don't raise - let the router be created and routes be registered
                 # The endpoints will check if agent is initialized and return errors if not
 except Exception as e:
@@ -84,6 +131,26 @@ except Exception as e:
     logger.error(f"Full traceback:\n{traceback.format_exc()}")
     logger.error("Router will be available but agent functionality will not work")
     logger.error("=" * 80)
+    # Fallback: define minimal exceptions if import fails
+    if TrinityException is None:
+        class TrinityException(Exception):
+            def __init__(self, message: str, code: str = "INTERNAL_ERROR"):
+                self.message = message
+                self.code = code
+                super().__init__(self.message)
+        
+        class AgentExecutionError(TrinityException):
+            def __init__(self, message: str, agent_name: str = "unknown"):
+                super().__init__(message, code="AGENT_EXECUTION_ERROR")
+                self.agent_name = agent_name
+        
+        class ConfigurationError(TrinityException):
+            def __init__(self, message: str, config_key: str = "unknown"):
+                super().__init__(message, code="CONFIGURATION_ERROR")
+                self.config_key = config_key
+        
+        FileLoadError = TrinityException
+        ValidationError = TrinityException
     # Continue - router is already created and routes will be registered
 
 # Only define MergeAgent if BaseAgent was imported successfully
@@ -146,6 +213,68 @@ if BaseAgent is not None:
             
             return result
         
+        def _filter_existing_files(self, available_files: Dict[str, Any]) -> Dict[str, Any]:
+            """
+            Filter out files that no longer exist in S3.
+            Validates each file exists before including it in the available files list.
+            
+            Args:
+                available_files: Dictionary of files with columns
+                
+            Returns:
+                Filtered dictionary containing only existing files
+            """
+            filtered_files = {}
+            import os
+            
+            for file_path, file_info in available_files.items():
+                try:
+                    # Try to stat the object to verify it exists
+                    self.file_reader.minio_client.stat_object(
+                        bucket_name=self.bucket,
+                        object_name=file_path
+                    )
+                    # File exists, include it
+                    filtered_files[file_path] = file_info
+                except Exception as e:
+                    # File doesn't exist or error accessing it
+                    logger.warning(f"⚠️ File '{file_path}' no longer exists or is inaccessible: {e}")
+                    # Try to find by basename in case path changed
+                    file_basename = os.path.basename(file_path)
+                    found = False
+                    try:
+                        # List objects to find by basename
+                        objects = self.file_reader.minio_client.list_objects(
+                            bucket_name=self.bucket,
+                            prefix=self.file_reader.prefix,
+                            recursive=True
+                        )
+                        for obj in objects:
+                            if os.path.basename(obj.object_name) == file_basename:
+                                # Found file with same basename, verify it exists
+                                try:
+                                    self.file_reader.minio_client.stat_object(
+                                        bucket_name=self.bucket,
+                                        object_name=obj.object_name
+                                    )
+                                    # Update the path and include it
+                                    filtered_files[obj.object_name] = file_info
+                                    found = True
+                                    logger.info(f"✅ Found file by basename: '{file_path}' -> '{obj.object_name}'")
+                                    break
+                                except:
+                                    continue
+                    except:
+                        pass
+                    
+                    if not found:
+                        logger.debug(f"❌ Excluding non-existent file: '{file_path}'")
+            
+            if len(filtered_files) < len(available_files):
+                logger.info(f"🔍 Filtered files: {len(available_files)} -> {len(filtered_files)} (removed {len(available_files) - len(filtered_files)} non-existent files)")
+            
+            return filtered_files
+        
         def _build_prompt(
             self,
             user_prompt: str,
@@ -156,11 +285,17 @@ if BaseAgent is not None:
             Build merge-specific prompt using MergePromptBuilder.
             BaseAgent handles file loading and context building automatically.
             """
+            # Filter out non-existent files before building prompt
+            filtered_files = self._filter_existing_files(available_files)
+            
+            # Update files_with_columns to only include existing files
+            self.files_with_columns = filtered_files
+            
             # Use MergePromptBuilder to build the prompt
             # BaseAgent's execute() method provides available_files and context
             prompt = MergePromptBuilder.build_merge_prompt(
                 user_prompt=user_prompt,
-                available_files_with_columns=available_files,
+                available_files_with_columns=filtered_files,  # Use filtered files
                 context=context,
                 file_details={},  # Can be enhanced if needed
                 other_files=[],
@@ -211,15 +346,133 @@ if BaseAgent is not None:
                 if join_type not in ["inner", "outer", "left", "right"]:
                     return False
             
-            # Must have smart_response (BaseAgent requirement)
-            if "smart_response" not in result:
-                return False
-            
-            # Must have response (raw thinking)
-            if "response" not in result:
-                return False
+            # Reasoning is preferred but not strictly required (will be added in normalization if missing)
+            # No longer validating for smart_response or response - only reasoning is used now
             
             return True
+        
+        def _validate_files_exist(self, file1: Any, file2: Any) -> Tuple[bool, List[str]]:
+            """
+            Validate that files exist in the available files list.
+            
+            Args:
+                file1: First file name or list
+                file2: Second file name or list
+                
+            Returns:
+                Tuple of (all_valid, error_messages)
+            """
+            errors = []
+            
+            # Extract file names from lists if needed
+            file1_name = file1[0] if isinstance(file1, list) and file1 else (file1 if isinstance(file1, str) else "")
+            file2_name = file2[0] if isinstance(file2, list) and file2 else (file2 if isinstance(file2, str) else "")
+            
+            # Check if files exist in files_with_columns
+            if file1_name:
+                # Try to resolve file path
+                file1_resolved = None
+                if file1_name in self.files_with_columns:
+                    file1_resolved = file1_name
+                else:
+                    # Try to find by basename
+                    import os
+                    file1_basename = os.path.basename(file1_name)
+                    for actual_path in self.files_with_columns.keys():
+                        if os.path.basename(actual_path) == file1_basename:
+                            file1_resolved = actual_path
+                            break
+                
+                if not file1_resolved:
+                    errors.append(f"File '{file1_name}' not found in available files")
+            
+            if file2_name:
+                # Try to resolve file path
+                file2_resolved = None
+                if file2_name in self.files_with_columns:
+                    file2_resolved = file2_name
+                else:
+                    # Try to find by basename
+                    import os
+                    file2_basename = os.path.basename(file2_name)
+                    for actual_path in self.files_with_columns.keys():
+                        if os.path.basename(actual_path) == file2_basename:
+                            file2_resolved = actual_path
+                            break
+                
+                if not file2_resolved:
+                    errors.append(f"File '{file2_name}' not found in available files")
+            
+            return len(errors) == 0, errors
+        
+        def _detect_categorical_columns(self, file1: str, file2: str) -> List[str]:
+            """
+            Detect categorical/string columns that are good candidates for joining.
+            
+            Args:
+                file1: First file name
+                file2: Second file name
+                
+            Returns:
+                List of common categorical column names
+            """
+            import os
+            
+            # Resolve file paths
+            file1_resolved = None
+            file2_resolved = None
+            
+            if file1 in self.files_with_columns:
+                file1_resolved = file1
+            else:
+                file1_basename = os.path.basename(file1)
+                for actual_path in self.files_with_columns.keys():
+                    if os.path.basename(actual_path) == file1_basename:
+                        file1_resolved = actual_path
+                        break
+            
+            if file2 in self.files_with_columns:
+                file2_resolved = file2
+            else:
+                file2_basename = os.path.basename(file2)
+                for actual_path in self.files_with_columns.keys():
+                    if os.path.basename(actual_path) == file2_basename:
+                        file2_resolved = actual_path
+                        break
+            
+            if not file1_resolved or not file2_resolved:
+                return []
+            
+            # Get columns for both files
+            file1_info = self.files_with_columns.get(file1_resolved, {})
+            file2_info = self.files_with_columns.get(file2_resolved, {})
+            
+            file1_columns = file1_info.get("columns", [])
+            file2_columns = file2_info.get("columns", [])
+            
+            # Find common columns
+            common_columns = set(file1_columns) & set(file2_columns)
+            
+            # Filter for categorical-looking columns (ID, name, key, code, etc.)
+            categorical_keywords = ["id", "key", "name", "code", "identifier", "ref", "reference"]
+            categorical_columns = []
+            
+            for col in common_columns:
+                col_lower = col.lower()
+                # Check if column name suggests it's categorical
+                if any(keyword in col_lower for keyword in categorical_keywords):
+                    categorical_columns.append(col)
+                # Also include columns that look like IDs (e.g., "ProductID", "CustomerID")
+                elif col_lower.endswith("id") or col_lower.endswith("_id"):
+                    categorical_columns.append(col)
+            
+            # If no categorical columns found, return common columns (prioritize shorter names)
+            if not categorical_columns and common_columns:
+                # Sort by length (shorter names are often IDs/keys)
+                sorted_common = sorted(common_columns, key=len)
+                return sorted_common[:3]  # Return top 3 candidates
+            
+            return categorical_columns[:3]  # Return top 3 categorical candidates
         
         def _normalize_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
             """
@@ -235,12 +488,41 @@ if BaseAgent is not None:
             # Add merge_json if present
             if "merge_json" in result:
                 merge_json = result["merge_json"]
+                
+                # Extract file names
+                file1 = merge_json.get("file1", [])
+                file2 = merge_json.get("file2", [])
+                join_columns = merge_json.get("join_columns", [])
+                join_type = merge_json.get("join_type", "").lower().strip()
+                
+                # Validate files exist
+                file1_name = file1[0] if isinstance(file1, list) and file1 else (file1 if isinstance(file1, str) else "")
+                file2_name = file2[0] if isinstance(file2, list) and file2 else (file2 if isinstance(file2, str) else "")
+                
+                if file1_name and file2_name:
+                    files_valid, errors = self._validate_files_exist(file1, file2)
+                    if not files_valid:
+                        logger.warning(f"⚠️ File validation errors: {errors}")
+                        # Don't fail, but log the warning
+                
+                # If join_columns not specified, try to detect categorical columns
+                if not join_columns and file1_name and file2_name:
+                    detected_columns = self._detect_categorical_columns(file1_name, file2_name)
+                    if detected_columns:
+                        logger.info(f"🔍 Detected categorical columns for joining: {detected_columns}")
+                        join_columns = detected_columns[:1]  # Use first detected column
+                
+                # Ensure join_type defaults to "outer" if not specified or invalid
+                if not join_type or join_type not in ["inner", "outer", "left", "right"]:
+                    join_type = "outer"
+                    logger.info("🔧 Defaulting join_type to 'outer'")
+                
                 normalized["merge_json"] = {
                     "bucket_name": merge_json.get("bucket_name", "trinity"),
-                    "file1": merge_json.get("file1", []),
-                    "file2": merge_json.get("file2", []),
-                    "join_columns": merge_json.get("join_columns", []),
-                    "join_type": merge_json.get("join_type", "outer")
+                    "file1": file1,
+                    "file2": file2,
+                    "join_columns": join_columns,
+                    "join_type": join_type  # Always "outer" if not specified
                 }
             
             # Add other fields
@@ -343,6 +625,20 @@ if BaseAgent is not None and settings is not None:
         logger.info("✅ MergeAgent initialized successfully")
         logger.info(f"Agent name: {agent.name}")
         logger.info(f"Agent description: {agent.description}")
+        
+        # Register agent in BaseAgent registry
+        try:
+            from BaseAgent.registry import registry
+            registry.register(agent)
+            logger.info(f"✅ Registered MergeAgent in BaseAgent registry")
+        except ImportError:
+            try:
+                from TrinityAgent.BaseAgent.registry import registry
+                registry.register(agent)
+                logger.info(f"✅ Registered MergeAgent in BaseAgent registry (absolute import)")
+            except ImportError as e:
+                logger.warning(f"⚠️ Could not register agent in registry: {e}")
+        
         agent_initialized = True
         logger.info("=" * 80)
     except Exception as e:
@@ -445,12 +741,10 @@ def merge_files(request: MergeRequest) -> Dict[str, Any]:
             logger.info("BaseAgent not imported - attempting to retry import...")
             if not _retry_baseagent_import():
                 logger.error("BaseAgent import retry failed - cannot initialize agent")
-                return {
-                    "success": False,
-                    "error": "MergeAgent not initialized - BaseAgent import failed",
-                    "smart_response": "The merge agent is not available. BaseAgent could not be imported. Please check server logs for details.",
-                    "processing_time": round(time.time() - start_time, 2)
-                }
+                raise ConfigurationError(
+                    "MergeAgent not initialized - BaseAgent import failed",
+                    config_key="BASEAGENT_IMPORT"
+                )
             
             # MergeAgent should already be defined at module level if BaseAgent was imported
             # If it's still None, that means BaseAgent import succeeded but MergeAgent wasn't defined
@@ -458,6 +752,10 @@ def merge_files(request: MergeRequest) -> Dict[str, Any]:
             if BaseAgent is not None and MergeAgent is None:
                 logger.error("BaseAgent imported but MergeAgent class not found - this should not happen")
                 logger.error("MergeAgent should be defined at module level when BaseAgent is imported")
+                raise ConfigurationError(
+                    "MergeAgent class not found after BaseAgent import",
+                    config_key="MERGEAGENT_CLASS"
+                )
         
         # Try to initialize now
         if BaseAgent is not None and settings is not None:
@@ -476,33 +774,40 @@ def merge_files(request: MergeRequest) -> Dict[str, Any]:
                     bucket=minio_config["bucket"],
                     prefix=minio_config["prefix"]
                 )
+                # Register agent in BaseAgent registry
+                try:
+                    from BaseAgent.registry import registry
+                    registry.register(agent)
+                    logger.info(f"✅ Registered MergeAgent in BaseAgent registry (on-demand)")
+                except ImportError:
+                    try:
+                        from TrinityAgent.BaseAgent.registry import registry
+                        registry.register(agent)
+                        logger.info(f"✅ Registered MergeAgent in BaseAgent registry (on-demand, absolute import)")
+                    except ImportError as e:
+                        logger.warning(f"⚠️ Could not register agent in registry: {e}")
+                
                 agent_initialized = True
                 logger.info("✅ MergeAgent initialized successfully on-demand")
             except Exception as init_error:
                 logger.error(f"❌ Failed to initialize MergeAgent on-demand: {init_error}", exc_info=True)
-                return {
-                    "success": False,
-                    "error": f"MergeAgent initialization failed: {str(init_error)}",
-                    "smart_response": "The merge agent could not be initialized. Please check server logs for details.",
-                    "processing_time": round(time.time() - start_time, 2)
-                }
+                raise ConfigurationError(
+                    f"MergeAgent initialization failed: {str(init_error)}",
+                    config_key="MERGEAGENT_INIT"
+                )
         else:
             logger.error("BaseAgent or settings still not available after retry")
-            return {
-                "success": False,
-                "error": "MergeAgent not initialized - BaseAgent import failed",
-                "smart_response": "The merge agent is not available. BaseAgent could not be imported. Please check server logs for details.",
-                "processing_time": round(time.time() - start_time, 2)
-            }
+            raise ConfigurationError(
+                "MergeAgent not initialized - BaseAgent import failed",
+                config_key="BASEAGENT_IMPORT"
+            )
     
     if not agent_initialized or agent is None:
         logger.error("MergeAgent still not initialized after retry")
-        return {
-            "success": False,
-            "error": "MergeAgent not initialized",
-            "smart_response": "The merge agent is not available. Please check server logs.",
-            "processing_time": round(time.time() - start_time, 2)
-        }
+        raise ConfigurationError(
+            "MergeAgent not initialized",
+            config_key="MERGEAGENT_INIT"
+        )
     
     logger.info(f"MERGE REQUEST RECEIVED:")
     logger.info(f"Prompt: {request.prompt}")
@@ -549,12 +854,17 @@ def merge_files(request: MergeRequest) -> Dict[str, Any]:
             if isinstance(file2, list):
                 file2 = file2[0] if file2 else ""
             
+            # Ensure join_type defaults to "outer" if not specified
+            join_type = merge_json.get("join_type", "outer")
+            if not join_type or join_type.lower() not in ["inner", "outer", "left", "right"]:
+                join_type = "outer"
+            
             # Add merge_config for frontend/backend
             response["merge_config"] = {
                 "file1": file1,
                 "file2": file2,
                 "join_columns": merge_json.get("join_columns", []),
-                "join_type": merge_json.get("join_type", "outer"),
+                "join_type": join_type,  # Always defaults to "outer"
             }
         
         # Add other fields from result.data
@@ -568,27 +878,27 @@ def merge_files(request: MergeRequest) -> Dict[str, Any]:
         
         return response
         
+    except (TrinityException, ValidationError, FileLoadError, ConfigurationError) as e:
+        # Re-raise Trinity exceptions to be caught by global handler
+        logger.error(f"MERGE REQUEST FAILED (TrinityException): {e.message if hasattr(e, 'message') else str(e)}", exc_info=True)
+        raise
     except Exception as e:
+        # Wrap generic exceptions in AgentExecutionError
         logger.error(f"MERGE REQUEST FAILED: {e}", exc_info=True)
-        processing_time = round(time.time() - start_time, 2)
-        
-        return {
-            "success": False,
-            "error": str(e),
-            "response": f"Error occurred: {str(e)}",
-            "smart_response": f"An error occurred while processing your request: {str(e)}",
-            "processing_time": processing_time
-        }
+        raise AgentExecutionError(
+            f"An error occurred while processing your request: {str(e)}",
+            agent_name="merge"
+        )
 
 
 @router.get("/merge/history/{session_id}")
 def get_history(session_id: str) -> Dict[str, Any]:
     """Get session history."""
     if not agent_initialized or agent is None:
-        return {
-            "success": False,
-            "error": "MergeAgent not initialized"
-        }
+        raise ConfigurationError(
+            "MergeAgent not initialized",
+            config_key="MERGEAGENT_INIT"
+        )
     
     logger.info(f"Getting history for session: {session_id}")
     
@@ -601,21 +911,21 @@ def get_history(session_id: str) -> Dict[str, Any]:
             "total_interactions": len(history) if isinstance(history, list) else 0
         }
     except Exception as e:
-        logger.error(f"Failed to get history: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"Failed to get history: {e}", exc_info=True)
+        raise AgentExecutionError(
+            f"Failed to get session history: {str(e)}",
+            agent_name="merge"
+        )
 
 
 @router.get("/merge/files")
 def list_files() -> Dict[str, Any]:
     """List available files."""
     if not agent_initialized or agent is None:
-        return {
-            "success": False,
-            "error": "MergeAgent not initialized"
-        }
+        raise ConfigurationError(
+            "MergeAgent not initialized",
+            config_key="MERGEAGENT_INIT"
+        )
     
     logger.info("Listing available files")
     
@@ -627,11 +937,11 @@ def list_files() -> Dict[str, Any]:
             "files": files
         }
     except Exception as e:
-        logger.error(f"Failed to list files: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"Failed to list files: {e}", exc_info=True)
+        raise AgentExecutionError(
+            f"Failed to list files: {str(e)}",
+            agent_name="merge"
+        )
 
 
 @router.get("/merge/health")

@@ -6,16 +6,23 @@ from fastapi.responses import Response
 import io
 import json
 from datetime import datetime
-import numpy as np
 import pandas as pd
 
-from app.core.task_queue import celery_task_client, format_task_response
+from app.core.task_queue import format_task_response
 from app.features.data_upload_validate.app.routes import get_object_prefix
-from .deps import get_minio_df, minio_client, MINIO_BUCKET, redis_client
+from .deps import minio_client, MINIO_BUCKET, redis_client
 from .mongodb_saver import (
     save_create_data_settings,
     save_createandtransform_configs,
     get_createandtransform_config_from_mongo,
+)
+from .task_service import (
+    submit_cached_dataframe_task,
+    submit_cardinality_task,
+    submit_classification_task,
+    submit_perform_task,
+    submit_results_task,
+    submit_save_task,
 )
 
 router = APIRouter()
@@ -52,43 +59,46 @@ async def identifier_options(
     client_name: str = Query(..., description="Client name"),
     app_name: str = Query(..., description="App name"),
     project_name: str = Query(..., description="Project name"),
+    file_name: str = Query(None, description="File name for file-specific config lookup"),
 ):
-    """Return identifier column names using Redis ▶ Mongo ▶ fallback logic.
+    """Return identifier column names by fetching directly from MongoDB (bypassing Redis).
 
-    1. Attempt to read JSON config from Redis key
-       `<client>/<app>/<project>/column_classifier_config`.
-    2. If missing, fetch from Mongo (`column_classifier_config` collection).
-       Cache the document back into Redis.
-    3. If still unavailable, return empty list – the frontend will
-       fall back to its existing column_summary extraction flow.
+    Fetches the latest identifiers from MongoDB `column_classifier_config` collection.
+    If file_name is provided, looks for file-specific config first, then falls back to base config.
+    If unavailable, returns empty list – the frontend will fall back to its existing
+    column_summary extraction flow.
+    
+    This matches the same MongoDB lookup pattern used by the groupby atom.
     """
-    import json
     from typing import Any
     
-    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
-    cfg: dict[str, Any] | None = None
-
-    # --- Redis lookup -------------------------------------------------------
-    try:
-        cached = redis_client.get(key)
-        if cached:
-            cfg = json.loads(cached)
-    except Exception as exc:
-        print(f"⚠️ Redis read error for {key}: {exc}")
-
-    # --- Mongo fallback ------------------------------------------------------
-    if cfg is None:
-        cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
-        if cfg:
-            try:
-                redis_client.setex(key, 3600, json.dumps(cfg, default=str))
-            except Exception as exc:
-                print(f"⚠️ Redis write error for {key}: {exc}")
-
+    # --- Fetch directly from MongoDB (bypass Redis) - same as groupby atom -----
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Construct full file_key path like groupby atom does (client/app/project/file.arrow)
+    file_key: str | None = None
+    if file_name:
+        file_key = f"{client_name}/{app_name}/{project_name}/{file_name}"
+    
+    logger.info(f"[identifier_options] Fetching config for client={client_name}, app={app_name}, project={project_name}, file_name={file_name}, file_key={file_key}")
+    
+    # Pass file_key (full path) to get_classifier_config_from_mongo, same as groupby atom
+    cfg: dict[str, Any] | None = get_classifier_config_from_mongo(client_name, app_name, project_name, file_key)
+    
+    logger.info(f"[identifier_options] MongoDB config result: {cfg}")
+    logger.info(f"[identifier_options] Config keys: {list(cfg.keys()) if cfg else 'None'}")
+    
     identifiers: list[str] = []
     if cfg and isinstance(cfg.get("identifiers"), list):
         identifiers = cfg["identifiers"]
-
+        logger.info(f"[identifier_options] Found {len(identifiers)} identifiers: {identifiers}")
+    else:
+        logger.warning(f"[identifier_options] No identifiers found in config. Config type: {type(cfg)}, has 'identifiers' key: {cfg and 'identifiers' in cfg if cfg else False}")
+    
+    # Return all identifiers without filtering - frontend will handle filtering as needed
+    # This allows compute_metrics_within_group to access all identifiers including date columns
+    logger.info(f"[identifier_options] Returning {len(identifiers)} identifiers: {identifiers}")
     return {"identifiers": identifiers}
 
 
@@ -140,25 +150,15 @@ async def perform_create(
         project_name=project_name,
     )
 
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.perform",
-        dotted_path="app.features.createcolumn.service.perform_createcolumn_task",
-        kwargs={
-            "bucket_name": bucket_name,
-            "object_name": object_names,
-            "object_prefix": prefix,
-            "identifiers": identifiers,
-            "form_items": form_items,
-            "client_name": client_name,
-            "app_name": app_name,
-            "project_name": project_name,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "perform",
-            "object_name": object_names,
-            "bucket": bucket_name,
-        },
+    submission = submit_perform_task(
+        bucket_name=bucket_name,
+        object_name=object_names,
+        object_prefix=prefix,
+        identifiers=identifiers,
+        form_items=form_items,
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
     )
 
     if submission.status == "failure":
@@ -174,23 +174,20 @@ async def get_create_data(
     object_names: str = Query(...),
     bucket_name: str = Query(...)
 ):
-    try:
-        # 🔧 CRITICAL FIX: Resolve the full MinIO object path
-        prefix = await get_object_prefix()
-        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
-        create_key = f"{full_object_path}_create.csv"
-        
-        print(f"🔧 File path resolution for results: original={object_names}, prefix={prefix}, full_path={full_object_path}, create_key={create_key}")
-        
-        create_obj = minio_client.get_object(bucket_name, create_key)
-        create_df = pd.read_csv(io.BytesIO(create_obj.read()))
-        clean_df = create_df.replace({np.nan: None, np.inf: None, -np.inf: None})
-        return {
-            "row_count": len(create_df),
-            "create_data": clean_df.to_dict(orient="records")
-        }
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Unable to fetch create data: {str(e)}")
+    prefix = await get_object_prefix()
+    submission = submit_results_task(
+        bucket_name=bucket_name,
+        object_name=object_names,
+        object_prefix=prefix,
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=400,
+            detail=submission.detail or "Unable to fetch create data",
+        )
+
+    return format_task_response(submission)
 
 
 
@@ -212,27 +209,17 @@ async def save_createcolumn_dataframe(
         project_name=project_name or "",
     )
 
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.save",
-        dotted_path="app.features.createcolumn.service.save_dataframe_task",
-        kwargs={
-            "csv_data": csv_data,
-            "filename": filename,
-            "object_prefix": prefix,
-            "overwrite_original": overwrite_original,
-            "client_name": client_name,
-            "app_name": app_name,
-            "project_name": project_name,
-            "user_id": user_id,
-            "project_id": project_id,
-            "operation_details": operation_details,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "save",
-            "filename": filename,
-            "overwrite_original": overwrite_original,
-        },
+    submission = submit_save_task(
+        csv_data=csv_data,
+        filename=filename,
+        object_prefix=prefix,
+        overwrite_original=overwrite_original,
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        user_id=user_id,
+        project_id=project_id,
+        operation_details=operation_details,
     )
 
     if submission.status == "failure":
@@ -249,21 +236,8 @@ async def cached_dataframe(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     page_size: int = Query(50, ge=1, le=1000, description="Number of rows per page")
 ):
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.cached_dataframe",
-        dotted_path="app.features.createcolumn.service.cached_dataframe_task",
-        kwargs={
-            "object_name": object_name,
-            "page": page,
-            "page_size": page_size,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "cached_dataframe",
-            "object_name": object_name,
-            "page": page,
-            "page_size": page_size,
-        },
+    submission = submit_cached_dataframe_task(
+        object_name=object_name, page=page, page_size=page_size
     )
 
     if submission.status == "failure":
@@ -354,19 +328,8 @@ async def get_column_classification(
     validator_atom_id: str = Query(...),
     file_key: str = Query(...)
 ):
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.classification",
-        dotted_path="app.features.createcolumn.service.classification_task",
-        kwargs={
-            "validator_atom_id": validator_atom_id,
-            "file_key": file_key,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "classification",
-            "validator_atom_id": validator_atom_id,
-            "file_key": file_key,
-        },
+    submission = submit_classification_task(
+        validator_atom_id=validator_atom_id, file_key=file_key
     )
 
     if submission.status == "failure":
@@ -446,16 +409,33 @@ async def get_createcolumn_configuration(
 async def get_cardinality_data(
     object_name: str = Query(..., description="Object name/path of the dataframe"),
 ):
+    submission = submit_cardinality_task(
+        bucket_name=MINIO_BUCKET, object_name=object_name
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=400,
+            detail=submission.detail or "Failed to get cardinality data",
+        )
+
+    return format_task_response(submission)
+
+@router.get("/columns_with_missing_values")
+async def get_columns_with_missing_values(
+    object_name: str = Query(..., description="Object name/path of the dataframe"),
+):
+    """Return list of column names that have missing values."""
     submission = celery_task_client.submit_callable(
-        name="createcolumn.cardinality",
-        dotted_path="app.features.createcolumn.service.cardinality_task",
+        name="createcolumn.columns_with_missing_values",
+        dotted_path="app.features.createcolumn.service.columns_with_missing_values_task",
         kwargs={
             "bucket_name": MINIO_BUCKET,
             "object_name": object_name,
         },
         metadata={
             "atom": "createcolumn",
-            "operation": "cardinality",
+            "operation": "columns_with_missing_values",
             "object_name": object_name,
         },
     )
@@ -463,7 +443,7 @@ async def get_cardinality_data(
     if submission.status == "failure":
         raise HTTPException(
             status_code=400,
-            detail=submission.detail or "Failed to get cardinality data",
+            detail=submission.detail or "Failed to get columns with missing values",
         )
 
     return format_task_response(submission)

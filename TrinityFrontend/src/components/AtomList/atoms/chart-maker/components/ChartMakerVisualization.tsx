@@ -108,8 +108,18 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     // Migrate legacy chart format before applying updates
     const migratedChart = migrateLegacyChart(prevChart);
 
+    // 🔧 CRITICAL FIX: Ensure filters is always initialized as an object
+    if (!migratedChart.filters) {
+      migratedChart.filters = {};
+    }
+
     // Merge updates into migrated chart first
     let updatedChart: ChartMakerConfig = { ...migratedChart, ...updates } as ChartMakerConfig;
+    
+    // 🔧 CRITICAL FIX: Ensure filters persists through updates
+    if (!updatedChart.filters) {
+      updatedChart.filters = {};
+    }
 
     // Enforce chart type compatibility with legend selections
     const nextLegendField = updates.legendField !== undefined ? updates.legendField : updatedChart.legendField;
@@ -352,6 +362,10 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
   const updateFilter = (chartIndex: number, column: string, values: string[]) => {
     const newCharts = [...settings.charts];
+    // 🔧 CRITICAL FIX: Ensure filters object exists before updating
+    if (!newCharts[chartIndex].filters) {
+      newCharts[chartIndex].filters = {};
+    }
     newCharts[chartIndex].filters = {
       ...newCharts[chartIndex].filters,
       [column]: values
@@ -361,6 +375,10 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
   const removeFilter = (chartIndex: number, column: string) => {
     const newCharts = [...settings.charts];
+    // 🔧 CRITICAL FIX: Ensure filters object exists before removing
+    if (!newCharts[chartIndex].filters) {
+      newCharts[chartIndex].filters = {};
+    }
     const { [column]: removed, ...remainingFilters } = newCharts[chartIndex].filters;
     newCharts[chartIndex].filters = remainingFilters;
     onSettingsChange({ charts: newCharts });
@@ -776,7 +794,8 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                         <div>
                           <Label className="text-xs">Filters</Label>
                           <div className="mt-1 flex flex-wrap gap-2">
-                            {Object.entries(chart.filters).map(([column, values]) => (
+                            {/* 🔧 CRITICAL FIX: Ensure filters is always an object before iterating */}
+                            {Object.entries(chart.filters || {}).map(([column, values]) => (
                               <Badge key={column} variant="secondary" className="flex items-center gap-1">
                                 {column}
                                 <X 
@@ -793,10 +812,22 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                                   size="sm" 
                                   className="w-full"
                                   disabled={
-                                    !chart.xAxis || !chart.yAxis || chart.xAxis === 'None' || chart.yAxis === 'None' || getAvailableFilterColumns().length === 0
+                                    // 🔧 CRITICAL FIX: Allow filters if xAxis is set AND (yAxis OR secondYAxis) is set
+                                    // For dual Y-axis charts, secondYAxis might be set instead of yAxis
+                                    !chart.xAxis || 
+                                    chart.xAxis === 'None' || 
+                                    (!chart.yAxis && !chart.secondYAxis) || 
+                                    (chart.yAxis === 'None' && !chart.secondYAxis) ||
+                                    getAvailableFilterColumns().length === 0
                                   }
                                   style={{
-                                    opacity: (!chart.xAxis || !chart.yAxis || chart.xAxis === 'None' || chart.yAxis === 'None' || getAvailableFilterColumns().length === 0) ? 0.5 : 1
+                                    opacity: (
+                                      !chart.xAxis || 
+                                      chart.xAxis === 'None' || 
+                                      (!chart.yAxis && !chart.secondYAxis) || 
+                                      (chart.yAxis === 'None' && !chart.secondYAxis) ||
+                                      getAvailableFilterColumns().length === 0
+                                    ) ? 0.5 : 1
                                   }}
                                 >
                                   <Filter className="w-3 h-3 mr-1" />
@@ -817,13 +848,14 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                                              size="sm"
                                              className="w-full justify-start"
                                              onClick={() => {
-                                               if (!chart.filters[column]) {
+                                               // 🔧 CRITICAL FIX: Ensure filters exists before checking
+                                               if (!chart.filters || !chart.filters[column]) {
                                                  // Initialize with ALL unique values selected by default
                                                  const allValues = getUniqueValues(column);
                                                  updateFilter(index, column, allValues);
                                                }
                                              }}
-                                             disabled={!!chart.filters[column]}
+                                             disabled={!!(chart.filters && chart.filters[column])}
                                            >
                                              {column}
                                            </Button>

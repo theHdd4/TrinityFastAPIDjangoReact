@@ -353,12 +353,13 @@ services:
 
   trinity-ai:
     build:
-      context: ./TrinityAI
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: TrinityAgent/Dockerfile
     env_file:
       - ./TrinityBackendDjango/.env
     environment:
       <<: *redis-env
+      HOST_IP: ${HOST_IP:-10.2.4.48}
       OLLAMA_IP: 10.2.4.48
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
@@ -366,9 +367,12 @@ services:
       FASTAPI_HOST: fastapi
       FASTAPI_PORT: "8001"
       REDIS_LOG_SERVICE: trinity-ai
-    volumes:
-      - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
-      - ./TrinityAgent:/app/TrinityAgent:ro
+    # volumes:
+      # Temporarily commented out due to Docker Desktop Windows volume mount issue
+      # If you need DataStorageRetrieval, uncomment after restarting Docker Desktop:
+      # - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
+      # TrinityAgent is already copied into image during build, so volume mount not needed:
+      # - ./TrinityAgent:/app:ro
     ports:
       - "8005:8002"
     networks:

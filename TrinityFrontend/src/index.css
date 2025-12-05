@@ -49,6 +49,52 @@
   padding: 0 !important;
 }
 
+/* Markdown styling for insight text boxes */
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content .markdown-h3 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #458EE2;
+  margin-top: 1rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #cfe2ff;
+  transition: all 0.2s ease;
+  cursor: default;
+}
+
+.markdown-content .markdown-h3:hover {
+  color: #2d6bb8;
+  border-bottom-color: #458EE2;
+}
+
+.markdown-content .markdown-h3:first-child {
+  margin-top: 0;
+}
+
+.markdown-content .markdown-bold {
+  font-weight: 700;
+  color: #1f2937;
+  background: linear-gradient(120deg, rgba(69, 142, 226, 0.1) 0%, rgba(69, 142, 226, 0.05) 100%);
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  transition: all 0.2s ease;
+}
+
+.markdown-content .markdown-bold:hover {
+  background: linear-gradient(120deg, rgba(69, 142, 226, 0.15) 0%, rgba(69, 142, 226, 0.1) 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(69, 142, 226, 0.1);
+}
+
+.markdown-content .markdown-italic {
+  font-style: italic;
+  color: #4b5563;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

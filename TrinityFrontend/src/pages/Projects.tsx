@@ -8,8 +8,8 @@ import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
-import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
-import { startProjectTransition, cleanupProjectTransition } from '@/utils/projectTransition';
+import { openProjectAndNavigate } from '@/utils/openProject';
+import { cleanupProjectTransition } from '@/utils/projectTransition';
 import {
   Plus,
   FolderOpen,
@@ -303,53 +303,32 @@ const Projects = () => {
   const openProject = async (project: Project) => {
     if (isTransitioning) return;
 
-    setIsTransitioning(true);
-    startProjectTransition(navigate);
-
-    clearProjectState();
-    saveCurrentProject(project);
-
-    // Construct an initial environment using any existing client identifiers
-    // and the currently selected app/project. This ensures env-dependent
-    // components (session state, MinIO prefixing, etc.) immediately reflect
-    // the user's context even before the backend responds with its
-    // canonical environment payload.
-    let env: Record<string, string> = {
-      APP_NAME: selectedApp || '',
-      APP_ID: appId?.toString() || '',
-      PROJECT_NAME: project.name,
-      PROJECT_ID: project.id?.toString() || '',
-    };
-    try {
-      const envStr = localStorage.getItem('env');
-      const baseEnv = envStr ? JSON.parse(envStr) : {};
-      if (baseEnv.CLIENT_NAME) env.CLIENT_NAME = baseEnv.CLIENT_NAME;
-      if (baseEnv.CLIENT_ID) env.CLIENT_ID = baseEnv.CLIENT_ID;
-    } catch {
-      /* ignore parse errors */
+    if (!appId) {
+      console.error('❌ App ID not found, cannot open project');
+      return;
     }
-    localStorage.setItem('env', JSON.stringify(env));
 
-    try {
-      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.environment) {
-          // Persist the full environment returned by the backend, but ensure
-          // current app/project identifiers remain accurate.
-          env = {
-            ...env,
-            ...data.environment,
-            APP_NAME: selectedApp || env.APP_NAME,
-            APP_ID: appId?.toString() || env.APP_ID,
-            PROJECT_NAME: project.name,
-            PROJECT_ID: project.id?.toString() || env.PROJECT_ID,
-          };
-          localStorage.setItem('env', JSON.stringify(env));
-        }
+    setIsTransitioning(true);
+
+    // Use shared utility function to open project and navigate
+    const success = await openProjectAndNavigate(
+      {
+        id: project.id,
+        name: project.name,
+        appId: selectedApp || project.appTemplate,
+      },
+      appId,
+      navigate,
+      {
+        onError: (error) => {
+          console.error('Failed to open project:', error);
+          setIsTransitioning(false);
+        },
       }
-    } catch (err) {
-      console.log('Project env fetch error', err);
+    );
+
+    if (!success) {
+      setIsTransitioning(false);
     }
   };
 
@@ -686,8 +665,8 @@ const Projects = () => {
               >
                 <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex-1">
-                    <h2 className="mb-2 text-3xl font-bold text-gray-900">Workspace</h2>
-                    <p className="text-lg text-gray-600">
+                    <h2 className="mb-2 text-base font-semibold text-gray-900">Workspace</h2>
+                    <p className="text-xs text-gray-600">
                       Manage your {appDetails.title.toLowerCase()} projects and templates
                     </p>
                   </div>
@@ -698,7 +677,7 @@ const Projects = () => {
                         placeholder="Search projects & templates..."
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
-                        className="w-full pl-10"
+                        className="w-full pl-10 text-sm"
                       />
                     </div>
                     <div className="flex items-center rounded-lg border border-gray-200 p-1">
@@ -721,7 +700,7 @@ const Projects = () => {
                     </div>
                     <Button
                       onClick={createNewProject}
-                      className="px-6 py-2.5 text-white transition-all duration-300 bg-black shadow-lg hover:bg-gray-900 hover:shadow-xl"
+                      className="px-6 py-2.5 text-sm text-white transition-all duration-300 bg-black shadow-lg hover:bg-gray-900 hover:shadow-xl"
                     >
                       <Plus className="mr-2 h-4 w-4" />
                       New Project
@@ -743,11 +722,11 @@ const Projects = () => {
                     data-project-transition="tabs-list"
                     data-project-transition-order="20"
                   >
-                    <TabsTrigger value="templates" className="flex items-center space-x-2">
+                    <TabsTrigger value="templates" className="flex items-center space-x-2 text-sm">
                       <Bookmark className="h-4 w-4" />
                       <span>Templates ({filteredTemplates.length})</span>
                     </TabsTrigger>
-                    <TabsTrigger value="projects" className="flex items-center space-x-2">
+                    <TabsTrigger value="projects" className="flex items-center space-x-2 text-sm">
                       <FolderOpen className="h-4 w-4" />
                       <span>Projects ({filteredProjects.length})</span>
                     </TabsTrigger>
@@ -778,8 +757,8 @@ const Projects = () => {
                     <Plus className={`${viewMode === 'grid' ? 'w-10 h-10' : 'w-6 h-6'} text-gray-400 group-hover:text-gray-600 transition-colors duration-300`} />
                   </div>
                   <div className={viewMode === 'grid' ? 'text-center' : 'flex-1'}>
-                    <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors`}>Create New Project</h3>
-                    <p className="text-sm text-gray-500">Start a new analysis</p>
+                    <h3 className={`${viewMode === 'grid' ? 'text-sm' : 'text-sm'} font-medium text-gray-900 mb-2 group-hover:text-gray-700 transition-colors`}>Create New Project</h3>
+                    <p className="text-[11px] text-gray-500">Start a new analysis</p>
                   </div>
                 </div>
               </Card>
@@ -948,13 +927,13 @@ const Projects = () => {
                           onClick={(e) => e.stopPropagation()}
                         />
                       ) : (
-                        <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{project.name}</h3>
+                        <h3 className={`${viewMode === 'grid' ? 'text-sm' : 'text-sm'} font-medium text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{project.name}</h3>
                       )}
-                      <p className="text-sm text-gray-600 mb-4 line-clamp-2 leading-relaxed">
+                      <p className="text-[11px] text-gray-600 mb-4 line-clamp-2 leading-relaxed">
                         {`Base Template: ${project.baseTemplate || 'None'}`}
                       </p>
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2 text-gray-400 text-xs">
+                        <div className="flex items-center space-x-2 text-gray-400 text-[10px]">
                           <Clock className="w-3 h-3" />
                           <span>{formatDate(project.lastModified)}</span>
                         </div>
@@ -974,8 +953,8 @@ const Projects = () => {
                 <div className="w-20 h-20 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center mx-auto mb-6 shadow-inner">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Loading your projects</h3>
-                <p className="text-gray-500">Preparing your workspace…</p>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Loading your projects</h3>
+                <p className="text-xs text-gray-500">Preparing your workspace…</p>
               </div>
             )}
 
@@ -988,15 +967,15 @@ const Projects = () => {
                 <div className={`w-32 h-32 rounded-3xl bg-gradient-to-br ${appDetails.lightBg} flex items-center justify-center mx-auto mb-8 shadow-inner`}>
                   <Icon className="w-16 h-16 text-gray-400" />
                 </div>
-                <h3 className="text-2xl font-semibold text-gray-900 mb-4">No projects yet</h3>
-                <p className="text-gray-500 mb-8 text-lg max-w-md mx-auto leading-relaxed">
+                <h3 className="text-base font-semibold text-gray-900 mb-4">No projects yet</h3>
+                <p className="text-xs text-gray-500 mb-8 max-w-md mx-auto leading-relaxed">
                   Create your first {appDetails.title.toLowerCase()} project to start analyzing your data and unlock powerful insights.
                 </p>
                 <Button
                   onClick={createNewProject}
-                  className="bg-yellow-500 hover:bg-yellow-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 px-8 py-4 text-lg"
+                  className="bg-yellow-500 hover:bg-yellow-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 px-8 py-4 text-sm"
                 >
-                  <Plus className="w-5 h-5 mr-3" />
+                  <Plus className="w-4 h-4 mr-2" />
                   Create Your First Project
                 </Button>
               </div>
@@ -1011,8 +990,8 @@ const Projects = () => {
                 <div className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-6">
                   <Search className="w-12 h-12 text-gray-400" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">No projects found</h3>
-                <p className="text-gray-500">Try adjusting your search terms</p>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">No projects found</h3>
+                <p className="text-xs text-gray-500">Try adjusting your search terms</p>
               </div>
             )}
           </TabsContent>
@@ -1056,7 +1035,7 @@ const Projects = () => {
                       </div>
                       {viewMode === 'grid' && (
                         <div className="flex items-center space-x-2">
-                          <Badge variant="secondary" className="text-xs">
+                          <Badge variant="secondary" className="text-[10px]">
                             {template.usageCount} uses
                           </Badge>
                           {hoveredTemplate === template.id && (
@@ -1177,30 +1156,30 @@ const Projects = () => {
                           onClick={(e) => e.stopPropagation()}
                         />
                       ) : (
-                        <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{template.name}</h3>
+                        <h3 className={`${viewMode === 'grid' ? 'text-sm' : 'text-sm'} font-medium text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{template.name}</h3>
                       )}
-                      <p className="text-sm text-gray-600 mb-4 line-clamp-2 leading-relaxed">{template.description}</p>
+                      <p className="text-[11px] text-gray-600 mb-4 line-clamp-2 leading-relaxed">{template.description}</p>
                       {template.configurationSummary && (
                         <div className="flex flex-wrap gap-2 mb-6">
-                          <Badge variant="secondary" className="bg-slate-100 text-slate-600 border border-slate-200">
+                          <Badge variant="secondary" className="bg-slate-100 text-slate-600 border border-slate-200 text-[10px]">
                             Slides: {template.configurationSummary.exhibitionSlides}
                           </Badge>
-                          <Badge variant="secondary" className="bg-emerald-100 text-emerald-600 border border-emerald-200">
+                          <Badge variant="secondary" className="bg-emerald-100 text-emerald-600 border border-emerald-200 text-[10px]">
                             Lab cards: {template.configurationSummary.atomCards.laboratory}
                           </Badge>
-                          <Badge variant="secondary" className="bg-blue-100 text-blue-600 border border-blue-200">
+                          <Badge variant="secondary" className="bg-blue-100 text-blue-600 border border-blue-200 text-[10px]">
                             Workflow cards: {template.configurationSummary.atomCards.workflow}
                           </Badge>
-                          <Badge variant="secondary" className="bg-violet-100 text-violet-600 border border-violet-200">
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-600 border border-violet-200 text-[10px]">
                             Exhibition cards: {template.configurationSummary.atomCards.exhibition}
                           </Badge>
-                          <Badge variant="secondary" className="bg-amber-100 text-amber-600 border border-amber-200">
+                          <Badge variant="secondary" className="bg-amber-100 text-amber-600 border border-amber-200 text-[10px]">
                             Molecules: {template.configurationSummary.moleculeCount}
                           </Badge>
                         </div>
                       )}
                       <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500">{template.usageCount} uses</span>
+                        <span className="text-[10px] text-gray-500">{template.usageCount} uses</span>
                         {viewMode === 'list' && hoveredTemplate === template.id && (
                           <div className="flex items-center space-x-1">
                             <Tooltip>
@@ -1313,12 +1292,12 @@ const Projects = () => {
                 <div className="w-32 h-32 rounded-3xl bg-gradient-to-br from-amber-50 to-orange-100 flex items-center justify-center mx-auto mb-8 shadow-inner">
                   <Bookmark className="w-16 h-16 text-amber-400" />
                 </div>
-                <h3 className="text-2xl font-semibold text-gray-900 mb-4">No templates yet</h3>
-                <p className="text-gray-500 mb-8 text-lg max-w-md mx-auto leading-relaxed">
+                <h3 className="text-base font-semibold text-gray-900 mb-4">No templates yet</h3>
+                <p className="text-xs text-gray-500 mb-8 max-w-md mx-auto leading-relaxed">
                   Save your projects as templates to reuse them for future analysis.
                 </p>
-                <Button onClick={() => setActiveTab('projects')} variant="outline" className="px-8 py-4 text-lg">
-                  <FolderOpen className="w-5 h-5 mr-3" />
+                <Button onClick={() => setActiveTab('projects')} variant="outline" className="px-8 py-4 text-sm">
+                  <FolderOpen className="w-4 h-4 mr-2" />
                   Browse Projects
                 </Button>
               </div>
@@ -1329,8 +1308,8 @@ const Projects = () => {
                 <div className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-6">
                   <Search className="w-12 h-12 text-gray-400" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">No templates found</h3>
-                <p className="text-gray-500">Try adjusting your search terms</p>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">No templates found</h3>
+                <p className="text-xs text-gray-500">Try adjusting your search terms</p>
               </div>
             )}
                   </TabsContent>

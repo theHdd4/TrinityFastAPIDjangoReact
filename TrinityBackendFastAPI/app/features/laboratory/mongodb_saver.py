@@ -215,3 +215,105 @@ async def save_variable_definition(document: Dict[str, Any]) -> Dict[str, Any]:
             "collection": CONFIG_VARIABLE_COLLECTION,
         }
 
+
+async def save_variable_to_project(document: Dict[str, Any]) -> Dict[str, Any]:
+    """Save a variable to a project document with nested structure: _id = client/app/project, variables = {variable_name: {...}}."""
+    
+    client_id = document.get("client_id", "").strip()
+    app_id = document.get("app_id", "").strip()
+    project_id = document.get("project_id", "").strip()
+    variable_name = document.get("variable_name", "").strip()
+    
+    if not client_id or not app_id or not project_id:
+        return {
+            "status": "error",
+            "error": "client_id, app_id, and project_id are required",
+            "collection": CONFIG_VARIABLE_COLLECTION,
+        }
+    
+    if not variable_name:
+        return {
+            "status": "error",
+            "error": "Variable name is required",
+            "collection": CONFIG_VARIABLE_COLLECTION,
+        }
+    
+    try:
+        # Document ID is just client/app/project
+        doc_id = f"{client_id}/{app_id}/{project_id}"
+        
+        # Prepare variable data (exclude id, client_id, app_id, project_id, variable_name from nested data)
+        variable_data = {
+            "value": document.get("value", ""),
+            "description": document.get("description"),
+            "usage_summary": document.get("usage_summary"),
+            "metadata": document.get("metadata", {}),
+            "created_at": document.get("created_at") or datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+        
+        # Check if document exists
+        existing_doc = await get_config_variable_collection().find_one({"_id": doc_id})
+        
+        if existing_doc:
+            # Check if variable name already exists
+            existing_variables = existing_doc.get("variables", {})
+            if variable_name in existing_variables:
+                # Update existing variable
+                variable_data["created_at"] = existing_variables[variable_name].get("created_at", variable_data["created_at"])
+                operation = "updated"
+            else:
+                operation = "inserted"
+            
+            # Update the variables object
+            existing_variables[variable_name] = variable_data
+            
+            result = await get_config_variable_collection().update_one(
+                {"_id": doc_id},
+                {
+                    "$set": {
+                        "variables": existing_variables,
+                        "updated_at": datetime.utcnow(),
+                    }
+                }
+            )
+        else:
+            # Create new document
+            new_doc = {
+                "_id": doc_id,
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "project_name": document.get("project_name", project_id),
+                "variables": {
+                    variable_name: variable_data
+                },
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+            
+            result = await get_config_variable_collection().insert_one(new_doc)
+            operation = "inserted"
+        
+        # logger.info(
+        #     "🔖 %s variable %s in project %s",
+        #     "Updated" if operation == "updated" else "Inserted",
+        #     variable_name,
+        #     doc_id,
+        # )
+        
+        return {
+            "status": "success",
+            "operation": operation,
+            "variable_name": variable_name,
+            "project_id": doc_id,
+            "collection": CONFIG_VARIABLE_COLLECTION,
+        }
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to persist variable %s to project", variable_name)
+        return {
+            "status": "error",
+            "error": str(exc),
+            "variable_name": variable_name,
+            "collection": CONFIG_VARIABLE_COLLECTION,
+        }

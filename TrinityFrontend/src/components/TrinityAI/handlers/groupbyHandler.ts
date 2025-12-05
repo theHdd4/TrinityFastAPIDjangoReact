@@ -11,8 +11,12 @@ import {
   executePerformOperation,
   validateFileInput,
   createProgressTracker,
-  autoSaveStepResult
+  autoSaveStepResult,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox
 } from './utils';
+import { generateAtomInsight } from './insightGenerator';
 
 const normalizeColumnName = (value: string | undefined | null) => {
   if (!value || typeof value !== 'string') return '';
@@ -35,25 +39,17 @@ export const groupbyHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { atomId, updateAtomSettings, setMessages, sessionId, isStreamMode = false, stepAlias } = context;
     
-    // 🔧 FIX: Show smart_response in handleSuccess for success cases
-    // handleFailure will handle failure cases
-    // Only show messages in Individual AI mode (not in Stream AI mode)
-    const smartResponseText = processSmartResponse(data);
-    console.log('💬 Smart response text available:', smartResponseText ? 'Yes' : 'No');
-    console.log('🔍 Has groupby_json:', !!data.groupby_json);
-    console.log('🔍 Is Stream Mode:', isStreamMode);
-    
-    // Show smart_response for success cases (when groupby_json exists) - only in Individual AI
-    if (smartResponseText && !isStreamMode) {
-      const smartMsg: Message = {
+    // Show reasoning in chat (only reasoning field now) - only in Individual AI mode
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    if (reasoningText && !isStreamMode) {
+      const reasoningMsg: Message = {
         id: (Date.now() + 1).toString(),
-        content: smartResponseText,
+        content: `**Reasoning:**\n${reasoningText}`,
         sender: 'ai',
         timestamp: new Date(),
       };
-      console.log('📤 Sending smart response message to chat (Individual AI)...');
-      setMessages(prev => [...prev, smartMsg]);
-      console.log('✅ Displayed smart_response to user:', smartResponseText);
+      setMessages(prev => [...prev, reasoningMsg]);
+      console.log('✅ Displayed reasoning to user');
     }
     
     if (!data.groupby_json) {
@@ -306,6 +302,41 @@ export const groupbyHandler: AtomHandler = {
       lastUpdateTime: Date.now()
     });
     
+    // 📝 Update card text box with reasoning
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content length:', textBoxContent.length);
+    
+    // Update card's text box (this enables the text box icon on the card)
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // Store agent response in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || '',
+        reasoning: data.reasoning || '',
+        formattedText: textBoxContent
+      }
+    });
+    
+    // STEP 2: Add text box with placeholder (like create-transform) - right after 3 keys are added
+    // Add a small delay to ensure first text box is fully saved
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      // Add text box with placeholder (addCardTextBox requires non-empty content)
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
+      // Continue even if text box addition fails
+    }
+    
     // Add AI success message with operation completion
     const successDetails = {
       'File': singleFileName || 'N/A',
@@ -432,6 +463,48 @@ export const groupbyHandler: AtomHandler = {
                 completionMsg.content += '\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!';
                 setMessages(prev => [...prev, completionMsg]);
               }
+              
+              // STEP 2b: Generate insight AFTER perform operation completes successfully
+              // Update the existing "Generating insight..." text box with the actual insight
+              const enhancedDataForInsight = {
+                ...data, // This includes reasoning
+                groupby_json: data.groupby_json, // Original config from first LLM call
+                groupby_results: {
+                  ...result.data,
+                  result_file: result.data.result_file,
+                  row_count: directRows.length,
+                  columns: headers,
+                  unsaved_data: directRows,
+                },
+                file_details: {
+                  file_name: singleFileName || '',
+                  identifiers: aiSelectedIdentifiers,
+                  aggregations: aiSelectedMeasures,
+                },
+              };
+              
+              // Generate insight - same pattern as create-transform (non-blocking)
+              // STEP 2b: Generate insight AFTER perform operation completes successfully
+              // Uses async backend endpoint that processes in background and updates card automatically
+              console.log('🔍 GROUPBY: Starting insight generation for atomId:', atomId);
+              console.log('🔍 GROUPBY: Enhanced data keys:', Object.keys(enhancedDataForInsight));
+              
+              generateAtomInsight({
+                data: enhancedDataForInsight,
+                atomType: 'groupby-wtg-avg',
+                sessionId,
+                atomId, // Pass atomId so async backend endpoint can update card automatically
+              }).then((result) => {
+                console.log('🔍 GROUPBY: Insight generation result:', {
+                  success: result.success,
+                  hasInsight: !!result.insight,
+                  error: result.error,
+                  note: result.insight === '' ? 'Using async endpoint - backend will update card' : 'Sync endpoint used'
+                });
+              }).catch((error) => {
+                console.error('❌ GROUPBY: Error generating insight:', error);
+              });
+              // Note: When using async endpoint, backend handles text box update automatically
             } else {
               // 🔧 FIX: Retrieve results from the saved file using the cached_dataframe endpoint
               try {
@@ -507,6 +580,47 @@ export const groupbyHandler: AtomHandler = {
                   completionMsg.content += '\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!';
                   setMessages(prev => [...prev, completionMsg]);
                 }
+                
+                // STEP 2b: Generate insight AFTER perform operation completes successfully
+                // Update the existing "Generating insight..." text box with the actual insight
+                const enhancedDataForInsight = {
+                  ...data, // This includes reasoning
+                  groupby_json: data.groupby_json, // Original config from first LLM call
+                  groupby_results: {
+                    ...result.data,
+                    result_file: result.data.result_file,
+                    row_count: rows.length,
+                    columns: headers,
+                    unsaved_data: rows,
+                  },
+                  file_details: {
+                    file_name: singleFileName || '',
+                    identifiers: aiSelectedIdentifiers,
+                    aggregations: aiSelectedMeasures,
+                  },
+                };
+                
+                // STEP 2b: Generate insight AFTER perform operation completes successfully (cached_dataframe path)
+                // Uses async backend endpoint that processes in background and updates card automatically
+                console.log('🔍 GROUPBY (cached): Starting insight generation for atomId:', atomId);
+                console.log('🔍 GROUPBY (cached): Enhanced data keys:', Object.keys(enhancedDataForInsight));
+                
+                generateAtomInsight({
+                  data: enhancedDataForInsight,
+                  atomType: 'groupby-wtg-avg',
+                  sessionId,
+                  atomId, // Pass atomId so async backend endpoint can update card automatically
+                }).then((result) => {
+                  console.log('🔍 GROUPBY (cached): Insight generation result:', {
+                    success: result.success,
+                    hasInsight: !!result.insight,
+                    error: result.error,
+                    note: result.insight === '' ? 'Using async endpoint - backend will update card' : 'Sync endpoint used'
+                  });
+                }).catch((error) => {
+                  console.error('❌ GROUPBY (cached): Error generating insight:', error);
+                });
+                // Note: When using async endpoint, backend handles text box update automatically
               } catch (fetchError) {
                 console.error('❌ Error fetching results from saved file:', fetchError);
                 
@@ -644,10 +758,10 @@ export const groupbyHandler: AtomHandler = {
     const { setMessages, atomId, updateAtomSettings, isStreamMode = false } = context;
     
     // 🔧 FIX: This function now handles BOTH success and failure cases
-    // Always show the smart_response message once, regardless of success/failure
+    // Always show the reasoning message once, regardless of success/failure
     let aiText = '';
-    if (data.smart_response) {
-      aiText = data.smart_response;
+    if (data.reasoning) {
+      aiText = `**Reasoning:**\n${data.reasoning}`;
     } else if (data.suggestions && Array.isArray(data.suggestions)) {
       aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
       
@@ -665,7 +779,7 @@ export const groupbyHandler: AtomHandler = {
         aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n')}`;
       }
     } else {
-      aiText = data.smart_response || data.message || 'AI response received';
+      aiText = data.reasoning ? `**Reasoning:**\n${data.reasoning}` : (data.message || 'AI response received');
     }
     
     // Only add the message if we have content (and not in Stream mode)
@@ -698,6 +812,16 @@ export const groupbyHandler: AtomHandler = {
       });
       
       console.log('✅ Files loaded into groupby interface');
+    }
+    
+    // 📝 Update card text box with reasoning (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
     }
     
     return { success: true };

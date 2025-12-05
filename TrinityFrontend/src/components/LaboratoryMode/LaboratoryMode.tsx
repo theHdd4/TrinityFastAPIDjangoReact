@@ -918,6 +918,95 @@ const LaboratoryMode = () => {
     };
   }, [canEdit, handleSave]);
 
+  // Handle Ctrl+Alt+I keyboard shortcut to toggle AI panel
+  // Use refs to always access latest state values
+  const auxActiveRef = useRef(auxActive);
+  const isTrinityAIVisibleRef = useRef(isTrinityAIVisible);
+  const trinityAILayoutRef = useRef(trinityAILayout);
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    auxActiveRef.current = auxActive;
+    isTrinityAIVisibleRef.current = isTrinityAIVisible;
+    trinityAILayoutRef.current = trinityAILayout;
+  }, [auxActive, isTrinityAIVisible, trinityAILayout]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Debug: Log all Ctrl+Alt key combinations to help troubleshoot
+      if ((event.ctrlKey || event.metaKey) && event.altKey) {
+        console.log('🔍 Ctrl+Alt key detected:', {
+          key: event.key,
+          code: event.code,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          target: (event.target as HTMLElement)?.tagName
+        });
+      }
+      
+      // Check for Ctrl+Alt+I (or Cmd+Alt+I on Mac)
+      const isCtrlAltI = (event.ctrlKey || event.metaKey) && event.altKey && 
+                         (event.key.toLowerCase() === 'i' || event.code === 'KeyI');
+      
+      if (isCtrlAltI) {
+        console.log('✅ Ctrl+Alt+I detected!');
+        
+        // Don't trigger if user is typing in an input field
+        const target = event.target as HTMLElement;
+        const isInputField = 
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.contentEditable === 'true' ||
+          target.getAttribute('role') === 'textbox';
+        
+        if (isInputField) {
+          console.log('⚠️ Ignored: user is typing in input field');
+          return;
+        }
+
+        // Prevent default and stop propagation
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        
+        console.log('⌨️ Ctrl+Alt+I pressed - toggling AI panel', {
+          currentActive: auxActiveRef.current,
+          isVisible: isTrinityAIVisibleRef.current,
+          layout: trinityAILayoutRef.current
+        });
+        
+        // Directly toggle the AI panel state (same logic as clicking the icon)
+        const currentActive = auxActiveRef.current;
+        const newActive = currentActive === 'trinity' ? null : 'trinity';
+        
+        // If panel was hidden, show it again
+        if (newActive === 'trinity' && !isTrinityAIVisibleRef.current) {
+          setIsTrinityAIVisible(true);
+        }
+        
+        // In horizontal view, toggle collapse state
+        if (trinityAILayoutRef.current === 'horizontal' && newActive === 'trinity') {
+          setIsHorizontalAICollapsed(false); // Expand when opening
+        } else if (trinityAILayoutRef.current === 'horizontal' && newActive === null && currentActive === 'trinity') {
+          setIsHorizontalAICollapsed(true); // Collapse when closing
+        }
+        
+        // Update the active state
+        setAuxActive(newActive);
+        console.log('✅ AI panel toggled to:', newActive);
+      }
+    };
+
+    // Use capture phase to ensure this handler runs before others
+    window.addEventListener('keydown', handleKeyDown, true);
+    console.log('🎹 Keyboard shortcut handler registered: Ctrl+Alt+I');
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []); // Empty deps - we use refs for state access
+
   return (
     <div
       data-lab-preparing={isPreparingAnimation ? 'true' : undefined}
@@ -934,7 +1023,7 @@ const LaboratoryMode = () => {
           right: (auxActive && auxActive !== 'exhibition') ? '368px' : '48px', // w-12 (48px) icons + w-80 (320px) panel when open (exhibition is on left)
         }}
       >
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 px-2.5 py-0.5 flex items-center gap-2 pointer-events-auto">
+        <div className="bg-white rounded-full shadow-md border border-gray-200 px-2.5 py-0.5 flex items-center gap-2 pointer-events-auto transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
           {/* Active Users */}
           {canEdit && activeUsers.length > 0 && (
             <div className="flex items-center">
@@ -1022,13 +1111,13 @@ const LaboratoryMode = () => {
           {/* Run Pipeline */}
           <button
             disabled={!canEdit}
-            className={`px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs transition-all flex items-center gap-1.5 ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
+            className={`w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-700 transition-all flex items-center justify-center text-white ${
+              !canEdit ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
             title="Run Pipeline"
             type="button"
           >
-            <Play className="w-3 h-3" fill="white" />
-            <span>Run Pipeline</span>
+            <Play className="w-3.5 h-3.5" fill="white" />
           </button>
 
           {/* Mode Toggle Switch */}
@@ -1052,124 +1141,124 @@ const LaboratoryMode = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Atoms Sidebar */}
-        <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
-          <AuxiliaryMenuLeft
-            onAtomDragStart={handleAtomDragStart}
-            active={auxActive}
-            onActiveChange={(newActive) => {
-              setAuxActive(newActive);
-            }}
-            isExhibitionOpen={isExhibitionOpen}
-            setIsExhibitionOpen={setIsExhibitionOpen}
-            canEdit={canEdit}
-            showFloatingNavigationList={showFloatingNavigationList}
-            setShowFloatingNavigationList={setShowFloatingNavigationList}
-          />
-        </div>
-
-        {/* Main Canvas Area */}
-        <div
-          data-lab-canvas="true"
-          className={`flex-1 pt-8 px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
-          onClick={
-            canEdit
-              ? () => {
-                setSelectedAtomId(undefined);
-                setSelectedCardId(undefined);
-              }
-              : undefined
-          }
-        >
-          <CanvasArea
-            ref={canvasAreaRef}
-            onAtomSelect={handleAtomSelect}
-            onCardSelect={handleCardSelect}
-            selectedCardId={selectedCardId}
-            onToggleSettingsPanel={toggleSettingsPanel}
-            onOpenSettingsPanel={openSettingsPanel}
-            onToggleHelpPanel={toggleHelpPanel}
-            canEdit={canEdit}
-            cardEditors={cardEditors}
-            onCardFocus={notifyCardFocus}
-            onCardBlur={notifyCardBlur}
-          />
-        </div>
-
-        {/* Auxiliary menu */}
-        <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
-          <AuxiliaryMenu
-            selectedAtomId={selectedAtomId}
-            selectedCardId={selectedCardId}
-            cardExhibited={cardExhibited}
-            active={auxActive}
-            onActiveChange={(newActive) => {
-              setAuxActive(newActive);
-              // If clicking AI icon and panel was hidden, show it again
-              if (newActive === 'trinity' && !isTrinityAIVisible) {
-                setIsTrinityAIVisible(true);
-              }
-              // In horizontal view, toggle collapse state when AI icon is clicked
-              if (trinityAILayout === 'horizontal' && newActive === 'trinity') {
-                setIsHorizontalAICollapsed(false); // Expand when AI icon is clicked
-              } else if (trinityAILayout === 'horizontal' && newActive === null && auxActive === 'trinity') {
-                setIsHorizontalAICollapsed(true); // Collapse when AI icon is clicked again
-              }
-            }}
-            trinityAILayout={trinityAILayout}
-            isTrinityAIVisible={isTrinityAIVisible}
-            onTrinityAIClose={() => {
-              setIsTrinityAIVisible(false);
-              setAuxActive(null);
-            }}
-            canEdit={canEdit}
-            activeUsers={activeUsers}
-            autosaveEnabled={autosaveEnabled}
-            setAutosaveEnabled={setAutosaveEnabled}
-            onUndo={handleUndo}
-            onSave={handleSave}
-            onShare={handleShareClick}
-            showFloatingNavigationList={showFloatingNavigationList}
-            setShowFloatingNavigationList={setShowFloatingNavigationList}
-          />
-          <FloatingNavigationList
-            isVisible={showFloatingNavigationList}
-            onClose={() => setShowFloatingNavigationList(false)}
-            anchorSelector="[data-lab-header-text]"
-          />
-        </div>
-
-        {/* Trinity AI Panel - Only for horizontal layout */}
-        {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
-        {/* In horizontal view, panel stays visible and aligned with canvas area */}
-        {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
-          <div
-            className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
-          >
-            <div className="pointer-events-auto">
-              <TrinityAIPanel
-                isCollapsed={isHorizontalAICollapsed}
-                onToggle={() => {
-                  // In horizontal view, toggle between collapsed (sparkle icon) and expanded
-                  // Don't auto-minimize when other panels open - only toggle when AI icon is clicked
-                  setIsHorizontalAICollapsed(prev => !prev);
-                  if (isHorizontalAICollapsed) {
-                    setAuxActive('trinity');
-                  } else {
-                    setAuxActive(null);
-                  }
-                }}
-                onClose={() => {
-                  // Only X button calls this - completely hide the panel
-                  setIsTrinityAIVisible(false);
-                  setIsHorizontalAICollapsed(false);
-                  setAuxActive(null);
-                }}
-                layout="horizontal"
-              />
-            </div>
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* Atoms Sidebar */}
+          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
+            <AuxiliaryMenuLeft 
+              onAtomDragStart={handleAtomDragStart}
+              active={auxActive}
+              onActiveChange={(newActive) => {
+                setAuxActive(newActive);
+              }}
+              isExhibitionOpen={isExhibitionOpen}
+              setIsExhibitionOpen={setIsExhibitionOpen}
+              canEdit={canEdit}
+              showFloatingNavigationList={showFloatingNavigationList}
+              setShowFloatingNavigationList={setShowFloatingNavigationList}
+            />
           </div>
+
+          {/* Main Canvas Area */}
+          <div
+            data-lab-canvas="true"
+            className={`flex-1 pt-[2.1rem] px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
+            onClick={
+              canEdit
+                ? () => {
+                    setSelectedAtomId(undefined);
+                    setSelectedCardId(undefined);
+                  }
+                : undefined
+            }
+          >
+              <CanvasArea
+                ref={canvasAreaRef}
+                onAtomSelect={handleAtomSelect}
+                onCardSelect={handleCardSelect}
+                selectedCardId={selectedCardId}
+                onToggleSettingsPanel={toggleSettingsPanel}
+                onOpenSettingsPanel={openSettingsPanel}
+                onToggleHelpPanel={toggleHelpPanel}
+                canEdit={canEdit}
+                cardEditors={cardEditors}
+                onCardFocus={notifyCardFocus}
+                onCardBlur={notifyCardBlur}
+              />
+          </div>
+
+          {/* Auxiliary menu */}
+          <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+            <AuxiliaryMenu
+              selectedAtomId={selectedAtomId}
+              selectedCardId={selectedCardId}
+              cardExhibited={cardExhibited}
+              active={auxActive}
+              onActiveChange={(newActive) => {
+                setAuxActive(newActive);
+                // If clicking AI icon and panel was hidden, show it again
+                if (newActive === 'trinity' && !isTrinityAIVisible) {
+                  setIsTrinityAIVisible(true);
+                }
+                // In horizontal view, toggle collapse state when AI icon is clicked
+                if (trinityAILayout === 'horizontal' && newActive === 'trinity') {
+                  setIsHorizontalAICollapsed(false); // Expand when AI icon is clicked
+                } else if (trinityAILayout === 'horizontal' && newActive === null && auxActive === 'trinity') {
+                  setIsHorizontalAICollapsed(true); // Collapse when AI icon is clicked again
+                }
+              }}
+              trinityAILayout={trinityAILayout}
+              isTrinityAIVisible={isTrinityAIVisible}
+              onTrinityAIClose={() => {
+                setIsTrinityAIVisible(false);
+                setAuxActive(null);
+              }}
+              canEdit={canEdit}
+              activeUsers={activeUsers}
+              autosaveEnabled={autosaveEnabled}
+              setAutosaveEnabled={setAutosaveEnabled}
+              onUndo={handleUndo}
+              onSave={handleSave}
+              onShare={handleShareClick}
+              showFloatingNavigationList={showFloatingNavigationList}
+              setShowFloatingNavigationList={setShowFloatingNavigationList}
+            />
+            <FloatingNavigationList
+              isVisible={showFloatingNavigationList}
+              onClose={() => setShowFloatingNavigationList(false)}
+              anchorSelector="[data-lab-header-text]"
+            />
+          </div>
+
+          {/* Trinity AI Panel - Only for horizontal layout */}
+          {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
+          {/* In horizontal view, panel stays visible and aligned with canvas area */}
+          {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
+            <div 
+              className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
+            >
+              <div className="pointer-events-auto">
+                <TrinityAIPanel
+                  isCollapsed={isHorizontalAICollapsed}
+                  onToggle={() => {
+                    // In horizontal view, toggle between collapsed (sparkle icon) and expanded
+                    // Don't auto-minimize when other panels open - only toggle when AI icon is clicked
+                    setIsHorizontalAICollapsed(prev => !prev);
+                    if (isHorizontalAICollapsed) {
+                      setAuxActive('trinity');
+                    } else {
+                      setAuxActive(null);
+                    }
+                  }}
+                  onClose={() => {
+                    // Only X button calls this - completely hide the panel
+                    setIsTrinityAIVisible(false);
+                    setIsHorizontalAICollapsed(false);
+                    setAuxActive(null);
+                  }}
+                  layout="horizontal"
+                />
+              </div>
+            </div>
         )}
       </div>
 

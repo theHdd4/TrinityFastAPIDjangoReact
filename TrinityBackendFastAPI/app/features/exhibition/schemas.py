@@ -223,6 +223,10 @@ class ExhibitionExportRequest(BaseModel):
     document_styles: Optional[DocumentStylesPayload] = Field(
         default=None, alias="documentStyles"
     )
+    fidelity: Optional[str] = Field(
+        default="low",
+        description="PPTX export fidelity mode: 'low' (editable charts) or 'high' (image-based charts)"
+    )
 
 
 class SlideScreenshotsResponse(BaseModel):

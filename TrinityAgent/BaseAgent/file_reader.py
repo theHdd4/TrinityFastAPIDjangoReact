@@ -67,34 +67,27 @@ class FileReader:
         
         logger.info(f"FileReader initialized with bucket: {self.bucket}, prefix: {self.prefix}")
     
-    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
-        """Set environment context for dynamic path resolution."""
-        if client_name:
-            os.environ["CLIENT_NAME"] = client_name
-        if app_name:
-            os.environ["APP_NAME"] = app_name
-        if project_name:
-            os.environ["PROJECT_NAME"] = project_name
-        logger.info(f"🔧 Environment context set: {client_name}/{app_name}/{project_name}")
-    
     def _maybe_update_prefix(
         self,
         client_name: str = "",
         app_name: str = "",
         project_name: str = ""
     ) -> None:
-        """Dynamically update MinIO prefix using backend API."""
+        """Dynamically update MinIO prefix using backend API.
+        
+        Args:
+            client_name: Client name (required, no fallback to env vars)
+            app_name: App name (required, no fallback to env vars)
+            project_name: Project name (required, no fallback to env vars)
+        """
         try:
-            # Use passed parameters or environment variables
-            if not client_name:
-                client_name = os.getenv("CLIENT_NAME", "")
-            if not app_name:
-                app_name = os.getenv("APP_NAME", "")
-            if not project_name:
-                project_name = os.getenv("PROJECT_NAME", "")
-            
+            # Use passed parameters only - no environment variable fallback
+            # Context should be passed from AgentContext or request parameters
             if not client_name or not app_name or not project_name:
-                logger.warning("⚠️ Missing project context for dynamic path resolution")
+                logger.warning(
+                    "⚠️ Missing project context for dynamic path resolution. "
+                    f"client_name={client_name}, app_name={app_name}, project_name={project_name}"
+                )
                 return
             
             # Call backend API for dynamic path

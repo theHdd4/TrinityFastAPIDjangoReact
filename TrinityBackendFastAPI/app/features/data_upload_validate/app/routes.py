@@ -84,12 +84,11 @@ from app.features.data_upload_validate.app.database import (
 # Add this import
 from app.features.data_upload_validate.app.database import save_validator_atom_to_mongo
 
-# Import classifier functions for auto-classification
+# Import column classifier functions for auto-classification
 from app.features.column_classifier.database import (
-    get_classifier_config_from_mongo,
     save_classifier_config_to_mongo,
+    get_classifier_config_from_mongo,
 )
-
 
 # Initialize router
 timing_dependency = timing_dependency_factory("app.features.data_upload_validate")
@@ -2306,15 +2305,32 @@ def _classify_column(
     identifier_keywords: list[str],
     measure_keywords: list[str],
 ) -> str:
-    """Classify a single column. Returns 'identifiers', 'measures', or 'unclassified'."""
+    """Classify a single column. Returns 'identifiers', 'measures', or 'unclassified'.
+    
+    Logic:
+    1. If column name matches identifier keywords → identifiers
+    2. If column name matches measure keywords → measures
+    3. If datetime type → identifiers
+    4. If categorical/string/object type → identifiers
+    5. If numerical type → measures
+    6. Else → unclassified
+    """
     col_lower = col.lower()
     
+    # Check keyword matches first
     if any(keyword in col_lower for keyword in identifier_keywords):
         return "identifiers"
     elif any(keyword in col_lower for keyword in measure_keywords):
         return "measures"
+    
+    # If no keyword match, classify by data type
+    # Datetime → identifiers
+    elif "datetime" in col_type.lower() or col_type in ["datetime64[ns]", "datetime64", "date"]:
+        return "identifiers"
+    # Categorical/string/object → identifiers
     elif col_type in ["object", "category", "string"]:
         return "identifiers"
+    # Numerical → measures
     elif "int" in col_type.lower() or "float" in col_type.lower() or col_type in ["numeric", "integer", "float64", "float32", "int64", "int32"]:
         return "measures"
     else:
@@ -2449,6 +2465,7 @@ async def _auto_classify_and_save_file(
             "project_name": project_name,
             "identifiers": final_identifiers,
             "measures": final_measures,
+            "unclassified": final_unclassified,
             "dimensions": {},  # Empty dimensions object (same as column classifier)
             "file_name": object_name,
         }
@@ -2464,9 +2481,10 @@ async def _auto_classify_and_save_file(
         
         # Save to MongoDB
         mongo_result = save_classifier_config_to_mongo(config_data)
+        logger.info(f"✅ Auto-classified and saved: {object_name} | {len(final_identifiers)} identifiers, {len(final_measures)} measures, {len(final_unclassified)} unclassified")
             
     except Exception as e:
-        pass
+        logger.error(f"❌ Auto-classification failed for {object_name}: {e}", exc_info=True)
 
 
 async def _background_auto_classify_files(
@@ -2486,6 +2504,8 @@ async def _background_auto_classify_files(
         except (ValueError, TypeError):
             pass
         
+        logger.info(f"🔄 Background auto-classification started for {len(files)} files")
+        
         for file_entry in files:
             object_name = file_entry.get("object_name")
             if not object_name:
@@ -2497,6 +2517,7 @@ async def _background_auto_classify_files(
             )
             
             if has_classification:
+                logger.info(f"🔍 Re-classifying (merge mode): {object_name}")
                 # Check for new columns and classify only those
                 await _auto_classify_and_save_file(
                     object_name,
@@ -2507,6 +2528,7 @@ async def _background_auto_classify_files(
                     existing_config=existing_config,
                 )
             else:
+                logger.info(f"🆕 Auto-classifying (new file): {object_name}")
                 # Auto-classify in background (full classification)
                 await _auto_classify_and_save_file(
                     object_name,
@@ -2516,8 +2538,10 @@ async def _background_auto_classify_files(
                     project_id,
                     existing_config=None,
                 )
+        
+        logger.info(f"✅ Background auto-classification completed for {len(files)} files")
     except Exception as e:
-        pass
+        logger.error(f"❌ Background auto-classification failed: {e}", exc_info=True)
 
 
 @router.get("/list_saved_dataframes")
@@ -2578,6 +2602,18 @@ async def list_saved_dataframes(
             if isinstance(size, int):
                 entry["size"] = size
             files.append(entry)
+        
+        # Trigger background auto-classification for files
+        asyncio.create_task(
+            _background_auto_classify_files(
+                files=files,
+                env=env,
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            )
+        )
+        
         return {
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
@@ -3141,6 +3177,10 @@ def _cast_series_dtype(series: pd.Series, dtype: str, datetime_format: str | Non
     if dtype_lower in {"datetime", "timestamp", "datetime64"}:
         # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
         normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
+        # Normalize format string if provided (replace '/' and '.' with '-') to match normalized data
+        normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
+        # Use the provided format if available, otherwise fall back to auto-detection
+        return pd.to_datetime(normalized_series, format=normalized_format, errors="coerce")
         # Normalize format string if provided (replace '/' and '.' with '-') to match normalized data
         normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
         # Use the provided format if available, otherwise fall back to auto-detection

@@ -106,6 +106,36 @@ class Project(models.Model):
         return f"{self.name} ({self.owner.username})"
 
 
+class ProjectModificationHistory(models.Model):
+    """
+    Tracks all users who have modified a project, with timestamps.
+    Allows multiple users to see a project in their "My Projects" tab if they've both modified it.
+    """
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="modification_history"
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="project_modifications"
+    )
+    modified_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = "registry_project_modification_history"
+        ordering = ["-modified_at"]
+        indexes = [
+            models.Index(fields=['user', '-modified_at']),
+            models.Index(fields=['project', '-modified_at']),
+        ]
+        unique_together = [('project', 'user')]  # One entry per user per project
+    
+    def __str__(self):
+        return f"{self.user.username} modified {self.project.name} at {self.modified_at}"
+
+
 class Template(models.Model):
     """A reusable project template stored in the registry."""
 
@@ -229,3 +259,46 @@ class RegistryEnvironment(models.Model):
 
     def __str__(self):
         return f"{self.client_name}/{self.app_name}/{self.project_name}"
+
+
+class RetrievalDocument(models.Model):
+    """Normalized document metadata for hybrid retrieval."""
+
+    doc_id = models.CharField(max_length=255, unique=True)
+    title = models.CharField(max_length=512, blank=True)
+    text = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["doc_id"]),
+            models.Index(fields=["updated_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.doc_id}: {self.title or 'Untitled'}"
+
+
+class EmbeddingCache(models.Model):
+    """Cache of document embeddings by model name."""
+
+    document = models.ForeignKey(
+        RetrievalDocument,
+        on_delete=models.CASCADE,
+        related_name="embeddings",
+    )
+    model_name = models.CharField(max_length=255, db_index=True)
+    vector = models.JSONField(default=list, blank=True)
+    vector_norm = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("document", "model_name")
+        indexes = [models.Index(fields=["model_name"])]
+
+    def __str__(self):
+        return f"{self.model_name} embedding for {self.document.doc_id}"

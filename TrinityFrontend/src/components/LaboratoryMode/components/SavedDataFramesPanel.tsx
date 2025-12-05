@@ -34,6 +34,56 @@ interface Props {
 }
 
 const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirection = 'right' }) => {
+  // Add rainbow bounce animation style
+  const rainbowBounceStyle = `
+    @keyframes rainbowBounce {
+      0%, 100% {
+        transform: translateY(0) scale(1);
+        color: #ff0000;
+      }
+      10% {
+        transform: translateY(-8px) scale(1.3);
+        color: #ff7f00;
+      }
+      20% {
+        transform: translateY(0) scale(1);
+        color: #ffff00;
+      }
+      30% {
+        transform: translateY(-8px) scale(1.3);
+        color: #00ff00;
+      }
+      40% {
+        transform: translateY(0) scale(1);
+        color: #0000ff;
+      }
+      50% {
+        transform: translateY(-8px) scale(1.3);
+        color: #4b0082;
+      }
+      60% {
+        transform: translateY(0) scale(1);
+        color: #9400d3;
+      }
+      70% {
+        transform: translateY(-8px) scale(1.3);
+        color: #ff0000;
+      }
+      80% {
+        transform: translateY(0) scale(1);
+        color: #ff69b4;
+      }
+      90% {
+        transform: translateY(-8px) scale(1.3);
+        color: #00ffff;
+      }
+    }
+    .rainbow-bounce-icon {
+      animation: rainbowBounce 8s ease-in-out infinite;
+      filter: drop-shadow(0 0 8px currentColor);
+    }
+  `;
+
   interface Frame {
     object_name: string;
     csv_name: string;
@@ -122,6 +172,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [hasMultipleSheets, setHasMultipleSheets] = useState(false);
   const [tempUploadMeta, setTempUploadMeta] = useState<{ file_path: string; file_name: string; workbook_path?: string | null } | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [pendingProcessFiles, setPendingProcessFiles] = useState<string[]>([]);
   const [sheetChangeTarget, setSheetChangeTarget] = useState<Frame | null>(null);
   const [sheetChangeOptions, setSheetChangeOptions] = useState<string[]>([]);
   const [sheetChangeSelected, setSheetChangeSelected] = useState('');
@@ -498,7 +549,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       const form = new FormData();
       form.append('validator_atom_id', 'panel-upload');
       form.append('file_paths', JSON.stringify([meta.file_path]));
-      form.append('file_keys', JSON.stringify([deriveFileKey(meta.file_name)]));
+      const fileKey = deriveFileKey(meta.file_name);
+      form.append('file_keys', JSON.stringify([fileKey]));
       form.append('overwrite', 'false');
       const workbookPathsPayload =
         tempUploadMeta?.workbook_path ? [tempUploadMeta.workbook_path] : [];
@@ -529,6 +581,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         throw new Error(txt || 'Failed to save dataframe');
       }
       toast({ title: 'Dataframe saved', description: `${meta.file_name} uploaded successfully.` });
+      // Construct the actual object_name using prefix + fileKey + .arrow extension (this is how MinIO stores it)
+      const expectedObjectName = prefix ? `${prefix}${fileKey}.arrow` : `${fileKey}.arrow`;
+      setPendingProcessFiles(prev => [...prev, expectedObjectName]);
       resetUploadState();
       setReloadToken(prev => prev + 1);
     } catch (err: any) {
@@ -703,12 +758,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           client_name: env.CLIENT_NAME || '',
           app_name: env.APP_NAME || '',
           project_name: env.PROJECT_NAME || '',
+          bypass_cache: 'true', // Always bypass Redis cache to get fresh data from MongoDB
         });
         if (fileName) {
           queryParams.append('file_name', fileName);
         }
         
-        console.log('🔍 [Process Modal] Calling get_config with:', queryParams.toString());
+        console.log('🔍 [Process Modal] Calling get_config with bypass_cache=true:', queryParams.toString());
         const configRes = await fetch(`${CLASSIFIER_API}/get_config?${queryParams.toString()}`, {
           credentials: 'include'
         });
@@ -1393,6 +1449,19 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       cancelled = true;
     };
   }, [isOpen, user, reloadToken]);
+
+  useEffect(() => {
+    // Only open modal if there's no modal currently open and we have files in the queue
+    if (processingTarget || pendingProcessFiles.length === 0 || !files.length) return;
+    
+    const nextFileToProcess = pendingProcessFiles[0];
+    const frame = files.find(f => f.object_name === nextFileToProcess);
+    if (frame) {
+      // Remove this file from the queue and open modal
+      setPendingProcessFiles(prev => prev.slice(1));
+      openProcessingModal(frame);
+    }
+  }, [files, pendingProcessFiles, processingTarget]);
 
   const handleOpen = (obj: string) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
@@ -2301,6 +2370,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
 
   return (
     <div className={`w-80 bg-white flex flex-col h-full ${borderClass}`}>
+      <style>{rainbowBounceStyle}</style>
       {fileInput}
       <div className="p-2 border-b border-gray-200 flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-900 flex items-center space-x-2">
@@ -2315,7 +2385,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             className="p-1 h-8 w-8"
             title="Upload dataframe"
           >
-            <Upload className="w-4 h-4" />
+            <Upload className={`w-4 h-4 ${tree.length === 0 && !loading ? 'rainbow-bounce-icon' : ''}`} />
           </Button>
           <Button
             variant="ghost"
@@ -2588,7 +2658,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       {processingTarget && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-lg shadow-xl w-[1000px] max-w-[98vw] p-4 max-h-[90vh] flex flex-col">
-            <h4 className="text-lg font-semibold text-gray-900 mb-2">Process Dataframe</h4>
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">Dataframe Profiling (Verify details)</h4>
             <p className="text-sm text-gray-600">
               {processingTarget.arrow_name || processingTarget.csv_name || processingTarget.object_name}
             </p>
@@ -2849,7 +2919,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 onClick={handleProcessingSave}
                 disabled={processingSaving || processingLoading || !processingColumns.length}
               >
-                {processingSaving ? 'Saving…' : 'Save Changes'}
+                {processingSaving ? 'Saving…' : 'Approve'}
               </Button>
             </div>
           </div>

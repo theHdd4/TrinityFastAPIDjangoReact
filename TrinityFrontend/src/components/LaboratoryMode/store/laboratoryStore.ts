@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
 import { atoms as allAtoms } from "@/components/AtomList/data";
+import { ClarificationRequestMessage as ClarificationRequest } from "@/types/streaming";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -29,13 +30,24 @@ export interface TextBoxSettings {
   font_size: number;
   font_family: string;
   text_color: string;
+  background_color?: string;
   bold: boolean;
   italics: boolean;
   underline: boolean;
+  strikethrough?: boolean;
+  list_type?: "none" | "bullet" | "number";
   headline: string;
   slide_layout: "full" | "sidebar" | "note-callout";
   transition_effect: "none" | "fade" | "typewriter";
   lock_content: boolean;
+}
+
+export interface TextBoxConfig {
+  id: string;
+  title?: string;
+  content?: string;
+  html?: string;
+  settings?: Partial<TextBoxSettings>;
 }
 
 export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
@@ -47,9 +59,12 @@ export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
   font_size: 14,
   font_family: "Inter",
   text_color: "#000000",
+  background_color: "transparent",
   bold: false,
   italics: false,
   underline: false,
+  strikethrough: false,
+  list_type: "none",
   headline: "",
   slide_layout: "full",
   transition_effect: "none",
@@ -1675,6 +1690,11 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
   variables?: CardVariable[];
+  textBoxEnabled?: boolean;
+  textBoxContent?: string;
+  textBoxHtml?: string;
+  textBoxSettings?: TextBoxSettings;
+  textBoxes?: TextBoxConfig[];
   order?: number; // For positioning standalone cards between molecules
   afterMoleculeId?: string; // Reference to molecule this card is positioned after
   beforeMoleculeId?: string; // Reference to molecule this card is positioned before
@@ -1717,6 +1737,7 @@ export interface GroupByAtomSettings {
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
+  showCardinalityView?: boolean;
   
   // GroupBy results
   groupbyResults?: {
@@ -1748,6 +1769,7 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   sortColumn: 'unique_count',
   sortDirection: 'desc',
   columnFilters: {},
+  showCardinalityView: false,
   groupbyResults: {
     result_file: '',
     result_shape: [0, 0],
@@ -1891,16 +1913,58 @@ export interface MetricsOperation {
   param?: string | number | Record<string, any>;
 }
 
+export interface VariableOperation {
+  id: string;
+  numericalColumn: string;
+  method: string;
+  secondColumn: string;
+  secondInputType?: 'column' | 'number';
+  secondValue?: string;
+  customName?: string;
+}
+
+export interface ConstantAssignment {
+  id: string;
+  variableName: string;
+  value: string;
+}
+
 export interface MetricsInputSettings {
   dataSource: string;
   operations: MetricsOperation[];
   currentTab: 'input' | 'variables' | 'column-operations' | 'exhibition';
+  // Variable tab specific settings
+  variableComputeMode?: 'whole-dataframe' | 'within-group';
+  variableType?: 'dataframe' | 'constant';
+  computeWithinGroup?: boolean;
+  variableIdentifiers?: string[];
+  selectedVariableIdentifiers?: string[];
+  variableOperations?: VariableOperation[];
+  constantAssignments?: ConstantAssignment[];
+  variableIdentifiersListOpen?: boolean;
+  // Column operations tab specific settings
+  columnOpsAllIdentifiers?: string[]; // Unfiltered identifiers for compute_metrics_within_group
+  columnOpsSelectedIdentifiers?: string[]; // Filtered identifiers (date columns removed) for display
+  columnOpsSelectedIdentifiersForBackend?: string[]; // Selected identifiers for backend operations
+  columnOpsIdentifiersListOpen?: boolean;
 }
 
 export const DEFAULT_METRICS_INPUT_SETTINGS: MetricsInputSettings = {
   dataSource: '',
   operations: [],
   currentTab: 'input',
+  variableComputeMode: 'whole-dataframe',
+  variableType: 'dataframe',
+  computeWithinGroup: false,
+  variableIdentifiers: [],
+  selectedVariableIdentifiers: [],
+  variableOperations: [{ id: '1', numericalColumn: '', method: 'sum', secondColumn: '' }],
+  constantAssignments: [{ id: '1', variableName: '', value: '' }],
+  variableIdentifiersListOpen: false,
+  columnOpsAllIdentifiers: [],
+  columnOpsSelectedIdentifiers: [],
+  columnOpsSelectedIdentifiersForBackend: [],
+  columnOpsIdentifiersListOpen: false,
 };
 
 // Mode constants
@@ -1923,37 +1987,65 @@ export const getAllowedAtoms = (mode: LaboratorySubMode) => {
 };
 
 interface LaboratoryStore {
+  // --- State Properties ---
   cards: LayoutCard[];
   auxPanelActive: 'settings' | 'frames' | null;
   auxiliaryMenuLeftOpen: boolean;
   metricsInputs: MetricsInputSettings;
-  subMode: LaboratorySubMode;  // Current mode: 'analytics' or 'dashboard'
+  subMode: LaboratorySubMode;
+  isLaboratorySession: boolean;
+  pendingClarification?: ClarificationRequest | null;
+
+  // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
   setAuxiliaryMenuLeftOpen: (open: boolean) => void;
   setSubMode: (mode: LaboratorySubMode) => void;
+  setIsLaboratorySession: (active: boolean) => void;
+  setPendingClarification: (payload: ClarificationRequest | null) => void;
+  reset: () => void;
+
+  // --- Card & Atom Actions ---
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
+
+  // --- Variable Actions ---
   addCardVariable: (cardId: string, variable: CardVariable) => void;
+  deleteCardVariable: (cardId: string, variableId: string) => void;
+  toggleCardVariableAppend: (cardId: string, variableId: string, appended: boolean) => void;
   updateCardVariable: (
     cardId: string,
     variableId: string,
     update: Partial<Omit<CardVariable, 'id' | 'originCardId'>>
   ) => void;
-  deleteCardVariable: (cardId: string, variableId: string) => void;
-  toggleCardVariableAppend: (cardId: string, variableId: string, appended: boolean) => void;
+
+  // --- Metrics Actions ---
   updateMetricsInputs: (updates: Partial<MetricsInputSettings>) => void;
   addMetricsOperation: (operation: MetricsOperation) => void;
   updateMetricsOperation: (operationId: string, updates: Partial<MetricsOperation>) => void;
   removeMetricsOperation: (operationId: string) => void;
-  reset: () => void;
 }
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
   auxPanelActive: null,
   auxiliaryMenuLeftOpen: true,
+  isLaboratorySession: typeof window !== 'undefined'
+    ? window.location.pathname.toLowerCase().includes('laboratory')
+    : true,
+  pendingClarification: typeof window !== 'undefined'
+    ? (() => {
+        const stored = localStorage.getItem('trinity_lab_pending_clarification');
+        if (!stored) return null;
+        try {
+          return JSON.parse(stored);
+        } catch (error) {
+          console.warn('Failed to parse pending clarification from storage', error);
+          return null;
+        }
+      })()
+    : null,
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   subMode: 'analytics',  // Default to analytics mode
   setCards: (cards: LayoutCard[]) => {
@@ -2094,6 +2186,25 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     set({ subMode: mode });
     console.info('🔍 [DIAGNOSIS] Switched mode from', currentMode, 'to', mode, '- cards cleared');
     console.log('🔍 [DIAGNOSIS] ========== MODE SWITCH COMPLETE ==========');
+  },
+
+  setIsLaboratorySession: (active: boolean) => {
+    set({ isLaboratorySession: active });
+  },
+
+  setPendingClarification: (payload: ClarificationRequest | null) => {
+    set({ pendingClarification: payload });
+    if (typeof window !== 'undefined') {
+      try {
+        if (payload) {
+          localStorage.setItem('trinity_lab_pending_clarification', safeStringify(payload));
+        } else {
+          localStorage.removeItem('trinity_lab_pending_clarification');
+        }
+      } catch (error) {
+        console.warn('Failed to persist pending clarification', error);
+      }
+    }
   },
 
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => {
@@ -2256,6 +2367,13 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   reset: () => {
-    set({ cards: [], metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS });
+    set({
+      cards: [],
+      metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
+      pendingClarification: null,
+    });
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('trinity_lab_pending_clarification');
+    }
   },
 }));

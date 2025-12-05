@@ -1,0 +1,5 @@
+Diagnosis of card properties tab label issue:
+
+- Tab labels for the card properties panel are hard-coded inside `TrinityFrontend/src/components/LaboratoryMode/components/SettingsPanel/CardSettingsTabs.tsx`. The only place that renders the three triggers uses the labels “Variables”, “Text-box”, and “Visualisation” (lines 797-804), and there are no other occurrences of “Text-box” elsewhere in the repository.
+- The Settings panel decides between rendering card tabs or atom tabs in `TrinityFrontend/src/components/LaboratoryMode/components/SettingsPanel/index.tsx`. When a card is selected (and no atom is selected), it renders `CardSettingsTabs`; when an atom is selected it renders `AtomSettingsTabs`, whose middle tab is still labeled “Settings”.
+- Because the hard-coded labels already read “Text-box” for the card tabs, seeing “Variables, Settings, Visualisation” on the card view indicates the running UI is not picking up `CardSettingsTabs.tsx` from this workspace (e.g., stale compiled assets or another frontend copy). It may instead be serving an older bundle or pointing to a different frontend source.

@@ -8,8 +8,13 @@ import {
   createErrorMessage,
   processSmartResponse,
   executePerformOperation,
-  validateFileInput 
+  validateFileInput,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox,
+  updateInsightTextBox
 } from './utils';
+import { generateAtomInsight } from './insightGenerator';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 export const dfValidateHandler: AtomHandler = {
@@ -22,19 +27,12 @@ export const dfValidateHandler: AtomHandler = {
     console.log('🔍 Has validate_json:', !!data.validate_json);
     console.log('🔍 Has validate_config:', !!data.validate_config);
     
-    // Show smart_response EXACTLY like other handlers
-    const smartResponseText = processSmartResponse(data);
-    console.log('💬 DF Validate smart response:', smartResponseText);
-    
-    // Add AI smart response message
-    if (smartResponseText) {
-      const aiMessage = createMessage(smartResponseText);
+    // Show reasoning in chat (only reasoning field now)
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    if (reasoningText) {
+      const aiMessage = createMessage(`**Reasoning:**\n${reasoningText}`);
       setMessages(prev => [...prev, aiMessage]);
-      console.log('🤖 AI Smart Response displayed:', smartResponseText);
-    } else {
-      console.warn('⚠️ No smart_response found in df_validate data - creating fallback message');
-      const fallbackMsg = createMessage('✅ I\'ve received your data validation request and will process it now.');
-      setMessages(prev => [...prev, fallbackMsg]);
+      console.log('🤖 AI Reasoning displayed');
     }
     
     // Extract validate_json - check multiple possible locations
@@ -72,6 +70,9 @@ export const dfValidateHandler: AtomHandler = {
     }
     
     const hasDtypeChanges = Object.keys(dtype_changes).length > 0;
+    
+    // Declare normalizedDtypeChanges at function scope for insight generation
+    let normalizedDtypeChanges: Record<string, string> = {};
     
     // STEP 1: Map AI file path to object_name and check if file needs to be loaded
     let mappedFileName = file_name;
@@ -156,7 +157,7 @@ export const dfValidateHandler: AtomHandler = {
     
     // STEP 2: Load file if not already loaded (via API)
     // Get current settings from the store to check if file is already loaded
-    const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings || {};
+    let currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings || {};
     
     if (savedDataframe) {
       console.log('📂 STEP 2: Loading file via API...');
@@ -329,7 +330,7 @@ export const dfValidateHandler: AtomHandler = {
       // Normalize all dtype changes - match manual flow exactly
       // Manual flow stores date types as just 'datetime64' string (no format object)
       // This matches FileDataPreview.tsx line 442 when format detection fails
-      const normalizedDtypeChanges: Record<string, string> = {};
+      normalizedDtypeChanges = {};
       for (const [colName, dtype] of Object.entries(dtype_changes)) {
         const normalized = normalizeDtypeChange(dtype);
         // Ensure date types are stored as string (not object) to match manual flow
@@ -553,6 +554,68 @@ export const dfValidateHandler: AtomHandler = {
       });
     }
 
+    // 📝 Update card text box with reasoning
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // STEP 2: Add text box with placeholder for insight (like concat/merge)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
+    }
+    
+    // STEP 2b: Generate insight AFTER operation completes successfully
+    // Get the final result from the operation (either transformation result or file load)
+    // Get fresh settings after operations complete
+    currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings || {};
+    const transformationResults = currentSettings?.transformationResults || null;
+    const operationCompleted = currentSettings?.operationCompleted || false;
+    
+    if (operationCompleted) {
+      console.log('🔍 STEP 2b: Generating insight for data-upload-validate (after operation completes)');
+      
+      // Prepare enhanced data with validation/transformation results for insight generation
+      const enhancedDataForInsight = {
+        ...data, // This includes reasoning
+        validate_json: data.validate_json || data.validate_config, // Original config from first LLM call
+        validation_results: {
+          file_name: mappedFileName,
+          dtype_changes_applied: hasDtypeChanges ? Object.keys(normalizedDtypeChanges || {}).length : 0,
+          dtype_changes: normalizedDtypeChanges || {},
+          transformation_results: transformationResults || null,
+          rows_affected: transformationResults?.rows_affected || transformationResults?.rows || 0,
+          operation_type: hasDtypeChanges ? 'dtype_conversion' : 'file_load',
+        },
+        file_details: {
+          file_name: mappedFileName,
+          object_name: objectName,
+          has_dtype_changes: hasDtypeChanges,
+        },
+      };
+      
+      // Generate insight - uses queue manager to ensure completion even when new atoms start
+      // The queue manager automatically handles text box updates with retry logic
+      generateAtomInsight({
+        data: enhancedDataForInsight,
+        atomType: 'data-upload-validate',
+        sessionId: context.sessionId,
+        atomId, // Pass atomId so queue manager can track and complete this insight
+      }).catch((error) => {
+        console.error('❌ Error generating insight:', error);
+      });
+      // Note: We don't need to manually update the text box here - the queue manager handles it
+    }
+    
     return { success: true };
   },
 
@@ -560,8 +623,8 @@ export const dfValidateHandler: AtomHandler = {
     const { setMessages, updateAtomSettings, atomId } = context;
     
     let aiText = '';
-    if (data.smart_response) {
-      aiText = data.smart_response;
+    if (data.reasoning) {
+      aiText = `**Reasoning:**\n${data.reasoning}`;
     } else if (data.suggestions && Array.isArray(data.suggestions)) {
       aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
       
@@ -585,8 +648,8 @@ export const dfValidateHandler: AtomHandler = {
         });
       }
     } else {
-      // Fallback to processSmartResponse for backward compatibility
-      aiText = processSmartResponse(data);
+      // Fallback to reasoning
+      aiText = data.reasoning ? `**Reasoning:**\n${data.reasoning}` : 'AI response received';
     }
     
     // Create and add AI message
@@ -601,6 +664,16 @@ export const dfValidateHandler: AtomHandler = {
         fileAnalysis: data.file_analysis || null,
         lastInteractionTime: Date.now()
       });
+    }
+    
+    // 📝 Update card text box with reasoning (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
     }
     
     return { success: true };

@@ -13,9 +13,11 @@ import { Target, BarChart3, Zap, Plus, FolderOpen } from 'lucide-react';
 
 interface HeaderProps {
   projectCount?: number;
+  sidebarOpen?: boolean;
+  onSidebarToggle?: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ projectCount = 0 }) => {
+const Header: React.FC<HeaderProps> = ({ projectCount = 0, sidebarOpen = false, onSidebarToggle }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [projectName, setProjectName] = useState<string | null>(null);
@@ -89,7 +91,7 @@ const Header: React.FC<HeaderProps> = ({ projectCount = 0 }) => {
 
   return (
     <header
-      data-primary-menu="true"
+       data-primary-menu="true"
       className="bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-between shadow-sm"
     >
       <div className="flex items-center space-x-8">

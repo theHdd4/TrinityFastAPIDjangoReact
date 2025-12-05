@@ -640,9 +640,181 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const axisLabelSubmenuRef = useRef<HTMLDivElement>(null);
   const axisToggleSubmenuRef = useRef<HTMLDivElement>(null);
   const seriesSettingsSubmenuRef = useRef<HTMLDivElement>(null);
+  const chartRenderedRef = useRef(false);
+  const animationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  // Disable animations when export is active
+  // Check global flag set by ExportDialog when download button is clicked
+  const [animationsDisabled, setAnimationsDisabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return !!(window as any).__disableChartAnimations;
+    }
+    return false;
+  });
+
+  // Listen for export start/stop events
+  useEffect(() => {
+    const handleDisable = () => {
+      setAnimationsDisabled(true);
+      console.log('[Chart Renderer] Animations disabled for export');
+    };
+    const handleEnable = () => {
+      setAnimationsDisabled(false);
+      console.log('[Chart Renderer] Animations re-enabled');
+    };
+
+    window.addEventListener('disable-chart-animations', handleDisable);
+    window.addEventListener('enable-chart-animations', handleEnable);
+
+    // Also check flag periodically in case event is missed
+    const checkInterval = setInterval(() => {
+      const shouldDisable = typeof window !== 'undefined' && !!(window as any).__disableChartAnimations;
+      if (shouldDisable !== animationsDisabled) {
+        setAnimationsDisabled(shouldDisable);
+      }
+    }, 100);
+
+    return () => {
+      window.removeEventListener('disable-chart-animations', handleDisable);
+      window.removeEventListener('enable-chart-animations', handleEnable);
+      clearInterval(checkInterval);
+    };
+  }, [animationsDisabled]);
+
+  // Animation props - disable when export is active
+  const animationProps = animationsDisabled
+    ? { isAnimationActive: false, animationDuration: 0 }
+    : { isAnimationActive: true, animationDuration: 800, animationEasing: 'ease-out' as const };
+  
   const rootAttributes = captureId
     ? { 'data-exhibition-chart-root': 'true', 'data-exhibition-chart-id': captureId }
     : {};
+
+  // Chart rendering completion signal for Playwright
+  useEffect(() => {
+    if (!captureId || chartRenderedRef.current) {
+      return;
+    }
+
+    // Reset on data/type change
+    chartRenderedRef.current = false;
+    if (animationTimeoutRef.current) {
+      clearTimeout(animationTimeoutRef.current);
+    }
+
+    // Recharts animation duration is typically 800ms, add buffer for async operations
+    // Use a reasonable timeout that will be checked by actual content validation
+    const ANIMATION_DURATION = 3000; // 800ms animation + 2200ms buffer for complex charts
+    
+    animationTimeoutRef.current = setTimeout(() => {
+      if (chartRenderedRef.current) {
+        return;
+      }
+
+      const chartElement = chartRef.current?.querySelector<HTMLElement>(
+        '[data-exhibition-chart-root="true"]',
+      );
+
+      if (!chartElement) {
+        return;
+      }
+
+      // Check if chart has actual content (SVG paths, bars, lines, etc.)
+      // Also check that paths have actual data (not empty)
+      const hasContent = () => {
+        const svg = chartElement.querySelector('svg');
+        if (!svg) return false;
+        
+        // Check for chart elements
+        const paths = svg.querySelectorAll('path');
+        const hasPaths = paths.length > 0;
+        
+        // Verify paths have actual data (not just empty paths)
+        let hasValidPaths = false;
+        if (hasPaths) {
+          for (const path of Array.from(paths)) {
+            if (path instanceof Element) {
+              const d = path.getAttribute('d');
+              if (d && d.length > 10) { // Path data should have meaningful content
+                hasValidPaths = true;
+                break;
+              }
+            }
+          }
+        }
+        
+        const hasBars = svg.querySelectorAll('.recharts-bar').length > 0;
+        const hasLines = svg.querySelectorAll('.recharts-line').length > 0;
+        const hasPie = svg.querySelectorAll('.recharts-pie').length > 0;
+        const hasScatter = svg.querySelectorAll('.recharts-scatter').length > 0;
+        const hasText = svg.querySelectorAll('text').length > 0; // Labels, axes
+        
+        // Chart is ready if it has valid paths OR other chart elements OR text (labels)
+        return hasValidPaths || hasBars || hasLines || hasPie || hasScatter || hasText;
+      };
+
+      if (!hasContent()) {
+        // Chart not ready yet, wait a bit more and retry
+        console.log(`[Chart Renderer] Chart ${captureId} not ready yet, will retry...`);
+        animationTimeoutRef.current = setTimeout(() => {
+          // Retry after additional delay
+          if (!chartRenderedRef.current && hasContent()) {
+            chartRenderedRef.current = true;
+            // Set signals...
+            chartElement.setAttribute('data-chart-rendered', 'true');
+            if (typeof window !== 'undefined') {
+              if (!(window as any).chartRenderingStatus) {
+                (window as any).chartRenderingStatus = {};
+              }
+              (window as any).chartRenderingStatus[captureId] = {
+                rendered: true,
+                timestamp: Date.now(),
+              };
+              const allCharts = document.querySelectorAll('[data-exhibition-chart-root="true"]');
+              const allRendered = Array.from(allCharts).every(
+                el => el.getAttribute('data-chart-rendered') === 'true'
+              );
+              (window as any).allChartsRendered = allRendered;
+            }
+            console.log(`[Chart Renderer] Chart ${captureId} rendering complete signal set (retry)`);
+          }
+        }, 1000);
+        return;
+      }
+
+      chartRenderedRef.current = true;
+
+      // Signal 1: Set DOM attribute
+      chartElement.setAttribute('data-chart-rendered', 'true');
+      chartElement.setAttribute('data-chart-render-timestamp', Date.now().toString());
+
+      // Signal 2: Set window variable (for Playwright to check)
+      if (typeof window !== 'undefined') {
+        if (!(window as any).chartRenderingStatus) {
+          (window as any).chartRenderingStatus = {};
+        }
+        (window as any).chartRenderingStatus[captureId] = {
+          rendered: true,
+          timestamp: Date.now(),
+        };
+
+        // Signal 3: Global flag when all charts are done
+        const allCharts = document.querySelectorAll('[data-exhibition-chart-root="true"]');
+        const allRendered = Array.from(allCharts).every(
+          el => el.getAttribute('data-chart-rendered') === 'true'
+        );
+        (window as any).allChartsRendered = allRendered;
+      }
+
+      console.log(`[Chart Renderer] Chart ${captureId} rendering complete signal set`);
+    }, ANIMATION_DURATION);
+
+    return () => {
+      if (animationTimeoutRef.current) {
+        clearTimeout(animationTimeoutRef.current);
+      }
+    };
+  }, [data, type, captureId, xField, yField, yFields]); // Re-run when chart data changes
 
   // State for custom axis labels - use localStorage to persist across component recreations
   // Create a unique key based on chart props to make it chart-specific (excluding type for persistence across chart types)
@@ -3772,8 +3944,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     dataKey={seriesKey}
                     name={seriesKey}
                     fill={seriesColor}
-                    animationDuration={800}
-                    animationEasing="ease-out"
+                    {...animationProps}
                     {...(stackBars ? { stackId: "stack" } : {})}
                     style={{ cursor: 'pointer' }}
                   >
@@ -3907,8 +4078,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 <Bar 
                   dataKey={yKey} 
                   fill={seriesColor} 
-                  animationDuration={800} 
-                  animationEasing="ease-out" 
+                  {...animationProps}
                   yAxisId={0}
                   onClick={() => handleSeriesClick(yKey, effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey, seriesColor)}
                   style={{ cursor: 'pointer' }}
@@ -3935,8 +4105,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 <Bar 
                   dataKey={secondKey} 
                   fill={seriesColor} 
-                  animationDuration={800} 
-                  animationEasing="ease-out" 
+                  {...animationProps}
                   yAxisId={forceSingleAxis ? 0 : 1}
                   onClick={() => handleSeriesClick(secondKey, effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey, seriesColor)}
                   style={{ cursor: 'pointer' }}
@@ -4036,8 +4205,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     dataKey={seriesKey}
                     name={seriesKey}
                     fill={seriesColor}
-                    animationDuration={800}
-                    animationEasing="ease-out"
+                    {...animationProps}
                     stackId="stack"
                     style={{ cursor: 'pointer' }}
                   >
@@ -4171,6 +4339,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     strokeWidth={2}
                     dot={{ r: 0 }}
                     activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
+                    {...animationProps}
                     style={{ cursor: 'pointer' }}
                   >
                     {seriesShowDataLabels && (
@@ -4317,6 +4486,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                       strokeWidth: 3,
                       style: { cursor: 'pointer' }
                     }}
+                    {...animationProps}
                     yAxisId={0}
                     style={{ cursor: 'pointer' }}
                   >
@@ -4353,6 +4523,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                       strokeWidth: 3,
                       style: { cursor: 'pointer' }
                     }}
+                    {...animationProps}
                     yAxisId={forceSingleAxis ? 0 : 1}
                     style={{ cursor: 'pointer' }}
                   >
@@ -4465,6 +4636,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     name={seriesKey}
                     stroke={seriesColor}
                     fill={seriesColor}
+                    {...animationProps}
                     style={{ cursor: 'pointer' }}
                   >
                     {seriesShowDataLabels && (
@@ -4585,6 +4757,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   dataKey={yKey} 
                   stroke={seriesColor} 
                   fill={seriesColor} 
+                  {...animationProps}
                   yAxisId={0}
                   onClick={() => handleSeriesClick(yKey, effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey, seriesColor)}
                   style={{ cursor: 'pointer' }}
@@ -4612,6 +4785,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   dataKey={secondKey} 
                   stroke={seriesColor} 
                   fill={seriesColor} 
+                  {...animationProps}
                   yAxisId={forceSingleAxis ? 0 : 1}
                   onClick={() => handleSeriesClick(secondKey, effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey, seriesColor)}
                   style={{ cursor: 'pointer' }}
@@ -4737,7 +4911,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   ? seriesSettings[seriesKey]?.showDataLabels 
                   : currentShowDataLabels;
                 return (
-                  <Scatter key={seriesKey} data={seriesData} dataKey={seriesKey} name={seriesKey} fill={seriesColor}>
+                  <Scatter key={seriesKey} data={seriesData} dataKey={seriesKey} name={seriesKey} fill={seriesColor} {...animationProps}>
                     {seriesShowDataLabels && (
                       <LabelList 
                         dataKey={seriesKey} 
@@ -4757,7 +4931,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     ? seriesSettings[yKey]?.showDataLabels 
                     : currentShowDataLabels;
                   return (
-                    <Scatter data={transformedChartData} dataKey={yKey} fill={seriesColor} yAxisId={0}>
+                    <Scatter data={transformedChartData} dataKey={yKey} fill={seriesColor} {...animationProps} yAxisId={0}>
                       {seriesShowDataLabels && (
                         <LabelList 
                           dataKey={yKey} 
@@ -4776,7 +4950,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     ? seriesSettings[secondKey]?.showDataLabels 
                     : currentShowDataLabels;
                   return (
-                    <Scatter data={transformedChartData} dataKey={secondKey} fill={seriesColor} yAxisId={forceSingleAxis ? 0 : 1}>
+                    <Scatter data={transformedChartData} dataKey={secondKey} fill={seriesColor} {...animationProps} yAxisId={forceSingleAxis ? 0 : 1}>
                       {seriesShowDataLabels && (
                         <LabelList 
                           dataKey={secondKey} 
@@ -4900,9 +5074,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 labelLine={false}
                 dataKey={primaryYKey}
                 nameKey={xKey}
-                animationBegin={0}
-                animationDuration={1000}
-                animationEasing="ease-out"
+                animationBegin={animationsDisabled ? undefined : 0}
+                {...animationProps}
               >
                 {Array.isArray(chartDataForRendering) ? chartDataForRendering.map((entry, index) => (
                   <Cell
@@ -5003,9 +5176,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 labelLine={false}
                 dataKey={yKey}
                 nameKey={xKey}
-                animationBegin={0}
-                animationDuration={1000}
-                animationEasing="ease-out"
+                animationBegin={animationsDisabled ? undefined : 0}
+                {...animationProps}
                 style={{ fontSize: '11px', fontWeight: 500 }}
               >
                 {Array.isArray(chartDataForRendering) ? chartDataForRendering.map((entry, index) => (
