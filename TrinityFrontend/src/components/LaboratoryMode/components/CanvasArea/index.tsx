@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
-import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
+import { 
+  sanitizeLabConfig, 
+  persistLaboratoryConfig,
+  getWorkflowMoleculesKey,
+  getWorkflowSelectedAtomsKey,
+  getWorkflowDataKey
+} from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
@@ -1026,7 +1032,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
 };
 
 // Function to fetch atom configurations from MongoDB
-const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
+const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashboard' = 'analytics'): Promise<{
   cards: LayoutCard[];
   workflowMolecules: WorkflowMolecule[];
   autosaveEnabled?: boolean;
@@ -1038,11 +1044,15 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
       return null;
     }
 
-    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+    // Include mode parameter to fetch mode-specific data
+    const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}?mode=${mode}`;
 
     console.info('[Laboratory API] Fetching atom configurations from MongoDB', {
       url: requestUrl,
       project: projectContext.project_name,
+      subMode: subMode,
+      mode: mode,
     });
 
     const response = await fetch(requestUrl, {
@@ -2099,8 +2109,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         // Only try to fetch molecule info if cards are NOT from MongoDB (e.g., from localStorage fallback)
         console.log('[Laboratory API] Cards from localStorage - attempting to fetch molecule information from MongoDB');
 
-        // Try to fetch molecule information from MongoDB
-        fetchAtomConfigurationsFromMongoDB()
+        // Try to fetch molecule information from MongoDB (with subMode)
+        fetchAtomConfigurationsFromMongoDB(subMode)
           .then((mongoData) => {
             if (mongoData && mongoData.cards.length > 0) {
               console.log('[Laboratory API] Found MongoDB data with molecule info, updating cards');
@@ -2159,10 +2169,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         setLayoutCards(normalizedCards);
       }
 
-      // Check for saved workflowMolecules in localStorage if no override provided
+      // Check for saved workflowMolecules in mode-specific localStorage if no override provided
       let workflow = workflowOverride;
       if (!workflow) {
-        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        // Check mode-specific key first, then legacy key
+        const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode)) || localStorage.getItem('workflow-molecules');
         if (storedWorkflowMolecules) {
           try {
             workflow = JSON.parse(storedWorkflowMolecules);
@@ -2471,10 +2482,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     };
 
     // PRIORITY: Fetch from MongoDB FIRST, then fall back to localStorage if MongoDB fails
-    console.info('[Laboratory API] Starting data load - prioritizing MongoDB over localStorage');
+    console.info('[Laboratory API] Starting data load - prioritizing MongoDB over localStorage', {
+      subMode: subMode
+    });
 
     hasPendingAsyncLoad = true;
-    fetchAtomConfigurationsFromMongoDB()
+    fetchAtomConfigurationsFromMongoDB(subMode)
       .then((mongoData) => {
         if (!isMounted) {
           return;
@@ -2483,23 +2496,28 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         if (mongoData && mongoData.cards && mongoData.cards.length > 0) {
           console.info('[Laboratory API] ✅ Successfully loaded data from MongoDB (primary source)', {
             cardsCount: mongoData.cards.length,
-            workflowMoleculesCount: mongoData.workflowMolecules?.length || 0
+            workflowMoleculesCount: mongoData.workflowMolecules?.length || 0,
+            subMode: subMode
           });
           applyInitialCards(mongoData.cards, mongoData.workflowMolecules || [], true); // fromMongoDB = true
           return; // Successfully loaded from MongoDB, no need to check localStorage
         } else {
           // FIX: If MongoDB returns empty cards array, clear workflow data and return to regular laboratory mode
           if (mongoData && Array.isArray(mongoData.cards) && mongoData.cards.length === 0) {
-            console.info('[Laboratory API] ⚠️ MongoDB returned empty cards array - clearing workflow data and returning to regular laboratory mode');
-            // Clear workflow-related localStorage items
-            localStorage.removeItem('workflow-molecules');
-            localStorage.removeItem('workflow-selected-atoms');
-            localStorage.removeItem('workflow-data');
+            console.info('[Laboratory API] ⚠️ MongoDB returned empty cards array - clearing workflow data and returning to regular laboratory mode', {
+              subMode: subMode
+            });
+            // Clear mode-specific workflow-related localStorage items
+            localStorage.removeItem(getWorkflowMoleculesKey(subMode));
+            localStorage.removeItem(getWorkflowSelectedAtomsKey(subMode));
+            localStorage.removeItem(getWorkflowDataKey(subMode));
             // Apply empty cards with no workflow molecules to return to regular laboratory mode
             applyInitialCards([], [], true); // fromMongoDB = true, empty cards and workflow molecules
             return;
           }
-          console.info('[Laboratory API] ⚠️ MongoDB returned no data, falling back to localStorage');
+          console.info('[Laboratory API] ⚠️ MongoDB returned no data, falling back to localStorage', {
+            subMode: subMode
+          });
           // MongoDB returned null/undefined, fall back to localStorage
           return loadFromLocalStorage();
         }
@@ -2508,7 +2526,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         if (!isMounted) {
           return;
         }
-        console.warn('[Laboratory API] ⚠️ MongoDB fetch failed, falling back to localStorage', error);
+        console.warn('[Laboratory API] ⚠️ MongoDB fetch failed, falling back to localStorage', error, {
+          subMode: subMode
+        });
         // MongoDB fetch failed, fall back to localStorage
         return loadFromLocalStorage();
       });
@@ -2519,11 +2539,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         return;
       }
 
-      console.info('[Laboratory API] Attempting to load from localStorage (fallback)');
+      console.info('[Laboratory API] Attempting to load from localStorage (fallback)', {
+        subMode: subMode
+      });
 
-    // Check for both workflow-selected-atoms and workflow-data
-    const storedAtoms = localStorage.getItem('workflow-selected-atoms');
-    const storedWorkflowData = localStorage.getItem('workflow-data');
+    // Check for mode-specific workflow keys first, then fall back to legacy keys
+    const storedAtoms = localStorage.getItem(getWorkflowSelectedAtomsKey(subMode)) || localStorage.getItem('workflow-selected-atoms');
+    const storedWorkflowData = localStorage.getItem(getWorkflowDataKey(subMode)) || localStorage.getItem('workflow-data');
       let workflowAtoms: {
         atomName: string;
         moleculeId: string;
@@ -2586,8 +2608,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             } as LayoutCard;
           });
 
+        // Remove mode-specific key after loading
+        localStorage.removeItem(getWorkflowSelectedAtomsKey(subMode));
+        // Also remove legacy key for migration
         localStorage.removeItem('workflow-selected-atoms');
-          console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-selected-atoms)');
+          console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-selected-atoms)', {
+            subMode: subMode
+          });
           if (initialCards && initialCards.length > 0) {
             applyInitialCards(initialCards, initialWorkflow);
             return;
@@ -2640,8 +2667,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             const molecules = Array.from(moleculeMap.values());
             if (molecules.length > 0) {
               initialWorkflow = molecules;
-            // Save the molecules to workflow-molecules localStorage for future switches
-            localStorage.setItem('workflow-molecules', JSON.stringify(molecules));
+            // Save the molecules to mode-specific workflow-molecules localStorage for future switches
+            localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(molecules));
             }
 
             const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
@@ -2671,8 +2698,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               } as LayoutCard;
             });
 
+          // Remove mode-specific key after loading
+          localStorage.removeItem(getWorkflowDataKey(subMode));
+          // Also remove legacy key for migration
           localStorage.removeItem('workflow-data');
-            console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-data)');
+            console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-data)', {
+              subMode: subMode
+            });
             if (initialCards && initialCards.length > 0) {
               applyInitialCards(initialCards, initialWorkflow);
               return;
@@ -2680,21 +2712,26 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           }
         } catch (e) {
           console.error('Failed to parse workflow-data', e);
+        // Remove mode-specific key after loading error
+        localStorage.removeItem(getWorkflowDataKey(subMode));
+        // Also remove legacy key
         localStorage.removeItem('workflow-data');
         }
       }
 
       // If still no cards, try stored layout from localStorage
       if (!initialCards || initialCards.length === 0) {
-      const storedLayout = localStorage.getItem(STORAGE_KEY);
+      // Use mode-specific key for stored layout
+      const storageKey = subMode === 'analytics' ? 'laboratory-analytics-layout-cards' : 'laboratory-dashboard-layout-cards';
+      const storedLayout = localStorage.getItem(storageKey) || localStorage.getItem(STORAGE_KEY); // Fallback to legacy key
         if (storedLayout && storedLayout !== 'undefined') {
           try {
             const raw = JSON.parse(storedLayout);
             initialCards = hydrateLayoutCards(raw);
 
-            // Check for workflow molecules in localStorage
+            // Check for workflow molecules in mode-specific localStorage first, then legacy
             if (!initialWorkflow) {
-              const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+              const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode)) || localStorage.getItem('workflow-molecules');
               if (storedWorkflowMolecules) {
                 try {
                   initialWorkflow = JSON.parse(storedWorkflowMolecules);
@@ -2704,14 +2741,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               }
             }
 
-            console.info('[Laboratory API] ✅ Loaded from localStorage (stored layout)');
+            console.info('[Laboratory API] ✅ Loaded from localStorage (stored layout)', {
+              subMode: subMode,
+              storageKey: storageKey
+            });
             if (initialCards && initialCards.length > 0) {
               applyInitialCards(initialCards, initialWorkflow);
               return;
             }
           } catch (e) {
             console.error('Failed to parse stored laboratory layout', e);
-          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(storageKey);
+          localStorage.removeItem(STORAGE_KEY); // Also remove legacy key
           }
         }
 
@@ -2721,7 +2762,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       } else {
         // We have initialCards from workflow data, but need to check for workflow molecules
         if (!initialWorkflow) {
-        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        // Check mode-specific workflow molecules first, then legacy
+        const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode)) || localStorage.getItem('workflow-molecules');
           if (storedWorkflowMolecules) {
             try {
               initialWorkflow = JSON.parse(storedWorkflowMolecules);
@@ -2737,7 +2779,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [subMode]); // CRITICAL: Add subMode as dependency to reload data when switching modes
 
 
   useEffect(() => {

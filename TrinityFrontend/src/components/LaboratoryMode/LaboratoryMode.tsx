@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 // import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
 import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown, BarChart3, LayoutDashboard } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -1028,11 +1027,11 @@ const LaboratoryMode = () => {
           {canEdit && activeUsers.length > 0 && (
             <div className="flex items-center">
               <div className="relative group">
-                <div className="flex -space-x-1.5">
+                <div className="flex -space-x-2">
                   {activeUsers.slice(0, 3).map((activeUser, index) => (
                     <div
                       key={activeUser.client_id}
-                      className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-semibold border-2 border-white shadow-sm"
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold border-2 border-white shadow-sm"
                       title={`${activeUser.name} (${activeUser.email})`}
                       style={{
                         zIndex: 10 - index,
@@ -1044,7 +1043,7 @@ const LaboratoryMode = () => {
                   ))}
                   {activeUsers.length > 3 && (
                     <div
-                      className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 text-[9px] font-semibold border-2 border-white shadow-sm"
+                      className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 text-[10px] font-semibold border-2 border-white shadow-sm"
                       title={`+${activeUsers.length - 3} more`}
                     >
                       +{activeUsers.length - 3}
@@ -1111,7 +1110,7 @@ const LaboratoryMode = () => {
           {/* Run Pipeline */}
           <button
             disabled={!canEdit}
-            className={`w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-700 transition-all flex items-center justify-center text-white ${
+            className={`w-7 h-7 rounded-full bg-blue-600 hover:bg-blue-700 hover:shadow-md transition-all flex items-center justify-center text-white ${
               !canEdit ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             title="Run Pipeline"
@@ -1120,23 +1119,40 @@ const LaboratoryMode = () => {
             <Play className="w-3.5 h-3.5" fill="white" />
           </button>
 
-          {/* Mode Toggle Switch */}
-          <div className="flex items-center gap-1.5 px-1.5 py-0.5 bg-gray-50 rounded-md border border-gray-200">
-            <span className={`text-[10px] font-medium px-1 transition-colors ${subMode === 'analytics' ? 'text-gray-900' : 'text-gray-400'
-              }`}>
-              Analytics
-            </span>
-            <Switch
-              checked={subMode === 'dashboard'}
-              onCheckedChange={(checked) => {
-                setSubMode(checked ? 'dashboard' : 'analytics');
-              }}
-              className="scale-[0.65]"
-            />
-            <span className={`text-[10px] font-medium px-1 transition-colors ${subMode === 'dashboard' ? 'text-gray-900' : 'text-gray-400'
-              }`}>
-              Dashboard
-            </span>
+          {/* Mode Toggle - Pill Style */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setSubMode('analytics')}
+              disabled={!canEdit}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all duration-200 ${
+                subMode === 'analytics'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              } ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              title="Analytics Mode"
+              type="button"
+            >
+              <div className="flex items-center gap-1.5">
+                <BarChart3 className="w-3 h-3" />
+                <span>Analytics</span>
+              </div>
+            </button>
+            <button
+              onClick={() => setSubMode('dashboard')}
+              disabled={!canEdit}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all duration-200 ${
+                subMode === 'dashboard'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              } ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              title="Dashboard Mode"
+              type="button"
+            >
+              <div className="flex items-center gap-1.5">
+                <LayoutDashboard className="w-3 h-3" />
+                <span>Dashboard</span>
+              </div>
+            </button>
           </div>
         </div>
       </div>
