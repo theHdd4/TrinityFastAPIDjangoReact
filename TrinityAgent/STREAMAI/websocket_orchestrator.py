@@ -50,6 +50,8 @@ from .graphrag import GraphRAGWorkspaceConfig
 from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
 from .laboratory_retriever import LaboratoryRetrievalPipeline
+from STREAMAI.lab_context_builder import LabContextBuilder
+from STREAMAI.lab_memory_store import LabMemoryStore
 # Import workflow_insight_agent - try both paths for Docker and local development
 try:
     from Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
@@ -289,6 +291,17 @@ class StreamWebSocketOrchestrator:
         except Exception as lab_exc:
             logger.warning("⚠️ Laboratory retrieval pipeline unavailable: %s", lab_exc)
             self.laboratory_retriever = None
+
+        self.lab_memory_store: Optional[LabMemoryStore] = None
+        self.lab_context_builder: Optional[LabContextBuilder] = None
+        try:
+            self.lab_memory_store = LabMemoryStore()
+            self.lab_context_builder = LabContextBuilder(self.lab_memory_store)
+            logger.info("✅ Laboratory deterministic memory store initialized")
+        except Exception as lab_memory_exc:
+            logger.warning("⚠️ Laboratory memory store unavailable: %s", lab_memory_exc)
+            self.lab_memory_store = None
+            self.lab_context_builder = None
 
         # GraphRAG integration
         self.graph_workspace_config = GraphRAGWorkspaceConfig()
@@ -2796,6 +2809,10 @@ WORKFLOW PLANNING:
             frontend_chat_id,
             websocket_session_id,
         )
+        request_id = uuid.uuid4().hex
+        laboratory_mode = (project_context.get("mode") or "laboratory").lower() == "laboratory"
+        lab_envelope = None
+        lab_bundle: List[Dict[str, Any]] = []
         available_files = list(available_files or [])
         existing_files = self._sequence_available_files.get(sequence_id)
         if existing_files:
@@ -2845,6 +2862,35 @@ WORKFLOW PLANNING:
             self._chat_file_mentions[sequence_id] = file_focus
             effective_user_prompt = self._append_file_focus_note(effective_user_prompt, file_focus)
             logger.info("📁 Tracking %d file references from chat context", len(file_focus))
+
+        if laboratory_mode and self.lab_context_builder:
+            lab_envelope = self.lab_context_builder.build_envelope(
+                request_id=request_id,
+                session_id=sequence_id,
+                user_id=user_id,
+                model_version=self.llm_model,
+                feature_flags=project_context.get("feature_flags"),
+                prompt_template=self.lab_context_builder.prompt_template,
+                prompt_template_version=self.lab_context_builder.prompt_template_version,
+                raw_inputs={
+                    "user_prompt": user_prompt,
+                    "project_context": project_context,
+                    "history_summary": history_summary,
+                },
+            )
+            lab_bundle = self.lab_context_builder.load_context_bundle(lab_envelope)
+            effective_user_prompt = self.lab_context_builder.merge_context_into_prompt(
+                effective_user_prompt,
+                lab_bundle,
+            )
+            regression_hash = self.lab_context_builder.regression_hash(effective_user_prompt, lab_bundle)
+            logger.info(
+                "🧪 Laboratory context prepared | template_hash=%s input_hash=%s bundle_docs=%s regression_hash=%s",
+                lab_envelope.prompt_template_hash,
+                lab_envelope.input_hash,
+                len(lab_bundle),
+                regression_hash,
+            )
 
         try:
             # Send connected event
@@ -3741,9 +3787,18 @@ WORKFLOW PLANNING:
             except Exception as insight_error:
                 logger.warning(f"⚠️ Failed to emit workflow insight (connection may be closed): {insight_error}")
                 # Don't fail the entire workflow if insight emission fails
-            
+
+            if laboratory_mode and self.lab_context_builder and lab_envelope:
+                self.lab_context_builder.persist_run(
+                    envelope=lab_envelope,
+                    user_prompt=user_prompt,
+                    project_context=project_context,
+                    execution_history=execution_history,
+                    history_summary=history_summary,
+                )
+
             # ReAct loop handles all execution - old loop code removed
-            
+
         except WebSocketDisconnect:
             logger.info(f"🔌 WebSocket disconnected during workflow {sequence_id}")
         except Exception as e:
