@@ -228,12 +228,20 @@ class AtomExecutionPolicy:
 @dataclass
 class WorkstreamContextStore:
     dedupe_budget: int = 5
-    snapshots: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
-    last_inputs: Dict[str, str] = field(default_factory=dict)
     telemetry: Optional[WorkstreamTelemetry] = None
     max_backtracks: int = 3
+    cooldown_seconds: float = 1.5
+    backtrack_time_budget: float = 180.0
+    snapshots: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    last_inputs: Dict[str, str] = field(default_factory=dict)
+    last_executed_at: Dict[str, float] = field(default_factory=dict)
     consecutive_backtracks: int = 0
     global_snapshots: List[Dict[str, Any]] = field(default_factory=list)
+    backtrack_window_start: Optional[float] = None
+    last_atom_run: Optional[str] = None
+
+    def register_attempt(self, atom_id: str) -> None:
+        self.last_atom_run = atom_id
 
     def register_execution(
         self,
@@ -269,6 +277,7 @@ class WorkstreamContextStore:
         entries.append(snapshot)
         self.global_snapshots.append(snapshot)
         self.last_inputs[atom_id] = input_hash
+        self.last_executed_at[atom_id] = time.time()
         self.consecutive_backtracks = 0
         return snapshot_id
 
@@ -322,10 +331,34 @@ class WorkstreamContextStore:
 
     def record_backtrack(self) -> bool:
         self.consecutive_backtracks += 1
+        if self.backtrack_window_start is None:
+            self.backtrack_window_start = time.time()
         return self.consecutive_backtracks <= self.max_backtracks
+
+    def backtrack_time_exhausted(self) -> bool:
+        if self.backtrack_window_start is None:
+            return False
+        return (time.time() - self.backtrack_window_start) > self.backtrack_time_budget
 
     def trim_completed_nodes(self, allowed_atoms: Set[str]) -> None:
         self.last_inputs = {atom: h for atom, h in self.last_inputs.items() if atom in allowed_atoms}
+        self.last_executed_at = {atom: t for atom, t in self.last_executed_at.items() if atom in allowed_atoms}
+
+    def summarize_context(self, atom_id: str, input_hash: str, upstream: Optional[str]) -> Dict[str, Any]:
+        return {
+            "atom_id": atom_id,
+            "input_hash": input_hash,
+            "upstream": upstream,
+            "last_inputs": dict(self.last_inputs),
+            "snapshot_count": len(self.global_snapshots),
+            "consecutive_backtracks": self.consecutive_backtracks,
+        }
+
+    def cooldown_due(self, atom_id: str) -> bool:
+        last_exec = self.last_executed_at.get(atom_id)
+        if last_exec is None:
+            return False
+        return (time.time() - last_exec) < self.cooldown_seconds
 
     def upstream_snapshot_id(self, deps: Iterable[str]) -> str:
         """Generate a stable identifier for upstream state."""

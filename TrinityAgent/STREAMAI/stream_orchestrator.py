@@ -359,6 +359,21 @@ class StreamOrchestrator:
             logger.info(f"📍 Executing Atom {i}/{total_atoms}: {atom_id}")
             logger.info(f"{'='*80}")
 
+            context_store.register_attempt(atom_id)
+            last_exec = context_store.last_executed_at.get(atom_id)
+            if last_exec and context_store.cooldown_due(atom_id):
+                remaining = max(0.0, context_store.cooldown_seconds - (time.time() - last_exec))
+                await self._emit_progress(
+                    progress_callback,
+                    {
+                        "type": "atom_cooldown_enforced",
+                        "atom_id": atom_id,
+                        "cooldown_seconds": context_store.cooldown_seconds,
+                        "remaining": remaining,
+                    },
+                )
+                await asyncio.sleep(remaining)
+
             # Update progress
             await self._emit_progress(progress_callback, {
                 "type": "atom_start",
@@ -384,7 +399,7 @@ class StreamOrchestrator:
                     stable_index=last_stable_index,
                 )
                 if loop_signal.detected:
-                    handled, rewind_to = await self._handle_loop_detection(
+                    handled, rewind_to, atoms, atom_index_lookup = await self._handle_loop_detection(
                         atom=atom,
                         atom_index=i,
                         input_hash=input_hash,
@@ -396,7 +411,9 @@ class StreamOrchestrator:
                         progress_callback=progress_callback,
                         atoms=atoms,
                         atom_index_lookup=atom_index_lookup,
+                        loop_detector=loop_detector,
                     )
+                    total_atoms = len(atoms)
                     if handled:
                         target_index = atom_index if rewind_to is None else max(rewind_to, 0)
                         last_stable_index = max(last_stable_index, target_index)
@@ -618,7 +635,7 @@ class StreamOrchestrator:
                         stable_index=last_stable_index,
                     )
                     if signal.detected:
-                        await self._handle_loop_detection(
+                        _, _, atoms, atom_index_lookup = await self._handle_loop_detection(
                             atom=atom,
                             atom_index=i,
                             input_hash=input_hash,
@@ -630,7 +647,9 @@ class StreamOrchestrator:
                             progress_callback=progress_callback,
                             atoms=atoms,
                             atom_index_lookup=atom_index_lookup,
+                            loop_detector=loop_detector,
                         )
+                        total_atoms = len(atoms)
                     break
                 
             except Exception as e:
@@ -686,7 +705,8 @@ class StreamOrchestrator:
         progress_callback: Optional[Callable],
         atoms: List[Dict[str, Any]],
         atom_index_lookup: Dict[str, int],
-    ) -> Tuple[bool, Optional[int]]:
+        loop_detector: WorkstreamLoopDetector,
+    ) -> Tuple[bool, Optional[int], List[Dict[str, Any]], Dict[str, int]]:
         atom_id = atom.get("atom_id", "unknown")
         logger.warning(
             "🌀 Loop detected on atom %s (step %s): %s | details=%s",
@@ -696,29 +716,50 @@ class StreamOrchestrator:
             loop_signal.details,
         )
 
-        await self._emit_progress(
-            progress_callback,
-            {
-                "type": "loop_detected",
-                "atom_id": atom_id,
-                "step": atom_index,
-                "reason": loop_signal.reason,
-                "details": loop_signal.details,
-            },
-        )
+        paused_payload = {
+            "type": "atom_loop_paused",
+            "atom_id": atom_id,
+            "step": atom_index,
+            "reason": loop_signal.reason,
+            "details": loop_signal.details,
+            "context": context_store.summarize_context(atom_id, input_hash, upstream_snapshot),
+            "executions": loop_detector.executed_atoms_count,
+            "unique_nodes": len(loop_detector.unique_nodes_visited) or len(completed_nodes),
+        }
+
+        await self._emit_progress(progress_callback, paused_payload)
 
         context_store.flag_snapshot(atom_id, input_hash)
-        if not context_store.record_backtrack():
+        if not context_store.record_backtrack() or context_store.backtrack_time_exhausted():
             results["failed_atoms"] += 1
+            exhaustion_reason = (
+                "loop_backtrack_time_budget" if context_store.backtrack_time_exhausted() else "loop_backtrack_cap_reached"
+            )
+            failure_details = {
+                "max_backtracks": context_store.max_backtracks,
+                "time_budget": context_store.backtrack_time_budget,
+            }
             results["errors"].append(
                 {
                     "atom_id": atom_id,
                     "step": atom_index,
-                    "error": "loop_backtrack_cap_reached",
-                    "details": {"max_backtracks": context_store.max_backtracks},
+                    "error": exhaustion_reason,
+                    "details": failure_details,
                 }
             )
-            return False, None
+            await self._emit_progress(
+                progress_callback,
+                {
+                    "type": "loop_backtrack_exhausted",
+                    "atom_id": atom_id,
+                    "step": atom_index,
+                    "reason": exhaustion_reason,
+                    "action": "human_override",
+                    "trace": context_store.global_snapshots,
+                    "details": failure_details,
+                },
+            )
+            return False, None, atoms, atom_index_lookup
 
         ancestors = atom.get("depends_on", [])
         candidate_snapshot = context_store.find_divergent_snapshot(atom_id, input_hash, ancestors)
@@ -732,6 +773,8 @@ class StreamOrchestrator:
                     target_atom_id = parent
                     break
 
+        metadata_hops = 0
+        max_metadata_hops = 3
         if candidate_snapshot is None:
             target_index = 0
             refreshed_metadata, _, _ = self._recalculate_metadata(atoms[target_index], None, upstream_snapshot)
@@ -744,7 +787,8 @@ class StreamOrchestrator:
             )
             metadata_target["metadata"] = refreshed_metadata
             probe = candidate_snapshot
-            while not changed and probe:
+            while not changed and probe and metadata_hops < max_metadata_hops:
+                metadata_hops += 1
                 probe = context_store.previous_snapshot(target_atom_id, probe["id"])
                 if not probe:
                     break
@@ -766,6 +810,12 @@ class StreamOrchestrator:
         completed_nodes.intersection_update(allowed_atoms)
         context_store.trim_completed_nodes(allowed_atoms)
 
+        atoms, atom_index_lookup = self._replan_downstream(
+            atoms=atoms,
+            completed_nodes=completed_nodes,
+            start_index=target_index,
+        )
+
         await self._emit_progress(
             progress_callback,
             {
@@ -777,7 +827,53 @@ class StreamOrchestrator:
             },
         )
 
-        return True, target_index
+        return True, target_index, atoms, atom_index_lookup
+
+    def _replan_downstream(
+        self,
+        *,
+        atoms: List[Dict[str, Any]],
+        completed_nodes: Set[str],
+        start_index: int,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+        prefix = atoms[:start_index]
+        remaining = atoms[start_index:]
+        if not remaining:
+            return atoms, {atom.get("atom_id"): idx for idx, atom in enumerate(atoms)}
+
+        id_to_atom = {atom.get("atom_id"): atom for atom in remaining}
+        indegree: Dict[str, int] = {}
+        dependents: Dict[str, Set[str]] = {}
+
+        for atom in remaining:
+            atom_id = atom.get("atom_id")
+            deps = set(atom.get("depends_on", [])) - completed_nodes
+            indegree[atom_id] = 0
+            for dep in deps:
+                if dep in id_to_atom:
+                    indegree[atom_id] += 1
+                    dependents.setdefault(dep, set()).add(atom_id)
+                elif dep not in completed_nodes:
+                    raise WorkstreamValidationError(
+                        f"Dependency {dep} for atom {atom_id} is not satisfied after backtrack"
+                    )
+
+        queue = [node for node, deg in indegree.items() if deg == 0]
+        topo: List[str] = []
+
+        while queue:
+            current = queue.pop(0)
+            topo.append(current)
+            for child in dependents.get(current, set()):
+                indegree[child] -= 1
+                if indegree[child] == 0:
+                    queue.append(child)
+
+        if len(topo) != len(remaining):
+            raise WorkstreamValidationError("Cycle or unsatisfied dependency detected during replanning")
+
+        reordered = prefix + [id_to_atom[node] for node in topo]
+        return reordered, {atom.get("atom_id"): idx for idx, atom in enumerate(reordered)}
 
     def _recalculate_metadata(
         self,
