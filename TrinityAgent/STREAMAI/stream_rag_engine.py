@@ -516,10 +516,15 @@ class StreamRAGEngine:
 """,
             "correlation": """
 ## Parameter Generation Guidance:
-- Requires data_source parameter
-- Optionally specify columns to correlate (default: all numeric)
-- Method can be: pearson (default), spearman, kendall
+- Requires data_source parameter (file path or result from previous step)
+- Optionally specify columns to correlate (default: analyzes all numeric columns)
+- Method can be: pearson (default for linear relationships), spearman (for monotonic relationships)
+- Excellent for EDA (Exploratory Data Analysis) workflows
+- Use after data loading/merging to understand variable relationships
+- Can filter data before correlation using identifier_filters and measure_filters
 - Use output from previous step that has numeric columns
+- Example: After merging datasets, use correlation to find relationships between numeric columns
+- Example: Use correlation early in EDA workflow to guide further analysis
 """
         }
         

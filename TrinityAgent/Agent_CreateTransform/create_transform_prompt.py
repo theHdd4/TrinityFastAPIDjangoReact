@@ -87,9 +87,7 @@ class CreateTransformPromptBuilder:
                 "add_1_rename": "new_column_name"
             }
         ],
-        "response": "Raw thinking and reasoning from LLM about the transformation operation, including why these columns were selected, why this operation was chosen, and any considerations made",
-        "smart_response": "I've configured the transformation operation for you. The columns will be transformed using the specified operations. You can now proceed with the transformation or make adjustments as needed.",
-        "reasoning": "Found all required components with context from history",
+        "reasoning": "Detailed explanation of why the CreateTransform atom was chosen, including: analysis of the user's request, why these specific columns were selected, why this transformation operation was chosen, alternatives considered, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "used_memory": True
     }
     
@@ -104,9 +102,7 @@ class CreateTransformPromptBuilder:
             "To complete transformation, specify: file + columns + operation + new column name",
             "Or say 'yes' to use my suggestions"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what files are available, what columns can be transformed, what operations are suitable, and recommendations based on available data",
-        "smart_response": "I'd be happy to help you with data transformations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you create new columns using various operations like add, subtract, multiply, divide, and more. What transformation would you like to perform?",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why the CreateTransform atom was chosen, including: analysis of the current situation, what files are available, what columns can be transformed, what operations are suitable, why CreateTransform is appropriate, recommendations based on available data, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "file_analysis": {
             "total_files": "number",
             "recommended_files": ["file1", "file2"],

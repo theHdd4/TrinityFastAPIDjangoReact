@@ -106,35 +106,11 @@ export const correlationHandler: AtomHandler = {
     
     // All detailed logging happens on backend - check terminal for logs
     
-    // Show smart_response in chat FIRST (user-friendly message)
-    const smartResponseText = processSmartResponse(data);
-    if (smartResponseText) {
-      const smartMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: smartResponseText,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, smartMsg]);
-    }
-    
-    // Show response and reasoning in chat
-    const responseText = data.response || data.data?.response || '';
+    // Show reasoning in chat (only reasoning field now)
     const reasoningText = data.reasoning || data.data?.reasoning || '';
-    
-    if (responseText) {
-      const responseMsg: Message = {
-        id: (Date.now() + 2).toString(),
-        content: `**Response:**\n${responseText}`,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, responseMsg]);
-    }
-    
     if (reasoningText) {
       const reasoningMsg: Message = {
-        id: (Date.now() + 3).toString(),
+        id: (Date.now() + 1).toString(),
         content: `**Reasoning:**\n${reasoningText}`,
         sender: 'ai',
         timestamp: new Date(),
@@ -142,14 +118,25 @@ export const correlationHandler: AtomHandler = {
       setMessages(prev => [...prev, reasoningMsg]);
     }
     
-    // STEP 1: Add the 3 keys (smart_response, response, reasoning) to a TEXT BOX
+    // STEP 1: Add reasoning to a TEXT BOX
     const textBoxContent = formatAgentResponseForTextBox(data);
     
     try {
       await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated with initial 3 keys');
     } catch (textBoxError) {
       console.error('❌ Error adding 3 keys to text box:', textBoxError);
       // Continue even if text box update fails
+    }
+    
+    // STEP 2: Add placeholder text box for insight (like other atoms)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight placeholder text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight placeholder text box:', textBoxError);
     }
     
     if (!data.correlation_config) {
@@ -176,7 +163,7 @@ export const correlationHandler: AtomHandler = {
       }
     } else {
       const errorMsg = createMessage(
-        data.smart_response || `I couldn't find a data file to analyze. Please make sure you have selected or uploaded a data file first, then try your correlation request again.`
+        data.reasoning ? `**Reasoning:**\n${data.reasoning}` : `I couldn't find a data file to analyze. Please make sure you have selected or uploaded a data file first, then try your correlation request again.`
       );
       setMessages(prev => [...prev, errorMsg]);
       return { success: false, error: 'No file path in correlation configuration' };
@@ -352,10 +339,10 @@ export const correlationHandler: AtomHandler = {
       // All detailed logging happens on backend - check terminal for logs
       
       // Prepare enhanced data with correlation results for insight generation
-      // Include the 3 keys from the original AI response (they're in 'data')
+      // Include reasoning from the original AI response (it's in 'data')
       // Include correlation results from backend API call
       const enhancedDataForInsight = {
-        ...data, // This includes smart_response, response, reasoning (the 3 keys)
+        ...data, // This includes reasoning
         correlation_config: correlationConfig, // Original config from first LLM call
         correlation_results: {
           correlation_matrix: correlationMatrixDict, // Original dict format from backend
@@ -383,28 +370,18 @@ export const correlationHandler: AtomHandler = {
         }
       };
       
-      // Generate insight - this is the 2nd LLM call
-      // All detailed logging happens on backend - check terminal for logs
-      
-      // Add a small delay to ensure first text box is fully saved
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
+      // STEP 2b: Generate insight - uses queue manager to ensure completion even when new atoms start
+      // The queue manager automatically handles text box updates with retry logic
+      // The placeholder text box was already added in STEP 2 above
       generateAtomInsight({
         data: enhancedDataForInsight,
         atomType: 'correlation',
         sessionId,
-      }).then(async (result) => {
-        if (result.success && result.insight) {
-          try {
-            // Add insight to a NEW text box (separate from the text box with 3 keys)
-            await addCardTextBox(atomId, result.insight, 'AI Insight');
-          } catch (textBoxError) {
-            console.error('❌ Error adding new text box with insight:', textBoxError);
-          }
-        }
+        atomId, // Pass atomId so queue manager can track and complete this insight
       }).catch((error) => {
         console.error('❌ Error generating insight:', error);
       });
+      // Note: We don't need to manually update the text box here - the queue manager handles it
       
       return {
         success: true,
@@ -425,7 +402,7 @@ export const correlationHandler: AtomHandler = {
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { setMessages } = context;
     
-    // Show smart_response if available
+    // Show reasoning if available
     const smartResponseText = processSmartResponse(data);
     const errorMessage = smartResponseText || data.error || data.message || 'I encountered an issue processing your correlation request. Please try again with more specific details.';
     

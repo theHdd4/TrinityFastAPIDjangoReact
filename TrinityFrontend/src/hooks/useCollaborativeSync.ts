@@ -6,7 +6,7 @@ import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useAuth } from '@/contexts/AuthContext';
 
 // WebSocket message types
-export type WSMessageType = 
+export type WSMessageType =
   | 'connect'
   | 'state_update'
   | 'card_update'  // New: granular card-level update
@@ -14,6 +14,10 @@ export type WSMessageType =
   | 'card_blur'    // New: user unfocused from a card
   | 'full_sync'
   | 'ack'
+  | 'resume'
+  | 'resume_ack'
+  | 'session_ack'
+  | 'close_session'
   | 'error'
   | 'heartbeat'
   | 'user_list_update';
@@ -25,6 +29,11 @@ export interface WSMessage {
   version?: string;
   timestamp?: string;
   client_id?: string;
+  session_id?: string;
+  sequence?: number;
+  last_acked_sequence?: number;
+  op?: 'ping' | 'pong';
+  reason?: string;
   user_email?: string;
   user_name?: string;
   project_context?: {
@@ -70,6 +79,114 @@ const DEFAULT_OPTIONS: Required<CollaborativeSyncOptions> = {
   onUsersChanged: () => {},
 };
 
+const CLIENT_HEARTBEAT_INTERVAL_MS = 20000;
+
+function clearSharedHeartbeat() {
+  if (sharedSocketState.heartbeatInterval) {
+    clearInterval(sharedSocketState.heartbeatInterval);
+    sharedSocketState.heartbeatInterval = null;
+  }
+}
+
+function scheduleHeartbeat(send: () => void) {
+  clearSharedHeartbeat();
+  sharedSocketState.heartbeatInterval = setInterval(() => {
+    send();
+  }, CLIENT_HEARTBEAT_INTERVAL_MS);
+}
+
+function resetReconnectTimer() {
+  if (sharedSocketState.reconnectTimeout) {
+    clearTimeout(sharedSocketState.reconnectTimeout);
+    sharedSocketState.reconnectTimeout = null;
+  }
+  sharedSocketState.reconnectAttempts = 0;
+}
+
+function scheduleReconnect(connectFn: () => void) {
+  if (sharedSocketState.manualClose || sharedSocketState.reconnectTimeout) {
+    return;
+  }
+
+  const attempt = sharedSocketState.reconnectAttempts + 1;
+  sharedSocketState.reconnectAttempts = attempt;
+  const backoff = Math.min(30000, 1000 * 2 ** Math.min(attempt, 5)) + Math.random() * 500;
+  sharedSocketState.reconnectTimeout = setTimeout(() => {
+    sharedSocketState.reconnectTimeout = null;
+    connectFn();
+  }, backoff);
+}
+
+function ensureSharedSocket(
+  urlFactory: () => string,
+  onOpen?: () => void,
+  onClose?: (ev: CloseEvent) => void,
+  onError?: (ev: Event) => void,
+) {
+  if (sharedSocketState.ws &&
+      (sharedSocketState.ws.readyState === WebSocket.OPEN ||
+       sharedSocketState.ws.readyState === WebSocket.CONNECTING)) {
+    return sharedSocketState.ws;
+  }
+
+  const wsUrl = urlFactory();
+  const socket = new WebSocket(wsUrl);
+  sharedSocketState.ws = socket;
+  sharedSocketState.manualClose = false;
+
+  socket.addEventListener('message', dispatchMessage);
+
+  socket.addEventListener('open', () => {
+    resetReconnectTimer();
+    notifyConnectionListeners(true);
+    onOpen?.();
+  });
+
+  socket.addEventListener('close', (ev) => {
+    notifyConnectionListeners(false);
+    clearSharedHeartbeat();
+    onClose?.(ev);
+    if (!sharedSocketState.manualClose) {
+      scheduleReconnect(() => ensureSharedSocket(urlFactory, onOpen, onClose, onError));
+    }
+  });
+
+  socket.addEventListener('error', (ev) => {
+    onError?.(ev);
+  });
+
+  return socket;
+}
+
+type MessageListener = (event: MessageEvent) => void;
+type ConnectionListener = (connected: boolean) => void;
+
+const sharedSocketState: {
+  ws: WebSocket | null;
+  listeners: Set<MessageListener>;
+  connectionListeners: Set<ConnectionListener>;
+  reconnectTimeout: ReturnType<typeof setTimeout> | null;
+  heartbeatInterval: ReturnType<typeof setInterval> | null;
+  reconnectAttempts: number;
+  manualClose: boolean;
+} = {
+  ws: null,
+  listeners: new Set(),
+  connectionListeners: new Set(),
+  reconnectTimeout: null,
+  heartbeatInterval: null,
+  reconnectAttempts: 0,
+  manualClose: false,
+};
+
+const dispatchMessage = (event: MessageEvent) => {
+  sharedSocketState.listeners.forEach((listener) => listener(event));
+};
+
+const notifyConnectionListeners = (connected: boolean) => {
+  sharedSocketState.connectionListeners.forEach((listener) => listener(connected));
+};
+
 /**
  * Hook for real-time collaborative synchronization using WebSocket
  * 
@@ -91,7 +208,6 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   const onDisconnected = options.onDisconnected ?? DEFAULT_OPTIONS.onDisconnected;
   const onUsersChanged = options.onUsersChanged ?? DEFAULT_OPTIONS.onUsersChanged;
 
-  const wsRef = useRef<WebSocket | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fullSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastStateRef = useRef<string>('');
@@ -100,10 +216,12 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   const clientIdRef = useRef<string>(`client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
   const isApplyingRemoteUpdateRef = useRef(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const manualCloseRef = useRef(false);
   const hasInitialFullSyncRef = useRef(false);
   const initialFullSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionIdRef = useRef<string>('');
+  const lastAckSequenceRef = useRef<number>(0);
   
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [cardEditors, setCardEditors] = useState<Map<string, CardEditor>>(new Map());
@@ -141,6 +259,46 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  const getSessionStorageKey = useCallback(() => {
+    const projectContext = getActiveProjectContext();
+    if (!projectContext) {
+      return 'lab_ws_session_global';
+    }
+    return `lab_ws_session_${projectContext.client_name}_${projectContext.app_name}_${projectContext.project_name}`;
+  }, []);
+
+  const loadSessionState = useCallback(() => {
+    if (typeof window === 'undefined') return '';
+
+    const storageKey = getSessionStorageKey();
+    let sessionId = sessionStorage.getItem(storageKey);
+
+    if (!sessionId) {
+      sessionId =
+        (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+          ? crypto.randomUUID()
+          : `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      sessionStorage.setItem(storageKey, sessionId);
+    }
+
+    sessionIdRef.current = sessionId;
+
+    const lastAck = Number(sessionStorage.getItem(`${storageKey}_lastAck`) || '0');
+    lastAckSequenceRef.current = Number.isFinite(lastAck) ? lastAck : 0;
+
+    return sessionId;
+  }, [getSessionStorageKey]);
+
+  const persistLastAck = useCallback(
+    (sequence?: number) => {
+      if (!sequence || sequence <= 0 || typeof window === 'undefined') return;
+      const storageKey = getSessionStorageKey();
+      sessionStorage.setItem(`${storageKey}_lastAck`, sequence.toString());
+      lastAckSequenceRef.current = sequence;
+    },
+    [getSessionStorageKey],
+  );
 
   const onErrorRef = useRef(onError);
   const onConnectedRef = useRef(onConnected);
@@ -216,9 +374,15 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       baseUrl = `${protocol}//${host}:${resolvedFastapiPort}`;
     }
 
-    const wsUrl = `${baseUrl}/api/laboratory/sync/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+    const sessionId = sessionIdRef.current || loadSessionState();
+    const params = new URLSearchParams({
+      session_id: sessionId,
+      resume: '1',
+    });
+
+    const wsUrl = `${baseUrl}/api/laboratory/sync/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}?${params.toString()}`;
     return wsUrl;
-  }, []);
+  }, [loadSessionState]);
 
   // Serialize current state
   const serializeState = useCallback(() => {
@@ -246,9 +410,14 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
 
   // Send message via WebSocket
   const sendMessage = useCallback((message: WSMessage) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    const socket = sharedSocketState.ws;
+    if (socket && socket.readyState === WebSocket.OPEN) {
       try {
-        wsRef.current.send(JSON.stringify(message));
+        const payload: WSMessage = {
+          session_id: sessionIdRef.current || undefined,
+          ...message,
+        };
+        socket.send(JSON.stringify(payload));
       } catch (error) {
         onErrorRef.current(error as Error);
       }
@@ -396,6 +565,10 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     try {
       const message: WSMessage = JSON.parse(event.data);
 
+      if (typeof message.sequence === 'number') {
+        persistLastAck(message.sequence);
+      }
+
       // Ignore messages from self
       if (message.client_id === clientIdRef.current) {
         console.log('[CollaborativeSync] Ignoring self-echo message:', {
@@ -407,6 +580,22 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       }
 
       switch (message.type) {
+        case 'session_ack':
+          if (message.session_id) {
+            sessionIdRef.current = message.session_id;
+            const storageKey = getSessionStorageKey();
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem(storageKey, message.session_id);
+            }
+          }
+          break;
+
+        case 'resume_ack':
+          if (typeof message.last_acked_sequence === 'number') {
+            persistLastAck(message.last_acked_sequence);
+          }
+          break;
+
         case 'card_update':
           // Apply single card update
           if (message.card_id && message.payload) {
@@ -541,8 +730,10 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
           break;
 
         case 'heartbeat':
-          // Respond to heartbeat
-          sendMessage({ type: 'heartbeat', client_id: clientIdRef.current });
+          // Respond to heartbeat ping
+          if (message.op === 'ping') {
+            sendMessage({ type: 'heartbeat', op: 'pong', client_id: clientIdRef.current });
+          }
           break;
 
         default:
@@ -551,7 +742,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     } catch (error) {
       onErrorRef.current(error as Error);
     }
-  }, [setCards, serializeState, sendMessage]);
+  }, [getSessionStorageKey, persistLastAck, serializeState, sendMessage, setCards]);
 
   const handleMessageRef = useRef(handleMessage);
   useEffect(() => {
@@ -563,23 +754,31 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     sendFullSyncRef.current = sendFullSync;
   }, [sendFullSync]);
 
-  // Connect to WebSocket
+  // Connect to WebSocket (shared singleton)
   const connect = useCallback(() => {
     if (!enabled) return;
 
     try {
-      const wsUrl = getWebSocketUrl();
-      console.log('[CollaborativeSync] Connecting to:', wsUrl);
-
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      const sessionId = loadSessionState();
+      const wsUrlFactory = () => getWebSocketUrl();
       manualCloseRef.current = false;
+      sharedSocketState.manualClose = false;
 
-      ws.onopen = () => {
+      const onOpen = () => {
         console.log('[CollaborativeSync] Connected');
         setIsConnected(true);
         hasInitialFullSyncRef.current = false;
+        reconnectAttemptsRef.current = 0;
         onConnectedRef.current?.();
+
+        // Attempt resume before sending additional data
+        sendMessage({
+          type: 'resume',
+          session_id: sessionId || sessionIdRef.current,
+          last_acked_sequence: lastAckSequenceRef.current,
+          client_id: clientIdRef.current,
+          timestamp: new Date().toISOString(),
+        });
 
         // Send initial connection message with user info
         const projectContext = getActiveProjectContext();
@@ -606,59 +805,74 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
           }
         }, 100);
 
-        // Start periodic full sync
-        fullSyncTimerRef.current = setInterval(() => {
-          sendFullSyncRef.current();
-        }, fullSyncIntervalMs);
+        // Start periodic full sync (once per hook instance)
+        if (!fullSyncTimerRef.current) {
+          fullSyncTimerRef.current = setInterval(() => {
+            sendFullSyncRef.current();
+          }, fullSyncIntervalMs);
+        }
 
-        // Start heartbeat
-        heartbeatIntervalRef.current = setInterval(() => {
-          sendMessage({ type: 'heartbeat', client_id: clientIdRef.current });
-        }, 15000); // 15 seconds
+        scheduleHeartbeat(() => {
+          sendMessage({ type: 'heartbeat', op: 'pong', client_id: clientIdRef.current });
+        });
       };
 
-      ws.onmessage = (event) => handleMessageRef.current(event);
-
-      ws.onerror = (error) => {
-        console.error('[CollaborativeSync] WebSocket error:', error);
-        onErrorRef.current(new Error('WebSocket connection error'));
-      };
-
-      ws.onclose = () => {
-        console.log('[CollaborativeSync] Disconnected');
+      const onClose = (event: CloseEvent) => {
+        console.log('[CollaborativeSync] Disconnected', event.code, event.reason);
         setIsConnected(false);
         hasInitialFullSyncRef.current = false;
         onDisconnectedRef.current?.();
 
-        // Clear timers
+        if (typeof window !== 'undefined' && event.code === 4001) {
+          const storageKey = getSessionStorageKey();
+          sessionStorage.removeItem(storageKey);
+          sessionStorage.removeItem(`${storageKey}_lastAck`);
+          sessionIdRef.current = '';
+          lastAckSequenceRef.current = 0;
+        }
+
         if (fullSyncTimerRef.current) {
           clearInterval(fullSyncTimerRef.current);
           fullSyncTimerRef.current = null;
         }
-        if (heartbeatIntervalRef.current) {
-          clearInterval(heartbeatIntervalRef.current);
-          heartbeatIntervalRef.current = null;
-        }
+      };
 
-        // Attempt reconnection after 3 seconds
-        if (!manualCloseRef.current && enabled) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            console.log('[CollaborativeSync] Attempting reconnection...');
-            connect();
-          }, 3000);
-        }
+      const onError = (event: Event) => {
+        console.error('[CollaborativeSync] WebSocket error:', event);
+        onErrorRef.current(new Error('WebSocket connection error'));
+      };
+
+      ensureSharedSocket(wsUrlFactory, onOpen, onClose, onError);
+
+      const listener: MessageListener = (event) => handleMessageRef.current(event);
+      const connectionListener: ConnectionListener = (connected) => setIsConnected(connected);
+
+      sharedSocketState.listeners.add(listener);
+      sharedSocketState.connectionListeners.add(connectionListener);
+
+      return () => {
+        sharedSocketState.listeners.delete(listener);
+        sharedSocketState.connectionListeners.delete(connectionListener);
       };
     } catch (error) {
       onErrorRef.current(error as Error);
+      return undefined;
     }
-  }, [enabled, fullSyncIntervalMs, getWebSocketUrl, sendMessage]);
+  }, [enabled, fullSyncIntervalMs, getSessionStorageKey, getWebSocketUrl, loadSessionState, sendMessage]);
 
-  // Disconnect from WebSocket
-  const disconnect = useCallback(() => {
+  // Disconnect from WebSocket (does not close shared socket unless explicitly requested)
+  const disconnect = useCallback((endSession = false, reason = 'client_closed') => {
     manualCloseRef.current = true;
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    sharedSocketState.manualClose = endSession || sharedSocketState.manualClose;
+
+    const socket = sharedSocketState.ws;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      if (endSession) {
+        sendMessage({ type: 'close_session', reason });
+      }
+      if (endSession) {
+        socket.close(1000, reason);
+      }
     }
 
     if (debounceTimerRef.current) {
@@ -669,11 +883,6 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     if (fullSyncTimerRef.current) {
       clearInterval(fullSyncTimerRef.current);
       fullSyncTimerRef.current = null;
-    }
-
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
     }
 
     if (initialFullSyncTimeoutRef.current) {
@@ -718,18 +927,21 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
 
   // Connect on mount, disconnect on unmount
   useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
     if (enabled) {
-      connect();
+      unsubscribe = connect() as (() => void) | undefined;
     }
 
     return () => {
+      unsubscribe?.();
       disconnect();
     };
   }, [enabled, connect, disconnect]);
 
   // Resend user details when identity information becomes available
   useEffect(() => {
-    if (!user || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    const socket = sharedSocketState.ws;
+    if (!user || !socket || socket.readyState !== WebSocket.OPEN) {
       return;
     }
 
@@ -787,6 +999,20 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     triggerFullSync();
   }, [enabled, isConnected, cards]);
 
+  const endSession = useCallback(
+    (reason = 'session ended') => {
+      disconnect(true, reason);
+      if (typeof window !== 'undefined') {
+        const storageKey = getSessionStorageKey();
+        sessionStorage.removeItem(storageKey);
+        sessionStorage.removeItem(`${storageKey}_lastAck`);
+      }
+      sessionIdRef.current = '';
+      lastAckSequenceRef.current = 0;
+    },
+    [disconnect, getSessionStorageKey],
+  );
+
   return {
     isConnected,
     clientId: clientIdRef.current,
@@ -795,6 +1021,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     notifyCardFocus,
     notifyCardBlur,
     disconnect,
+    endSession,
     reconnect: connect,
   };
 }

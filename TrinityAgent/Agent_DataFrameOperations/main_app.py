@@ -87,6 +87,27 @@ except Exception as e:
     # Continue - router is already created and routes will be registered
 
 # Only define DataFrameOperationsAgent if BaseAgent was imported successfully
+SUPPORTED_DF_ENDPOINTS = {
+    "/load",
+    "/load_cached",
+    "/insert_row",
+    "/delete_row",
+    "/duplicate_row",
+    "/insert_column",
+    "/delete_column",
+    "/duplicate_column",
+    "/move_column",
+    "/rename_column",
+    "/retype_column",
+    "/edit_cell",
+    "/sort",
+    "/filter_rows",
+    "/apply_formula",
+    "/sample_rows",
+    "/save",
+}
+
+
 if BaseAgent is not None:
     class DataFrameOperationsAgent(BaseAgent):
         """
@@ -220,13 +241,8 @@ if BaseAgent is not None:
                     if "parameters" not in op:
                         return False
             
-            # Must have smart_response (BaseAgent requirement)
-            if "smart_response" not in result:
-                return False
-            
-            # Must have response (raw thinking)
-            if "response" not in result:
-                return False
+            # Reasoning is preferred but not strictly required (will be added in normalization if missing)
+            # No longer validating for smart_response or response - only reasoning is used now
             
             return True
         
@@ -404,11 +420,38 @@ if BaseAgent is not None:
                 elif not self.data_validator:
                     logger.warning("⚠️ DataValidator not available - skipping validation")
                 
+                unsupported_ops = []
+                cleaned_operations = []
+                for op in normalized_operations:
+                    endpoint = op.get("api_endpoint", "")
+                    if endpoint not in SUPPORTED_DF_ENDPOINTS:
+                        unsupported_ops.append(endpoint or op.get("operation_id", "unknown"))
+                        logger.warning(
+                            f"⚠️ Skipping unsupported dataframe operation endpoint '{endpoint}'. "
+                            "Use the dedicated groupby atom for aggregations and keep dataframe-operations to table manipulations."
+                        )
+                        continue
+                    cleaned_operations.append(op)
+
+                if unsupported_ops:
+                    normalized["success"] = normalized.get("success", True) and bool(cleaned_operations)
+                    skipped_msg = (
+                        "I skipped unsupported operations (" + ", ".join(unsupported_ops) + 
+                        "). These endpoints are not part of dataframe-operations. "
+                        "Use the groupby atom for aggregations; the remaining supported steps will still run."
+                    )
+                    normalized["smart_response"] = (
+                        (normalized.get("smart_response") or "") + "\n" + skipped_msg
+                    ).strip()
+                    normalized.setdefault("warnings", []).append(skipped_msg)
+
                 # Store normalized dataframe_config
                 normalized["dataframe_config"] = {
-                    "operations": normalized_operations
+                    "operations": cleaned_operations
                 }
-                
+                if unsupported_ops:
+                    normalized["dataframe_config"]["skipped_operations"] = unsupported_ops
+
                 # Add execution_plan if present
                 if "execution_plan" in result:
                     normalized["execution_plan"] = result["execution_plan"]
@@ -419,6 +462,10 @@ if BaseAgent is not None:
                         "execution_mode": "sequential",
                         "error_handling": "stop_on_error"
                     }
+
+                if unsupported_ops:
+                    normalized["execution_plan"]["auto_execute"] = bool(cleaned_operations)
+                    normalized["execution_plan"]["error_handling"] = "continue_on_error"
             
             # Extract file_name from first load_cached operation if available
             if "dataframe_config" in normalized and normalized["dataframe_config"].get("operations"):

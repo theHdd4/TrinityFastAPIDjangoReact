@@ -31,9 +31,7 @@ class FetchAtomPromptBuilder:
         "atom_name": "ChartMaker",
         "atom_id": "chart_maker",
         "confidence": 0.95,
-        "reasoning": "User wants to create a chart visualization",
-        "response": "Raw thinking and reasoning from LLM about which atom best matches the user's query, including analysis of the query, matching against available atoms, and confidence level",
-        "smart_response": "I'll help you create a chart! Based on your request, I recommend using the ChartMaker atom which allows you to create interactive visualizations from your data.",
+        "reasoning": "Detailed explanation of why this atom was chosen, including: analysis of the user's query, matching against available atoms, why this specific atom best matches the request, confidence level and rationale, alternatives considered, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "suggested_atoms": [
             {
                 "atom_name": "ChartMaker",
@@ -54,17 +52,21 @@ class FetchAtomPromptBuilder:
             "Data Upload & Validate - Upload and validate data files",
             "Merge - Join datasets together",
             "Explore - Browse and analyze data",
+            "Metric - Perform metric operations (variables, column operations, data source selection)",
             "Please clarify what you'd like to do",
             "Or say 'show me all atoms' to see complete list"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what atoms are available, what the user might want, analysis of the request, and recommendations based on available atoms",
-        "smart_response": "I'd be happy to help! I can assist you with various data operations. Here are some options:\n\n📊 **ChartMaker** - Create charts and visualizations\n📤 **Data Upload & Validate** - Upload and validate data files\n🔗 **Merge** - Join datasets together\n🔍 **Explore** - Browse and analyze data\n\nWhat would you like to do?",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why FetchAtom was chosen, including: analysis of the current situation, what atoms are available, what the user might want, analysis of the request, why FetchAtom is appropriate, recommendations based on available atoms, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "available_atoms": [
             {
                 "atom_name": "ChartMaker",
                 "description": "Create charts and visualizations",
                 "keywords": ["chart", "graph", "visualization", "plot"]
+            },
+            {
+                "atom_name": "Metric",
+                "description": "Perform metric operations including variable creation, column operations, and data source selection",
+                "keywords": ["metric", "variable", "create column", "compute variable", "assign variable", "column operation", "filter rows", "create new column", "transform column", "data source", "select file"]
             }
         ],
         "next_steps": [
@@ -83,12 +85,13 @@ class FetchAtomPromptBuilder:
         "MEMORY UTILIZATION: Suggest atoms user has successfully used before",
         "PATTERN RECOGNITION: Identify user's preferred atoms and workflows",
         "ATOM MATCHING: Match user queries to appropriate atoms based on keywords, descriptions, and context",
+        "METRIC ATOM ROUTING: When user mentions 'metric', 'variable', 'create column', 'compute variable', 'assign variable', 'column operation', 'filter rows', 'create new column', 'transform column', 'data source', or 'select file', route to Metric atom (atom_id: 'metric')",
         "CONFIDENCE SCORING: Provide confidence scores for atom recommendations",
         "MULTIPLE SUGGESTIONS: When query is ambiguous, suggest multiple relevant atoms with confidence scores",
         "VALIDATION: Always ensure suggested atoms exist in the AVAILABLE ATOMS section",
-        "REQUIRED JSON KEYS: success, atom_name (when success true), atom_id (when success true), and smart_response must ALL be present so the UI always has a friendly response",
-        "ATOM ID FORMAT: Use snake_case for atom_id (e.g., 'chart_maker', 'data_upload_validate', 'merge')",
-        "ATOM NAME FORMAT: Use proper case for atom_name (e.g., 'ChartMaker', 'Data Upload & Validate', 'Merge')"
+        "REQUIRED JSON KEYS: success, atom_name (when success true), atom_id (when success true), and reasoning must ALL be present so the UI always has a friendly response",
+        "ATOM ID FORMAT: Use snake_case for atom_id (e.g., 'chart_maker', 'data_upload_validate', 'merge', 'metric')",
+        "ATOM NAME FORMAT: Use proper case for atom_name (e.g., 'ChartMaker', 'Data Upload & Validate', 'Merge', 'Metric')"
     ]
     
     @staticmethod

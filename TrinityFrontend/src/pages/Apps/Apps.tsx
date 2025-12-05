@@ -1,21 +1,20 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, ChevronLeft, GitBranch, FlaskConical, Presentation, Info, User, Building2, PanelLeft } from 'lucide-react';
+import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, ChevronDown, GitBranch, FlaskConical, Presentation, Info, PanelLeft } from 'lucide-react';
 import Header from '@/components/Header';
-import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API, TENANTS_API, ACCOUNTS_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
-import { startProjectTransition } from '@/utils/projectTransition';
-import CreateNewProject from '@/components/AppList/apps/CreateNewProject';
+import { openProjectAndNavigate } from '@/utils/openProject';
+import CreateNewProject from './CreateNewProject';
+import Sidebar from './Sidebar';
+import WorkspaceTabs from './WorkspaceTabs';
 
 interface BackendApp {
   id: number;
@@ -52,297 +51,6 @@ const formatRelativeTime = (date: Date) => {
   return date.toLocaleDateString();
 };
 
-// Mode Status Indicator Component
-const ModeStatusIndicator = ({ modes }: { modes: ModeStatus }) => {
-  const modeItems = [
-    { key: 'workflow', label: 'Workflow', icon: GitBranch, configured: modes.workflow },
-    { key: 'laboratory', label: 'Laboratory', icon: FlaskConical, configured: modes.laboratory },
-    { key: 'exhibition', label: 'Exhibition', icon: Presentation, configured: modes.exhibition },
-  ];
-
-  return (
-    <TooltipProvider delayDuration={200}>
-      <div className="flex items-center gap-1">
-        {modeItems.map((mode) => {
-          const Icon = mode.icon;
-          return (
-            <Tooltip key={mode.key}>
-              <TooltipTrigger asChild>
-                <div
-                  className={cn(
-                    "flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-300",
-                    mode.configured
-                      ? "bg-emerald-100 text-emerald-600"
-                      : "bg-muted/50 text-muted-foreground/40"
-                  )}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent 
-                side="bottom" 
-                sideOffset={8}
-                className="text-xs z-[9999]"
-              >
-                <p>{mode.configured ? `${mode.label} configured` : `${mode.label} not configured`}</p>
-              </TooltipContent>
-            </Tooltip>
-          );
-        })}
-      </div>
-    </TooltipProvider>
-  );
-};
-
-// Horizontal Scroll Container Component
-interface HorizontalScrollContainerProps {
-  children: React.ReactNode;
-  className?: string;
-  'aria-label'?: string;
-}
-
-const HorizontalScrollContainer: React.FC<HorizontalScrollContainerProps> = ({ 
-  children, 
-  className = '',
-  'aria-label': ariaLabel = 'Scrollable content'
-}) => {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [startX, setStartX] = useState(0);
-  const [scrollLeft, setScrollLeft] = useState(0);
-  const [visibleCount, setVisibleCount] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
-  const [touchStart, setTouchStart] = useState(0);
-  const [touchScrollLeft, setTouchScrollLeft] = useState(0);
-
-  const updateScrollButtons = useCallback(() => {
-    if (!scrollRef.current) return;
-    const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
-    setCanScrollLeft(scrollLeft > 0);
-    setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 1);
-  }, []);
-
-  const scroll = (direction: 'left' | 'right') => {
-    if (!scrollRef.current) return;
-    const scrollAmount = scrollRef.current.clientWidth * 0.8;
-    const targetScroll = direction === 'left' 
-      ? scrollRef.current.scrollLeft - scrollAmount
-      : scrollRef.current.scrollLeft + scrollAmount;
-    
-    scrollRef.current.scrollTo({
-      left: targetScroll,
-      behavior: 'smooth'
-    });
-  };
-
-  // Mouse drag handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!scrollRef.current) return;
-    setIsDragging(true);
-    setStartX(e.pageX - scrollRef.current.offsetLeft);
-    setScrollLeft(scrollRef.current.scrollLeft);
-    scrollRef.current.style.cursor = 'grabbing';
-    scrollRef.current.style.userSelect = 'none';
-  };
-
-  const handleMouseLeave = () => {
-    setIsDragging(false);
-    if (scrollRef.current) {
-      scrollRef.current.style.cursor = 'grab';
-      scrollRef.current.style.userSelect = '';
-    }
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-    if (scrollRef.current) {
-      scrollRef.current.style.cursor = 'grab';
-      scrollRef.current.style.userSelect = '';
-    }
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !scrollRef.current) return;
-    e.preventDefault();
-    const x = e.pageX - scrollRef.current.offsetLeft;
-    const walk = (x - startX) * 2;
-    scrollRef.current.scrollLeft = scrollLeft - walk;
-  };
-
-  // Keyboard navigation
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!scrollRef.current) return;
-    if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      scrollRef.current.scrollBy({ left: -300, behavior: 'smooth' });
-    } else if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      scrollRef.current.scrollBy({ left: 300, behavior: 'smooth' });
-    }
-  };
-
-  // Touch handlers for swipe
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (!scrollRef.current) return;
-    setTouchStart(e.touches[0].pageX);
-    setTouchScrollLeft(scrollRef.current.scrollLeft);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!scrollRef.current) return;
-    const touchCurrent = e.touches[0].pageX;
-    const touchDiff = touchStart - touchCurrent;
-    scrollRef.current.scrollLeft = touchScrollLeft + touchDiff;
-  };
-
-  // Update visible count
-  useEffect(() => {
-    if (!scrollRef.current) return;
-    const container = scrollRef.current;
-    const cards = container.querySelectorAll('[data-scroll-card]');
-    setTotalCount(cards.length);
-    
-    const updateVisibleCount = () => {
-      const containerRect = container.getBoundingClientRect();
-      let visible = 0;
-      cards.forEach((card) => {
-        const cardRect = card.getBoundingClientRect();
-        if (cardRect.left < containerRect.right && cardRect.right > containerRect.left) {
-          visible++;
-        }
-      });
-      setVisibleCount(visible);
-    };
-
-    updateVisibleCount();
-    const observer = new ResizeObserver(updateVisibleCount);
-    observer.observe(container);
-    
-    return () => observer.disconnect();
-  }, [children]);
-
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-
-    updateScrollButtons();
-    container.addEventListener('scroll', updateScrollButtons);
-    window.addEventListener('resize', updateScrollButtons);
-
-    return () => {
-      container.removeEventListener('scroll', updateScrollButtons);
-      window.removeEventListener('resize', updateScrollButtons);
-    };
-  }, [updateScrollButtons, children]);
-
-  return (
-    <div className={cn("relative", className)}>
-      {/* Left Gradient Mask */}
-      {canScrollLeft && (
-        <div 
-          className="absolute left-0 top-0 bottom-0 w-16 bg-gradient-to-r from-background via-background/80 to-transparent pointer-events-none z-10 transition-opacity duration-200"
-          aria-hidden="true"
-        />
-      )}
-      
-      {/* Right Gradient Mask */}
-      {canScrollRight && (
-        <div 
-          className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-background via-background/80 to-transparent pointer-events-none z-10 transition-opacity duration-200"
-          aria-hidden="true"
-        />
-      )}
-
-      {/* Arrow Buttons - Show on scroll area hover */}
-      {canScrollLeft && (
-        <button
-          onClick={() => scroll('left')}
-          className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-background/95 backdrop-blur-sm border border-border shadow-lg flex items-center justify-center text-foreground hover:bg-card hover:scale-110 transition-all duration-200 opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-          aria-label="Scroll left"
-          type="button"
-        >
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-      )}
-
-      {canScrollRight && (
-        <button
-          onClick={() => scroll('right')}
-          className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-background/95 backdrop-blur-sm border border-border shadow-lg flex items-center justify-center text-foreground hover:bg-card hover:scale-110 transition-all duration-200 opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-          aria-label="Scroll right"
-          type="button"
-        >
-          <ChevronRight className="w-5 h-5" />
-        </button>
-      )}
-
-      {/* Scrollable Container */}
-      <div
-        ref={scrollRef}
-        className={cn(
-          "overflow-x-auto overflow-y-hidden group",
-          "scroll-smooth",
-          "cursor-grab active:cursor-grabbing",
-          "select-none",
-          "[&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2",
-          "[&::-webkit-scrollbar-track]:bg-transparent",
-          "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#FFBD59]/60",
-          "hover:[&::-webkit-scrollbar-thumb]:bg-[#FFBD59]/80",
-          "[scrollbar-width:thin] [scrollbar-color:#FFBD59_transparent]"
-        )}
-        onMouseDown={handleMouseDown}
-        onMouseLeave={handleMouseLeave}
-        onMouseUp={handleMouseUp}
-        onMouseMove={handleMouseMove}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onKeyDown={handleKeyDown}
-        onScroll={updateScrollButtons}
-        tabIndex={0}
-        role="region"
-        aria-label={ariaLabel}
-        aria-live="polite"
-        style={{
-          scrollSnapType: 'x mandatory',
-          WebkitOverflowScrolling: 'touch',
-        }}
-      >
-        <div 
-          className="flex gap-4 pb-4"
-          style={{
-            scrollSnapAlign: 'start',
-          }}
-        >
-          {React.Children.map(children, (child, index) => (
-            <div
-              key={index}
-              data-scroll-card
-              className="flex-shrink-0"
-              style={{
-                scrollSnapAlign: 'start',
-                scrollSnapStop: 'always',
-              }}
-            >
-              {child}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Screen Reader Announcement */}
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {visibleCount > 0 && totalCount > 0 && (
-          <span>
-            Showing {visibleCount} of {totalCount} items
-          </span>
-        )}
-      </div>
-    </div>
-  );
-};
-
 const Apps = () => {
   const navigate = useNavigate();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
@@ -358,6 +66,7 @@ const Apps = () => {
     appId: string;
     appTitle: string;
     lastModified: Date;
+    relativeTime?: string;
     icon: any;
     modes: ModeStatus;
   }>>([]);
@@ -368,12 +77,16 @@ const Apps = () => {
     appId: string;
     appTitle: string;
     lastModified: Date;
+    relativeTime?: string;
     icon: any;
     modes: ModeStatus;
   }>>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
+  const [tenantName, setTenantName] = useState<string | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [loadingMyProjects, setLoadingMyProjects] = useState(false);
+  const [loadingRecentProjects, setLoadingRecentProjects] = useState(false);
 
   const { isAuthenticated, user } = useAuth();
 
@@ -439,8 +152,9 @@ const Apps = () => {
           if (res.ok) {
             const tenantsData = await res.json();
             if (Array.isArray(tenantsData) && tenantsData.length > 0) {
-              const tenantName = tenantsData[0].name;
-              console.log('🏢 Tenant Name:', tenantName);
+              const name = tenantsData[0].name;
+              setTenantName(name);
+              console.log('🏢 Tenant Name:', name);
             } else {
               console.log('⚠️ No tenant data found');
             }
@@ -524,8 +238,8 @@ const Apps = () => {
     setRecentProjectsState([]);
 
     const loadAllProjects = async () => {
-      // Check if user is authenticated and apps are loaded
-      if (!isAuthenticated || !user || apps.length === 0) {
+      // Check if user is authenticated
+      if (!isAuthenticated || !user) {
         return;
       }
 
@@ -535,14 +249,18 @@ const Apps = () => {
         return;
       }
 
+      setLoadingRecentProjects(true);
       console.log('🔍 Fetching recent projects from registry API...');
-      // Fetch recent projects with backend sorting (no limit - fetch all)
-      const apiUrl = `${REGISTRY_API}/projects/?ordering=-updated_at`;
+      // Fetch recent projects with pagination: limit=10, offset=10
+      const limit = 20;
+      const offset = 0;
+      const apiUrl = `${REGISTRY_API}/projects/?ordering=-updated_at&limit=${limit}&offset=${offset}`;
       console.log('🔗 API URL:', apiUrl);
       console.log('👤 User:', user.username);
+      console.log('📄 Pagination - Limit:', limit, 'Offset:', offset);
       
       try {
-        // Fetch recent projects (sorted by updated_at desc, limited to 4)
+        // Fetch recent projects (sorted by updated_at desc, paginated: limit=10, offset=10)
         const projectsRes = await fetch(apiUrl, { 
           method: 'GET',
           credentials: 'include',
@@ -557,59 +275,30 @@ const Apps = () => {
           console.log('📁 Number of projects:', Array.isArray(projectsData) ? projectsData.length : 'N/A');
           
           if (Array.isArray(projectsData)) {
-            // Create mapping from app ID to app slug and name
-            const appIdToInfoMap: Record<number, { slug: string; name: string }> = {};
-            apps.forEach((app) => {
-              appIdToInfoMap[app.id] = {
-                slug: app.slug,
-                name: app.name
-              };
-            });
-
-            // Transform projects to recentProjects format
-            // Backend already sorted by updated_at desc and limited to 4
+            // Backend now provides app_slug, app_name, modes, and last_modified
+            // Directly map backend response to frontend format
             const transformedProjects = projectsData
               .map((project: any) => {
-                // Get app ID (handle both object and ID formats)
-                const appId = typeof project.app === 'object' ? project.app?.id : project.app;
-                const appInfo = appIdToInfoMap[appId];
-                
-                if (!appInfo) {
-                  console.warn(`⚠️ App not found for project ${project.id}, app_id: ${appId}`);
+                // Backend provides app_slug and app_name directly
+                if (!project.app_slug || !project.app_name) {
+                  console.warn(`⚠️ Missing app info for project ${project.id}`);
                   return null;
                 }
-
-                // Extract mode status from project.state
-                const state = project.state || {};
-                const modes: ModeStatus = {
-                  workflow: !!(state.workflow_config && (
-                    (state.workflow_config.cards && state.workflow_config.cards.length > 0) ||
-                    (typeof state.workflow_config === 'object' && Object.keys(state.workflow_config).length > 0)
-                  )),
-                  laboratory: !!(state.laboratory_config && (
-                    (state.laboratory_config.cards && state.laboratory_config.cards.length > 0) ||
-                    (typeof state.laboratory_config === 'object' && Object.keys(state.laboratory_config).length > 0)
-                  )),
-                  exhibition: !!(state.exhibition_config && (
-                    (state.exhibition_config.cards && state.exhibition_config.cards.length > 0) ||
-                    (typeof state.exhibition_config === 'object' && Object.keys(state.exhibition_config).length > 0)
-                  )),
-                };
 
                 return {
                   id: project.id?.toString() || '',
                   name: project.name,
-                  appId: appInfo.slug,
-                  appTitle: appInfo.name,
-                  lastModified: new Date(project.updated_at),
-                  icon: getAppIcon(appInfo.slug),
-                  modes: modes,
+                  appId: project.app_slug,
+                  appTitle: project.app_name,
+                  lastModified: new Date(project.last_modified || project.updated_at),
+                  relativeTime: project.relative_time,
+                  icon: getAppIcon(project.app_slug),
+                  modes: project.modes || { workflow: false, laboratory: false, exhibition: false },
                 };
               })
-              .filter((p: any) => p !== null); // Remove projects with unknown apps
-              // No need to sort or slice - backend handles it
+              .filter((p: any) => p !== null); // Remove projects with missing app info
 
-            console.log('📋 Transformed recent projects:', transformedProjects);
+            console.log('📋 Loaded recent projects:', transformedProjects);
             setRecentProjectsState(transformedProjects);
           } else {
             console.log('❌ Response is not an array:', typeof projectsData);
@@ -639,6 +328,8 @@ const Apps = () => {
           console.error('❌ Error message:', err?.message);
         }
         // Don't set empty state on error, keep previous data or fallback
+      } finally {
+        setLoadingRecentProjects(false);
       }
     };
 
@@ -648,7 +339,7 @@ const Apps = () => {
     return () => {
       setRecentProjectsState([]);
     };
-  }, [isAuthenticated, user, apps]);
+  }, [isAuthenticated, user]);
 
   // Fetch and transform user-specific projects for "Your Workspace" tab
   useEffect(() => {
@@ -656,8 +347,8 @@ const Apps = () => {
     setMyProjectsState([]);
 
     const loadMyProjects = async () => {
-      // Check if user is authenticated and apps are loaded
-      if (!isAuthenticated || !user || apps.length === 0) {
+      // Check if user is authenticated
+      if (!isAuthenticated || !user) {
         return;
       }
 
@@ -667,14 +358,18 @@ const Apps = () => {
         return;
       }
 
+      setLoadingMyProjects(true);
       console.log('🔍 Fetching user-specific projects from registry API...');
-      // Fetch user-specific projects with scope=user parameter (no limit - fetch all)
-      const apiUrl = `${REGISTRY_API}/projects/?scope=user&ordering=-updated_at`;
+      // Fetch user-specific projects with pagination: limit=10, offset=0
+      const limit = 20;
+      const offset = 0;
+      const apiUrl = `${REGISTRY_API}/projects/?scope=user&ordering=-updated_at&limit=${limit}&offset=${offset}`;
       console.log('🔗 API URL:', apiUrl);
       console.log('👤 User:', user.username);
+      console.log('📄 Pagination - Limit:', limit, 'Offset:', offset);
       
       try {
-        // Fetch user-specific projects (sorted by updated_at desc, limited to 4)
+        // Fetch user-specific projects (sorted by updated_at desc, paginated: limit=10, offset=0)
         const projectsRes = await fetch(apiUrl, { 
           method: 'GET',
           credentials: 'include',
@@ -689,59 +384,30 @@ const Apps = () => {
           console.log('📁 Number of projects:', Array.isArray(projectsData) ? projectsData.length : 'N/A');
           
           if (Array.isArray(projectsData)) {
-            // Create mapping from app ID to app slug and name
-            const appIdToInfoMap: Record<number, { slug: string; name: string }> = {};
-            apps.forEach((app) => {
-              appIdToInfoMap[app.id] = {
-                slug: app.slug,
-                name: app.name
-              };
-            });
-
-            // Transform projects to myProjectsState format
-            // Backend already sorted by updated_at desc and limited to 4
+            // Backend now provides app_slug, app_name, modes, and last_modified
+            // Directly map backend response to frontend format
             const transformedProjects = projectsData
               .map((project: any) => {
-                // Get app ID (handle both object and ID formats)
-                const appId = typeof project.app === 'object' ? project.app?.id : project.app;
-                const appInfo = appIdToInfoMap[appId];
-                
-                if (!appInfo) {
-                  console.warn(`⚠️ App not found for project ${project.id}, app_id: ${appId}`);
+                // Backend provides app_slug and app_name directly
+                if (!project.app_slug || !project.app_name) {
+                  console.warn(`⚠️ Missing app info for project ${project.id}`);
                   return null;
                 }
-
-                // Extract mode status from project.state
-                const state = project.state || {};
-                const modes: ModeStatus = {
-                  workflow: !!(state.workflow_config && (
-                    (state.workflow_config.cards && state.workflow_config.cards.length > 0) ||
-                    (typeof state.workflow_config === 'object' && Object.keys(state.workflow_config).length > 0)
-                  )),
-                  laboratory: !!(state.laboratory_config && (
-                    (state.laboratory_config.cards && state.laboratory_config.cards.length > 0) ||
-                    (typeof state.laboratory_config === 'object' && Object.keys(state.laboratory_config).length > 0)
-                  )),
-                  exhibition: !!(state.exhibition_config && (
-                    (state.exhibition_config.cards && state.exhibition_config.cards.length > 0) ||
-                    (typeof state.exhibition_config === 'object' && Object.keys(state.exhibition_config).length > 0)
-                  )),
-                };
 
                 return {
                   id: project.id?.toString() || '',
                   name: project.name,
-                  appId: appInfo.slug,
-                  appTitle: appInfo.name,
-                  lastModified: new Date(project.updated_at),
-                  icon: getAppIcon(appInfo.slug),
-                  modes: modes,
+                  appId: project.app_slug,
+                  appTitle: project.app_name,
+                  lastModified: new Date(project.last_modified || project.updated_at),
+                  relativeTime: project.relative_time,
+                  icon: getAppIcon(project.app_slug),
+                  modes: project.modes || { workflow: false, laboratory: false, exhibition: false },
                 };
               })
-              .filter((p: any) => p !== null); // Remove projects with unknown apps
-              // No need to sort or slice - backend handles it
+              .filter((p: any) => p !== null); // Remove projects with missing app info
 
-            console.log('📋 Transformed user-specific projects:', transformedProjects);
+            console.log('📋 Loaded user-specific projects:', transformedProjects);
             setMyProjectsState(transformedProjects);
           } else {
             console.log('❌ Response is not an array:', typeof projectsData);
@@ -771,6 +437,8 @@ const Apps = () => {
           console.error('❌ Error message:', err?.message);
         }
         // Don't set empty state on error, keep previous data or fallback
+      } finally {
+        setLoadingMyProjects(false);
       }
     };
 
@@ -780,7 +448,7 @@ const Apps = () => {
     return () => {
       setMyProjectsState([]);
     };
-  }, [isAuthenticated, user, apps]);
+  }, [isAuthenticated, user]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -883,61 +551,21 @@ const Apps = () => {
       return;
     }
 
-    // Clear project state
-    clearProjectState();
-
-    // Set up current-app in localStorage
-    localStorage.setItem('current-app', JSON.stringify({ id: appId, slug: project.appId }));
-
-    // Construct initial environment
-    let env: Record<string, string> = {
-      APP_NAME: project.appId || '',
-      APP_ID: appId.toString(),
-      PROJECT_NAME: project.name,
-      PROJECT_ID: project.id || '',
-    };
-
-    // Preserve existing CLIENT_NAME and CLIENT_ID if available
-    try {
-      const envStr = localStorage.getItem('env');
-      const baseEnv = envStr ? JSON.parse(envStr) : {};
-      if (baseEnv.CLIENT_NAME) env.CLIENT_NAME = baseEnv.CLIENT_NAME;
-      if (baseEnv.CLIENT_ID) env.CLIENT_ID = baseEnv.CLIENT_ID;
-    } catch {
-      /* ignore parse errors */
-    }
-    localStorage.setItem('env', JSON.stringify(env));
-
-    // Fetch full project details from API
-    try {
-      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { 
-        credentials: 'include' 
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.environment) {
-          // Update environment with full project data from API
-          env = {
-            ...env,
-            ...data.environment,
-            APP_NAME: project.appId || env.APP_NAME,
-            APP_ID: appId.toString() || env.APP_ID,
-            PROJECT_NAME: project.name,
-            PROJECT_ID: project.id || env.PROJECT_ID,
-          };
-          localStorage.setItem('env', JSON.stringify(env));
-        }
-
-        // Save project to localStorage
-        saveCurrentProject(data);
+    // Use shared utility function to open project and navigate
+    await openProjectAndNavigate(
+      {
+        id: project.id,
+        name: project.name,
+        appId: project.appId,
+      },
+      appId,
+      navigate,
+      {
+        onError: (error) => {
+          console.error('Failed to open project:', error);
+        },
       }
-    } catch (err) {
-      console.log('Project env fetch error', err);
-      // Still proceed with navigation even if API call fails
-    }
-
-    // Navigate to laboratory mode
-    startProjectTransition(navigate);
+    );
   };
 
   const categories = [
@@ -1083,161 +711,42 @@ const Apps = () => {
     ...(playIntro ? { opacity: 0 } : {}),
   });
 
+  // Calculate sidebar width based on state
+  const sidebarWidth = sidebarOpen ? 260 : 48; // 48px (icon) + 212px (expanded) = 260px when open
+
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-background via-background to-secondary/20">
-      {/* Background Animation */}
-      <div
-        className="pointer-events-none absolute inset-0 z-0 animate-fade-in"
-        style={animationStyle(0)}
-      >
-        <GreenGlyphRain className="pointer-events-none opacity-90" />
+    <div className="relative bg-background">
+      {/* Fixed Header */}
+      <div className="fixed top-0 left-0 right-0 z-50 animate-slide-in-from-top" style={animationStyle(0.2)}>
+        <Header 
+          sidebarOpen={sidebarOpen}
+          onSidebarToggle={() => setSidebarOpen(!sidebarOpen)}
+        />
       </div>
 
-      <div className="relative z-10 flex min-h-screen flex-col">
-        {/* Header */}
-        <div className="animate-slide-in-from-top" style={animationStyle(0.2)}>
-          <Header 
+      {/* Fixed Sidebar */}
+          <Sidebar
             sidebarOpen={sidebarOpen}
-            onSidebarToggle={() => setSidebarOpen(!sidebarOpen)}
+            setSidebarOpen={setSidebarOpen}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            userName={userName}
+            user={user}
+            tenantName={tenantName}
+            myProjectsCount={myProjectsState.length}
+            recentProjectsCount={recentProjectsState.length}
+            appsCount={apps.length}
           />
-        </div>
 
-        {/* Main Content Area with Sidebar */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Sidebar */}
-          <div
-            className={cn(
-              "bg-card border-r border-border transition-all duration-300 ease-in-out flex flex-col shrink-0 overflow-hidden",
-              sidebarOpen ? "w-[260px]" : "w-0"
-            )}
-            style={{
-              height: 'calc(100vh - 80px)',
-            }}
-          >
-            <div className={cn(
-              "p-4 flex flex-col h-full transition-opacity duration-300 relative",
-              sidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-            )}>
-              {/* Sidebar Toggle Button - Inside Sidebar */}
-              {sidebarOpen && (
-                <div className="absolute top-4 right-4 z-20">
-                  <button
-                    type="button"
-                    onClick={() => setSidebarOpen(!sidebarOpen)}
-                    className="p-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors shadow-sm"
-                    title="Toggle Sidebar"
-                    aria-label="Toggle Sidebar"
-                  >
-                    <PanelLeft className="w-4 h-4 text-foreground" />
-                  </button>
-                </div>
-              )}
-              {/* Menu Options */}
-              <div className="flex-1 space-y-1 mt-8">
-                <button
-                  onClick={() => setActiveTab('my-projects')}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                    activeTab === 'my-projects'
-                      ? "bg-yellow-100 text-foreground"
-                      : "text-foreground hover:bg-muted"
-                  )}
-                >
-                  <User className="w-4 h-4 shrink-0" style={{ color: '#FFE28A' }} />
-                  <span className="truncate">Your Workspace</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('workspace')}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                    activeTab === 'workspace'
-                      ? "bg-blue-100 text-foreground"
-                      : "text-foreground hover:bg-muted"
-                  )}
-                >
-                  <Building2 className="w-4 h-4 shrink-0 text-blue-400" />
-                  <span className="truncate">Companies Workspace</span>
-                </button>
-                
-                {/* Divider */}
-                <div className="my-2 border-t border-border"></div>
-                
-                {/* Application Navigation */}
-                <button
-                  onClick={() => {
-                    const element = document.getElementById('custom-applications-section');
-                    if (element) {
-                      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-foreground hover:bg-muted"
-                >
-                  <Plus className="w-4 h-4 shrink-0" />
-                  <span className="truncate">Custom Application</span>
-                </button>
-                <button
-                  onClick={() => {
-                    const element = document.getElementById('all-applications-section');
-                    if (element) {
-                      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-foreground hover:bg-muted"
-                >
-                  <Sparkles className="w-4 h-4 shrink-0" />
-                  <span className="truncate">All Application</span>
-                </button>
-              </div>
-
-              {/* User Info - At Bottom */}
-              <div className="mt-auto pt-4 pb-4 border-t border-border">
-                <div className="flex items-center justify-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-semibold">
-                    {(userName || user?.username || 'User').charAt(0).toUpperCase()}
-                  </div>
-                  <span className="text-sm font-semibold">{userName || user?.username || 'User'}</span>
-                </div>
-              </div>
-
-              {/* Project Statistics - At Bottom */}
-              <div className="pt-4 border-t border-border">
-                <h3 className="text-xs font-semibold text-foreground mb-2">Project Statistics</h3>
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-muted-foreground">Your Projects</span>
-                    <span className="font-medium">{myProjectsState.length}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-muted-foreground">Company Projects</span>
-                    <span className="font-medium">{recentProjectsState.length}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-muted-foreground">Total Applications</span>
-                    <span className="font-medium">{apps.length}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Main Content */}
-          <div className="flex-1 overflow-hidden min-w-0 relative">
-            {/* Sidebar Toggle Button - Only show when sidebar is closed */}
-            {!sidebarOpen && (
-              <div className="absolute top-4 left-4 z-20">
-                <button
-                  type="button"
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="p-2 rounded-lg bg-card border border-border hover:bg-muted transition-colors shadow-sm"
-                  title="Toggle Sidebar"
-                  aria-label="Toggle Sidebar"
-                >
-                  <PanelLeft className="w-5 h-5 text-foreground" />
-                </button>
-              </div>
-            )}
-            <ScrollArea className="h-[calc(100vh-80px)]">
-              {/* Search & Filters */}
+      {/* Main Content - Normal document flow with margins */}
+      <div 
+        className="relative z-10"
+        style={{
+          marginTop: '80px',
+          marginLeft: `${sidebarWidth}px`,
+        }}
+      >
+            {/* Search & Filters */}
               <div className="max-w-7xl mx-auto px-6 pt-8 pb-6">
             <div className="animate-fade-in" style={animationStyle(0.4)}>
               <div className="flex items-center gap-4">
@@ -1279,116 +788,23 @@ const Apps = () => {
             </div>
           </div>
 
-          {/* Recent Projects Section - Show if there are projects in either tab */}
-          {(recentProjectsState.length > 0 || myProjectsState.length > 0) && (
-            <section className="border-b border-border/40 bg-muted/30 animate-fade-in" style={animationStyle(0.3)}>
-              <div className="max-w-7xl mx-auto px-6 py-8">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <div 
-                      className="w-9 h-9 rounded-xl flex items-center justify-center"
-                      style={activeTab === 'my-projects' ? { backgroundColor: '#FFF4D6' } : { backgroundColor: '#DBEAFE' }}
-                    >
-                      {activeTab === 'my-projects' ? (
-                        <User className="w-4.5 h-4.5" style={{ color: '#FFE28A' }} />
-                      ) : (
-                        <Building2 className="w-4.5 h-4.5 text-blue-400" />
-                      )}
-                    </div>
-                    <div>
-                      <h2 className="text-base font-semibold text-foreground">
-                        {activeTab === 'my-projects' ? 'Your Workspace' : 'Companies Workspace'}
-                      </h2>
-                      <p className="text-xs text-muted-foreground">
-                        {activeTab === 'my-projects' ? 'Your recent work' : 'Continue where you left off'}
-                      </p>
-                    </div>
-                  </div>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="text-xs bg-[#FFBD59] hover:bg-[#FFA726] text-gray-800 font-medium h-8 gap-1.5 shadow-md hover:shadow-lg shadow-[#FFBD59]/30 hover:shadow-[#FFBD59]/40 transition-all duration-300 hover:scale-105"
-                    onClick={() => setCreateProjectOpen(true)}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Create New Project
-                  </Button>
-                </div>
-                
-                {/* Show projects if available, otherwise show empty state */}
-                {(activeTab === 'my-projects' ? filteredMyProjects.length > 0 : filteredRecentProjects.length > 0) ? (
-                  <HorizontalScrollContainer
-                    aria-label={`${activeTab === 'my-projects' ? 'Your Workspace' : 'Companies Workspace'} projects`}
-                  >
-                    {(activeTab === 'my-projects' ? filteredMyProjects : filteredRecentProjects).map((project) => {
-                    const Icon = project.icon;
-                    const appColorValue = getAppColorValue(project.appId);
-                    return (
-                      <Card
-                        key={project.id}
-                        className={cn(
-                          "group bg-card cursor-pointer overflow-hidden",
-                          "w-[280px] sm:w-[300px] lg:w-[320px]",
-                          "border border-border/50 hover:border-primary/40",
-                          "shadow-sm hover:shadow-[0_12px_28px_rgba(var(--color-primary-rgb, 59,130,246),0.12)]",
-                          "transition-all duration-300 hover:-translate-y-2"
-                        )}
-                        onClick={() => openRecentProject(project)}
-                      >
-                        <div className="p-4">
-                          <div className="flex items-start gap-3 mb-4">
-                            <div 
-                              className={cn(
-                                "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
-                                "text-white",
-                                "transition-all duration-300",
-                                "group-hover:scale-105"
-                              )}
-                              style={{
-                                backgroundColor: appColorValue,
-                              }}
-                            >
-                              <Icon className="w-5 h-5" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-medium text-foreground text-sm truncate group-hover:text-primary transition-colors duration-300">
-                                {project.name}
-                              </h4>
-                              <p className="text-[11px] text-muted-foreground truncate">
-                                {project.appTitle}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center justify-between pt-3 border-t border-border/40">
-                            <div className="flex items-center gap-1.5 text-muted-foreground">
-                              <Calendar className="w-3 h-3" />
-                              <span className="text-[10px] font-medium">{formatRelativeTime(project.lastModified)}</span>
-                            </div>
-                            <div className="flex items-center gap-1 text-primary text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-all duration-300">
-                              <span>Open</span>
-                              <ChevronRight className="w-3 h-3" />
-                            </div>
-                          </div>
-                        </div>
-                      </Card>
-                    );
-                  })}
-                  </HorizontalScrollContainer>
-                ) : (
-                  <div className="text-center py-12">
-                    <p className="text-muted-foreground text-sm">
-                      {(searchTerm || selectedCategory !== 'all')
-                        ? `No projects found matching your filters. Try adjusting your search or category selection.`
-                        : activeTab === 'my-projects' 
-                          ? 'No projects found. Create or modify a project to see it here.'
-                          : 'No recent projects. Start a new project to see it here.'}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
+          {/* Workspace Tabs Component */}
+          <WorkspaceTabs
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            filteredMyProjects={filteredMyProjects}
+            filteredRecentProjects={filteredRecentProjects}
+            loadingMyProjects={loadingMyProjects}
+            loadingRecentProjects={loadingRecentProjects}
+            searchTerm={searchTerm}
+            selectedCategory={selectedCategory}
+            tenantName={tenantName}
+            onOpenProject={openRecentProject}
+            onCreateProject={() => setCreateProjectOpen(true)}
+            getAppColorValue={getAppColorValue}
+            formatRelativeTime={formatRelativeTime}
+            animationStyle={animationStyle}
+          />
 
           <div className="max-w-7xl mx-auto px-6 py-8 pb-20">
             {/* Loading State */}
@@ -1399,13 +815,14 @@ const Apps = () => {
               </div>
             )}
 
-
+          {/* Background section starting from Custom Applications */}
+          <div className="bg-gradient-to-br from-muted/40 via-muted/30 to-muted/40 -mx-6 px-6 py-8 mt-8 pb-20">
             {/* Custom Applications */}
             {!loading && customApps.length > 0 && (
               <div id="custom-applications-section" className="animate-fade-in scroll-mt-8" style={animationStyle(1.0)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Plus className="w-5 h-5 text-primary" />
-                  <h3 className="text-lg font-bold text-foreground">Custom Applications</h3>
+                  <h3 className="text-lg font-bold text-foreground">{tenantName || 'Custom'} Applications</h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {customApps.map((app, index) => {
@@ -1413,7 +830,7 @@ const Apps = () => {
                     return (
                       <Card 
                         key={app.id}
-                        className="group relative bg-card border border-dashed border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
+                        className="group relative bg-card border border-dashed border-border hover:border-primary/50 shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden hover:-translate-y-1 cursor-pointer animate-scale-in"
                         style={animationStyle(1.1 + index * 0.05)}
                         onClick={() => handleAppSelect(app.id)}
                       >
@@ -1513,12 +930,12 @@ const Apps = () => {
               </div>
             )}
 
-            {/* All Applications */}
+            {/* QM Applications */}
             {!loading && filteredApps.length > 0 && (
               <div id="all-applications-section" className="mt-10 mb-12 animate-fade-in scroll-mt-8" style={animationStyle(1.4)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Sparkles className="w-5 h-5 text-primary" />
-                  <h3 className="text-lg font-bold text-foreground">All Applications</h3>
+                  <h3 className="text-lg font-bold text-foreground">QM Applications</h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {filteredApps.map((app, index) => {
@@ -1526,7 +943,7 @@ const Apps = () => {
                     return (
                       <Card 
                         key={app.id}
-                        className="group relative bg-card border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
+                        className="group relative bg-card border border-border hover:border-primary/50 shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden hover:-translate-y-1 cursor-pointer animate-scale-in"
                         style={animationStyle(1.5 + index * 0.05)}
                         onClick={() => handleAppSelect(app.id)}
                       >
@@ -1606,18 +1023,17 @@ const Apps = () => {
               "The Matrix has you" – pick your path
             </div>
           </div>
-            </ScrollArea>
           </div>
-        </div>
       </div>
       
       {/* Create New Project Dialog */}
-      <CreateNewProject 
-        open={createProjectOpen} 
-        onOpenChange={setCreateProjectOpen}
-        apps={displayApps}
-        appMap={appMap}
-      />
+          <CreateNewProject 
+            open={createProjectOpen} 
+            onOpenChange={setCreateProjectOpen}
+            apps={displayApps}
+            appMap={appMap}
+            tenantName={tenantName}
+          />
     </div>
   );
 };

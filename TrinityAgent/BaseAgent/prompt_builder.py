@@ -136,7 +136,7 @@ GENERAL RESPONSE (for questions, file info, suggestions):
         Args:
             prompt: Base prompt string
             rules: List of rule strings
-            include_smart_response_rule: Whether to include the smart_response rule
+            include_smart_response_rule: Whether to include the reasoning rule (kept for backward compatibility, but now always adds reasoning rule)
         
         Returns:
             Prompt with intelligence rules added
@@ -144,7 +144,13 @@ GENERAL RESPONSE (for questions, file info, suggestions):
         prompt += "\n\nINTELLIGENCE RULES:\n\n"
         
         if include_smart_response_rule:
-            prompt += "1. **CRITICAL: ALWAYS include \"smart_response\" field in your JSON output** - This is the user-friendly message displayed in the chat\n"
+            prompt += "1. **CRITICAL: ALWAYS include \"reasoning\" field in your JSON output** - This is a detailed explanation that includes:\n"
+            prompt += "   - Why this atom/agent was chosen for the user's request\n"
+            prompt += "   - Your complete raw thinking process and analysis\n"
+            prompt += "   - Why specific files, columns, or configurations were selected\n"
+            prompt += "   - Any considerations, alternatives considered, and decision rationale\n"
+            prompt += "   - Be thorough and detailed - there is no length limit on reasoning\n"
+            prompt += "   - This reasoning will be displayed in the first text box to explain your choices\n"
         
         for i, rule in enumerate(rules, start=2 if include_smart_response_rule else 1):
             prompt += f"{i}. {rule}\n"
@@ -210,11 +216,11 @@ GENERAL RESPONSE (for questions, file info, suggestions):
             example_response=general_template
         )
         
-        # Add intelligence rules
+        # Add intelligence rules (always includes reasoning rule)
         prompt = PromptBuilder.add_intelligence_rules(
             prompt,
             intelligence_rules,
-            include_smart_response_rule=True
+            include_smart_response_rule=True  # Always True - adds reasoning rule
         )
         
         return prompt

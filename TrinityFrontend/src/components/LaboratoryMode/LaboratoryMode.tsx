@@ -898,7 +898,7 @@ const LaboratoryMode = () => {
           right: (auxActive && auxActive !== 'exhibition') ? '368px' : '48px', // w-12 (48px) icons + w-80 (320px) panel when open (exhibition is on left)
         }}
       >
-        <div className="bg-white rounded-lg shadow-md border border-gray-200 px-2.5 py-0.5 flex items-center gap-2 pointer-events-auto transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
+        <div className="bg-white rounded-full shadow-md border border-gray-200 px-2.5 py-0.5 flex items-center gap-2 pointer-events-auto transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
           {/* Active Users */}
           {canEdit && activeUsers.length > 0 && (
             <div className="flex items-center">

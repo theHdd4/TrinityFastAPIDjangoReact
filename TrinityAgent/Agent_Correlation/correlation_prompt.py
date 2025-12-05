@@ -51,9 +51,7 @@ class CorrelationPromptBuilder:
             "date_range_filter": None,
             "aggregation_level": None
         },
-        "response": "Raw thinking and reasoning from LLM about the correlation configuration, including why this file was selected, why these columns were chosen, why this method was selected, and what analysis will be performed",
-        "smart_response": "I'll help you analyze correlations in your data! Based on your request, I'll calculate correlations using the Pearson method on the selected numeric columns. The analysis will help identify relationships between variables.",
-        "reasoning": "Found all required components with context from history",
+        "reasoning": "Detailed explanation of why the Correlation atom was chosen, including: analysis of the user's request, why this specific file was selected, why these columns were chosen, why this correlation method was selected, what analysis will be performed, alternatives considered, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "used_memory": True,
         "file_name": "data_file.arrow"
     }
@@ -70,9 +68,7 @@ class CorrelationPromptBuilder:
             "To analyze correlations, specify: file + numeric columns + correlation method",
             "Or say 'yes' to use my suggestions"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what files are available, what the user might want, analysis of the request, and recommendations based on available data",
-        "smart_response": "I'd be happy to help you analyze correlations! Here are your available files and their numeric columns: [FORMAT: **filename.arrow** (X numeric columns) - column1, column2, column3, etc.]. I can help you calculate Pearson, Spearman, Phi Coefficient, or Cramer's V correlations. What would you like to analyze?",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why the Correlation atom was chosen, including: analysis of the current situation, what files are available, what the user might want, analysis of the request, why Correlation is appropriate, what information is needed, recommendations based on available data, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "file_analysis": {
             "total_files": "number",
             "recommended_files": ["file1"],
@@ -107,7 +103,7 @@ class CorrelationPromptBuilder:
         "COLUMN TYPES: Use measure_columns for numeric variables, identifier_columns for categorical filters",
         "FILTER SUPPORT: Support identifier_filters (categorical) and measure_filters (numeric ranges)",
         "DATE ANALYSIS: Support optional date analysis and date range filtering",
-        "REQUIRED JSON KEYS: success, correlation_config (when success true), and smart_response must ALL be present so the UI always has a friendly response",
+        "REQUIRED JSON KEYS: success, correlation_config (when success true), and reasoning must ALL be present so the UI always has a friendly response",
         "CORRELATION CONFIG STRUCTURE: correlation_config must have file_path (required - full path as shown in AVAILABLE FILES, e.g., 'Quant_Matrix_AI_Schema/churn-prediction/New Projects Project/D0_KHC_UK_Beans.arrow'), method (required), and optionally identifier_columns, measure_columns, identifier_filters, measure_filters, date_column, date_range_filter",
         "FILE_PATH FORMAT: Always return the COMPLETE file path as it appears in the AVAILABLE FILES AND COLUMNS section (e.g., 'Quant_Matrix_AI_Schema/churn-prediction/New Projects Project/D0_KHC_UK_Beans.arrow'). Use the exact path from the available files list - do NOT extract just the filename. The backend needs the full object path to locate the file in the bucket.",
         "DEFAULT BEHAVIOR: If no method specified, use pearson as default",

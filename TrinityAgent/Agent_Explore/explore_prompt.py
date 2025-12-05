@@ -39,9 +39,7 @@ class ExplorePromptBuilder:
                 "description": "Description of the exploration analysis"
             }
         ],
-        "response": "Raw thinking and reasoning from LLM about the exploration configuration, including why this file was selected, why these columns were chosen, and what analysis will be performed",
-        "smart_response": "I'll help you explore your data! Based on your request, I'll analyze the following:\n\n📊 **Exploration Analysis**\n• Type: pattern_analysis\n• Columns: column1, column2\n• Method: correlation_study\n• Visualization: scatter chart\n\n💡 **Insights:**\nThis analysis will help identify patterns and relationships in your data.",
-        "reasoning": "Found all required components with context from history",
+        "reasoning": "Detailed explanation of why the Explore atom was chosen, including: analysis of the user's request, why this specific file was selected, why these columns were chosen, what analysis will be performed, alternatives considered, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "used_memory": True,
         "file_name": "data_file.arrow"
     }
@@ -57,9 +55,7 @@ class ExplorePromptBuilder:
             "To explore data, specify: what you want to analyze + which columns/metrics",
             "Or say 'yes' to use my suggestions"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what files are available, what the user might want, analysis of the request, and recommendations based on available data",
-        "smart_response": "I'd be happy to help you explore your data! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you perform various analyses like pattern analysis, trend analysis, outlier detection, and statistical summaries. What would you like to explore?",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why the Explore atom was chosen, including: analysis of the current situation, what files are available, what the user might want, analysis of the request, why Explore is appropriate, what information is needed, recommendations based on available data, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "file_analysis": {
             "total_files": "number",
             "recommended_files": ["file1"],
@@ -92,7 +88,7 @@ class ExplorePromptBuilder:
         "ANALYSIS METHODS: Support correlation_study, time_series_analysis, statistical_analysis, clustering, regression_analysis, distribution_analysis",
         "VISUALIZATION TYPES: Support scatter, line, bar, box, histogram, heatmap, area",
         "MULTIPLE EXPLORATIONS: Can generate multiple exploration_config items in a single response for comprehensive analysis",
-        "REQUIRED JSON KEYS: success, exploration_config (when success true), and smart_response must ALL be present so the UI always has a friendly response",
+        "REQUIRED JSON KEYS: success, exploration_config (when success true), and reasoning must ALL be present so the UI always has a friendly response",
         "EXPLORATION CONFIG STRUCTURE: Each exploration_config item must have exploration_type, target_columns, analysis_method, visualization_type, insights_focus, and description"
     ]
     

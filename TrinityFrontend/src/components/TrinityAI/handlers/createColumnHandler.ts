@@ -31,23 +31,17 @@ export const createColumnHandler: AtomHandler = {
     
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
-    // 🔧 CRITICAL FIX: Show smart_response FIRST (like concat/merge)
-    // This displays the AI's clean, user-friendly message immediately
-    const smartResponseText = processSmartResponse(data);
-    console.log('💬 Smart response text:', smartResponseText);
-    
-    if (smartResponseText) {
-      const smartMsg: Message = {
+    // Show reasoning in chat (only reasoning field now)
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    if (reasoningText) {
+      const reasoningMsg: Message = {
         id: (Date.now() + 1).toString(),
-        content: smartResponseText,
+        content: `**Reasoning:**\n${reasoningText}`,
         sender: 'ai',
         timestamp: new Date(),
       };
-      console.log('📤 Sending smart response message to chat...');
-      setMessages(prev => [...prev, smartMsg]);
-      console.log('✅ Displayed smart_response to user:', smartResponseText);
-    } else {
-      console.warn('⚠️ No smart response text found!');
+      setMessages(prev => [...prev, reasoningMsg]);
+      console.log('✅ Displayed reasoning to user');
     }
     
     // Extract json - check multiple possible locations (including create_transform_json)
@@ -435,7 +429,7 @@ export const createColumnHandler: AtomHandler = {
     
     updateAtomSettings(atomId, mergedSettings);
     
-    // STEP 1: Add the 3 keys (smart_response, response, reasoning) to a TEXT BOX
+    // STEP 1: Add reasoning to a TEXT BOX
     console.log('📝 Updating card text box with agent response...');
     const textBoxContent = formatAgentResponseForTextBox(data);
     console.log('📝 Formatted text box content length:', textBoxContent.length);
@@ -453,7 +447,6 @@ export const createColumnHandler: AtomHandler = {
       agentResponse: {
         response: data.response || '',
         reasoning: data.reasoning || '',
-        smart_response: data.smart_response || '',
         formattedText: textBoxContent
       }
     });
@@ -467,7 +460,7 @@ export const createColumnHandler: AtomHandler = {
     
     // Prepare data for insight generation (with config data, before perform operation)
     const configDataForInsight = {
-      ...data, // This includes smart_response, response, reasoning (the 3 keys)
+          ...data, // This includes reasoning
       json: jsonData, // Original config from first LLM call
       create_transform_json: data.create_transform_json || jsonData, // Support create_transform_json
       operations: operations, // Parsed operations
@@ -613,7 +606,7 @@ export const createColumnHandler: AtomHandler = {
       }
     }
     
-    // 🔧 FIX: No need for duplicate success message - smart_response already shown at the top
+    // 🔧 FIX: No need for duplicate success message - reasoning already shown at the top
     console.log('📋 Create Column configuration:', {
       file: resolvedDataSource,
       operations: operations.map(op => `${op.type}(${op.columns.join(', ')})`),
@@ -1098,8 +1091,8 @@ export const createColumnHandler: AtomHandler = {
     const { setMessages, atomId } = context;
     
     let aiText = '';
-    if (data.smart_response) {
-      aiText = data.smart_response;
+    if (data.reasoning) {
+      aiText = `**Reasoning:**\n${data.reasoning}`;
     } else if (data.suggestions && Array.isArray(data.suggestions)) {
       aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
       
@@ -1117,7 +1110,7 @@ export const createColumnHandler: AtomHandler = {
         aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n')}`;
       }
     } else {
-      aiText = data.smart_response || data.message || 'AI response received';
+      aiText = data.reasoning ? `**Reasoning:**\n${data.reasoning}` : (data.message || 'AI response received');
     }
     
     const aiMsg: Message = {
@@ -1128,7 +1121,7 @@ export const createColumnHandler: AtomHandler = {
     };
     setMessages(prev => [...prev, aiMsg]);
     
-    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    // 📝 Update card text box with reasoning (even for failures)
     console.log('📝 Updating card text box with agent response (failure case)...');
     const textBoxContent = formatAgentResponseForTextBox(data);
     try {

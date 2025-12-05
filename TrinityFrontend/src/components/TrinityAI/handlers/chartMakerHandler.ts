@@ -28,37 +28,12 @@ export const chartMakerHandler: AtomHandler = {
     console.log('🔍 Has file_name:', !!data.file_name);
     console.log('🔍 Has data_source:', !!data.data_source);
     
-    // 🔧 CRITICAL FIX: Show smart_response FIRST (user-friendly message)
-    const smartResponseText = processSmartResponse(data);
-    if (smartResponseText) {
-      const smartMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: smartResponseText,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, smartMsg]);
-      console.log('✅ Displayed smart_response to user:', smartResponseText);
-    }
-    
-    // Show response and reasoning in chat box (3 keys total: smart_response, response, reasoning)
-    const responseText = data.response || data.data?.response || '';
+    // Show reasoning in chat box (only reasoning field now)
     const reasoningText = data.reasoning || data.data?.reasoning || '';
-    
-    if (responseText) {
-      const responseMsg: Message = {
-        id: (Date.now() + 2).toString(),
-        content: `**Response:**\n${responseText}`,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, responseMsg]);
-      console.log('✅ Displayed response to user');
-    }
     
     if (reasoningText) {
       const reasoningMsg: Message = {
-        id: (Date.now() + 3).toString(),
+        id: (Date.now() + 1).toString(),
         content: `**Reasoning:**\n${reasoningText}`,
         sender: 'ai',
         timestamp: new Date(),
@@ -67,7 +42,7 @@ export const chartMakerHandler: AtomHandler = {
       console.log('✅ Displayed reasoning to user');
     }
     
-    // STEP 1: Add the 3 keys (smart_response, response, reasoning) to a TEXT BOX
+    // STEP 1: Add reasoning to a TEXT BOX
     const textBoxContent = formatAgentResponseForTextBox(data);
     
     try {
@@ -270,18 +245,36 @@ export const chartMakerHandler: AtomHandler = {
         console.log('🔧 Additional filters from chartConfig.filters:', chartConfig.filters);
       }
 
+      // 🔧 UPDATED: Use legend_field from updated chart maker code (replaces segregated_field)
       const legendFieldCandidate =
         chartConfig.legend_field ??
         chartConfig.legendField ??
-        chartConfig.segregated_field ??
-        chartConfig.segregatedField ??
         traces[0]?.legend_field ??
+        traces[0]?.legendField ??
         '';
       const normalizedLegendField =
         legendFieldCandidate && legendFieldCandidate !== 'aggregate'
           ? legendFieldCandidate
           : '';
       const legendField = normalizedLegendField || 'aggregate';
+      
+      // 🔧 NEW INTERFACE SUPPORT: Detect dual Y-axis (Image 3)
+      // If there are 2 traces with different y_columns and same x_column, it's dual Y-axis
+      const isDualYAxis = traces.length === 2 && 
+                          traces[0]?.x_column === traces[1]?.x_column &&
+                          traces[0]?.y_column !== traces[1]?.y_column &&
+                          !traces[0]?.legend_field && !traces[1]?.legend_field;
+      
+      // 🔧 NEW INTERFACE SUPPORT: Detect legend field segregation (Image 2)
+      // If there's 1 trace with legend_field, use simple mode with legendField
+      const hasLegendField = legendField !== 'aggregate' && traces.length === 1;
+      
+      // 🔧 NEW INTERFACE SUPPORT: Determine if we should use simple mode (new interface)
+      // Simple mode: dual Y-axis OR legend field (not advanced traces mode)
+      const useSimpleMode = isDualYAxis || hasLegendField;
+      
+      // Extract second Y-axis value if dual Y-axis
+      const secondYAxis = isDualYAxis ? traces[1]?.y_column : undefined;
       
       return {
         id: `ai_chart_${chartConfig.chart_id || index + 1}_${Date.now()}`,
@@ -290,10 +283,17 @@ export const chartMakerHandler: AtomHandler = {
         chart_type: chartType, // 🔧 CRITICAL FIX: Add chart_type field for backend compatibility
         xAxis: traces[0]?.x_column || '', // 🔧 FIX: Keep original case for backend validation
         yAxis: traces[0]?.y_column || '', // 🔧 FIX: Keep original case for backend validation
+        // 🔧 NEW INTERFACE SUPPORT: Add secondYAxis for dual Y-axis (Image 3)
+        secondYAxis: secondYAxis,
+        // 🔧 NEW INTERFACE SUPPORT: Add dualAxisMode for axis mode selection
+        dualAxisMode: isDualYAxis ? 'dual' as const : undefined,
         filters: filters, // 🔧 FILTER INTEGRATION: Use AI-generated filters
-        legendField,
+        // 🔧 NEW INTERFACE SUPPORT: Set legendField for segregate field values (Image 2)
+        legendField: hasLegendField ? legendField : (legendField !== 'aggregate' ? legendField : 'aggregate'),
         chartRendered: false,
-        isAdvancedMode: traces.length > 1,
+        // 🔧 NEW INTERFACE SUPPORT: Use simple mode for new interface features
+        isAdvancedMode: !useSimpleMode && traces.length > 1,
+        aggregation: traces[0]?.aggregation || 'sum', // 🔧 NEW INTERFACE SUPPORT: Add aggregation at chart level
         traces: traces.map((trace: any, traceIndex: number) => ({
           id: `trace_${traceIndex}`,
           x_column: trace.x_column || '', // 🔧 FIX: Keep original case for backend validation
@@ -304,11 +304,10 @@ export const chartMakerHandler: AtomHandler = {
           aggregation: trace.aggregation || 'sum',
           chart_type: trace.chart_type || chartType, // 🔧 CRITICAL FIX: Add chart_type to traces
           filters: filters, // 🔧 FILTER INTEGRATION: Apply same filters to traces
+          // 🔧 UPDATED: Use legend_field from updated chart maker code (replaces segregated_field)
           legend_field:
             trace.legend_field ||
             trace.legendField ||
-            trace.segregated_field ||
-            trace.segregatedField ||
             (legendField !== 'aggregate' ? legendField : undefined)
         }))
       };
@@ -402,10 +401,14 @@ export const chartMakerHandler: AtomHandler = {
           selectedDataSource: resolvedDataSource, // 🔧 FIX: Use object_name for dropdown
           uploadedData: {
             columns: fileData.columns,
+            allColumns: fileData.columns, // 🔧 CRITICAL FIX: Add allColumns for filter availability
             rows: fileData.sample_data,
             numeric_columns: fileData.numeric_columns,
+            numericColumns: fileData.numeric_columns, // 🔧 CRITICAL FIX: Add camelCase version for compatibility
             categorical_columns: fileData.categorical_columns,
+            categoricalColumns: fileData.categorical_columns, // 🔧 CRITICAL FIX: Add camelCase version for compatibility
             unique_values: fileData.unique_values,
+            uniqueValuesByColumn: fileData.unique_values, // 🔧 CRITICAL FIX: Add alternative key name
             file_id: fileData.file_id,
             row_count: fileData.row_count
           },
@@ -437,6 +440,7 @@ export const chartMakerHandler: AtomHandler = {
           const title = chart.title;
           
           console.log(`📊 Generating chart ${index + 1}/${charts.length}: ${title} (${chartType})`);
+          console.log(`🔧 Chart mode: ${chart.isAdvancedMode ? 'Advanced' : 'Simple'}, Dual Y-axis: ${chart.secondYAxis ? 'Yes' : 'No'}, Legend Field: ${chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : 'None'}`);
           
           const processedFilters = chart.filters || {};
           const processedTraceFilters = traces.map((trace: any) => {
@@ -465,23 +469,68 @@ export const chartMakerHandler: AtomHandler = {
             console.log(`✅ Chart ${index + 1} enhanced trace-level filters processed:`, enhancedTraceFilters);
           }
           
-          const chartRequest = {
-            file_id: fileData.file_id,
-            chart_type: chartType,
-            traces: traces.map((trace: any, traceIndex: number) => ({
+          // 🔧 NEW INTERFACE SUPPORT: Build traces based on chart mode
+          // For simple mode with dual Y-axis or legend field, use chart-level fields
+          let apiTraces: any[] = [];
+          
+          if (!chart.isAdvancedMode && chart.secondYAxis) {
+            // 🔧 DUAL Y-AXIS (Image 3): Simple mode with secondYAxis
+            console.log(`🔧 Building dual Y-axis traces for chart ${index + 1}`);
+            apiTraces = [
+              {
+                x_column: chart.xAxis || '',
+                y_column: chart.yAxis || '',
+                name: chart.yAxis || 'Series 1',
+                chart_type: chartType,
+                aggregation: chart.aggregation || 'sum',
+                filters: processedFilters,
+                legend_field: chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined
+              },
+              {
+                x_column: chart.xAxis || '',
+                y_column: chart.secondYAxis || '',
+                name: chart.secondYAxis || 'Series 2',
+                chart_type: chartType,
+                aggregation: chart.aggregation || 'sum',
+                filters: processedFilters,
+                legend_field: chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined
+              }
+            ];
+          } else if (!chart.isAdvancedMode && chart.legendField && chart.legendField !== 'aggregate') {
+            // 🔧 LEGEND FIELD (Image 2): Simple mode with legendField
+            console.log(`🔧 Building legend field trace for chart ${index + 1} with legend_field: ${chart.legendField}`);
+            apiTraces = [
+              {
+                x_column: chart.xAxis || '',
+                y_column: chart.yAxis || '',
+                name: chart.yAxis || 'Series 1',
+                chart_type: chartType,
+                aggregation: chart.aggregation || 'sum',
+                filters: processedFilters,
+                legend_field: chart.legendField
+              }
+            ];
+          } else {
+            // 🔧 ADVANCED MODE or FALLBACK: Use traces array
+            apiTraces = traces.map((trace: any, traceIndex: number) => ({
               x_column: (trace.x_column || chart.xAxis) || '', // 🔧 FIX: Keep original case for backend validation
               y_column: (trace.y_column || chart.yAxis) || '', // 🔧 FIX: Keep original case for backend validation
               name: trace.name || `Trace ${traceIndex + 1}`,
               chart_type: trace.chart_type || chartType,
               aggregation: trace.aggregation || 'sum',
               filters: enhancedTraceFilters[traceIndex] || {},
+              // 🔧 UPDATED: Use legend_field from updated chart maker code (replaces segregated_field)
               legend_field:
                 trace.legend_field ||
                 trace.legendField ||
-                trace.segregated_field ||
-                trace.segregatedField ||
                 (chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined)
-            })),
+            }));
+          }
+          
+          const chartRequest = {
+            file_id: fileData.file_id,
+            chart_type: chartType,
+            traces: apiTraces,
             title: title,
             filters: processedFilters
           };
@@ -579,10 +628,14 @@ export const chartMakerHandler: AtomHandler = {
           fileId: fileData.file_id,
           uploadedData: {
             columns: fileData.columns,
+            allColumns: fileData.columns, // 🔧 CRITICAL FIX: Add allColumns for filter availability
             rows: fileData.sample_data,
             numeric_columns: fileData.numeric_columns,
+            numericColumns: fileData.numeric_columns, // 🔧 CRITICAL FIX: Add camelCase version for compatibility
             categorical_columns: fileData.categorical_columns,
+            categoricalColumns: fileData.categorical_columns, // 🔧 CRITICAL FIX: Add camelCase version for compatibility
             unique_values: fileData.unique_values,
+            uniqueValuesByColumn: fileData.unique_values, // 🔧 CRITICAL FIX: Add alternative key name
             file_id: fileData.file_id,
             row_count: fileData.row_count
           },
@@ -656,10 +709,10 @@ export const chartMakerHandler: AtomHandler = {
           console.log('✅✅✅ All variables validated, creating enhancedDataForInsight');
           
           // Prepare enhanced data with chart results for insight generation
-          // Include the 3 keys from the original AI response (they're in 'data')
+          // Include reasoning from the original AI response (it's in 'data')
           // Include chart results from backend API call
           const enhancedDataForInsight = {
-            ...data, // This includes smart_response, response, reasoning (the 3 keys)
+            ...data, // This includes reasoning
             chart_json: chartJson, // Original chart config from first LLM call
             chart_results: {
               charts: generatedCharts,
@@ -822,17 +875,17 @@ export const chartMakerHandler: AtomHandler = {
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { setMessages } = context;
     
-    // Use processSmartResponse for consistent smart response handling
-    const smartResponseText = processSmartResponse(data);
-    if (smartResponseText) {
-      const smartMsg: Message = {
+    // Show reasoning in chat (only reasoning field now)
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    if (reasoningText) {
+      const reasoningMsg: Message = {
         id: (Date.now() + 1).toString(),
-        content: smartResponseText,
+        content: `**Reasoning:**\n${reasoningText}`,
         sender: 'ai',
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, smartMsg]);
-      console.log('✅ Displayed smart_response to user (failure):', smartResponseText);
+      setMessages(prev => [...prev, reasoningMsg]);
+      console.log('✅ Displayed reasoning to user (failure)');
     }
     
     return { success: true };

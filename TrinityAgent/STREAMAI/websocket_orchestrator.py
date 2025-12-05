@@ -7,6 +7,9 @@ Implements the Trinity AI streaming pattern for card and result handling.
 """
 
 import asyncio
+import contextlib
+import copy
+import hashlib
 import json
 import logging
 import os
@@ -16,6 +19,20 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Callable, Set
 from dataclasses import dataclass
 import uuid
+
+logger = logging.getLogger("trinity.trinityai.websocket")
+
+# Import atom insights with fallbacks for environments where the package path differs
+try:
+    from TrinityAgent.atoms.insights import generate_insights
+except ImportError:
+    try:
+        from atoms.insights import generate_insights  # type: ignore
+    except ImportError:  # pragma: no cover - insights unavailable
+        logger.warning("Atom insights unavailable; TrinityAgent package not on PYTHONPATH")
+
+        def generate_insights(*args, **kwargs):
+            return []
 
 try:
     from starlette.websockets import WebSocketDisconnect  # type: ignore
@@ -32,6 +49,7 @@ from .atom_mapping import ATOM_MAPPING
 from .graphrag import GraphRAGWorkspaceConfig
 from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
+from .laboratory_retriever import LaboratoryRetrievalPipeline
 # Import workflow_insight_agent - try both paths for Docker and local development
 try:
     from Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
@@ -42,9 +60,6 @@ except ImportError:
         # Fallback: define a no-op function
         def get_workflow_insight_agent():
             return None
-
-logger = logging.getLogger("trinity.trinityai.websocket")
-
 # Import centralized settings
 try:
     from BaseAgent.config import settings
@@ -201,6 +216,8 @@ class ReActState:
     user_prompt: str
     goal_achieved: bool = False
     current_step_number: int = 0
+    paused: bool = False  # Indicates whether the loop was paused mid-generation
+    paused_at_step: int = 0  # The step where generation paused
     execution_history: List[Dict[str, Any]] = None  # Previous steps and results
     thoughts: List[str] = None  # Reasoning history
     observations: List[str] = None  # Observation history
@@ -264,6 +281,13 @@ class StreamWebSocketOrchestrator:
         self.rag_engine = rag_engine
         self._cancelled_sequences: Set[str] = set()
 
+        try:
+            self.laboratory_retriever = LaboratoryRetrievalPipeline()
+            logger.info("✅ Laboratory retrieval pipeline initialized for Lab Mode insights")
+        except Exception as lab_exc:
+            logger.warning("⚠️ Laboratory retrieval pipeline unavailable: %s", lab_exc)
+            self.laboratory_retriever = None
+
         # GraphRAG integration
         self.graph_workspace_config = GraphRAGWorkspaceConfig()
         self.graph_rag_client = GraphRAGQueryClient(self.graph_workspace_config)
@@ -277,7 +301,20 @@ class StreamWebSocketOrchestrator:
         self._output_alias_registry: Dict[str, Dict[str, str]] = {}
         self._chat_file_mentions: Dict[str, List[str]] = {}
         self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
+        self._sequence_intent_routing: Dict[str, Dict[str, Any]] = {}
         self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
+        self._sequence_step_plans: Dict[str, Dict[int, WorkflowStepPlan]] = {}  # Track executed step plans per sequence
+        self._sequence_replay_counts: Dict[str, int] = {}
+        self._paused_sequences: Set[str] = set()
+        self._react_step_guards: Dict[str, Dict[str, Any]] = {}  # Prevent overlapping ReAct steps
+        self._react_stall_watchdogs: Dict[str, Dict[str, Any]] = {}  # Detect stalled ReAct loops without progress
+
+        # Safety guards
+        self.max_initial_plan_steps: int = 8  # Abort overly long upfront plans
+        self.max_react_operations: int = 12  # Stop runaway execution loops
+        self.max_stalled_react_attempts: int = 4  # Prevent tight loops when no new atoms are executed
+        self.llm_attempt_timeout_seconds: float = 60.0  # Guardrail for individual LLM attempts
+        self.llm_status_interval_seconds: float = 10.0  # Periodic heartbeat interval
 
         # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
@@ -316,6 +353,8 @@ class StreamWebSocketOrchestrator:
             self.atom_retry_delay,
         )
 
+        self.max_replay_attempts = 7
+
         self._memory_storage = memory_storage_module
         self._memory_summarizer = summarize_chat_messages
         if self._memory_storage and self._memory_summarizer:
@@ -333,6 +372,40 @@ class StreamWebSocketOrchestrator:
                 logger.warning(f"⚠️ Could not initialize ReAct orchestrator: {e}")
         
         logger.info("✅ StreamWebSocketOrchestrator initialized")
+
+    @contextlib.asynccontextmanager
+    async def _react_step_guard(self, sequence_id: str, step_number: int):
+        """Ensure ReAct steps do not overlap for a given sequence."""
+        active_guard = self._react_step_guards.get(sequence_id)
+        if active_guard:
+            message = (
+                f"⚠️ ReAct: Step {active_guard.get('step_number')} still marked"
+                f" as {active_guard.get('status', 'in_progress')} - pausing new step"
+            )
+            logger.warning(message)
+            raise RuntimeError(message)
+
+        guard_token = uuid.uuid4().hex
+        self._react_step_guards[sequence_id] = {
+            "token": guard_token,
+            "step_number": step_number,
+            "status": "planning",
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+
+        try:
+            yield guard_token
+        finally:
+            guard_entry = self._react_step_guards.get(sequence_id)
+            if guard_entry and guard_entry.get("token") == guard_token:
+                self._react_step_guards.pop(sequence_id, None)
+
+    def _update_react_step_guard(self, sequence_id: str, guard_token: str, status: str) -> None:
+        """Update guardrail status for the current ReAct step if token matches."""
+        guard_entry = self._react_step_guards.get(sequence_id)
+        if guard_entry and guard_entry.get("token") == guard_token:
+            guard_entry["status"] = status
+            guard_entry["updated_at"] = datetime.utcnow().isoformat()
     
     async def execute_react_workflow(
         self,
@@ -374,7 +447,7 @@ class StreamWebSocketOrchestrator:
                 except Exception as e:
                     logger.debug(f"Could not send ReAct progress event: {e}")
             
-            # Prepare file context
+            # Prepare file context with proper context information
             if not file_context and project_context:
                 file_context = {
                     "files": project_context.get("available_files", []),
@@ -382,13 +455,22 @@ class StreamWebSocketOrchestrator:
                     "app_name": project_context.get("app_name", ""),
                     "project_name": project_context.get("project_name", "")
                 }
+            elif file_context:
+                # Ensure file_context has context information even if it was provided
+                if not file_context.get("client_name") and project_context:
+                    file_context["client_name"] = project_context.get("client_name", "")
+                if not file_context.get("app_name") and project_context:
+                    file_context["app_name"] = project_context.get("app_name", "")
+                if not file_context.get("project_name") and project_context:
+                    file_context["project_name"] = project_context.get("project_name", "")
             
             # Execute ReAct workflow
             result = await self.react_orchestrator.execute_workflow(
                 user_prompt=user_prompt,
                 session_id=session_id,
                 file_context=file_context,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                intent_route=self._sequence_intent_routing.get(session_id),
             )
             
             # Send final result event
@@ -432,7 +514,10 @@ class StreamWebSocketOrchestrator:
         self,
         llm_call_func: Callable,
         step_name: str,
-        max_attempts: int = 3
+        max_attempts: int = 3,
+        status_callback: Optional[Callable[[int, float, bool], Any]] = None,
+        attempt_timeout: Optional[float] = None,
+        pause_after_timeout: bool = False
     ) -> Any:
         """
         Retry mechanism for LLM JSON generation.
@@ -452,11 +537,39 @@ class StreamWebSocketOrchestrator:
         last_content = None
         
         for attempt in range(1, max_attempts + 1):
+            start_time = datetime.utcnow()
+            status_task = None
             try:
                 logger.info(f"🔄 [{step_name}] Attempt {attempt}/{max_attempts}: Calling LLM for JSON generation...")
-                result = await llm_call_func()
+                if status_callback:
+                    status_task = asyncio.create_task(
+                        self._periodic_generation_status(
+                            status_callback=status_callback,
+                            step_name=step_name,
+                            attempt=attempt,
+                            start_time=start_time,
+                            max_elapsed=attempt_timeout or self.llm_attempt_timeout_seconds,
+                        )
+                    )
+
+                if attempt_timeout:
+                    result = await asyncio.wait_for(llm_call_func(), timeout=attempt_timeout)
+                else:
+                    result = await llm_call_func()
                 logger.info(f"✅ [{step_name}] Attempt {attempt} succeeded: Valid JSON generated")
                 return result
+            except asyncio.TimeoutError as e:
+                last_error = e
+                logger.warning(
+                    f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} timed out after {attempt_timeout or self.llm_attempt_timeout_seconds}s"
+                )
+                if status_callback:
+                    try:
+                        await status_callback(attempt, (datetime.utcnow() - start_time).total_seconds(), True)
+                    except Exception:
+                        logger.debug("⚠️ Status callback failed after timeout", exc_info=True)
+                if pause_after_timeout:
+                    raise
             except json.JSONDecodeError as e:
                 last_error = e
                 logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: Invalid JSON - {e}")
@@ -478,6 +591,11 @@ class StreamWebSocketOrchestrator:
                     logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
                 else:
                     logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed: {e}")
+            finally:
+                if status_task:
+                    status_task.cancel()
+                    with contextlib.suppress(Exception):
+                        await status_task
         
         # All attempts failed
         error_msg = (
@@ -485,6 +603,28 @@ class StreamWebSocketOrchestrator:
             f"Please rephrase your query in a clearer way."
         )
         raise RetryableJSONGenerationError(error_msg, max_attempts, last_error)
+
+    async def _periodic_generation_status(
+        self,
+        status_callback: Callable[[int, float, bool], Any],
+        step_name: str,
+        attempt: int,
+        start_time: datetime,
+        max_elapsed: float,
+    ) -> None:
+        """Emit periodic status updates while waiting on a long LLM call."""
+        try:
+            while True:
+                await asyncio.sleep(self.llm_status_interval_seconds)
+                elapsed = (datetime.utcnow() - start_time).total_seconds()
+                try:
+                    await status_callback(attempt, elapsed, False)
+                except Exception:
+                    logger.debug("⚠️ Failed to emit generation heartbeat", exc_info=True)
+                if elapsed >= max_elapsed:
+                    return
+        except asyncio.CancelledError:
+            return
     
     def _load_atom_mapping(self):
         """Load atom mapping"""
@@ -645,14 +785,30 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
      * Example: If Step 1 merged files → Step 2 grouped data → Use the grouped output file for chart, NOT the original files
      * Check EXECUTION HISTORY for output files created by previous steps
 
-8. **correlation** - Correlation Analysis
-   - **CAN DO**: Calculates correlation matrix between numeric columns
-   - **USE WHEN**: User wants to analyze relationships, correlations, or dependencies
+8. **correlation** - Correlation Analysis (EDA Tool)
+   - **CAN DO**: 
+     * Calculates correlation matrix between numeric columns
+     * Analyzes relationships and dependencies between variables
+     * Filters data before correlation (by identifiers/measures)
+     * Finds highest correlation pairs
+     * Time series correlation analysis
+     * Comprehensive EDA (Exploratory Data Analysis)
+   - **USE WHEN**: 
+     * User wants to analyze relationships, correlations, or dependencies
+     * User mentions EDA, exploratory data analysis, or finding relationships
+     * User wants to understand how variables relate to each other
+     * User wants to discover patterns in data
+     * User asks "which columns are related" or "how are variables connected"
    - **REQUIRES**: One input file with numeric columns
-   - **OUTPUT**: Correlation analysis results
-   - **KEYWORDS**: correlation, relationship, dependency, associate
-   - **EXAMPLE**: "Analyze correlation between Price and Sales columns in sales.arrow"
-   - **REQUIRED IN PROMPT**: Specify the file and column names to analyze
+   - **OUTPUT**: Correlation matrix, correlation coefficients, highest correlation pairs
+   - **KEYWORDS**: correlation, correlate, relationship, dependency, associate, related, connection, link, EDA, exploratory data analysis, find relationships, which variables are related
+   - **EXAMPLE**: 
+     * "Analyze correlation between Price and Sales columns in sales.arrow"
+     * "Perform EDA to find relationships in merged_data.arrow"
+     * "Find which columns are most correlated in dataset.arrow"
+     * "Calculate correlation matrix for all numeric columns"
+   - **REQUIRED IN PROMPT**: Specify the file (column names optional - will analyze all numeric columns)
+   - **WORKFLOW POSITION**: Early to mid workflow - use after data loading/merging for EDA insights
 
 9. **data-upload-validate** - Load Data
    - **CAN DO**: Loads and validates data files (CSV, Excel, Arrow) from MinIO
@@ -685,6 +841,59 @@ WORKFLOW PLANNING:
 - **Example workflow**: Load → Filter → Apply Formula → Merge → Group → Chart (chart uses the grouped output file, NOT original files)
 - **Completion Rule**: Only set goal_achieved: true AFTER chart-maker has been executed
 """
+    
+    def _load_files_with_context(
+        self,
+        client_name: str = "",
+        app_name: str = "",
+        project_name: str = ""
+    ) -> List[str]:
+        """
+        Load files from MinIO using FileReader with proper client/project context.
+        This ensures we only read files from the specific location, not all files.
+        
+        Args:
+            client_name: Client name for context
+            app_name: App name for context
+            project_name: Project name for context
+        
+        Returns:
+            List of file paths (object names) from MinIO
+        """
+        try:
+            # Import FileReader (same as BaseAgent uses)
+            try:
+                from BaseAgent.file_reader import FileReader
+            except ImportError:
+                try:
+                    from TrinityAgent.BaseAgent.file_reader import FileReader
+                except ImportError:
+                    logger.error("❌ BaseAgent.FileReader not available - cannot load files with context")
+                    return []
+            
+            # Create FileReader instance
+            file_reader = FileReader()
+            
+            # Load files with proper context (this will set the correct prefix)
+            files_with_columns = file_reader.load_files(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name
+            )
+            
+            # Extract file paths (object names) from the dictionary
+            file_paths = list(files_with_columns.keys())
+            
+            logger.info(f"✅ Loaded {len(file_paths)} files from MinIO using FileReader with context: {client_name}/{app_name}/{project_name}")
+            logger.debug(f"📁 Files loaded: {file_paths[:5]}..." if len(file_paths) > 5 else f"📁 Files loaded: {file_paths}")
+            
+            return file_paths
+            
+        except Exception as e:
+            logger.error(f"❌ Error loading files with context: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
     
     def _extract_file_names_from_prompt(self, user_prompt: str, available_files: Optional[List[str]] = None) -> List[str]:
         """
@@ -1396,6 +1605,17 @@ WORKFLOW PLANNING:
                 step_name="Workflow Generation",
                 max_attempts=3
             )
+
+            if len(workflow_steps) > self.max_initial_plan_steps:
+                logger.warning(
+                    "⚠️ Workflow generation returned %d steps; aborting to avoid an unmanageable plan",
+                    len(workflow_steps),
+                )
+                raise RetryableJSONGenerationError(
+                    f"Generated plan has {len(workflow_steps)} steps which exceeds the limit of {self.max_initial_plan_steps}",
+                    attempts=1,
+                    last_error=ValueError("plan_too_long"),
+                )
             
             # Post-process: Keep data-upload-validate if user mentions files (it will load them)
             # We no longer skip data-upload-validate - it's needed to load files into the atom
@@ -1427,7 +1647,9 @@ WORKFLOW PLANNING:
         available_files: List[str],
         previous_results: List[Dict[str, Any]],
         sequence_id: str,
-        priority_files: Optional[List[str]] = None
+        priority_files: Optional[List[str]] = None,
+        status_callback: Optional[Callable[[int, float, bool], Any]] = None,
+        llm_timeout: Optional[float] = None,
     ) -> Optional[WorkflowStepPlan]:
         """
         Generate the next workflow step using ReAct-style planning.
@@ -1524,7 +1746,10 @@ WORKFLOW PLANNING:
             step_data = await self._retry_llm_json_generation(
                 llm_call_func=_call_llm_for_react_step,
                 step_name="ReAct Step Planning",
-                max_attempts=3
+                max_attempts=3,
+                status_callback=status_callback,
+                attempt_timeout=llm_timeout or self.llm_attempt_timeout_seconds,
+                pause_after_timeout=True,
             )
             
             if step_data.get("goal_achieved", False):
@@ -1590,6 +1815,48 @@ WORKFLOW PLANNING:
             files_used = step_data.get("files_used", [])
             inputs = step_data.get("inputs", [])
             output_alias = step_data.get("output_alias", f"step_{step_number}_output")
+
+            # Guardrail: favor the most recent materialized file when chaining
+            # so we don't accidentally grab the first uploaded dataset.
+            recent_output_file = self._get_latest_materialized_file(
+                sequence_id,
+                execution_history,
+                self._sequence_available_files.get(sequence_id, available_files.copy()),
+            )
+
+            prefers_latest_dataset = self._atom_prefers_latest_dataset(atom_id)
+            prefers_recent_output = (
+                prefers_latest_dataset
+                or (self._atom_produces_dataset(atom_id) and atom_id not in {"merge", "concat"})
+            )
+
+            if prefers_recent_output and recent_output_file:
+                # If no files were provided, default to the newest output
+                if not files_used:
+                    files_used = [recent_output_file]
+                    step_data["files_used"] = files_used
+                    logger.info(
+                        "📁 ReAct: Defaulting files_used to latest output %s for atom %s",
+                        recent_output_file,
+                        atom_id,
+                    )
+                # If the LLM picked an older file, re-prioritize the recent output
+                elif recent_output_file not in files_used:
+                    logger.info(
+                        "📁 ReAct: Reordering files to prioritize latest output %s over %s",
+                        recent_output_file,
+                        files_used,
+                    )
+                    files_used = [recent_output_file] + files_used
+                    step_data["files_used"] = files_used
+
+                # Align inputs with the prioritized file to keep downstream atoms in sync
+                if not inputs:
+                    inputs = files_used.copy()
+                    step_data["inputs"] = inputs
+                elif recent_output_file not in inputs:
+                    inputs = [recent_output_file] + inputs
+                    step_data["inputs"] = inputs
             
             # SPECIAL HANDLING FOR CHART-MAKER: Ensure it uses the most recent output file from previous steps
             if atom_id == "chart-maker" and available_files:
@@ -2434,12 +2701,14 @@ WORKFLOW PLANNING:
         user_id: str,
         frontend_session_id: Optional[str] = None,
         frontend_chat_id: Optional[str] = None,
+        websocket_session_id: Optional[str] = None,
         history_override: Optional[str] = None,
         chat_file_names: Optional[List[str]] = None,
+        intent_route: Optional[Dict[str, Any]] = None,
     ):
         """
         Execute complete workflow with WebSocket events.
-        
+
         Uses frontend session ID for proper context isolation between chats.
         
         Sends events:
@@ -2452,13 +2721,34 @@ WORKFLOW PLANNING:
         - workflow_completed: All steps done
         - error: Error occurred
         """
-        sequence_id = frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
-        logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
+        sequence_id = websocket_session_id or frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
+        logger.info(
+            "🔑 Using session ID: %s (Chat ID: %s, WebSocket Session: %s)",
+            sequence_id,
+            frontend_chat_id,
+            websocket_session_id,
+        )
         available_files = list(available_files or [])
+        existing_files = self._sequence_available_files.get(sequence_id)
+        if existing_files:
+            available_files = existing_files
         self._sequence_available_files[sequence_id] = available_files
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
+        if intent_route:
+            self._sequence_intent_routing[sequence_id] = intent_route
         logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
+
+        resume_mode = False
+        react_state: Optional[ReActState] = self._sequence_react_state.get(sequence_id)
+        if react_state and react_state.paused:
+            resume_mode = True
+            react_state.paused = False
+            logger.info(
+                "⏯️ Resuming paused ReAct workflow %s from step %s",
+                sequence_id,
+                react_state.paused_at_step or react_state.current_step_number,
+            )
 
         persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
         if persisted_history:
@@ -2500,17 +2790,19 @@ WORKFLOW PLANNING:
             )
             
             logger.info(f"🚀 Starting ReAct workflow for sequence: {sequence_id}")
-            
+
             # ================================================================
             # INITIALIZE REACT STATE
             # ================================================================
-            react_state = ReActState(
-                sequence_id=sequence_id,
-                user_prompt=effective_user_prompt
-            )
-            self._sequence_react_state[sequence_id] = react_state
-            
-            logger.info("🧠 ReAct: Initialized agent state")
+            if resume_mode and react_state:
+                logger.info("🧠 ReAct: Using existing paused agent state")
+            else:
+                react_state = ReActState(
+                    sequence_id=sequence_id,
+                    user_prompt=effective_user_prompt
+                )
+                self._sequence_react_state[sequence_id] = react_state
+                logger.info("🧠 ReAct: Initialized agent state")
             
             # ================================================================
             # REACT LOOP: Thought → Action → Observation → Thought...
@@ -2550,13 +2842,69 @@ WORKFLOW PLANNING:
                 )
             except (WebSocketDisconnect, Exception) as e:
                 logger.warning(f"⚠️ Failed to send initial progress event: {e}")
-            
+
             max_steps = 20  # Prevent infinite loops
-            current_step_number = 0
-            execution_history: List[Dict[str, Any]] = []
-            previous_results: List[Dict[str, Any]] = []
-            
+            if resume_mode and react_state:
+                current_step_number = max((react_state.paused_at_step or react_state.current_step_number) - 1, 0)
+                execution_history = list(react_state.execution_history)
+                previous_results = [entry.get("result", {}) for entry in react_state.execution_history]
+                try:
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "workflow_resumed",
+                            {
+                                "sequence_id": sequence_id,
+                                "resuming_from_step": react_state.paused_at_step or react_state.current_step_number,
+                                "message": "Resuming from last paused step",
+                            },
+                        ),
+                        "workflow_resumed event",
+                    )
+                except (WebSocketDisconnect, Exception):
+                    logger.debug("⚠️ Failed to send workflow_resumed event", exc_info=True)
+            else:
+                current_step_number = 0
+                execution_history = []
+                previous_results = []
+            abort_due_complexity = False
+
             while not react_state.goal_achieved and current_step_number < max_steps:
+                # Watchdog: if we keep looping without adding to execution history, stop to avoid runaway planning
+                watchdog = self._react_stall_watchdogs.setdefault(
+                    sequence_id,
+                    {"last_history_len": len(execution_history), "stalled_attempts": 0},
+                )
+                current_history_len = len(execution_history)
+                if current_history_len > watchdog["last_history_len"]:
+                    watchdog["last_history_len"] = current_history_len
+                    watchdog["stalled_attempts"] = 0
+                else:
+                    watchdog["stalled_attempts"] += 1
+                    if watchdog["stalled_attempts"] >= self.max_stalled_react_attempts:
+                        logger.warning(
+                            "⚠️ ReAct: Detected stalled loop (no new atom executions after %s attempts)",
+                            watchdog["stalled_attempts"],
+                        )
+                        try:
+                            await self._send_event(
+                                websocket,
+                                WebSocketEvent(
+                                    "react_stalled",
+                                    {
+                                        "sequence_id": sequence_id,
+                                        "attempts": watchdog["stalled_attempts"],
+                                        "message": "Workflow stalled without new atoms executing; stopping to prevent a loop.",
+                                    },
+                                ),
+                                "react_stalled event",
+                            )
+                        except (WebSocketDisconnect, Exception) as e:
+                            logger.debug("⚠️ Failed to send react_stalled event: %s", e, exc_info=True)
+
+                        react_state.goal_achieved = True
+                        break
+
                 if sequence_id in self._cancelled_sequences:
                     logger.info(f"🛑 Workflow {sequence_id} cancelled during ReAct loop")
                     self._cancelled_sequences.discard(sequence_id)
@@ -2572,477 +2920,682 @@ WORKFLOW PLANNING:
                         "workflow_stopped (ReAct loop)"
                     )
                     break
-                
-                current_step_number += 1
-                logger.info(f"🔄 ReAct Cycle {current_step_number}: Starting...")
-                
-                # Send progress update
-                try:
-                    progress_percent = min(int((current_step_number / max_steps) * 100), 99)  # Cap at 99% until complete
-                    await self._send_event(
-                        websocket,
-                        WebSocketEvent(
-                            "workflow_progress",
-                            {
-                                "sequence_id": sequence_id,
-                                "current_step": current_step_number,
-                                "total_steps": "?",
-                                "progress_percent": progress_percent,
-                                "status": "in_progress",
-                                "loading": True,
-                                "message": f"Processing step {current_step_number}..."
-                            }
-                        ),
-                        "workflow_progress event"
+
+                if current_step_number >= self.max_react_operations:
+                    abort_due_complexity = True
+                    logger.warning(
+                        "🛑 ReAct: Aborting workflow after %d operations to prevent runaway plans",
+                        current_step_number,
                     )
-                except (WebSocketDisconnect, Exception) as e:
-                    logger.warning(f"⚠️ Failed to send progress event: {e}")
-                
-                # ============================================================
-                # THOUGHT: Generate next step
-                # ============================================================
-                logger.info(f"💭 ReAct: THOUGHT - Planning next step...")
-                
-                # Send thought event (with error handling)
-                try:
-                    await self._send_event(
-                        websocket,
-                        WebSocketEvent(
-                            "react_thought",
-                            {
-                                "sequence_id": sequence_id,
-                                "step_number": current_step_number,
-                                "message": "Analyzing current state and planning next action...",
-                                "loading": True
-                            }
-                        ),
-                        "react_thought event"
-                    )
-                except (WebSocketDisconnect, Exception) as e:
-                    logger.warning(f"⚠️ Failed to send react_thought event: {e}, continuing...")
-                
-                # Generate next step with timeout protection
-                # IMPORTANT: Always get the latest available_files that includes newly created files from previous steps
-                current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
-                logger.info(f"📁 ReAct: Using {len(current_available_files)} available files for step {current_step_number} planning")
-                if current_available_files:
-                    logger.debug(f"   Latest files: {current_available_files[-3:]}")  # Show last 3 files
-                
-                # Check for loop: same atom repeated multiple times
-                if len(execution_history) >= 2:
-                    recent_atoms = [h.get("atom_id") for h in execution_history[-3:]]
-                    if len(set(recent_atoms)) == 1 and len(recent_atoms) >= 2:
-                        repeated_atom = recent_atoms[0]
-                        logger.warning(f"⚠️ ReAct: Detected loop - same atom '{repeated_atom}' repeated {len(recent_atoms)} times")
-                        # Add warning to prompt context
-                        effective_user_prompt_with_warning = f"{effective_user_prompt}\n\n⚠️ WARNING: The atom '{repeated_atom}' has been executed {len(recent_atoms)} times in a row. You MUST choose a DIFFERENT atom or set goal_achieved: true if the task is complete."
-                    else:
-                        effective_user_prompt_with_warning = effective_user_prompt
-                else:
-                    effective_user_prompt_with_warning = effective_user_prompt
-                
-                try:
-                    next_step = await asyncio.wait_for(
-                        self._generate_next_step_with_react(
-                            user_prompt=effective_user_prompt_with_warning,
-                            execution_history=execution_history,
-                            available_files=current_available_files,  # Use updated file list with newly created files
-                            previous_results=previous_results,
-                            sequence_id=sequence_id,
-                            priority_files=file_focus
-                        ),
-                        timeout=90.0  # 90 second timeout for step generation
-                    )
-                except asyncio.TimeoutError:
-                    logger.error(f"❌ ReAct: Step generation timed out after 90s, stopping workflow")
-                    react_state.goal_achieved = True
-                    break
-                except Exception as e:
-                    logger.error(f"❌ ReAct: Step generation failed: {e}, stopping workflow")
-                    react_state.goal_achieved = True
-                    break
-            
-                if next_step is None:
-                    # Check if chart-maker has been used before marking goal as achieved
-                    chart_maker_used = any(h.get("atom_id") == "chart-maker" for h in execution_history)
-                    if not chart_maker_used and execution_history:
-                        logger.info("📊 ReAct: Goal marked as achieved but chart-maker not used - forcing chart-maker step")
-                        # Force chart-maker as the final step
-                        current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
-                        most_recent_file = current_available_files[-1] if current_available_files else None
-                        
-                        if most_recent_file:
-                            # Create a forced chart-maker step
-                            next_step = WorkflowStepPlan(
-                                step_number=current_step_number,
-                                atom_id="chart-maker",
-                                description=f"Create visualization of the final results from {self._display_file_name(most_recent_file)}",
-                                prompt="",
-                                files_used=[most_recent_file],
-                                inputs=[most_recent_file],
-                                output_alias="final_visualization"
-                            )
-                            logger.info(f"📊 ReAct: Forced chart-maker step using {most_recent_file}")
-                        else:
-                            logger.warning("⚠️ ReAct: No files available for forced chart-maker, marking goal as achieved")
-                            react_state.goal_achieved = True
-                            break
-                    else:
-                        logger.info("✅ ReAct: Goal achieved, no more steps needed")
-                        react_state.goal_achieved = True
-                        break
-                
-                # Update step number from generated step
-                next_step.step_number = current_step_number
-                
-                # ENHANCED LOOP DETECTION: Check if we're repeating the same atom with same files
-                if execution_history:
-                    last_step = execution_history[-1]
-                    last_atom = last_step.get("atom_id")
-                    current_atom = next_step.atom_id
-                    
-                    # Check for exact match: same atom + same files
-                    if last_atom == current_atom:
-                        # Check if files are the same too
-                        last_files = set(last_step.get("files_used", []))  # Get from execution_history
-                        current_files = set(next_step.files_used or [])
-                        
-                        if last_files and current_files and last_files == current_files:
-                            logger.warning(f"⚠️ ReAct: LOOP DETECTED - Same atom '{current_atom}' with same files being repeated!")
-                            logger.warning(f"   Last step files: {last_files}")
-                            logger.warning(f"   Current step files: {current_files}")
-                            logger.warning(f"   Last step description: {last_step.get('description', 'N/A')}")
-                            logger.warning(f"   Current step description: {next_step.description}")
-                            
-                            # Force goal achieved to stop the loop
-                            logger.info("🛑 ReAct: Stopping workflow to prevent infinite loop")
-                            react_state.goal_achieved = True
-                            
-                            # Send loop detection event
-                            try:
-                                await self._send_event(
-                                    websocket,
-                                    WebSocketEvent(
-                                        "react_loop_detected",
-                                        {
-                                            "sequence_id": sequence_id,
-                                            "step_number": current_step_number,
-                                            "repeated_atom": current_atom,
-                                            "message": f"Loop detected: {current_atom} repeated with same files. Stopping workflow."
-                                        }
-                                    ),
-                                    "react_loop_detected event"
-                                )
-                            except (WebSocketDisconnect, Exception) as e:
-                                logger.warning(f"⚠️ Failed to send loop detection event: {e}")
-                            
-                            break
-                        else:
-                            logger.info(f"ℹ️ ReAct: Same atom '{current_atom}' but different files - allowing")
-                            logger.debug(f"   Last files: {last_files}, Current files: {current_files}")
-                    else:
-                        logger.info(f"ℹ️ ReAct: Different atom - {last_atom} -> {current_atom}")
-                    
-                    # Additional check: If same atom was used 2+ times in last 3 steps, warn
-                    if len(execution_history) >= 2:
-                        recent_atoms = [h.get("atom_id") for h in execution_history[-3:]]
-                        atom_count = recent_atoms.count(current_atom)
-                        if atom_count >= 2:
-                            logger.warning(f"⚠️ ReAct: Atom '{current_atom}' used {atom_count} times in last 3 steps - potential loop risk")
-                            # Don't stop, but log warning for evaluation to catch
-                
-                # ============================================================
-                # ACTION: Execute the step
-                # ============================================================
-                logger.info(f"⚡ ReAct: ACTION - Executing step {current_step_number} ({next_step.atom_id})...")
-                
-                # Send action event (with error handling)
-                try:
-                    await self._send_event(
-                        websocket,
-                        WebSocketEvent(
-                            "react_action",
-                            {
-                                "sequence_id": sequence_id,
-                                "step_number": current_step_number,
-                                "atom_id": next_step.atom_id,
-                                "description": next_step.description,
-                                "message": f"Executing {next_step.atom_id}..."
-                            }
-                        ),
-                        "react_action event"
-                    )
-                except (WebSocketDisconnect, Exception) as e:
-                    logger.warning(f"⚠️ Failed to send react_action event: {e}, continuing...")
-                
-                # Create a minimal plan for execution compatibility
-                plan = WorkflowPlan(
-                    workflow_steps=[next_step],
-                    total_steps=1
-                )
-                
-                # Execute the step
-                # IMPORTANT: Always get the latest available_files that includes newly created files from previous steps
-                current_available_files_for_exec = self._sequence_available_files.get(sequence_id, available_files.copy())
-                logger.info(f"📁 ReAct: Using {len(current_available_files_for_exec)} available files for step {current_step_number} execution")
-                try:
-                    execution_result = await self._execute_step_with_events(
-                        websocket=websocket,
-                        step=next_step,
-                        plan=plan,
-                        sequence_id=sequence_id,
-                        original_prompt=effective_user_prompt,
-                        project_context=project_context,
-                        user_id=user_id,
-                        available_files=current_available_files_for_exec,  # Use updated file list with newly created files
-                        frontend_chat_id=frontend_chat_id  # Pass chat_id for cache isolation
-                    )
-                except Exception as e:
-                    logger.error(f"❌ ReAct: Step execution failed: {e}")
-                    execution_result = {
-                        "success": False,
-                        "error": str(e),
-                        "message": f"Step execution failed: {str(e)}"
-                    }
-                
-                # ============================================================
-                # OBSERVATION: Evaluate the result
-                # ============================================================
-                logger.info(f"👁️ ReAct: OBSERVATION - Evaluating step {current_step_number} result...")
-                
-                # Send observation event (with error handling)
-                try:
-                    await self._send_event(
-                        websocket,
-                        WebSocketEvent(
-                            "react_observation",
-                            {
-                                "sequence_id": sequence_id,
-                                "step_number": current_step_number,
-                                "message": "Evaluating execution result..."
-                            }
-                        ),
-                        "react_observation event"
-                    )
-                except (WebSocketDisconnect, Exception) as e:
-                    logger.warning(f"⚠️ Failed to send react_observation event: {e}, continuing...")
-                
-                # Evaluate with timeout protection
-                try:
-                    evaluation = await asyncio.wait_for(
-                        self._evaluate_step_result(
-                            execution_result=execution_result,
-                            atom_id=next_step.atom_id,
-                            step_number=current_step_number,
-                            user_prompt=effective_user_prompt,
-                            step_plan=next_step,
-                            execution_history=execution_history,
-                            sequence_id=sequence_id
-                        ),
-                        timeout=120.0  # 2 minute timeout for evaluation
-                    )
-                except asyncio.TimeoutError:
-                    logger.error(f"❌ ReAct: Evaluation timed out after 120s, using fallback")
-                    # Fallback evaluation
-                    success = bool(execution_result.get("success", True))
-                    evaluation = StepEvaluation(
-                        decision="continue" if success else "retry_with_correction",
-                        reasoning="Evaluation timed out, using fallback based on success flag",
-                        correctness=success,
-                        issues=["Evaluation timeout"] if not success else []
-                    )
-                except Exception as e:
-                    logger.error(f"❌ ReAct: Evaluation failed: {e}, using fallback")
-                    # Fallback evaluation
-                    success = bool(execution_result.get("success", True))
-                    evaluation = StepEvaluation(
-                        decision="continue" if success else "retry_with_correction",
-                        reasoning=f"Evaluation error: {str(e)}, using fallback",
-                        correctness=success,
-                        issues=[f"Evaluation error: {str(e)}"]
-                    )
-                
-                # ============================================================
-                # AUTO-SAVE: Save step output immediately for next steps
-                # ============================================================
-                if execution_result.get("success", True):
-                    try:
-                        logger.info(f"💾 ReAct: Auto-saving step {current_step_number} output...")
-                        # Get current available files list (will be updated by _auto_save_step)
-                        files_before_save = len(self._sequence_available_files.get(sequence_id, []))
-                        
-                        await self._auto_save_step(
-                            sequence_id=sequence_id,
-                            step_number=current_step_number,
-                            workflow_step=next_step,
-                            available_files=available_files,  # This will be updated with new file
-                            frontend_chat_id=frontend_chat_id  # Pass chat_id for cache isolation
-                        )
-                        
-                        # Verify file was added
-                        files_after_save = len(self._sequence_available_files.get(sequence_id, []))
-                        logger.info(f"✅ ReAct: Step {current_step_number} output saved. Files: {files_before_save} -> {files_after_save}")
-                        
-                        # Send file_created event for UI
-                        try:
-                            saved_path = self._step_output_files.get(sequence_id, {}).get(current_step_number)
-                            if saved_path:
-                                logger.info(f"📄 ReAct: New file available for next steps: {saved_path}")
-                                await self._send_event(
-                                    websocket,
-                                    WebSocketEvent(
-                                        "file_created",
-                                        {
-                                            "sequence_id": sequence_id,
-                                            "step_number": current_step_number,
-                                            "file_path": saved_path,
-                                            "output_alias": next_step.output_alias,
-                                            "message": f"File created: {saved_path}",
-                                            "available_for_next_steps": True
-                                        }
-                                    ),
-                                    "file_created event"
-                                )
-                        except (WebSocketDisconnect, Exception) as e:
-                            logger.warning(f"⚠️ Failed to send file_created event: {e}")
-                    except Exception as save_error:
-                        logger.error(f"❌ ReAct: Auto-save failed for step {current_step_number}: {save_error}")
-                        # Continue anyway - file might still be usable
-                
-                # Add to execution history (include files_used for loop detection)
-                execution_history.append({
-                    "step_number": current_step_number,
-                    "atom_id": next_step.atom_id,
-                    "files_used": next_step.files_used or [],  # Track files for loop detection
-                    "description": next_step.description,  # Track description for context
-                    "result": execution_result,
-                    "evaluation": evaluation.__dict__
-                })
-                previous_results.append(execution_result)
-                
-                # Record in ReAct state (include description and files_used for workflow context)
-                react_state.add_execution(
-                    step_number=current_step_number,
-                    atom_id=next_step.atom_id,
-                    result=execution_result,
-                    evaluation=evaluation,
-                    description=next_step.description,
-                    files_used=next_step.files_used or []
-                )
-                
-                # ============================================================
-                # DECISION: Handle evaluation decision
-                # ============================================================
-                try:
-                    should_continue, retry_step = await asyncio.wait_for(
-                        self._handle_react_decision(
-                            evaluation=evaluation,
-                            step_plan=next_step,
-                            sequence_id=sequence_id,
-                            websocket=websocket,
-                            execution_result=execution_result
-                        ),
-                        timeout=10.0  # 10 second timeout for decision handling
-                    )
-                except asyncio.TimeoutError:
-                    logger.error(f"❌ ReAct: Decision handling timed out, defaulting to continue")
-                    should_continue = True
-                    retry_step = None
-                except Exception as e:
-                    logger.error(f"❌ ReAct: Decision handling failed: {e}, defaulting to continue")
-                    should_continue = True
-                    retry_step = None
-                
-                if not should_continue:
-                    # Goal achieved or workflow complete - but check if chart-maker was used
-                    chart_maker_used = any(h.get("atom_id") == "chart-maker" for h in execution_history)
-                    if not chart_maker_used and execution_history:
-                        logger.info("📊 ReAct: Goal marked as achieved but chart-maker not used - forcing chart-maker step")
-                        # Force chart-maker as the final step
-                        current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
-                        most_recent_file = current_available_files[-1] if current_available_files else None
-                        
-                        if most_recent_file:
-                            # Create a forced chart-maker step
-                            forced_chart_step = WorkflowStepPlan(
-                                step_number=current_step_number + 1,
-                                atom_id="chart-maker",
-                                description=f"Create visualization of the final results from {self._display_file_name(most_recent_file)}",
-                                prompt="",
-                                files_used=[most_recent_file],
-                                inputs=[most_recent_file],
-                                output_alias="final_visualization"
-                            )
-                            logger.info(f"📊 ReAct: Forced chart-maker step using {most_recent_file}")
-                            # Set next_step to the forced chart step and continue
-                            next_step = forced_chart_step
-                            should_continue = True
-                            react_state.goal_achieved = False
-                            # Continue the loop to execute the forced chart-maker step
-                            # Skip the retry check since we're forcing a new step
-                            continue
-                        else:
-                            logger.warning("⚠️ ReAct: No files available for forced chart-maker, marking goal as achieved")
-                            react_state.goal_achieved = True
-                            break
-                    else:
-                        # Goal achieved and chart-maker used (or no execution history)
-                        react_state.goal_achieved = True
-                        break
-                
-                if retry_step is not None:
-                    # Retry the same step with corrections
-                    logger.info(f"🔄 ReAct: Retrying step {current_step_number} with corrections...")
-                    
-                    # Send correction event (with error handling)
                     try:
                         await self._send_event(
                             websocket,
                             WebSocketEvent(
-                                "react_correction",
+                                "react_abort_complexity",
                                 {
                                     "sequence_id": sequence_id,
                                     "step_number": current_step_number,
-                                    "reasoning": evaluation.reasoning,
-                                    "corrected_prompt": evaluation.corrected_prompt,
-                                    "message": "Retrying step with corrections..."
-                                }
+                                    "message": "Workflow stopped: too many sequential operations; replan with a smaller set of actions.",
+                                },
                             ),
-                            "react_correction event"
+                            "react_abort_complexity event",
                         )
                     except (WebSocketDisconnect, Exception) as e:
-                        logger.warning(f"⚠️ Failed to send react_correction event: {e}, continuing...")
-                    
-                    # Don't increment step number, retry same step
+                        logger.warning(f"⚠️ Failed to send complexity abort event: {e}")
+                    break
+
+                current_step_number += 1
+                logger.info(f"🔄 ReAct Cycle {current_step_number}: Starting...")
+
+                active_guard = self._react_step_guards.get(sequence_id)
+                if active_guard:
+                    logger.warning(
+                        "⚠️ ReAct: Previous step %s still marked %s - waiting before starting new step",
+                        active_guard.get("step_number"),
+                        active_guard.get("status", "in_progress"),
+                    )
                     current_step_number -= 1
+                    await asyncio.sleep(0.5)
                     continue
+
+                guard_token = uuid.uuid4().hex
+                self._react_step_guards[sequence_id] = {
+                    "token": guard_token,
+                    "step_number": current_step_number,
+                    "status": "planning",
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+
+                try:
                 
-                # Continue to next step
-                logger.info(f"➡️ ReAct: Continuing to next step...")
-                
-                # Additional loop prevention: If we've done many steps with same pattern, check for completion
-                if current_step_number >= 5 and len(execution_history) >= 5:
-                    # Check if last few steps are all successful
-                    recent_successes = [h.get("result", {}).get("success", False) for h in execution_history[-5:]]
-                    if all(recent_successes):
-                        logger.info(f"ℹ️ ReAct: Last 5 steps all successful - checking if goal might be achieved")
-                        # Check if same atom repeated
+                    # Send progress update
+                    try:
+                        progress_percent = min(int((current_step_number / max_steps) * 100), 99)  # Cap at 99% until complete
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "workflow_progress",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "current_step": current_step_number,
+                                    "total_steps": "?",
+                                    "progress_percent": progress_percent,
+                                    "status": "in_progress",
+                                    "loading": True,
+                                    "message": f"Processing step {current_step_number}..."
+                                }
+                            ),
+                            "workflow_progress event"
+                        )
+                    except (WebSocketDisconnect, Exception) as e:
+                        logger.warning(f"⚠️ Failed to send progress event: {e}")
+                    
+                    # ============================================================
+                    # THOUGHT: Generate next step
+                    # ============================================================
+                    logger.info(f"💭 ReAct: THOUGHT - Planning next step...")
+                    # Send thought event (with error handling)
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_thought",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "message": "Analyzing current state and planning next action...",
+                                    "loading": True
+                                }
+                            ),
+                            "react_thought event",
+                        )
+                    except (WebSocketDisconnect, Exception) as e:
+                        logger.warning(f"⚠️ Failed to send react_thought event: {e}, continuing...")
+
+                    # Generate next step with timeout protection
+                    # IMPORTANT: Always get the latest available_files that includes newly created files from previous steps
+                    self._update_react_step_guard(sequence_id, guard_token, "planning_next_step")
+                    current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+                    logger.info(f"📁 ReAct: Using {len(current_available_files)} available files for step {current_step_number} planning")
+                    if current_available_files:
+                        logger.debug(f"   Latest files: {current_available_files[-3:]}")  # Show last 3 files
+                    
+                    # Check for loop: same atom repeated multiple times
+                    if len(execution_history) >= 2:
                         recent_atoms = [h.get("atom_id") for h in execution_history[-3:]]
-                        if len(set(recent_atoms)) == 1:
-                            logger.warning(f"⚠️ ReAct: Same atom '{recent_atoms[0]}' repeated 3+ times with success - goal may be achieved")
-                            # Force evaluation to consider completion
-                            if evaluation.decision != "complete":
-                                logger.warning(f"⚠️ ReAct: Evaluation didn't mark as complete, but pattern suggests it should be")
-                                # Don't force it, but log the warning
-            
+                        if len(set(recent_atoms)) == 1 and len(recent_atoms) >= 2:
+                            repeated_atom = recent_atoms[0]
+                            logger.warning(f"⚠️ ReAct: Detected loop - same atom '{repeated_atom}' repeated {len(recent_atoms)} times")
+                            # Add warning to prompt context
+                            effective_user_prompt_with_warning = f"{effective_user_prompt}\n\n⚠️ WARNING: The atom '{repeated_atom}' has been executed {len(recent_atoms)} times in a row. You MUST choose a DIFFERENT atom or set goal_achieved: true if the task is complete."
+                        else:
+                            effective_user_prompt_with_warning = effective_user_prompt
+                    else:
+                        effective_user_prompt_with_warning = effective_user_prompt
+    
+                    async def _react_generation_status(attempt: int, elapsed: float, timed_out: bool) -> None:
+                        message = (
+                            f"Still planning step {current_step_number} (attempt {attempt}) after {int(elapsed)}s."
+                        )
+                        if timed_out:
+                            message = (
+                                f"Step {current_step_number} planning timed out after {int(elapsed)}s."
+                            )
+                        try:
+                            await self._send_event(
+                                websocket,
+                                WebSocketEvent(
+                                    "react_generation_status",
+                                    {
+                                        "sequence_id": sequence_id,
+                                        "step_number": current_step_number,
+                                        "attempt": attempt,
+                                        "elapsed_seconds": int(elapsed),
+                                        "timed_out": timed_out,
+                                        "message": message,
+                                    },
+                                ),
+                                "react_generation_status event",
+                            )
+                        except (WebSocketDisconnect, Exception):
+                            logger.debug("⚠️ Unable to send generation status update", exc_info=True)
+    
+                    try:
+                        next_step = await asyncio.wait_for(
+                            self._generate_next_step_with_react(
+                                user_prompt=effective_user_prompt_with_warning,
+                                execution_history=execution_history,
+                                available_files=current_available_files,  # Use updated file list with newly created files
+                                previous_results=previous_results,
+                                sequence_id=sequence_id,
+                                priority_files=file_focus,
+                                status_callback=_react_generation_status,
+                                llm_timeout=self.llm_attempt_timeout_seconds,
+                            ),
+                            timeout=90.0  # 90 second timeout for step generation
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error(f"❌ ReAct: Step generation timed out after 90s, stopping workflow")
+                        react_state.goal_achieved = True
+                        react_state.paused = True
+                        react_state.paused_at_step = current_step_number
+                        react_state.current_step_number = current_step_number
+                        self._paused_sequences.add(sequence_id)
+                        try:
+                            await self._send_event(
+                                websocket,
+                                WebSocketEvent(
+                                    "react_generation_timeout",
+                                    {
+                                        "sequence_id": sequence_id,
+                                        "step_number": current_step_number,
+                                        "message": "Planning timed out. Please retry to resume from this step.",
+                                    },
+                                ),
+                                "react_generation_timeout event",
+                            )
+                        except (WebSocketDisconnect, Exception):
+                            logger.debug("⚠️ Unable to send generation timeout event", exc_info=True)
+                        break
+                    except Exception as e:
+                        logger.error(f"❌ ReAct: Step generation failed: {e}, stopping workflow")
+                        react_state.goal_achieved = True
+                        react_state.paused = True
+                        react_state.paused_at_step = current_step_number
+                        react_state.current_step_number = current_step_number
+                        self._paused_sequences.add(sequence_id)
+                        try:
+                            await self._send_event(
+                                websocket,
+                                WebSocketEvent(
+                                    "react_generation_failed",
+                                    {
+                                        "sequence_id": sequence_id,
+                                        "step_number": current_step_number,
+                                        "message": "Planning encountered an error. Please retry to continue from this step.",
+                                    },
+                                ),
+                                "react_generation_failed event",
+                            )
+                        except (WebSocketDisconnect, Exception):
+                            logger.debug("⚠️ Unable to send generation failure event", exc_info=True)
+                        break
+                
+                    if next_step is None:
+                        # Check if chart-maker has been used before marking goal as achieved
+                        chart_maker_used = any(h.get("atom_id") == "chart-maker" for h in execution_history)
+                        if not chart_maker_used and execution_history:
+                            logger.info("📊 ReAct: Goal marked as achieved but chart-maker not used - forcing chart-maker step")
+                            # Force chart-maker as the final step
+                            current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+                            most_recent_file = current_available_files[-1] if current_available_files else None
+                            
+                            if most_recent_file:
+                                # Create a forced chart-maker step
+                                next_step = WorkflowStepPlan(
+                                    step_number=current_step_number,
+                                    atom_id="chart-maker",
+                                    description=f"Create visualization of the final results from {self._display_file_name(most_recent_file)}",
+                                    prompt="",
+                                    files_used=[most_recent_file],
+                                    inputs=[most_recent_file],
+                                    output_alias="final_visualization"
+                                )
+                                logger.info(f"📊 ReAct: Forced chart-maker step using {most_recent_file}")
+                            else:
+                                logger.warning("⚠️ ReAct: No files available for forced chart-maker, marking goal as achieved")
+                                react_state.goal_achieved = True
+                                break
+                        else:
+                            logger.info("✅ ReAct: Goal achieved, no more steps needed")
+                            react_state.goal_achieved = True
+                            break
+                    
+                    # Update step number from generated step
+                    next_step.step_number = current_step_number
+                    self._update_react_step_guard(sequence_id, guard_token, "plan_ready")
+
+                    # Cache the generated plan for potential replays/recovery
+                    self._sequence_step_plans.setdefault(sequence_id, {})[current_step_number] = copy.deepcopy(next_step)
+                    
+                    # ENHANCED LOOP DETECTION: Check if we're repeating the same atom with same files
+                    if execution_history:
+                        last_step = execution_history[-1]
+                        last_atom = last_step.get("atom_id")
+                        current_atom = next_step.atom_id
+                        
+                        # Check for exact match: same atom + same files
+                        if last_atom == current_atom:
+                            # Check if files are the same too
+                            last_files = set(last_step.get("files_used", []))  # Get from execution_history
+                            current_files = set(next_step.files_used or [])
+                            
+                            if last_files and current_files and last_files == current_files:
+                                logger.warning(f"⚠️ ReAct: LOOP DETECTED - Same atom '{current_atom}' with same files being repeated!")
+                                logger.warning(f"   Last step files: {last_files}")
+                                logger.warning(f"   Current step files: {current_files}")
+                                logger.warning(f"   Last step description: {last_step.get('description', 'N/A')}")
+                                logger.warning(f"   Current step description: {next_step.description}")
+                                
+                                # Force goal achieved to stop the loop
+                                logger.info("🛑 ReAct: Stopping workflow to prevent infinite loop")
+                                react_state.goal_achieved = True
+                                
+                                # Send loop detection event
+                                try:
+                                    await self._send_event(
+                                        websocket,
+                                        WebSocketEvent(
+                                            "react_loop_detected",
+                                            {
+                                                "sequence_id": sequence_id,
+                                                "step_number": current_step_number,
+                                                "repeated_atom": current_atom,
+                                                "message": f"Loop detected: {current_atom} repeated with same files. Stopping workflow."
+                                            }
+                                        ),
+                                        "react_loop_detected event"
+                                    )
+                                except (WebSocketDisconnect, Exception) as e:
+                                    logger.warning(f"⚠️ Failed to send loop detection event: {e}")
+                                
+                                break
+                            else:
+                                logger.info(f"ℹ️ ReAct: Same atom '{current_atom}' but different files - allowing")
+                                logger.debug(f"   Last files: {last_files}, Current files: {current_files}")
+                        else:
+                            logger.info(f"ℹ️ ReAct: Different atom - {last_atom} -> {current_atom}")
+                        
+                        # Additional check: If same atom was used 2+ times in last 3 steps, warn
+                        if len(execution_history) >= 2:
+                            recent_atoms = [h.get("atom_id") for h in execution_history[-3:]]
+                            atom_count = recent_atoms.count(current_atom)
+                            if atom_count >= 2:
+                                logger.warning(f"⚠️ ReAct: Atom '{current_atom}' used {atom_count} times in last 3 steps - potential loop risk")
+                                # Don't stop, but log warning for evaluation to catch
+                    
+                    # ============================================================
+                    # ACTION: Execute the step
+                    # ============================================================
+                    logger.info(f"⚡ ReAct: ACTION - Executing step {current_step_number} ({next_step.atom_id})...")
+
+                    # Validate that the previous step produced sensible outputs before chaining
+                    self._update_react_step_guard(sequence_id, guard_token, "validating_dependencies")
+                    validation_passed, validation_reason = self._validate_chain_for_next_step(
+                        sequence_id=sequence_id,
+                        execution_history=execution_history,
+                        next_step=next_step,
+                    )
+                    if not validation_passed:
+                        self._update_react_step_guard(sequence_id, guard_token, "blocked_validation")
+                        logger.warning(
+                            "⚠️ ReAct: Blocking step %s due to failed dependency validation: %s",
+                            next_step.atom_id,
+                            validation_reason,
+                        )
+                        try:
+                            await self._send_event(
+                                websocket,
+                                WebSocketEvent(
+                                    "react_validation_blocked",
+                                    {
+                                        "sequence_id": sequence_id,
+                                        "step_number": current_step_number,
+                                        "atom_id": next_step.atom_id,
+                                        "message": validation_reason,
+                                    },
+                                ),
+                                "react_validation_blocked event",
+                            )
+                        except (WebSocketDisconnect, Exception) as e:
+                          logger.warning(f"⚠️ Failed to send validation_blocked event: {e}")
+                        
+                        # Attempt to replay the previous step to materialize the needed output when missing
+                        replayed_previous = False
+                        dependency_tokens: List[str] = []
+                        if next_step.files_used:
+                            dependency_tokens.extend(next_step.files_used)
+                        if next_step.inputs:
+                            dependency_tokens.extend(next_step.inputs)
+                        if "No materialized output from prior step" in validation_reason:
+                            replayed_previous = await self._replay_previous_step_for_output(
+                                websocket=websocket,
+                                sequence_id=sequence_id,
+                                execution_history=execution_history,
+                                project_context=project_context,
+                                user_id=user_id,
+                                original_prompt=effective_user_prompt,
+                                available_files=available_files,
+                                frontend_chat_id=frontend_chat_id,
+                                react_state=react_state,
+                              dependency_tokens=dependency_tokens,
+                          )
+                            if replayed_previous:
+                                logger.info("🔄 ReAct: Previous step re-executed to produce materialized output; retrying current step plan")
+                        
+                        # Re-plan without advancing the step counter
+                        current_step_number = max(0, current_step_number - 1)
+                        react_state.retry_count = 0
+                        continue
+
+                    self._update_react_step_guard(sequence_id, guard_token, "executing_atom")
+
+                    # Send action event (with error handling)
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_action",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "atom_id": next_step.atom_id,
+                                    "description": next_step.description,
+                                    "message": f"Executing {next_step.atom_id}..."
+                                }
+                            ),
+                            "react_action event"
+                        )
+                    except (WebSocketDisconnect, Exception) as e:
+                        logger.warning(f"⚠️ Failed to send react_action event: {e}, continuing...")
+                    
+                    # Create a minimal plan for execution compatibility
+                    plan = WorkflowPlan(
+                        workflow_steps=[next_step],
+                        total_steps=1
+                    )
+                    
+                    # Execute the step
+                    # IMPORTANT: Always get the latest available_files that includes newly created files from previous steps
+                    current_available_files_for_exec = self._sequence_available_files.get(sequence_id, available_files.copy())
+                    logger.info(f"📁 ReAct: Using {len(current_available_files_for_exec)} available files for step {current_step_number} execution")
+                    try:
+                        execution_result = await self._execute_step_with_events(
+                            websocket=websocket,
+                            step=next_step,
+                            plan=plan,
+                            sequence_id=sequence_id,
+                            original_prompt=effective_user_prompt,
+                            project_context=project_context,
+                            user_id=user_id,
+                            available_files=current_available_files_for_exec,  # Use updated file list with newly created files
+                            frontend_chat_id=frontend_chat_id  # Pass chat_id for cache isolation
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ ReAct: Step execution failed: {e}")
+                        execution_result = {
+                            "success": False,
+                            "error": str(e),
+                            "message": f"Step execution failed: {str(e)}"
+                        }
+                    
+                    # ============================================================
+                    # OBSERVATION: Evaluate the result
+                    # ============================================================
+                    logger.info(f"👁️ ReAct: OBSERVATION - Evaluating step {current_step_number} result...")
+                    self._update_react_step_guard(sequence_id, guard_token, "evaluating_result")
+                    
+                    # Send observation event (with error handling)
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_observation",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "message": "Evaluating execution result..."
+                                }
+                            ),
+                            "react_observation event"
+                        )
+                    except (WebSocketDisconnect, Exception) as e:
+                        logger.warning(f"⚠️ Failed to send react_observation event: {e}, continuing...")
+                    
+                    # Evaluate with timeout protection
+                    try:
+                        evaluation = await asyncio.wait_for(
+                            self._evaluate_step_result(
+                                execution_result=execution_result,
+                              atom_id=next_step.atom_id,
+                              step_number=current_step_number,
+                              user_prompt=effective_user_prompt,
+                              step_plan=next_step,
+                              execution_history=execution_history,
+                              sequence_id=sequence_id
+                          ),
+                          timeout=120.0  # 2 minute timeout for evaluation
+                      )
+                    except asyncio.TimeoutError:
+                        logger.error(f"❌ ReAct: Evaluation timed out after 120s, using fallback")
+                        # Fallback evaluation
+                        success = bool(execution_result.get("success", True))
+                        evaluation = StepEvaluation(
+                            decision="continue" if success else "retry_with_correction",
+                            reasoning="Evaluation timed out, using fallback based on success flag",
+                            correctness=success,
+                            issues=["Evaluation timeout"] if not success else []
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ ReAct: Evaluation failed: {e}, using fallback")
+                        # Fallback evaluation
+                        success = bool(execution_result.get("success", True))
+                        evaluation = StepEvaluation(
+                            decision="continue" if success else "retry_with_correction",
+                            reasoning=f"Evaluation error: {str(e)}, using fallback",
+                            correctness=success,
+                            issues=[f"Evaluation error: {str(e)}"]
+                        )
+
+                    self._update_react_step_guard(sequence_id, guard_token, "decision_ready")
+                    
+                    # ============================================================
+                    # AUTO-SAVE: Save step output immediately for next steps
+                    # ============================================================
+                    if execution_result.get("success", True):
+                        try:
+                            logger.info(f"💾 ReAct: Auto-saving step {current_step_number} output...")
+                            # Get current available files list (will be updated by _auto_save_step)
+                            files_before_save = len(self._sequence_available_files.get(sequence_id, []))
+                            
+                            await self._auto_save_step(
+                                sequence_id=sequence_id,
+                                step_number=current_step_number,
+                                workflow_step=next_step,
+                                available_files=available_files,  # This will be updated with new file
+                                frontend_chat_id=frontend_chat_id  # Pass chat_id for cache isolation
+                            )
+                            
+                            # Verify file was added
+                            files_after_save = len(self._sequence_available_files.get(sequence_id, []))
+                            logger.info(f"✅ ReAct: Step {current_step_number} output saved. Files: {files_before_save} -> {files_after_save}")
+                            
+                            # Send file_created event for UI
+                            try:
+                                saved_path = self._step_output_files.get(sequence_id, {}).get(current_step_number)
+                                if saved_path:
+                                    logger.info(f"📄 ReAct: New file available for next steps: {saved_path}")
+                                    await self._send_event(
+                                        websocket,
+                                        WebSocketEvent(
+                                            "file_created",
+                                            {
+                                                "sequence_id": sequence_id,
+                                                "step_number": current_step_number,
+                                                "file_path": saved_path,
+                                                "output_alias": next_step.output_alias,
+                                                "message": f"File created: {saved_path}",
+                                                "available_for_next_steps": True
+                                            }
+                                        ),
+                                        "file_created event"
+                                    )
+                            except (WebSocketDisconnect, Exception) as e:
+                                logger.warning(f"⚠️ Failed to send file_created event: {e}")
+                        except Exception as save_error:
+                            logger.error(f"❌ ReAct: Auto-save failed for step {current_step_number}: {save_error}")
+                            # Continue anyway - file might still be usable
+                    
+                    # Add to execution history (include files_used for loop detection)
+                    execution_history.append({
+                        "step_number": current_step_number,
+                        "atom_id": next_step.atom_id,
+                        "files_used": next_step.files_used or [],  # Track files for loop detection
+                        "description": next_step.description,  # Track description for context
+                        "output_alias": next_step.output_alias,
+                        "result": execution_result,
+                        "evaluation": evaluation.__dict__
+                    })
+                    # Reset stall watchdog now that we have material progress
+                    stall_guard = self._react_stall_watchdogs.get(sequence_id)
+                    if stall_guard is not None:
+                        stall_guard["last_history_len"] = len(execution_history)
+                        stall_guard["stalled_attempts"] = 0
+                    previous_results.append(execution_result)
+                    
+                    # Record in ReAct state (include description and files_used for workflow context)
+                    react_state.add_execution(
+                        step_number=current_step_number,
+                        atom_id=next_step.atom_id,
+                        result=execution_result,
+                        evaluation=evaluation,
+                        description=next_step.description,
+                        files_used=next_step.files_used or []
+                    )
+                    react_state.current_step_number = current_step_number
+                    
+                    # ============================================================
+                    # DECISION: Handle evaluation decision
+                    # ============================================================
+                    try:
+                        should_continue, retry_step = await asyncio.wait_for(
+                            self._handle_react_decision(
+                                evaluation=evaluation,
+                                step_plan=next_step,
+                                sequence_id=sequence_id,
+                                websocket=websocket,
+                                execution_result=execution_result
+                            ),
+                            timeout=10.0  # 10 second timeout for decision handling
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error(f"❌ ReAct: Decision handling timed out, defaulting to continue")
+                        should_continue = True
+                        retry_step = None
+                    except Exception as e:
+                        logger.error(f"❌ ReAct: Decision handling failed: {e}, defaulting to continue")
+                        should_continue = True
+                        retry_step = None
+                    
+                    if not should_continue:
+                        # Goal achieved or workflow complete - but check if chart-maker was used
+                        chart_maker_used = any(h.get("atom_id") == "chart-maker" for h in execution_history)
+                        if not chart_maker_used and execution_history:
+                            logger.info("📊 ReAct: Goal marked as achieved but chart-maker not used - forcing chart-maker step")
+                            # Force chart-maker as the final step
+                            current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+                            most_recent_file = current_available_files[-1] if current_available_files else None
+                            
+                            if most_recent_file:
+                                # Create a forced chart-maker step
+                                forced_chart_step = WorkflowStepPlan(
+                                    step_number=current_step_number + 1,
+                                    atom_id="chart-maker",
+                                    description=f"Create visualization of the final results from {self._display_file_name(most_recent_file)}",
+                                    prompt="",
+                                    files_used=[most_recent_file],
+                                    inputs=[most_recent_file],
+                                    output_alias="final_visualization"
+                                )
+                                logger.info(f"📊 ReAct: Forced chart-maker step using {most_recent_file}")
+                                # Set next_step to the forced chart step and continue
+                                next_step = forced_chart_step
+                                should_continue = True
+                                react_state.goal_achieved = False
+                                # Continue the loop to execute the forced chart-maker step
+                                # Skip the retry check since we're forcing a new step
+                                continue
+                            else:
+                                logger.warning("⚠️ ReAct: No files available for forced chart-maker, marking goal as achieved")
+                                react_state.goal_achieved = True
+                                break
+                        else:
+                            # Goal achieved and chart-maker used (or no execution history)
+                            react_state.goal_achieved = True
+                            break
+                    
+                    if retry_step is not None:
+                        # Retry the same step with corrections
+                        logger.info(f"🔄 ReAct: Retrying step {current_step_number} with corrections...")
+                        
+                        # Send correction event (with error handling)
+                        try:
+                            await self._send_event(
+                                websocket,
+                                WebSocketEvent(
+                                    "react_correction",
+                                    {
+                                        "sequence_id": sequence_id,
+                                        "step_number": current_step_number,
+                                        "reasoning": evaluation.reasoning,
+                                        "corrected_prompt": evaluation.corrected_prompt,
+                                        "message": "Retrying step with corrections..."
+                                    }
+                                ),
+                                "react_correction event"
+                            )
+                        except (WebSocketDisconnect, Exception) as e:
+                            logger.warning(f"⚠️ Failed to send react_correction event: {e}, continuing...")
+                        
+                        # Don't increment step number, retry same step
+                        current_step_number -= 1
+                        continue
+                    
+                    # Continue to next step
+                    logger.info(f"➡️ ReAct: Continuing to next step...")
+
+                    # Additional loop prevention: If we've done many steps with same pattern, check for completion
+                    if current_step_number >= 5 and len(execution_history) >= 5:
+                        # Check if last few steps are all successful
+                        recent_successes = [h.get("result", {}).get("success", False) for h in execution_history[-5:]]
+                        if all(recent_successes):
+                            logger.info(f"ℹ️ ReAct: Last 5 steps all successful - checking if goal might be achieved")
+                            # Check if same atom repeated
+                            recent_atoms = [h.get("atom_id") for h in execution_history[-3:]]
+                            if len(set(recent_atoms)) == 1:
+                                logger.warning(f"⚠️ ReAct: Same atom '{recent_atoms[0]}' repeated 3+ times with success - goal may be achieved")
+                                # Force evaluation to consider completion
+                                if evaluation.decision != "complete":
+                                    logger.warning(f"⚠️ ReAct: Evaluation didn't mark as complete, but pattern suggests it should be")
+                                    # Don't force it, but log the warning
+
+                finally:
+                    guard_entry = self._react_step_guards.get(sequence_id)
+                    if guard_entry and guard_entry.get("token") == guard_token:
+                        self._react_step_guards.pop(sequence_id, None)
+
             # ================================================================
+            # ============================================================
             # WORKFLOW COMPLETE
-            # ================================================================
-            if react_state.goal_achieved:
+            # ============================================================
+            if abort_due_complexity:
+                logger.warning(
+                    f"⚠️ ReAct: Workflow stopped early after {current_step_number} steps due to complexity guard",
+                )
+                final_status = "aborted"
+                final_message = "Workflow stopped: too many operations; please simplify or ask for a smaller plan."
+            elif react_state.goal_achieved:
                 logger.info(f"✅ ReAct: Workflow completed successfully after {current_step_number} steps")
+                final_status = "completed"
+                final_message = "ReAct workflow completed!"
             elif current_step_number >= max_steps:
                 logger.warning(f"⚠️ ReAct: Reached max steps ({max_steps}), stopping workflow")
-            
+                final_status = "stopped"
+                final_message = "Reached maximum step limit; consider simplifying the request."
+            else:
+                final_status = "stopped"
+                final_message = "Workflow stopped."
+
             # Send final progress update
             try:
                 await self._send_event(
@@ -3054,16 +3607,16 @@ WORKFLOW PLANNING:
                             "current_step": current_step_number,
                             "total_steps": current_step_number,
                             "progress_percent": 100,
-                            "status": "completed",
+                            "status": final_status,
                             "loading": False,  # Turn off loading
-                            "message": "Workflow completed!"
+                            "message": final_message,
                         }
                     ),
-                    "workflow_progress event (final)"
+                    "workflow_progress event (final)",
                 )
             except (WebSocketDisconnect, Exception) as e:
                 logger.warning(f"⚠️ Failed to send final progress event: {e}")
-            
+
             await self._send_event(
                 websocket,
                 WebSocketEvent(
@@ -3072,11 +3625,11 @@ WORKFLOW PLANNING:
                         "sequence_id": sequence_id,
                         "total_steps": current_step_number,
                         "goal_achieved": react_state.goal_achieved,
-                        "message": "ReAct workflow completed!",
+                        "message": final_message,
                         "loading": False  # Turn off loading
                     }
                 ),
-                "workflow_completed event (ReAct)"
+                "workflow_completed event (ReAct)",
             )
             
             # Emit workflow insight if websocket is still connected
@@ -3129,7 +3682,7 @@ WORKFLOW PLANNING:
             logger.error(f"❌ Workflow execution failed: {e}")
             import traceback
             traceback.print_exc()
-            
+
             # Send error event
             try:
                 await self._send_event(
@@ -3146,8 +3699,23 @@ WORKFLOW PLANNING:
                 )
             except WebSocketDisconnect:
                 logger.info("🔌 WebSocket disconnected before error event could be delivered")
+            # Ensure we send a close frame with an explicit error code/reason to avoid client-side 1005 closures
+            await self._safe_close_websocket(
+                websocket,
+                code=1011,
+                reason=str(e)[:120] or "workflow_failed",
+            )
         finally:
-            self._cleanup_sequence_state(sequence_id)
+            react_state_final = self._sequence_react_state.get(sequence_id)
+            if react_state_final and react_state_final.paused:
+                logger.info(
+                    "⏸️ Preserving state for sequence %s to allow resume at step %s",
+                    sequence_id,
+                    react_state_final.paused_at_step or react_state_final.current_step_number,
+                )
+            else:
+                self._cleanup_sequence_state(sequence_id)
+                self._paused_sequences.discard(sequence_id)
             self._cancelled_sequences.discard(sequence_id)
     async def _execute_step_with_events(
         self,
@@ -3327,14 +3895,21 @@ WORKFLOW PLANNING:
                 execution_result=execution_result,
                 execution_success=execution_success
             )
-            
+
+            atom_insights = await self._generate_atom_insights(
+                goal=original_prompt,
+                step=step,
+                execution_result=execution_result,
+            )
+
             logger.info(f"✅ Atom executed: {json.dumps(execution_result, indent=2)[:150]}...")
             self._record_step_execution_result(
                 sequence_id=sequence_id,
                 step_number=step_number,
                 atom_id=atom_id,
                 execution_result=execution_result,
-                insight=insight_text
+                insight=insight_text,
+                atom_insights=atom_insights,
             )
             # ================================================================
             # EVENT 3: AGENT_EXECUTED (Frontend will call atom handler)
@@ -3353,7 +3928,8 @@ WORKFLOW PLANNING:
                         "sequence_id": sequence_id,
                         "output_alias": step.output_alias,
                         "summary": f"Executed {atom_id}",
-                        "insight": insight_text
+                        "insight": insight_text,
+                        "atom_insights": atom_insights,
                     }
                 ),
                 f"agent_executed event (step {step_number})"
@@ -3373,7 +3949,8 @@ WORKFLOW PLANNING:
                         "card_id": card_id,
                         "summary": f"Step {step_number} completed",
                         "sequence_id": sequence_id,
-                        "insight": insight_text
+                        "insight": insight_text,
+                        "atom_insights": atom_insights,
                     }
                 ),
                 f"step_completed event (step {step_number})"
@@ -3440,9 +4017,11 @@ WORKFLOW PLANNING:
         if not step.files_used and step.inputs:
             step.files_used = step.inputs.copy()
 
-    def _register_output_alias(self, sequence_id: str, alias: Optional[str], file_path: Optional[str]) -> None:
+    def _register_output_alias(
+        self, sequence_id: str, alias: Optional[str], file_path: Optional[str]
+    ) -> None:
         """Track which file path was produced for a given output alias."""
-        if not alias or not file_path:
+        if not alias or not file_path or not isinstance(alias, str):
             return
         alias_map = self._output_alias_registry.setdefault(sequence_id, {})
         normalized = self._normalize_alias_token(alias)
@@ -3451,7 +4030,7 @@ WORKFLOW PLANNING:
 
     def _resolve_alias_value(self, sequence_id: str, token: Optional[str]) -> Optional[str]:
         """Resolve an alias token to the stored file path if available."""
-        if not token:
+        if not token or not isinstance(token, str):
             return token
         alias_map = self._output_alias_registry.get(sequence_id)
         if not alias_map:
@@ -3459,6 +4038,324 @@ WORKFLOW PLANNING:
         stripped = token.strip()
         normalized = self._normalize_alias_token(stripped)
         return alias_map.get(stripped) or alias_map.get(normalized) or token
+
+    def _extract_output_file_from_history(
+        self,
+        sequence_id: str,
+        history_entry: Dict[str, Any],
+    ) -> Optional[str]:
+        """Infer the materialized output file path from a previous execution entry."""
+        step_number = history_entry.get("step_number")
+        saved_outputs = self._step_output_files.get(sequence_id, {})
+        if step_number in saved_outputs:
+            return saved_outputs[step_number]
+
+        atom_id = history_entry.get("atom_id", "")
+        result = history_entry.get("result", {}) or {}
+
+        if atom_id == "merge" and isinstance(result.get("merge_json"), dict):
+            return result.get("merge_json", {}).get("result_file") or result.get("saved_path")
+        if atom_id == "concat" and isinstance(result.get("concat_json"), dict):
+            return result.get("concat_json", {}).get("result_file") or result.get("saved_path")
+        if atom_id in {"create-column", "create-transform", "groupby-wtg-avg", "dataframe-operations"}:
+            return result.get("output_file") or result.get("saved_path")
+
+        return result.get("output_file") or result.get("saved_path")
+
+    def _get_latest_materialized_file(
+        self,
+        sequence_id: str,
+        execution_history: List[Dict[str, Any]],
+        available_files: List[str],
+    ) -> Optional[str]:
+        """
+        Return the most recent materialized file path for a sequence.
+
+        Preference order:
+        1) The newest saved output from execution_history (reverse search)
+        2) The latest entry in the sequence's available_files list
+
+        This prevents the planner from accidentally grabbing the oldest
+        uploaded file when an intermediate atom has already produced the
+        correct dataset for chaining.
+        """
+
+        # Look for the latest saved output by walking history backwards
+        for hist in reversed(execution_history):
+            materialized = self._extract_output_file_from_history(sequence_id, hist)
+            if materialized:
+                return materialized
+
+        # Fallback to the tail of the available files list (latest append)
+        if available_files:
+            return available_files[-1]
+
+        return None
+
+    def _extract_row_count(self, result: Dict[str, Any]) -> Optional[float]:
+        """Return a simple row-count metric from flat or nested result payloads."""
+        row_keys = ("row_count", "rowcount", "rows", "count", "record_count")
+        for key in row_keys:
+            value = result.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+
+        nested_keys = ("merge_json", "concat_json", "groupby_json", "dataframe_result", "result")
+        for nested_key in nested_keys:
+            nested = result.get(nested_key)
+            if isinstance(nested, dict):
+                for key in row_keys:
+                    value = nested.get(key)
+                    if isinstance(value, (int, float)):
+                        return float(value)
+        return None
+
+    def _validate_chain_for_next_step(
+        self,
+        sequence_id: str,
+        execution_history: List[Dict[str, Any]],
+        next_step: WorkflowStepPlan,
+    ) -> Tuple[bool, str]:
+        """
+        Run sanity checks on the previous step before chaining into the next atom.
+
+        Ensures we don't cascade failures or empty datasets into follow-up operations.
+        """
+        if not execution_history:
+            return True, ""
+
+        last_entry = execution_history[-1]
+        last_result = last_entry.get("result", {}) or {}
+        if not bool(last_result.get("success", True)):
+            return False, "Previous atom failed; re-plan before continuing."
+
+        produced_file = self._extract_output_file_from_history(sequence_id, last_entry)
+        available_files = set(self._sequence_available_files.get(sequence_id, []) or [])
+
+        requires_previous_output = False
+        dependency_tokens: List[str] = []
+        if next_step.files_used:
+            dependency_tokens.extend(next_step.files_used)
+        if next_step.inputs:
+            dependency_tokens.extend(next_step.inputs)
+
+        for value in dependency_tokens:
+            normalized = self._resolve_alias_value(sequence_id, value)
+            if normalized in {produced_file, last_entry.get("output_alias"), "auto_from_previous"}:
+                requires_previous_output = True
+            if normalized in available_files:
+                requires_previous_output = True
+
+        if requires_previous_output and not produced_file:
+            return False, "No materialized output from prior step; cannot chain safely."
+
+        if produced_file and requires_previous_output and produced_file not in available_files:
+            return False, f"Expected previous output {produced_file} to be available but it is not registered."
+
+        row_count = self._extract_row_count(last_result)
+        if requires_previous_output and row_count is not None and row_count <= 0:
+            return False, "Previous atom produced an empty dataset; review before continuing."
+
+        return True, ""
+
+    async def _replay_previous_step_for_output(
+        self,
+        websocket,
+        sequence_id: str,
+        execution_history: List[Dict[str, Any]],
+        project_context: Dict[str, Any],
+        user_id: str,
+        original_prompt: str,
+        available_files: List[str],
+        frontend_chat_id: Optional[str],
+        react_state: Optional[ReActState],
+        dependency_tokens: Optional[List[str]] = None,
+    ) -> bool:
+        """Re-execute the prior step when chaining fails due to missing materialized output."""
+
+        replay_count = self._sequence_replay_counts.get(sequence_id, 0)
+        if replay_count >= self.max_replay_attempts:
+            logger.warning(
+                "⚠️ ReAct: Replay budget exhausted (%s attempts); prompting user to retry",
+                self.max_replay_attempts,
+            )
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_progress",
+                        {
+                            "sequence_id": sequence_id,
+                            "current_step": None,
+                            "total_steps": "?",
+                            "progress_percent": 100,
+                            "status": "retry_required",
+                            "loading": False,
+                            "message": (
+                                "Unable to recover missing output automatically. "
+                                "Please retry the workflow or adjust the configuration."
+                            ),
+                        },
+                    ),
+                    "workflow_progress replay exhausted",
+                )
+            except (WebSocketDisconnect, Exception):
+                logger.debug("⚠️ Failed to send replay exhaustion notice", exc_info=True)
+            return False
+
+        self._sequence_replay_counts[sequence_id] = replay_count + 1
+
+        if not execution_history:
+            logger.warning("⚠️ ReAct: Cannot replay previous step because there is no execution history")
+            return False
+
+        last_entry = execution_history[-1]
+        step_number = last_entry.get("step_number")
+        if step_number is None:
+            logger.warning("⚠️ ReAct: Cannot replay previous step because the last entry has no step number")
+            return False
+
+        plan_lookup = self._sequence_step_plans.get(sequence_id, {})
+        step_plan = plan_lookup.get(step_number)
+        if not step_plan:
+            logger.warning(
+                "⚠️ ReAct: Cannot replay previous step %s because no cached plan exists for sequence %s",
+                step_number,
+                sequence_id,
+            )
+            return False
+
+        logger.info("🔁 ReAct: Replaying step %s (%s) to materialize output", step_number, step_plan.atom_id)
+
+        try:
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "workflow_progress",
+                    {
+                        "sequence_id": sequence_id,
+                        "current_step": step_number,
+                        "total_steps": "?",
+                        "progress_percent": 0,
+                        "status": "retrying",
+                        "loading": True,
+                        "message": f"Replaying step {step_number} to obtain materialized output...",
+                    },
+                ),
+                "workflow_progress replay notice",
+            )
+        except (WebSocketDisconnect, Exception) as e:
+            logger.debug(f"⚠️ Failed to send replay progress event: {e}")
+
+        current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+        bound_plan = self._bind_operands_for_replay(
+            sequence_id=sequence_id,
+            step_plan=step_plan,
+            dependency_tokens=dependency_tokens or [],
+            available_files=current_available_files,
+        )
+        plan = WorkflowPlan(workflow_steps=[bound_plan], total_steps=1)
+
+        try:
+            execution_result = await self._execute_step_with_events(
+                websocket=websocket,
+                step=bound_plan,
+                plan=plan,
+                sequence_id=sequence_id,
+                original_prompt=original_prompt,
+                project_context=project_context,
+                user_id=user_id,
+                available_files=current_available_files,
+                frontend_chat_id=frontend_chat_id,
+            )
+        except Exception as exec_exc:
+            logger.error(f"❌ ReAct: Replay of step {step_number} failed: {exec_exc}")
+            return False
+
+        if not execution_result.get("success", True):
+            logger.warning(
+                "⚠️ ReAct: Replay of step %s did not succeed; cannot materialize output automatically", step_number
+            )
+            return False
+
+        try:
+            await self._auto_save_step(
+                sequence_id=sequence_id,
+                step_number=step_number,
+                workflow_step=bound_plan,
+                available_files=current_available_files,
+                frontend_chat_id=frontend_chat_id,
+            )
+
+            saved_path = self._step_output_files.get(sequence_id, {}).get(step_number)
+            if saved_path:
+                await self._send_event(
+                    websocket,
+                            WebSocketEvent(
+                                "file_created",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": step_number,
+                                    "file_path": saved_path,
+                                    "output_alias": bound_plan.output_alias,
+                                    "message": f"Replayed output available: {saved_path}",
+                                    "available_for_next_steps": True,
+                                },
+                            ),
+                            "file_created replay event",
+                )
+        except Exception as save_exc:
+            logger.warning(f"⚠️ ReAct: Failed to auto-save replayed output for step {step_number}: {save_exc}")
+
+        last_entry["result"] = execution_result
+        last_entry["output_alias"] = bound_plan.output_alias
+        last_entry["files_used"] = bound_plan.files_used or []
+
+        if react_state:
+            react_state.execution_history = execution_history
+
+        return True
+
+    def _bind_operands_for_replay(
+        self,
+        sequence_id: str,
+        step_plan: WorkflowStepPlan,
+        dependency_tokens: List[str],
+        available_files: List[str],
+    ) -> WorkflowStepPlan:
+        """Rebind a cached step plan to the latest operands before replaying."""
+
+        bound_plan = copy.deepcopy(step_plan)
+        resolved_operands: List[str] = []
+
+        def _append_if_available(token: str) -> None:
+            normalized = self._resolve_alias_value(sequence_id, token)
+            if normalized in available_files and normalized not in resolved_operands:
+                resolved_operands.append(normalized)
+
+        for token in dependency_tokens:
+            _append_if_available(token)
+
+        if not resolved_operands:
+            for token in bound_plan.files_used or []:
+                _append_if_available(token)
+            for token in bound_plan.inputs or []:
+                _append_if_available(token)
+
+        if not resolved_operands and available_files:
+            resolved_operands.append(available_files[-1])
+
+        if resolved_operands:
+            if bound_plan.files_used != resolved_operands:
+                logger.info(
+                    "🔧 ReAct: Rebinding replay operands for step %s -> %s",
+                    bound_plan.step_number,
+                    resolved_operands,
+                )
+            bound_plan.files_used = resolved_operands
+            bound_plan.inputs = resolved_operands
+
+        return bound_plan
 
     def _normalize_alias_token(self, alias: str) -> str:
         """Normalize alias references (strip braces, spaces, lowercase)."""
@@ -3497,6 +4394,130 @@ WORKFLOW PLANNING:
             logger.warning(f"⚠️ Step insight generation failed: {insight_error}")
             return None
 
+    async def _generate_atom_insights(
+        self,
+        goal: str,
+        step: WorkflowStepPlan,
+        execution_result: Dict[str, Any],
+    ) -> List[Dict[str, str]]:
+        """Generate structured business-first insights for an atom output."""
+
+        goal_text = goal or ""
+        facts = self._build_atom_facts(step, execution_result)
+        data_hash = self._compute_data_hash(facts)
+
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                lambda: generate_insights(
+                    goal=goal_text,
+                    facts=facts,
+                    data_hash=data_hash,
+                    atom_id=step.atom_id,
+                ),
+            )
+        except Exception as atom_insight_error:  # noqa: BLE001
+            logger.debug(
+                "🔇 Atom insight generation failed for %s: %s",
+                step.atom_id,
+                atom_insight_error,
+                exc_info=True,
+            )
+            return [
+                {
+                    "insight": "No actionable insight",
+                    "impact": "Insufficient context from this step.",
+                    "risk": "LLM or parsing error encountered.",
+                    "next_action": "Review the atom output manually and retry later.",
+                }
+            ]
+
+    def _build_atom_facts(
+        self, step: WorkflowStepPlan, execution_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Summarize execution payload into facts for business insight prompts."""
+
+        execution_result = execution_result or {}
+        facts: Dict[str, Any] = {
+            "atom_id": step.atom_id,
+            "description": step.description,
+            "result_keys": list(execution_result.keys()),
+            "result_preview": self._extract_result_preview(execution_result, max_chars=600),
+        }
+
+        for meta_key in ("schema", "columns", "chart_json", "metadata", "summary", "stats"):
+            if meta_key in execution_result:
+                facts[meta_key] = execution_result.get(meta_key)
+
+        tabular_rows = self._extract_tabular_rows(execution_result)
+        if tabular_rows:
+            facts["rows"] = tabular_rows[:50]
+            facts["row_count"] = len(tabular_rows)
+
+        return facts
+
+    def _extract_tabular_rows(self, execution_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find tabular payloads from known atom result shapes."""
+
+        for candidate in (
+            "table_json",
+            "merge_json",
+            "groupby_json",
+            "concat_json",
+            "rows",
+            "data",
+            "preview",
+        ):
+            value = execution_result.get(candidate)
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                if isinstance(value.get("data"), list):
+                    return value.get("data")  # type: ignore
+                if isinstance(value.get("rows"), list):
+                    return value.get("rows")  # type: ignore
+
+        return []
+
+    def _compute_data_hash(self, facts: Dict[str, Any]) -> str:
+        """Create a stable hash for caching atom-level insights."""
+
+        serialized = self._safe_json_dumps(facts, fallback="")
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def _compose_business_context(
+        self,
+        step: WorkflowStepPlan,
+        atom_prompt: str,
+        execution_result: Dict[str, Any],
+    ) -> str:
+        """Create a business-focused context block for the insight prompt."""
+
+        if not self.laboratory_retriever:
+            return ""
+
+        execution_result = execution_result or {}
+
+        query_parts = [
+            step.description,
+            atom_prompt,
+            getattr(step, "atom_prompt", ""),
+            getattr(step, "prompt", ""),
+        ]
+        query = " ".join([part for part in query_parts if part]) or step.atom_id
+
+        try:
+            return self.laboratory_retriever.generate_business_insights(
+                atom_id=step.atom_id,
+                query=query,
+                execution_result=execution_result,
+                top_n=3,
+            )
+        except Exception as business_exc:
+            logger.debug("🔇 Business context skipped: %s", business_exc)
+            return ""
+
     def _build_step_insight_prompt(
         self,
         step: WorkflowStepPlan,
@@ -3513,6 +4534,7 @@ WORKFLOW PLANNING:
 
         params_str = self._safe_json_dumps(parameters or {}, fallback="{}")
         result_preview = self._extract_result_preview(execution_result)
+        business_context = self._compose_business_context(step, base_prompt, execution_result)
 
         status_text = "SUCCESS" if execution_success else "FAILED"
         output_alias = step.output_alias or "not_specified"
@@ -3537,6 +4559,7 @@ WORKFLOW PLANNING:
             f"{params_str}\n\n"
             "RESULT SNAPSHOT\n"
             f"{result_preview}\n\n"
+            f"BUSINESS CONTEXT\n{business_context}\n\n" if business_context else ""
             "RESPONSE REQUIREMENTS\n"
             "- Keep total response under 120 words.\n"
             "- Use Markdown with three sections in this order:\n"
@@ -4180,7 +5203,8 @@ WORKFLOW PLANNING:
         step_number: int,
         atom_id: str,
         execution_result: Dict[str, Any],
-        insight: Optional[str] = None
+        insight: Optional[str] = None,
+        atom_insights: Optional[List[Dict[str, str]]] = None,
     ) -> None:
         """Cache step execution results and generated insights for later use."""
         cache = self._step_execution_cache.setdefault(sequence_id, {})
@@ -4188,7 +5212,8 @@ WORKFLOW PLANNING:
             "atom_id": atom_id,
             "execution_result": execution_result,
             "recorded_at": datetime.utcnow().isoformat(),
-            "insight": insight
+            "insight": insight,
+            "atom_insights": atom_insights or [],
         }
 
     def _collect_workflow_step_records(
@@ -4215,6 +5240,7 @@ WORKFLOW PLANNING:
                 "agent": step.atom_id,
                 "description": step.description,
                 "insight": step_cache.get("insight"),
+                "atom_insights": step_cache.get("atom_insights") or [],
                 "result_preview": self._extract_result_preview(execution_result),
                 "output_files": [],
             }
@@ -4367,6 +5393,15 @@ WORKFLOW PLANNING:
         except Exception:
             return True  # Assume connected if check fails
 
+    async def _safe_close_websocket(self, websocket, code: int = 1000, reason: str = "") -> None:
+        """Close websocket with a status code while swallowing close errors."""
+        try:
+            if hasattr(websocket, "close_code") and websocket.close_code:
+                return  # Already closing or closed
+            await websocket.close(code=code, reason=reason)
+        except Exception as close_error:  # pragma: no cover - defensive
+            logger.debug(f"WebSocket close failed (code={code}, reason={reason}): {close_error}")
+
     async def _send_event(
         self,
         websocket,
@@ -4399,6 +5434,10 @@ WORKFLOW PLANNING:
         self._output_alias_registry.pop(sequence_id, None)
         self._chat_file_mentions.pop(sequence_id, None)
         self._sequence_react_state.pop(sequence_id, None)  # Cleanup ReAct state
+        self._sequence_step_plans.pop(sequence_id, None)
+        self._sequence_replay_counts.pop(sequence_id, None)
+        self._react_step_guards.pop(sequence_id, None)
+        self._react_stall_watchdogs.pop(sequence_id, None)
 
     def _load_persisted_chat_summary(
         self,
@@ -5906,15 +6945,50 @@ WORKFLOW PLANNING:
             return ""
         return " ".join(text.split())
     
-    def _get_file_metadata(self, file_paths: List[str]) -> Dict[str, Dict[str, Any]]:
+    def _resolve_project_context_for_files(self, file_paths: List[str]) -> Dict[str, Any]:
+        """Resolve the most relevant project context for the given files.
+
+        Prefers the sequence context that lists the files so FileReader can
+        refresh its prefix to the correct tenant/app/project location.
+        """
+        if not file_paths:
+            return {}
+
+        # Try to find a sequence that contains any of the provided files
+        for sequence_id, files in self._sequence_available_files.items():
+            if any(path in files for path in file_paths):
+                context = self._sequence_project_context.get(sequence_id) or {}
+                if context:
+                    return context
+
+        # Fallback to any known project context
+        for context in self._sequence_project_context.values():
+            if context:
+                return context
+
+        return {}
+
+    def _get_file_metadata(
+        self,
+        file_paths: List[str],
+        sequence_id: Optional[str] = None,
+        project_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
         """
         Retrieve file metadata (including column names) for given file paths.
         Returns a dictionary mapping file paths to their metadata.
         """
         metadata_dict: Dict[str, Dict[str, Any]] = {}
-        
+
         if not file_paths:
             return metadata_dict
+
+        # Resolve project context so FileReader targets the correct folder
+        resolved_context = project_context or {}
+        if not resolved_context and sequence_id:
+            resolved_context = self._sequence_project_context.get(sequence_id, {})
+        if not resolved_context:
+            resolved_context = self._resolve_project_context_for_files(file_paths)
         
         try:
             # Use BaseAgent.FileReader (standardized file handler for all agents)
@@ -5926,7 +7000,11 @@ WORKFLOW PLANNING:
                 except ImportError:
                     logger.error("❌ BaseAgent.FileReader not available - cannot retrieve file metadata")
                     return metadata_dict
-            
+
+            client_name = resolved_context.get("client_name", "") if resolved_context else ""
+            app_name = resolved_context.get("app_name", "") if resolved_context else ""
+            project_name = resolved_context.get("project_name", "") if resolved_context else ""
+
             # Extract filenames from paths
             file_names = []
             path_to_filename = {}
@@ -5942,53 +7020,60 @@ WORKFLOW PLANNING:
                 file_details_dict = {}
                 try:
                     file_reader = FileReader()
-                    for filename in file_names:
+
+                    # Update prefix using the resolved project context to avoid
+                    # falling back to the MinIO root between atoms/steps
+                    if client_name and app_name and project_name:
                         try:
-                            columns = file_reader.get_file_columns(filename)
-                            file_details_dict[filename] = {
-                                "object_name": filename,
-                                "columns": columns,
-                                "column_count": len(columns) if columns else 0
-                            }
-                        except Exception as e:
-                            logger.debug(f"⚠️ Could not get columns for {filename}: {e}")
-                            # Still add entry with empty columns
-                            file_details_dict[filename] = {
+                            file_reader._maybe_update_prefix(client_name, app_name, project_name)
+                            logger.info(
+                                "📁 File metadata lookup using context: %s/%s/%s",
+                                client_name,
+                                app_name,
+                                project_name,
+                            )
+                        except Exception as ctx_exc:
+                            logger.warning("⚠️ Could not set FileReader context: %s", ctx_exc)
+
+                    for file_path in file_paths:
+                        filename = path_to_filename[file_path]
+                        # Try full path first (keeps folder context), then fallback to filename
+                        for candidate in [file_path, filename]:
+                            try:
+                                columns = file_reader.get_file_columns(candidate)
+                                file_details_dict[file_path] = {
+                                    "object_name": candidate,
+                                    "columns": columns,
+                                    "column_count": len(columns) if columns else 0,
+                                }
+                                break
+                            except Exception as e:
+                                logger.debug(
+                                    "⚠️ Could not get columns for %s (candidate=%s): %s",
+                                    file_path,
+                                    candidate,
+                                    e,
+                                )
+                        if file_path not in file_details_dict:
+                            file_details_dict[file_path] = {
                                 "object_name": filename,
                                 "columns": [],
-                                "column_count": 0
+                                "column_count": 0,
                             }
+
                     if file_details_dict:
-                        logger.debug(f"✅ Retrieved file metadata for {len(file_details_dict)} files using BaseAgent.FileReader")
+                        logger.debug(
+                            "✅ Retrieved file metadata for %s files using BaseAgent.FileReader",
+                            len(file_details_dict),
+                        )
                 except Exception as e:
                     logger.debug(f"⚠️ Failed to get file metadata using FileReader: {e}")
                     file_details_dict = {}
-                
+
                 if file_details_dict:
                     # Map back to original file paths
-                    for file_path, filename in path_to_filename.items():
-                        # Try to find matching metadata
-                        for key, metadata in file_details_dict.items():
-                            # Check if key matches filename or file_path
-                            if (key == filename or 
-                                key == file_path or 
-                                filename in key or 
-                                file_path in key or
-                                key in filename or
-                                key in file_path):
-                                metadata_dict[file_path] = metadata
-                                break
-                        
-                        # If not found, try to find by object_name
-                        if file_path not in metadata_dict:
-                            for key, metadata in file_details_dict.items():
-                                obj_name = metadata.get("object_name", "")
-                                if (obj_name == filename or 
-                                    obj_name == file_path or
-                                    filename in obj_name or
-                                    file_path in obj_name):
-                                    metadata_dict[file_path] = metadata
-                                    break
+                    for file_path, metadata in file_details_dict.items():
+                        metadata_dict[file_path] = metadata
                     
                     # Log what metadata was retrieved
                     for file_path, metadata in metadata_dict.items():
@@ -6305,7 +7390,8 @@ WORKFLOW PLANNING:
             "groupby-wtg-avg",
             "groupby",
             "create-column",
-            "chart-maker"
+            "chart-maker",
+            "correlation"  # Added correlation for EDA workflows - needs file access
         }
         
         if atom_id in atoms_needing_context:
@@ -6370,4 +7456,3 @@ WORKFLOW PLANNING:
         except Exception as e:
             logger.error(f"❌ Atom execution failed: {e}")
             raise
-

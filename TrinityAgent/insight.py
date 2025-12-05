@@ -7,14 +7,84 @@ import os
 import json
 import logging
 import time
+import requests
 from typing import Dict, Any, List, Optional, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 
 # Set up logging
 logger = logging.getLogger("trinity.ai.insights")
 router = APIRouter(prefix="/insights", tags=["AI Insights"])
+
+# 🔧 ENHANCED: Temporary storage for insights when cards aren't available yet (React loops)
+_pending_insights: Dict[str, Dict[str, Any]] = {}  # atom_id -> {insight, client_name, app_name, project_name, timestamp}
+_pending_retry_worker_started = False
+
+
+def _ensure_pending_retry_worker(interval_seconds: float = 30.0) -> None:
+    """Start a background worker that replays pending insights when cards appear."""
+
+    global _pending_retry_worker_started
+
+    if _pending_retry_worker_started:
+        return
+
+    _pending_retry_worker_started = True
+
+    import threading
+
+    def worker() -> None:
+        logger.info("🧠 Starting pending insight retry worker")
+
+        while True:
+            try:
+                time.sleep(interval_seconds)
+
+                if not _pending_insights:
+                    continue
+
+                # Copy keys to avoid runtime mutation while iterating
+                pending_items = list(_pending_insights.items())
+
+                for atom_id, pending in pending_items:
+                    try:
+                        logger.info(
+                            "🔁 Retrying pending insight for atomId: %s (age: %.1fs)",
+                            atom_id,
+                            time.time() - pending.get("timestamp", time.time()),
+                        )
+
+                        update_card_textbox_background(
+                            atom_id=atom_id,
+                            insight=pending.get("insight", ""),
+                            client_name=pending.get("client_name"),
+                            app_name=pending.get("app_name"),
+                            project_name=pending.get("project_name"),
+                            max_retries=3,
+                            retry_delay=2.0,
+                        )
+                    except Exception as retry_error:  # noqa: BLE001
+                        logger.warning(
+                            "⚠️ Retry worker failed for atomId %s: %s",
+                            atom_id,
+                            retry_error,
+                        )
+            except Exception as e:  # noqa: BLE001
+                logger.error("❌ Pending insight retry worker encountered an error: %s", e, exc_info=True)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+# Import enhanced insight analysis module
+try:
+    from TrinityAgent.insight_analysis import (
+        generate_insights as generate_deep_insights,
+        InsightPayload
+    )
+    DEEP_INSIGHTS_AVAILABLE = True
+except ImportError as e:
+    DEEP_INSIGHTS_AVAILABLE = False
+    logger.warning(f"Enhanced insight analysis module not available: {e}")
 
 # 🔧 Use same LLM config pattern as explore agent
 def get_llm_config():
@@ -399,9 +469,7 @@ async def generate_insights(request: InsightRequest):
         )
 
 class AtomInsightRequest(BaseModel):
-    smart_response: str = Field(..., description="User-friendly response from agent")
-    response: str = Field(..., description="Raw response/thinking from agent")
-    reasoning: str = Field(..., description="Reasoning behind agent's decision")
+    reasoning: str = Field(..., description="Detailed reasoning explaining atom choice, raw thinking, and decision rationale")
     data_summary: Dict[str, Any] = Field(..., description="Standardized data summary from atom handler")
     atom_type: str = Field(..., description="Type of atom (correlation, chart-maker, etc.)")
     session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
@@ -412,25 +480,83 @@ class AtomInsightResponse(BaseModel):
     processing_time: float = Field(..., description="Time taken to generate insight")
     error: Optional[str] = Field(None, description="Error message if generation failed")
 
+class AsyncAtomInsightRequest(BaseModel):
+    reasoning: str = Field(..., description="Detailed reasoning explaining atom choice, raw thinking, and decision rationale")
+    data_summary: Dict[str, Any] = Field(..., description="Standardized data summary from atom handler")
+    atom_type: str = Field(..., description="Type of atom (correlation, chart-maker, etc.)")
+    session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
+    atom_id: str = Field(..., description="Atom ID to update text box for")
+    client_name: Optional[str] = Field(None, description="Client name for card update")
+    app_name: Optional[str] = Field(None, description="App name for card update")
+    project_name: Optional[str] = Field(None, description="Project name for card update")
+    examples: Optional[List[str]] = Field(None, description="Example insights for LLM guidance")
+
+class AsyncAtomInsightResponse(BaseModel):
+    success: bool = Field(..., description="Whether async task was started successfully")
+    message: str = Field(..., description="Status message")
+    task_id: Optional[str] = Field(None, description="Task ID for tracking")
+
+def _safe_serialize_data_summary(data_summary: Dict[str, Any], max_size: int = 5000) -> str:
+    """
+    Safely serialize data_summary, excluding large datasets to prevent hanging.
+    
+    Args:
+        data_summary: The data summary dictionary
+        max_size: Maximum size of serialized output in characters
+    
+    Returns:
+        Serialized string representation, truncated if necessary
+    """
+    # Keys that typically contain large datasets that should be excluded or summarized
+    large_data_keys = {'rows', 'data', 'samples', 'preview', 'chart_data', 'dataset', 'values'}
+    
+    # Create a safe copy without large datasets
+    safe_summary = {}
+    for key, value in data_summary.items():
+        if key.lower() in large_data_keys:
+            # Replace large datasets with summaries
+            if isinstance(value, (list, tuple)):
+                safe_summary[key] = f"<{len(value)} items> (data excluded for performance)"
+            elif isinstance(value, dict):
+                safe_summary[key] = f"<dict with {len(value)} keys> (data excluded for performance)"
+            else:
+                safe_summary[key] = f"<{type(value).__name__}> (data excluded for performance)"
+        else:
+            # For other values, include them but check size
+            try:
+                test_serialized = json.dumps(value, default=str)
+                if len(test_serialized) > 1000:  # If value itself is large, summarize
+                    if isinstance(value, (list, tuple)):
+                        safe_summary[key] = f"<{len(value)} items> (truncated)"
+                    elif isinstance(value, dict):
+                        safe_summary[key] = f"<dict with {len(value)} keys> (truncated)"
+                    else:
+                        safe_summary[key] = str(value)[:500] + "..." if len(str(value)) > 500 else value
+                else:
+                    safe_summary[key] = value
+            except (TypeError, ValueError):
+                safe_summary[key] = str(value)[:500] if len(str(value)) > 500 else str(value)
+    
+    try:
+        serialized = json.dumps(safe_summary, indent=2, default=str)
+        # Truncate if still too large
+        if len(serialized) > max_size:
+            serialized = serialized[:max_size] + "\n... (truncated for performance)"
+        return serialized
+    except (TypeError, ValueError) as e:
+        return f"<Error serializing data summary: {e}>"
+
 def build_atom_insight_prompt(
-    smart_response: str,
-    response: str,
     reasoning: str,
     data_summary: Dict[str, Any],
-    atom_type: str
+    atom_type: str,
+    examples: Optional[List[str]] = None
 ) -> str:
     """Build AI prompt for atom insight generation."""
     
     atom_type_lower = atom_type.lower()
     
-    # Build context section
-    context_section = f"""AGENT RESPONSE CONTEXT:
-Smart Response (User-friendly): {smart_response}
-Response (Raw thinking): {response}
-Reasoning: {reasoning}
-"""
-    
-    # Build data summary section based on atom type
+    # Build data summary section based on atom type (focus only on results, not process)
     data_section = "DATA SUMMARY:\n"
     
     if atom_type_lower == 'correlation':
@@ -441,28 +567,36 @@ Reasoning: {reasoning}
         columns = summary_data.get('columns_analyzed', [])
         stats = summary_data.get('correlation_statistics', {})
         top_correlations = summary_data.get('top_correlations', [])
+        correlation_matrix = summary_data.get('correlation_matrix', {})
         row_count = metadata.get('row_count', 0)
         file_name = metadata.get('file_name', 'Unknown')
         
         data_section += f"""
-Correlation Analysis Details:
+CORRELATION DATA ANALYSIS:
+- Dataset: {file_name} ({row_count:,} rows)
 - Method: {method}
-- File: {file_name}
-- Columns Analyzed: {len(columns)} ({', '.join(columns[:5])}{'...' if len(columns) > 5 else ''})
-- Total Row Count: {row_count:,}
-- Total Correlation Pairs: {stats.get('total_pairs', 0)}
+- Columns Analyzed ({len(columns)}): {', '.join(columns) if columns else 'N/A'}
 - Strong Correlations (|r| > 0.7): {stats.get('strong_count', 0)}
 - Moderate Correlations (0.3 < |r| ≤ 0.7): {stats.get('moderate_count', 0)}
 - Weak Correlations (|r| ≤ 0.3): {stats.get('weak_count', 0)}
 """
         
         if top_correlations:
-            data_section += "\nTop Correlations:\n"
-            for i, corr in enumerate(top_correlations[:5], 1):
+            data_section += "\nTOP CORRELATIONS (exact column names and correlation values):\n"
+            for i, corr in enumerate(top_correlations[:10], 1):  # Show top 10
                 var1 = corr.get('var1', '')
                 var2 = corr.get('var2', '')
-                value = corr.get('value', 0)
-                data_section += f"{i}. {var1} ↔ {var2}: {value:.3f}\n"
+                value = corr.get('value', corr.get('correlation', 0))
+                data_section += f"{i}. Column '{var1}' ↔ Column '{var2}': r = {value:.4f}\n"
+        
+        # Include correlation matrix sample if available
+        if correlation_matrix and isinstance(correlation_matrix, dict):
+            data_section += "\nCORRELATION MATRIX (sample of key relationships):\n"
+            matrix_items = list(correlation_matrix.items())[:5]  # Show first 5 entries
+            for key, value in matrix_items:
+                if isinstance(value, dict):
+                    value_str = ", ".join([f"{k}: {v:.3f}" for k, v in list(value.items())[:3]])
+                    data_section += f"  {key}: {value_str}\n"
     
     elif atom_type_lower == 'chart-maker':
         summary_data = data_summary.get('summary_data', {})
@@ -473,34 +607,71 @@ Correlation Analysis Details:
         chart_results = summary_data.get('chart_results', {})
         file_name = metadata.get('file_name', 'Unknown')
         row_count = metadata.get('row_count', 0)
+        columns = metadata.get('column_count', 0)
         
         data_section += f"""
-Chart Generation Details:
-- File: {file_name}
-- Number of Charts: {chart_count}
-- Total Row Count: {row_count:,}
+CHART MAKER DATA ANALYSIS:
+- Dataset: {file_name} ({row_count:,} rows, {columns} columns)
+- Charts Created: {chart_count}
 """
         
+        # Include actual chart configurations with exact column names and data
+        if chart_configs:
+            for i, chart_config in enumerate(chart_configs[:3], 1):  # Show up to 3 charts
+                chart_title = chart_config.get('title', f'Chart {i}')
+                chart_type = chart_config.get('chart_type', chart_config.get('type', 'unknown'))
+                traces = chart_config.get('traces', [])
+                
+                data_section += f"\nCHART {i}: {chart_title} (Type: {chart_type})\n"
+                
+                for j, trace in enumerate(traces[:2], 1):  # Show up to 2 traces per chart
+                    x_col = trace.get('x_column', 'N/A')
+                    y_col = trace.get('y_column', 'N/A')
+                    trace_name = trace.get('name', f'Trace {j}')
+                    
+                    data_section += f"  Trace {j} ({trace_name}):\n"
+                    data_section += f"    X-Axis Column: {x_col}\n"
+                    data_section += f"    Y-Axis Column: {y_col}\n"
+                    
+                    # Include actual data values if available
+                    x_data = trace.get('x', [])
+                    y_data = trace.get('y', [])
+                    
+                    if x_data and len(x_data) > 0:
+                        data_section += f"    X-Values Sample: {x_data[:10]}{'...' if len(x_data) > 10 else ''}\n"
+                    if y_data and len(y_data) > 0:
+                        # Show actual numeric values
+                        y_sample = y_data[:10] if len(y_data) > 10 else y_data
+                        y_str = ', '.join([f"{val:.2f}" if isinstance(val, (int, float)) else str(val) for val in y_sample])
+                        data_section += f"    Y-Values Sample: [{y_str}]{'...' if len(y_data) > 10 else ''}\n"
+                        # Include summary stats
+                        if isinstance(y_data[0], (int, float)):
+                            y_numeric = [v for v in y_data if isinstance(v, (int, float))]
+                            if y_numeric:
+                                data_section += f"    Y-Values Stats: Min={min(y_numeric):.2f}, Max={max(y_numeric):.2f}, Avg={sum(y_numeric)/len(y_numeric):.2f}\n"
+        
+        # Include chart results with actual data if available
         if chart_results:
-            success_count = chart_results.get('success_count', 0)
             charts = chart_results.get('charts', [])
-            data_section += f"- Successfully Generated: {success_count}/{chart_count}\n"
+            file_data = chart_results.get('file_data', {})
+            
+            if file_data:
+                available_columns = file_data.get('columns', [])
+                if available_columns:
+                    data_section += f"\nAVAILABLE COLUMNS IN DATASET:\n"
+                    data_section += f"{', '.join(available_columns)}\n"
             
             if charts:
-                data_section += "\nChart Details:\n"
-                for i, chart in enumerate(charts[:3], 1):
+                data_section += f"\nCHART RESULTS:\n"
+                for i, chart in enumerate(charts[:2], 1):  # Show up to 2 charts
                     title = chart.get('title', f'Chart {i}')
                     chart_type = chart.get('type', chart.get('chart_type', 'unknown'))
                     data_section += f"{i}. {title} ({chart_type})\n"
-        
-        if chart_configs:
-            first_chart = chart_configs[0] if chart_configs else {}
-            data_section += f"\nFirst Chart Configuration:\n"
-            data_section += f"- Type: {first_chart.get('chart_type', 'unknown')}\n"
-            if first_chart.get('traces'):
-                first_trace = first_chart['traces'][0]
-                data_section += f"- X-Axis: {first_trace.get('x_column', 'N/A')}\n"
-                data_section += f"- Y-Axis: {first_trace.get('y_column', 'N/A')}\n"
+                    
+                    # Include actual data points if available
+                    chart_data = chart.get('data', {})
+                    if chart_data:
+                        data_section += f"   Data points available: {len(chart_data.get('x', []))} points\n"
     
     elif atom_type_lower in ['create-transform', 'create-column']:
         summary_data = data_summary.get('summary_data', {})
@@ -515,35 +686,16 @@ Chart Generation Details:
         new_column_count = metadata.get('new_column_count', 0)
         
         data_section += f"""
-Create Transform Details:
-- File: {file_name}
-- Total Row Count: {row_count:,}
-- Original Column Count: {column_count}
-- New Columns Created: {new_column_count}
-- Operations Executed: {operations_count}
+DATA RESULTS:
+- Dataset: {file_name} ({row_count:,} rows)
+- Original Columns: {column_count}
+- New Columns: {new_column_count}
 """
         
-        if operations:
-            data_section += "\nOperations Performed:\n"
-            for i, op in enumerate(operations[:10], 1):  # Show up to 10 operations
-                op_type = op.get('type', 'unknown')
-                columns = op.get('columns', [])
-                new_column_name = op.get('new_column_name', '')
-                data_section += f"{i}. {op_type.upper()}({', '.join(columns[:3])}{'...' if len(columns) > 3 else ''})"
-                if new_column_name:
-                    data_section += f" → {new_column_name}"
-                data_section += "\n"
-        
         if operation_results:
-            result_file = operation_results.get('result_file', '')
-            op_results = operation_results.get('operations_executed', [])
             new_columns = operation_results.get('new_columns', [])
-            
-            if result_file:
-                data_section += f"\nResult File: {result_file}\n"
-            
             if new_columns:
-                data_section += f"\nNew Columns Created ({len(new_columns)}):\n"
+                data_section += f"\nNEW COLUMNS:\n"
                 for i, col in enumerate(new_columns[:10], 1):  # Show up to 10 new columns
                     data_section += f"{i}. {col}\n"
     
@@ -557,24 +709,17 @@ Create Transform Details:
         concat_results = summary_data.get('concat_results', {})
         
         data_section += f"""
-Concat Operation Details:
-- File 1: {file1}
-- File 2: {file2}
+DATA RESULTS:
+- Files Combined: {file1} + {file2}
 - Direction: {direction}
 """
         
         if concat_results:
-            concat_id = concat_results.get('concat_id', '')
-            result_shape = concat_results.get('result_shape', '')
             columns = concat_results.get('columns', [])
             row_count = concat_results.get('row_count', 0)
             
-            if concat_id:
-                data_section += f"- Result ID: {concat_id}\n"
-            if result_shape:
-                data_section += f"- Result Shape: {result_shape}\n"
             if row_count > 0:
-                data_section += f"- Total Rows: {row_count:,}\n"
+                data_section += f"- Combined Rows: {row_count:,}\n"
             if columns:
                 data_section += f"- Total Columns: {len(columns)}\n"
                 if len(columns) <= 20:
@@ -595,93 +740,135 @@ Concat Operation Details:
         identifiers_count = metadata.get('identifiers_count', 0)
         aggregations_count = metadata.get('aggregations_count', 0)
         
+        result_row_count = groupby_results.get('row_count', 0) if groupby_results else 0
+        
         data_section += f"""
-GroupBy Operation Details:
-- File: {file_name}
-- Total Row Count: {row_count:,}
-- Result Column Count: {column_count}
-- Grouping Identifiers: {identifiers_count}
+GROUPBY DATA ANALYSIS:
+- Dataset: {file_name} ({row_count:,} rows)
+- Grouped Result: {result_row_count:,} groups, {column_count} columns
+- Grouping By: {identifiers_count} identifier(s)
 - Aggregations Applied: {aggregations_count}
 """
         
         if identifiers:
-            data_section += f"\nGrouping Identifiers:\n"
-            for i, identifier in enumerate(identifiers[:10], 1):  # Show up to 10 identifiers
+            data_section += f"\nGROUPING COLUMNS (exact names):\n"
+            for i, identifier in enumerate(identifiers, 1):
                 data_section += f"{i}. {identifier}\n"
         
         if aggregations:
-            data_section += f"\nAggregations Performed:\n"
-            for i, agg in enumerate(aggregations[:10], 1):  # Show up to 10 aggregations
-                if isinstance(agg, dict):
-                    field = agg.get('field', 'unknown')
-                    aggregator = agg.get('aggregator', agg.get('agg', 'unknown'))
-                    weight_by = agg.get('weight_by', '')
-                    rename_to = agg.get('rename_to', field)
-                    data_section += f"{i}. {aggregator.upper()}({field})"
-                    if weight_by:
-                        data_section += f" weighted by {weight_by}"
-                    if rename_to != field:
-                        data_section += f" → {rename_to}"
-                    data_section += "\n"
-                else:
-                    data_section += f"{i}. {agg}\n"
+            data_section += f"\nAGGREGATIONS (exact column names and operations):\n"
+            # Handle both list and dict formats for aggregations
+            if isinstance(aggregations, list):
+                for i, agg in enumerate(aggregations, 1):
+                    if isinstance(agg, dict):
+                        field = agg.get('field', 'unknown')
+                        aggregator = agg.get('aggregator', agg.get('agg', 'unknown'))
+                        weight_by = agg.get('weight_by', '')
+                        rename_to = agg.get('rename_to', field)
+                        data_section += f"{i}. {aggregator.upper()}({field})"
+                        if weight_by:
+                            data_section += f" weighted by {weight_by}"
+                        if rename_to != field:
+                            data_section += f" → renamed to {rename_to}"
+                        data_section += "\n"
+                    else:
+                        data_section += f"{i}. {agg}\n"
+            elif isinstance(aggregations, dict):
+                for i, (field, agg_config) in enumerate(list(aggregations.items()), 1):
+                    if isinstance(agg_config, dict):
+                        aggregator = agg_config.get('aggregator', agg_config.get('agg', 'unknown'))
+                        weight_by = agg_config.get('weight_by', '')
+                        rename_to = agg_config.get('rename_to', field)
+                        data_section += f"{i}. {aggregator.upper()}({field})"
+                        if weight_by:
+                            data_section += f" weighted by {weight_by}"
+                        if rename_to != field:
+                            data_section += f" → renamed to {rename_to}"
+                        data_section += "\n"
+                    else:
+                        data_section += f"{i}. {field}: {agg_config}\n"
         
         if groupby_results:
             result_file = groupby_results.get('result_file', '')
             result_row_count = groupby_results.get('row_count', 0)
             result_columns = groupby_results.get('columns', [])
+            unsaved_data = groupby_results.get('unsaved_data')
             
-            if result_file:
-                data_section += f"\nResult File: {result_file}\n"
-            if result_row_count > 0:
-                data_section += f"Result Rows: {result_row_count:,}\n"
             if result_columns:
-                data_section += f"Result Columns: {len(result_columns)}\n"
-                if len(result_columns) <= 20:
-                    data_section += f"Columns: {', '.join(result_columns)}\n"
-                else:
-                    data_section += f"Columns (first 20): {', '.join(result_columns[:20])}...\n"
+                data_section += f"\nRESULT COLUMNS (exact names):\n"
+                data_section += f"{', '.join(result_columns)}\n"
+            
+            # Include actual grouped data values if available
+            if unsaved_data and isinstance(unsaved_data, list) and len(unsaved_data) > 0:
+                data_section += f"\nGROUPED DATA RESULTS (top 10 groups with actual values):\n"
+                for i, row in enumerate(unsaved_data[:10], 1):
+                    if isinstance(row, dict):
+                        # Show identifier values and aggregated values
+                        row_str = ", ".join([f"{k}: {v}" for k, v in list(row.items())[:5]])
+                        data_section += f"{i}. {row_str}\n"
+                    else:
+                        data_section += f"{i}. {str(row)[:200]}\n"
+            
+            if result_row_count > 0:
+                data_section += f"\nTotal Groups: {result_row_count:,}\n"
     
     else:
-        # Generic atom type
+        # Generic atom type - use safe serialization to avoid hanging on large datasets
         data_section += f"Atom Type: {atom_type}\n"
-        data_section += f"Data Summary: {json.dumps(data_summary, indent=2)}\n"
+        safe_summary = _safe_serialize_data_summary(data_summary)
+        data_section += f"Data Summary: {safe_summary}\n"
     
-    # Build the complete prompt
-    prompt = f"""You are an intelligent data analysis assistant. Analyze the agent's response and the underlying data processing to provide a comprehensive, rigorous, and well-explained insight.
-
-{context_section}
+    # Build the complete prompt - DATA-DRIVEN INSIGHTS WITH ACTUAL VALUES
+    prompt = f"""You are a data insights analyst. Provide detailed, data-driven insights based on the ACTUAL data analysis results below.
 
 {data_section}
 
-TASK: Generate a detailed, rigorous insight that explains:
-1. What the agent did and why (based on reasoning and response)
-2. What the data analysis reveals (based on data summary)
-3. Key findings, patterns, or relationships discovered
-4. Business implications or actionable insights
-5. Any important considerations or limitations
+CRITICAL REQUIREMENTS:
+1. Use EXACT column names as shown in the data above - do not generalize or hide names
+2. Include ACTUAL values, numbers, and metrics from the data - be specific
+3. Reference specific data points, groups, or results mentioned above
+4. Use the exact terminology from the dataset (column names, categories, etc.)
 
-The insight should be:
-- Comprehensive and well-explained (can be lengthy - as detailed as needed)
-- Focused on helping users understand the analysis
-- Based on both the agent's reasoning AND the actual data results
-- Written in clear, professional language
-- Include specific numbers, metrics, or findings where relevant
+TASK: Generate detailed, data-driven insights (3-5 paragraphs) that:
+1. Reference specific column names and their actual values from the data
+2. Identify key patterns, trends, or relationships using actual numbers/metrics
+3. Highlight top performers, outliers, or significant findings with specific values
+4. Provide business implications based on the actual data results
+5. Include actionable recommendations based on specific findings
 
-Provide only the insight text - no JSON, no formatting markers, just the comprehensive insight explanation.
+DO NOT:
+- Use generic placeholders like "[Brand/Product]" or "[metric]" - use actual names and values
+- Hide or generalize column names - use them exactly as shown
+- Make up values - only use what's provided in the data above
+- Explain what was done - focus on what the data reveals
+
+The insight MUST:
+- Reference exact column names from the dataset
+- Include specific numeric values, percentages, or metrics where available
+- Mention specific categories, groups, or data points by name
+- Be based on the actual data provided above
+- Be detailed enough to understand the specific findings
+
+Start directly with specific findings using actual column names and values from the data.
+
+Provide only the insight text - no JSON, no formatting markers, just detailed data-driven insights.
 
 EXAMPLE OUTPUT STYLE FOR CORRELATION:
-"The correlation analysis examined 15 numeric columns across 12,345 data rows using the Pearson method. The analysis revealed 105 total correlation pairs, with 8 showing strong correlations (|r| > 0.7), 32 showing moderate correlations (0.3 < |r| ≤ 0.7), and 65 showing weak correlations. The strongest relationship was found between SalesValue and Volume (r = 0.847), indicating that sales revenue is highly correlated with sales volume. This strong positive correlation suggests that as volume increases, sales value increases proportionally, which is expected in retail scenarios. Other notable correlations include [additional findings]. These findings suggest that [business implications]."
+"SalesValue and Volume columns show a strong positive correlation (r = 0.847), indicating that sales revenue increases proportionally with sales volume. The correlation matrix reveals that SalesValue has the highest correlation (0.92) with Volume among all numeric columns. This suggests pricing strategies that encourage volume growth could directly impact revenue. Consider analyzing the relationship between Volume and SalesValue by region to identify growth opportunities."
 
 EXAMPLE OUTPUT STYLE FOR CHART-MAKER:
-"The chart generation process successfully created 2 visualizations from the dataset. The first chart is a bar chart comparing [x-axis] across [y-axis], showing [key findings]. The chart reveals [patterns/trends], with [specific metrics]. The second chart displays [details]. Overall, the visualizations provide clear insights into [business context], showing that [key takeaways]."
+"The bar chart using column 'Year' on X-axis and 'SalesValue' on Y-axis reveals that 2023 has the highest SalesValue at $2.45M, representing a 15% increase from 2022's $2.13M. The data shows consistent growth from 2018 ($1.8M) to 2023, with the largest year-over-year increase occurring between 2021 and 2022 (12%). This upward trend suggests successful market strategies. Recommendations: Continue current growth strategies and investigate factors driving the 2021-2022 surge."
 
-EXAMPLE OUTPUT STYLE FOR CREATE-TRANSFORM:
-"The create-transform operation successfully processed 12,345 rows from the dataset and executed 3 transformation operations. The first operation added two columns (SalesValue and Volume) to create a new column called RevenuePerUnit, which calculates the revenue efficiency metric. The second operation applied a logarithmic transformation to the SalesValue column to normalize the distribution, creating LogSalesValue. The third operation created a dummy variable from the Category column, generating Category_HEINZ. These transformations resulted in 3 new columns being added to the dataset, bringing the total column count from 15 to 18. The new columns enable [business use case], allowing for [specific analysis capabilities]. The transformed dataset has been saved and is ready for further analysis."
-
-EXAMPLE OUTPUT STYLE FOR CONCAT:
-"The concat operation successfully combined two datasets: D0_KHC_UK_Beans.arrow and D1_KHC_UK_Beans.arrow. The operation was performed vertically (stacking rows), which means rows from both files were appended together. The result contains [X] total rows and [Y] columns, combining data from both source files. This vertical concatenation is useful for [business use case], allowing you to [specific analysis capabilities]. The concatenated dataset preserves all columns from both files and is ready for further analysis."
+EXAMPLE OUTPUT STYLE FOR GROUPBY:
+"Grouping by 'Brand' and 'Region' columns with SUM(SalesValue) aggregation shows that Brand 'HEINZ' leads with $5.2M total sales across all regions, followed by 'Knorr' at $3.8M. The 'UK' region dominates with $12.5M total sales, with HEINZ contributing $2.1M (17%) in that region. The weighted average calculation reveals that HEINZ has the highest average sales per unit at $45.30. These insights support focusing marketing efforts on HEINZ in the UK region. Recommendations: Increase inventory for HEINZ in UK and analyze HEINZ's success factors for replication in other regions."
 """
+    
+    # Add examples if provided
+    if examples and len(examples) > 0:
+        prompt += "\n\nEXAMPLE INSIGHTS FOR REFERENCE:\n"
+        for i, example in enumerate(examples[:3], 1):  # Show up to 3 examples
+            prompt += f"\nExample {i}:\n{example}\n"
+        prompt += "\nUse these examples as a guide - keep insights concise and direct, focusing on findings and implications.\n"
     
     return prompt
 
@@ -697,11 +884,10 @@ async def generate_atom_insight(request: AtomInsightRequest):
         
         # Build prompt for atom insight
         prompt = build_atom_insight_prompt(
-            request.smart_response,
-            request.response,
             request.reasoning,
             request.data_summary,
-            request.atom_type
+            request.atom_type,
+            examples=None  # Examples not in original request model
         )
         
         logger.info(f"🤖 Generated atom insight prompt (length: {len(prompt)})")
@@ -735,7 +921,614 @@ async def generate_atom_insight(request: AtomInsightRequest):
             error=str(e)
         )
 
+def find_card_by_atom_id(cards: List[Dict[str, Any]], atom_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Robust card lookup with multiple matching strategies.
+    
+    Args:
+        cards: List of card dictionaries
+        atom_id: Atom ID to search for
+    
+    Returns:
+        Card dictionary if found, None otherwise
+    """
+    if not cards or not atom_id:
+        return None
+    
+    # Strategy 1: Exact match
+    for card in cards:
+        if card.get("atoms"):
+            for atom in card["atoms"]:
+                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                if atom_id_in_card == atom_id:
+                    logger.info(f"✅ Found card with exact atom ID match: {atom_id}")
+                    return card
+    
+    # Strategy 2: Case-insensitive match
+    atom_id_lower = atom_id.lower().strip()
+    for card in cards:
+        if card.get("atoms"):
+            for atom in card["atoms"]:
+                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                if atom_id_in_card and str(atom_id_in_card).lower().strip() == atom_id_lower:
+                    logger.info(f"✅ Found card with case-insensitive atom ID match: {atom_id} == {atom_id_in_card}")
+                    return card
+    
+    # Strategy 3: Partial match (atom_id ends with or contains the search term)
+    for card in cards:
+        if card.get("atoms"):
+            for atom in card["atoms"]:
+                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                if atom_id_in_card:
+                    atom_id_str = str(atom_id_in_card)
+                    # Check if atom_id ends with our search term or vice versa
+                    if atom_id_str.endswith(atom_id) or atom_id.endswith(atom_id_str):
+                        logger.info(f"✅ Found card with partial atom ID match: {atom_id} ~= {atom_id_str}")
+                        return card
+                    # Check if one contains the other
+                    if atom_id in atom_id_str or atom_id_str in atom_id:
+                        logger.info(f"✅ Found card with substring atom ID match: {atom_id} contains {atom_id_str}")
+                        return card
+    
+    # Strategy 4: Match by prefix (e.g., "chart-maker-123" matches "chart-maker")
+    atom_prefix = atom_id.split("-")[0] if "-" in atom_id else atom_id
+    for card in cards:
+        if card.get("atoms"):
+            for atom in card["atoms"]:
+                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                if atom_id_in_card:
+                    atom_id_str = str(atom_id_in_card)
+                    if atom_id_str.startswith(atom_prefix) or atom_prefix in atom_id_str:
+                        logger.info(f"✅ Found card with prefix atom ID match: {atom_id} (prefix: {atom_prefix})")
+                        return card
+    
+    return None
+
+
+def update_card_textbox_background(
+    atom_id: str,
+    insight: str,
+    client_name: Optional[str],
+    app_name: Optional[str],
+    project_name: Optional[str],
+    max_retries: int = 10,  # 🔧 INCREASED: More retries for React loops
+    retry_delay: float = 3.0  # 🔧 INCREASED: Longer delays for React loops
+):
+    """
+    Background task to update card text box with generated insight.
+    🔧 ENHANCED: Added retry logic and robust card lookup.
+    
+    Args:
+        atom_id: Atom ID to update
+        insight: Generated insight text
+        client_name: Client name
+        app_name: App name
+        project_name: Project name
+        max_retries: Maximum number of retry attempts
+        retry_delay: Delay between retries in seconds
+    """
+    try:
+        # Get laboratory API URL from environment
+        # Try multiple possible environment variable names
+        # Default to FastAPI backend service in Docker (fastapi service on port 8001)
+        lab_api_base = (
+            os.getenv("LABORATORY_API_URL") or 
+            os.getenv("LAB_API_URL") or 
+            os.getenv("LABORATORY_API") or
+            os.getenv("FASTAPI_BACKEND_URL") or
+            "http://fastapi:8001"  # Default to FastAPI service in Docker
+        )
+        
+        # Remove trailing slash and ensure /api/laboratory-project-state prefix
+        lab_api_base = lab_api_base.rstrip("/")
+        if not lab_api_base.endswith("/api/laboratory-project-state"):
+            if lab_api_base.endswith("/api"):
+                lab_api_base = f"{lab_api_base}/laboratory-project-state"
+            else:
+                lab_api_base = f"{lab_api_base}/api/laboratory-project-state"
+        
+        # Get cards from laboratory API using GET endpoint
+        # Endpoint: GET /api/laboratory-project-state/get/{client_name}/{app_name}/{project_name}
+        client_name_encoded = requests.utils.quote(client_name or "", safe="")
+        app_name_encoded = requests.utils.quote(app_name or "", safe="")
+        project_name_encoded = requests.utils.quote(project_name or "", safe="")
+        cards_url = f"{lab_api_base}/get/{client_name_encoded}/{app_name_encoded}/{project_name_encoded}"
+        
+        logger.info(f"📤 Fetching cards to update insight for atomId: {atom_id}")
+        logger.info(f"📤 Cards URL: {cards_url}")
+        logger.info(f"📤 Client: {client_name}, App: {app_name}, Project: {project_name}")
+        
+        # 🔧 ENHANCED: Retry logic with exponential backoff
+        target_card = None
+        cards_data = None
+        
+        for attempt in range(max_retries):
+            try:
+                cards_response = requests.get(cards_url, timeout=10)
+                
+                if not cards_response.ok:
+                    error_text = cards_response.text[:500] if cards_response.text else "No error message"
+                    logger.warning(f"⚠️ Failed to fetch cards (attempt {attempt + 1}/{max_retries}): {cards_response.status_code}")
+                    logger.warning(f"⚠️ Error response: {error_text}")
+                    
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(f"❌ Failed to fetch cards after {max_retries} attempts")
+                        return
+                
+                cards_data = cards_response.json()
+                cards = cards_data.get("cards", [])
+                
+                # 🔧 ENHANCED: Better logging for debugging
+                logger.info(f"📥 Cards API response structure: keys={list(cards_data.keys())}")
+                logger.info(f"📥 Cards array length: {len(cards) if cards else 0}")
+                
+                if not cards:
+                    logger.warning(
+                        f"⚠️ No cards found in response (attempt {attempt + 1}/{max_retries})\n"
+                        f"   Response keys: {list(cards_data.keys())}\n"
+                        f"   Response preview: {json.dumps({k: str(v)[:100] if isinstance(v, (list, dict)) else v for k, v in list(cards_data.items())[:5]}, default=str)}"
+                    )
+                    # 🔧 ENHANCED: For React loops, cards might not be saved yet - use longer delays
+                    if attempt < max_retries - 1:
+                        # Progressive delay: 3s, 6s, 9s, 12s, 15s, 18s, 21s, 24s, 27s, 30s
+                        wait_time = retry_delay * (attempt + 1)
+                        logger.info(f"⏳ Retrying in {wait_time}s (cards might not be saved yet in React loop)...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"❌ No cards found after {max_retries} attempts")
+                        logger.error(f"   Final response keys: {list(cards_data.keys())}")
+                        logger.error(f"   Client: {client_name}, App: {app_name}, Project: {project_name}")
+                        # 🔧 FINAL FALLBACK: Store insight for later retrieval when cards become available
+                        logger.warning(f"⚠️ Insight generated but cards array is empty - storing for later - atomId: {atom_id}")
+                        _ensure_pending_retry_worker()
+                        _pending_insights[atom_id] = {
+                            "insight": insight,
+                            "client_name": client_name,
+                            "app_name": app_name,
+                            "project_name": project_name,
+                            "timestamp": time.time()
+                        }
+                        logger.info(f"💾 Stored pending insight for atomId: {atom_id} (will retry when cards are available)")
+                        # Schedule a delayed retry to check if cards become available
+                        import threading
+                        def delayed_retry():
+                            time.sleep(30)  # Wait 30 seconds
+                            logger.info(f"🔄 Delayed retry: Attempting to update card for atomId: {atom_id}")
+                            if atom_id in _pending_insights:
+                                pending = _pending_insights[atom_id]
+                                update_card_textbox_background(
+                                    atom_id=atom_id,
+                                    insight=pending["insight"],
+                                    client_name=pending["client_name"],
+                                    app_name=pending["app_name"],
+                                    project_name=pending["project_name"],
+                                    max_retries=5,  # Fewer retries for delayed attempt
+                                    retry_delay=2.0
+                                )
+                                # Remove from pending if successful (check will be done in the function)
+                        threading.Thread(target=delayed_retry, daemon=True).start()
+                        return
+                
+                # 🔧 ENHANCED: Use robust card lookup
+                target_card = find_card_by_atom_id(cards, atom_id)
+                
+                if target_card:
+                    logger.info(f"✅ Found target card on attempt {attempt + 1}")
+                    break
+                else:
+                    # Log all atom IDs for debugging
+                    all_atom_ids = []
+                    for card in cards:
+                        if card.get("atoms"):
+                            for atom in card["atoms"]:
+                                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                                if atom_id_in_card:
+                                    all_atom_ids.append(atom_id_in_card)
+                    
+                    logger.warning(
+                        f"⚠️ Card not found for atomId: {atom_id} (attempt {attempt + 1}/{max_retries})\n"
+                        f"   Available atom IDs: {all_atom_ids[:10]}{'...' if len(all_atom_ids) > 10 else ''}"
+                    )
+                    
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (attempt + 1)
+                        logger.info(f"⏳ Retrying in {wait_time}s (card might not be saved yet)...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"❌ Card not found after {max_retries} attempts")
+                        logger.error(f"   Searched for: {atom_id}")
+                        logger.error(f"   Total cards: {len(cards)}")
+                        logger.error(f"   Total atoms: {len(all_atom_ids)}")
+                        return
+                        
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"⚠️ Request exception (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                else:
+                    logger.error(f"❌ Request exception after {max_retries} attempts: {e}")
+                    return
+        
+        if not target_card:
+            logger.error(f"❌ Could not find card for atomId: {atom_id} after all retry attempts")
+            # 🔧 ENHANCED: Store insight for delayed retry if card not found
+            logger.warning(f"💾 Storing insight for delayed retry - atomId: {atom_id}")
+            _ensure_pending_retry_worker()
+            _pending_insights[atom_id] = {
+                "insight": insight,
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+                "timestamp": time.time()
+            }
+            # Schedule delayed retry
+            import threading
+            def delayed_retry():
+                time.sleep(30)  # Wait 30 seconds for cards to be created
+                logger.info(f"🔄 Delayed retry: Attempting to update card for atomId: {atom_id}")
+                if atom_id in _pending_insights:
+                    pending = _pending_insights[atom_id]
+                    update_card_textbox_background(
+                        atom_id=atom_id,
+                        insight=pending["insight"],
+                        client_name=pending["client_name"],
+                        app_name=pending["app_name"],
+                        project_name=pending["project_name"],
+                        max_retries=5,
+                        retry_delay=2.0
+                    )
+            threading.Thread(target=delayed_retry, daemon=True).start()
+            return
+        
+        # Update the insight text box
+        text_boxes = target_card.get("textBoxes", [])
+        
+        # Find the last text box with title 'AI Insight' or 'Generating insight...'
+        insight_box_index = -1
+        for i in range(len(text_boxes) - 1, -1, -1):
+            title = text_boxes[i].get("title", "")
+            if title == "AI Insight" or title == "Generating insight..." or "Insight" in title:
+                insight_box_index = i
+                break
+        
+        if insight_box_index >= 0:
+            # Update existing insight text box
+            text_boxes[insight_box_index] = {
+                **text_boxes[insight_box_index],
+                "title": "AI Insight",
+                "content": insight,
+                "html": insight.replace("\n", "<br />")
+            }
+        else:
+            # Create new insight text box
+            new_text_box = {
+                "id": f"insight-{atom_id}-{int(time.time())}",
+                "title": "AI Insight",
+                "content": insight,
+                "html": insight.replace("\n", "<br />"),
+                "settings": {}
+            }
+            text_boxes.append(new_text_box)
+        
+        # Update card
+        target_card["textBoxes"] = text_boxes
+        target_card["textBoxEnabled"] = True
+        
+        # Save updated cards
+        # Endpoint: POST /api/laboratory-project-state/save
+        save_url = f"{lab_api_base}/save"
+        save_payload = {
+            "client_name": client_name or "",
+            "app_name": app_name or "",
+            "project_name": project_name or "",
+            "cards": cards,
+            "workflow_molecules": cards_data.get("workflow_molecules", []),
+            "auxiliaryMenuLeftOpen": cards_data.get("auxiliaryMenuLeftOpen", True),
+            "autosaveEnabled": cards_data.get("autosaveEnabled", True),
+            "mode": "laboratory"
+        }
+        
+        logger.info(f"📤 Saving updated card with insight for atomId: {atom_id}")
+        logger.info(f"📤 Save URL: {save_url}")
+        save_response = requests.post(save_url, json=save_payload, timeout=10)
+        
+        if save_response.ok:
+            logger.info(f"✅ Successfully updated card text box with insight for atomId: {atom_id}")
+            # 🔧 ENHANCED: Clean up pending insight if successfully saved
+            if atom_id in _pending_insights:
+                del _pending_insights[atom_id]
+                logger.info(f"🗑️ Removed pending insight for atomId: {atom_id} (successfully saved)")
+        else:
+            logger.error(f"❌ Failed to save card: {save_response.status_code} - {save_response.text}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error updating card text box in background: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+@router.post("/generate-atom-insight-async", response_model=AsyncAtomInsightResponse)
+async def generate_atom_insight_async(
+    request: AsyncAtomInsightRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Generate AI-powered insights asynchronously in the background.
+    The insight will be automatically updated in the card text box when complete.
+    This ensures insights complete even when new atoms are called.
+    """
+    try:
+        logger.info(f"🚀 Starting async atom insight generation - Atom type: {request.atom_type}, AtomId: {request.atom_id}")
+        
+        # Add background task to generate insight and update card
+        background_tasks.add_task(
+            process_insight_and_update_card,
+            request
+        )
+        
+        return AsyncAtomInsightResponse(
+            success=True,
+            message="Insight generation started in background. Text box will be updated when complete.",
+            task_id=f"insight-{request.atom_id}-{int(time.time())}"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to start async insight generation: {e}")
+        return AsyncAtomInsightResponse(
+            success=False,
+            message=f"Failed to start insight generation: {str(e)}",
+            task_id=None
+        )
+
+def process_insight_and_update_card(request: AsyncAtomInsightRequest):
+    """Process insight generation and update card in background."""
+    start_time = time.time()
+    
+    try:
+        logger.info(f"🤖 Processing atom insight in background - Atom type: {request.atom_type}")
+        
+        # Build prompt for atom insight
+        prompt = build_atom_insight_prompt(
+            request.reasoning,
+            request.data_summary,
+            request.atom_type,
+            examples=request.examples
+        )
+        
+        logger.info(f"🤖 Generated atom insight prompt (length: {len(prompt)})")
+        
+        # Call LLM for insight generation
+        ai_insight = call_llm_for_atom_insights(
+            cfg["api_url"],
+            cfg["model_name"],
+            cfg["bearer_token"],
+            prompt
+        )
+        
+        processing_time = time.time() - start_time
+        logger.info(f"✅ Atom insight generated successfully in {processing_time:.2f}s")
+        
+        # Update card text box with the insight (synchronous function)
+        update_card_textbox_background(
+            request.atom_id,
+            ai_insight,
+            request.client_name,
+            request.app_name,
+            request.project_name
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Background insight generation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+def extract_facts_from_data_summary(data_summary: Dict[str, Any], atom_type: str) -> Dict[str, Any]:
+    """Extract facts (rows/data) from data_summary for deep insight analysis."""
+    facts = {}
+    
+    # Try to extract actual data rows
+    summary_data = data_summary.get('summary_data', {})
+    metadata = data_summary.get('metadata', {})
+    
+    # Look for rows/data in various places
+    if 'rows' in summary_data:
+        facts['rows'] = summary_data['rows']
+    elif 'data' in summary_data:
+        facts['rows'] = summary_data['data']
+    elif 'preview' in summary_data:
+        facts['rows'] = summary_data['preview']
+    
+    # Add metadata
+    facts['metadata'] = metadata
+    facts['summary'] = summary_data
+    
+    return facts
+
+
+def generate_atom_insight_with_deep_analysis(
+    goal: str,
+    data_summary: Dict[str, Any],
+    atom_type: str,
+    atom_id: Optional[str] = None,
+    use_deep_analysis: bool = True
+) -> str:
+    """Generate insight using deep analysis if available and data is present."""
+    if not DEEP_INSIGHTS_AVAILABLE or not use_deep_analysis:
+        return None
+    
+    try:
+        # Extract facts from data summary
+        facts = extract_facts_from_data_summary(data_summary, atom_type)
+        
+        # Check if we have actual data rows
+        rows = facts.get('rows', [])
+        if not rows or len(rows) == 0:
+            logger.debug("No rows found for deep analysis")
+            return None
+        
+        # Generate deep insights
+        insights = generate_deep_insights(
+            goal=goal,
+            facts=facts,
+            data_hash=None,
+            atom_id=atom_id,
+            llm_client=None  # Will use default LLMClient
+        )
+        
+        if insights and len(insights) > 0:
+            # Format insights into a comprehensive text
+            insight_parts = []
+            for i, insight_dict in enumerate(insights, 1):
+                insight_parts.append(f"### Insight {i}")
+                insight_parts.append(f"**Finding:** {insight_dict.get('insight', '')}")
+                insight_parts.append(f"**Impact:** {insight_dict.get('impact', '')}")
+                insight_parts.append(f"**Risk:** {insight_dict.get('risk', '')}")
+                insight_parts.append(f"**Recommended Action:** {insight_dict.get('next_action', '')}")
+                insight_parts.append("")
+            
+            return "\n".join(insight_parts)
+    
+    except Exception as e:
+        logger.warning(f"Deep insight analysis failed, falling back to standard: {e}")
+        return None
+    
+    return None
+
+
+@router.post("/generate-deep-insights", response_model=AtomInsightResponse)
+async def generate_deep_insights_endpoint(request: AtomInsightRequest):
+    """
+    Generate deep insights using enhanced statistical analysis and pattern detection.
+    """
+    start_time = time.time()
+    
+    try:
+        logger.info(f"🤖 Deep insight generation request - Atom type: {request.atom_type}")
+        
+        if not DEEP_INSIGHTS_AVAILABLE:
+            return AtomInsightResponse(
+                success=False,
+                insight="Deep insight analysis module not available",
+                processing_time=time.time() - start_time,
+                error="Module not available"
+            )
+        
+        # Build goal from reasoning and atom_type
+        goal = f"Analyze {request.atom_type} results: {request.reasoning[:200]}"
+        
+        # Extract facts from data summary
+        facts = extract_facts_from_data_summary(request.data_summary, request.atom_type)
+        
+        # Generate deep insights
+        insights = generate_deep_insights(
+            goal=goal,
+            facts=facts,
+            data_hash=None,
+            atom_id=None,
+            llm_client=None
+        )
+        
+        if not insights or len(insights) == 0:
+            raise ValueError("No insights generated")
+        
+        # Format insights
+        insight_parts = []
+        for i, insight_dict in enumerate(insights, 1):
+            insight_parts.append(f"### Insight {i}")
+            insight_parts.append(f"**Finding:** {insight_dict.get('insight', '')}")
+            insight_parts.append(f"**Impact:** {insight_dict.get('impact', '')}")
+            insight_parts.append(f"**Risk:** {insight_dict.get('risk', '')}")
+            insight_parts.append(f"**Recommended Action:** {insight_dict.get('next_action', '')}")
+            insight_parts.append("")
+        
+        insight_text = "\n".join(insight_parts)
+        
+        processing_time = time.time() - start_time
+        logger.info(f"✅ Deep insight generated successfully in {processing_time:.2f}s")
+        
+        return AtomInsightResponse(
+            success=True,
+            insight=insight_text,
+            processing_time=processing_time
+        )
+        
+    except Exception as e:
+        logger.error(f"Deep insight generation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return AtomInsightResponse(
+            success=False,
+            insight="",
+            processing_time=time.time() - start_time,
+            error=str(e)
+        )
+
+
+@router.get("/pending-insights/{atom_id}")
+async def get_pending_insight(atom_id: str):
+    """
+    Get pending insight for an atom if cards weren't available when insight was generated.
+    Useful for React loops where cards might be created after insight generation.
+    """
+    if atom_id in _pending_insights:
+        pending = _pending_insights[atom_id]
+        return {
+            "status": "pending",
+            "atom_id": atom_id,
+            "insight": pending["insight"],
+            "timestamp": pending["timestamp"],
+            "has_insight": True
+        }
+    return {
+        "status": "not_found",
+        "atom_id": atom_id,
+        "has_insight": False
+    }
+
+
+@router.post("/retry-pending/{atom_id}")
+async def retry_pending_insight(atom_id: str):
+    """
+    Retry updating card with pending insight.
+    Useful when cards become available after insight was generated.
+    """
+    if atom_id not in _pending_insights:
+        return {
+            "status": "not_found",
+            "message": f"No pending insight found for atom_id: {atom_id}"
+        }
+    
+    pending = _pending_insights[atom_id]
+    
+    # Try to update card again
+    update_card_textbox_background(
+        atom_id=atom_id,
+        insight=pending["insight"],
+        client_name=pending["client_name"],
+        app_name=pending["app_name"],
+        project_name=pending["project_name"],
+        max_retries=5,
+        retry_delay=2.0
+    )
+    
+    return {
+        "status": "retry_initiated",
+        "atom_id": atom_id,
+        "message": "Retry initiated - card will be updated if available"
+    }
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint for insight service."""
-    return {"status": "healthy", "service": "AI Insights"}
+    return {
+        "status": "healthy",
+        "service": "AI Insights",
+        "deep_insights_available": DEEP_INSIGHTS_AVAILABLE,
+        "pending_insights_count": len(_pending_insights)
+    }

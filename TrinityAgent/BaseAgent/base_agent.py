@@ -818,28 +818,59 @@ Now classify the intent:"""
             if hasattr(self, '_normalize_result'):
                 agent_result = self._normalize_result(agent_result)
             
-            # Build result
+            # 🔧 ENHANCED: Automatic retry on validation failures (for chart maker and other agents)
+            # Check if validation failed and retry mechanism is available
+            if (agent_result.get("success") is False and 
+                agent_result.get("validation_errors") and 
+                hasattr(self, '_retry_with_corrections')):
+                
+                logger.info("🔄 Validation failed - attempting automatic retry with corrections...")
+                logger.info(f"   Validation errors: {agent_result.get('validation_errors', [])}")
+                
+                try:
+                    retry_result = self._retry_with_corrections(
+                        agent_result=agent_result,
+                        user_prompt=context.user_prompt,
+                        file_context=file_context,
+                        full_context=full_context,
+                        session_id=context.session_id
+                    )
+                    
+                    if retry_result and retry_result.get("success") is True:
+                        logger.info("✅ Retry with corrections succeeded - using corrected result")
+                        agent_result = retry_result
+                    else:
+                        logger.warning("⚠️ Retry with corrections failed or returned unsuccessful result")
+                except Exception as retry_error:
+                    logger.error(f"❌ Error during retry with corrections: {retry_error}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    # Continue with original failed result
+            
+            # Build result - now only using reasoning field
+            reasoning = agent_result.get("reasoning", "Agent execution completed")
             result = {
-                "response": agent_result.get("smart_response", agent_result.get("response", "")),
+                "response": reasoning,  # Use reasoning as the response/message
                 "intent": "workflow",
                 "agent_data": agent_result,
-                "reasoning": agent_result.get("reasoning", "Agent execution completed")
+                "reasoning": reasoning
             }
             
             # Normalize result format (always workflow path now)
             if "error" in result:
                 normalized_result = {
-                    "message": result.get("response", "Agent execution failed"),
+                    "message": reasoning if reasoning else "Agent execution failed",
                     "error": result.get("error", "Unknown error"),
                     "intent": "workflow",
-                    "agent_data": result.get("agent_data", {})
+                    "agent_data": result.get("agent_data", {}),
+                    "reasoning": reasoning
                 }
             else:
                 normalized_result = {
-                    "message": result.get("response", ""),
+                    "message": reasoning,  # Use reasoning as the message
                     "intent": "workflow",
                     "agent_data": result.get("agent_data", {}),
-                    "reasoning": result.get("reasoning", "")
+                    "reasoning": reasoning
                 }
             
             # Store interaction

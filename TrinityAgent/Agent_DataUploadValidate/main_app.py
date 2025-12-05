@@ -223,9 +223,8 @@ if BaseAgent is not None:
                     if not isinstance(validate_json["dtype_changes"], dict):
                         return False
             
-            # Must have smart_response
-            if "smart_response" not in result:
-                return False
+            # Reasoning is preferred but not strictly required (will be added in normalization if missing)
+            # No longer validating for smart_response or response - only reasoning is used now
             
             return True
         

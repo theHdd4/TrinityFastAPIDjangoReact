@@ -259,3 +259,46 @@ class RegistryEnvironment(models.Model):
 
     def __str__(self):
         return f"{self.client_name}/{self.app_name}/{self.project_name}"
+
+
+class RetrievalDocument(models.Model):
+    """Normalized document metadata for hybrid retrieval."""
+
+    doc_id = models.CharField(max_length=255, unique=True)
+    title = models.CharField(max_length=512, blank=True)
+    text = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["doc_id"]),
+            models.Index(fields=["updated_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.doc_id}: {self.title or 'Untitled'}"
+
+
+class EmbeddingCache(models.Model):
+    """Cache of document embeddings by model name."""
+
+    document = models.ForeignKey(
+        RetrievalDocument,
+        on_delete=models.CASCADE,
+        related_name="embeddings",
+    )
+    model_name = models.CharField(max_length=255, db_index=True)
+    vector = models.JSONField(default=list, blank=True)
+    vector_norm = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("document", "model_name")
+        indexes = [models.Index(fields=["model_name"])]
+
+    def __str__(self):
+        return f"{self.model_name} embedding for {self.document.doc_id}"

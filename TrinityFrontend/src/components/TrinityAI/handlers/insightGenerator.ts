@@ -4,9 +4,10 @@
  * Includes a global queue manager to ensure insights complete even when new atoms start
  */
 
-import { INSIGHT_API } from '@/lib/api';
+import { INSIGHT_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { getDataSummary, StandardizedDataSummary } from './dataSummaryExtractors';
-import { updateInsightTextBox } from './utils';
+import { updateInsightTextBox, getEnvironmentContext } from './utils';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 /**
  * Global insight queue manager
@@ -46,6 +47,32 @@ class InsightQueueManager {
       .then(async (result) => {
         console.log(`✅ Insight generation completed for atomId: ${atomId}`);
         
+        // If using async endpoint, backend handles text box update - poll for the update
+        if (result.success && result.insight === '') {
+          // This means async endpoint was used - backend will update card
+          console.log(`📋 Async endpoint used - backend will update card for atomId: ${atomId}`);
+          console.log(`🔄 Starting to poll for backend card update...`);
+          
+          // Poll for the card update in the background
+          // Use arrow function to preserve 'this' context
+          const queueManager = this;
+          queueManager.pollForCardUpdate(atomId, 20, 2000).then((success) => {
+            if (success) {
+              console.log(`✅ Card state refreshed with insight for atomId: ${atomId}`);
+            } else {
+              console.warn(`⚠️ Could not refresh card state for atomId: ${atomId} - insight may still appear after manual refresh`);
+            }
+            // Remove from pending queue after polling completes
+            queueManager.pendingInsights.delete(atomId);
+          }).catch((error) => {
+            console.error(`❌ Error polling for card update:`, error);
+            queueManager.pendingInsights.delete(atomId);
+          });
+          
+          return result;
+        }
+        
+        // Fallback: If using sync endpoint or insight was returned, update text box
         if (result.success && result.insight) {
           // Update the text box with retry logic (handles state changes)
           console.log(`📝 Updating insight text box for atomId: ${atomId}`);
@@ -118,6 +145,83 @@ class InsightQueueManager {
    */
   isPending(atomId: string): boolean {
     return this.pendingInsights.has(atomId);
+  }
+
+  /**
+   * Poll for updated card state from backend and refresh local store
+   * This is used when backend updates the card asynchronously
+   */
+  private async pollForCardUpdate(atomId: string, maxAttempts: number = 20, intervalMs: number = 2000): Promise<boolean> {
+    const envContext = getEnvironmentContext();
+    
+    if (!envContext.client_name || !envContext.app_name || !envContext.project_name) {
+      console.warn('⚠️ Cannot poll for card update - missing environment context');
+      return false;
+    }
+
+    const clientNameEncoded = encodeURIComponent(envContext.client_name);
+    const appNameEncoded = encodeURIComponent(envContext.app_name);
+    const projectNameEncoded = encodeURIComponent(envContext.project_name);
+    const cardsUrl = `${LABORATORY_PROJECT_STATE_API}/get/${clientNameEncoded}/${appNameEncoded}/${projectNameEncoded}`;
+
+    console.log(`🔄 Starting to poll for card update for atomId: ${atomId}`);
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await new Promise(resolve => setTimeout(resolve, intervalMs));
+        
+        console.log(`🔄 Polling attempt ${attempt}/${maxAttempts} for atomId: ${atomId}`);
+        
+        const response = await fetch(cardsUrl, {
+          method: 'GET',
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          console.warn(`⚠️ Poll attempt ${attempt} failed: ${response.status}`);
+          continue;
+        }
+
+        const data = await response.json();
+        const cards = data.cards || [];
+
+        // Find the card containing this atom
+        for (const card of cards) {
+          if (card.atoms) {
+            for (const atom of card.atoms) {
+              if (atom.id === atomId) {
+                // Check if insight text box has been updated (not "Generating insight...")
+                const textBoxes = card.textBoxes || [];
+                const insightBox = textBoxes.find((tb: any) => 
+                  (tb.title === 'AI Insight' || tb.title === 'Generating insight...') && 
+                  tb.content && 
+                  tb.content.trim() !== '' && 
+                  tb.content !== 'Generating insight...'
+                );
+
+                if (insightBox && insightBox.content && insightBox.content !== 'Generating insight...') {
+                  console.log(`✅ Found updated insight in card state for atomId: ${atomId}`);
+                  
+                  // Update local store with the fetched card state
+                  const { setCards } = useLaboratoryStore.getState();
+                  setCards(cards);
+                  
+                  console.log(`✅ Successfully refreshed card state with insight for atomId: ${atomId}`);
+                  return true;
+                }
+              }
+            }
+          }
+        }
+
+        console.log(`⏳ Insight not yet updated (attempt ${attempt}/${maxAttempts}), will retry...`);
+      } catch (error) {
+        console.warn(`⚠️ Error polling for card update (attempt ${attempt}):`, error);
+      }
+    }
+
+    console.warn(`⚠️ Polling timeout - insight may not have been updated for atomId: ${atomId}`);
+    return false;
   }
 }
 
@@ -212,30 +316,26 @@ export const generateAtomInsight = async (
 
 /**
  * Internal insight generation function
- * This is the actual implementation that calls the API
+ * Uses async backend endpoint that processes in background and updates card automatically
  */
 const generateAtomInsightInternal = async (
   params: InsightGenerationParams
 ): Promise<InsightResult> => {
   const { data, atomType, sessionId } = params;
+  const atomId = params.atomId || params.data?.atomId || params.data?.atom_id;
   
   console.log('🚀🚀🚀 generateAtomInsight CALLED');
   console.log('🚀🚀🚀 atomType:', atomType);
   console.log('🚀🚀🚀 sessionId:', sessionId);
+  console.log('🚀🚀🚀 atomId:', atomId);
   console.log('🚀🚀🚀 data keys:', Object.keys(data));
   
   try {
-    // Extract smart_response, response, and reasoning
-    const smartResponse = data.smart_response || data.data?.smart_response || data.smartResponse || '';
-    const response = data.response || data.data?.response || '';
+    // Extract only reasoning field (smart_response and response are no longer used)
     const reasoning = data.reasoning || data.data?.reasoning || '';
     
     console.log('🚀🚀🚀 Extracted fields:', {
-      hasSmartResponse: !!smartResponse,
-      hasResponse: !!response,
       hasReasoning: !!reasoning,
-      smartResponseLength: smartResponse.length,
-      responseLength: response.length,
       reasoningLength: reasoning.length,
     });
     
@@ -250,26 +350,88 @@ const generateAtomInsightInternal = async (
     // Get example insights for this atom type
     const examples = getExampleInsights(atomType);
     
-    // Prepare request payload
+    // Get environment context for card update using utility function
+    const envContext = getEnvironmentContext();
+    const clientName = envContext.client_name || '';
+    const appName = envContext.app_name || '';
+    const projectName = envContext.project_name || '';
+    
+    if (!clientName || !appName || !projectName) {
+      console.warn('⚠️ Missing environment context for insight generation:', {
+        clientName: !!clientName,
+        appName: !!appName,
+        projectName: !!projectName
+      });
+    }
+    
+    // Use async endpoint if we have atomId (backend will update card automatically)
+    if (atomId) {
+      console.log('🚀🚀🚀 Using async endpoint - backend will update card automatically');
+      
+      const asyncRequestPayload = {
+        reasoning: reasoning,
+        data_summary: dataSummary,
+        atom_type: atomType,
+        session_id: sessionId,
+        atom_id: atomId,
+        client_name: clientName,
+        app_name: appName,
+        project_name: projectName,
+        examples: examples,
+      };
+      
+      console.log('🚀🚀🚀 Calling async insight API:', `${INSIGHT_API}/generate-atom-insight-async`);
+      
+      const asyncResponse = await fetch(`${INSIGHT_API}/generate-atom-insight-async`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(asyncRequestPayload),
+      });
+      
+      console.log('🚀🚀🚀 Async insight API response status:', asyncResponse.status);
+      
+      if (!asyncResponse.ok) {
+        const errorText = await asyncResponse.text();
+        console.error('❌ Async insight API error:', asyncResponse.status, errorText);
+        return {
+          success: false,
+          insight: '',
+          error: `Async insight generation failed: ${asyncResponse.status}`,
+        };
+      }
+      
+      const asyncResult = await asyncResponse.json();
+      
+      if (asyncResult.success) {
+        console.log('✅ Async insight generation started successfully');
+        // Return success immediately - backend will update card when complete
+        return {
+          success: true,
+          insight: '', // Empty for now, backend will update card directly
+        };
+      } else {
+        return {
+          success: false,
+          insight: '',
+          error: asyncResult.message || 'Failed to start async insight generation',
+        };
+      }
+    }
+    
+    // Fallback to synchronous endpoint if no atomId
+    console.log('⚠️ No atomId provided, using synchronous endpoint');
+    
     const requestPayload = {
-      smart_response: smartResponse,
-      response: response,
       reasoning: reasoning,
       data_summary: dataSummary,
       atom_type: atomType,
       session_id: sessionId,
-      examples: examples, // Add examples to guide the LLM
+      examples: examples,
     };
     
-    console.log('🚀🚀🚀 Calling insight API:', INSIGHT_API);
-    console.log('🚀🚀🚀 Request payload:', {
-      atom_type: requestPayload.atom_type,
-      session_id: requestPayload.session_id,
-      hasSmartResponse: !!requestPayload.smart_response,
-      hasResponse: !!requestPayload.response,
-      hasReasoning: !!requestPayload.reasoning,
-      hasDataSummary: !!requestPayload.data_summary,
-    });
+    console.log('🚀🚀🚀 Calling synchronous insight API:', INSIGHT_API);
     
     const insightResponse = await fetch(`${INSIGHT_API}/generate-atom-insight`, {
       method: 'POST',
@@ -280,8 +442,6 @@ const generateAtomInsightInternal = async (
     });
     
     console.log('🚀🚀🚀 Insight API response status:', insightResponse.status);
-    
-    // Connection status logged on backend
     
     if (!insightResponse.ok) {
       const errorText = await insightResponse.text();
@@ -294,8 +454,6 @@ const generateAtomInsightInternal = async (
     }
     
     const insightData = await insightResponse.json();
-    
-    // Response logged on backend - check terminal for details
     
     if (insightData.success && insightData.insight) {
       return {
@@ -322,28 +480,20 @@ const generateAtomInsightInternal = async (
 
 /**
  * Format insight content for text box display
- * Combines smart_response, response, reasoning, and generated insight
+ * Now only uses reasoning field (smart_response and response are no longer used)
  */
 export const formatInsightForTextBox = (
-  smartResponse: string,
-  response: string,
   reasoning: string,
   insight: string
 ): string => {
   let formattedText = '';
   
-  if (smartResponse) {
-    formattedText += `**Smart Response:**\n${smartResponse}\n\n`;
-  }
-  
+  // Show reasoning first (this is the detailed explanation from the atom)
   if (reasoning) {
     formattedText += `**Reasoning:**\n${reasoning}\n\n`;
   }
   
-  if (response) {
-    formattedText += `**Response:**\n${response}\n\n`;
-  }
-  
+  // Show generated insight if available
   if (insight) {
     formattedText += `**Insight:**\n${insight}\n\n`;
   }
@@ -360,18 +510,14 @@ export const generateAndFormatInsight = async (
 ): Promise<{ formattedContent: string; insight: string }> => {
   const { data } = params;
   
-  // Extract fields
-  const smartResponse = data.smart_response || data.data?.smart_response || data.smartResponse || '';
-  const response = data.response || data.data?.response || '';
+  // Extract only reasoning field
   const reasoning = data.reasoning || data.data?.reasoning || '';
   
   // Generate insight
   const insightResult = await generateAtomInsight(params);
   
-  // Format for text box
+  // Format for text box (only reasoning and insight now)
   const formattedContent = formatInsightForTextBox(
-    smartResponse,
-    response,
     reasoning,
     insightResult.insight
   );
