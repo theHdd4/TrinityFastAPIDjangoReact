@@ -138,6 +138,7 @@ class LabContextBuilder:
         self,
         envelope: LaboratoryEnvelope,
         freshness_minutes: int = 360,
+        project_context: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         return self.store.load_recent_documents(
             session_id=envelope.session_id,
@@ -145,6 +146,7 @@ class LabContextBuilder:
             prompt_template_version=envelope.prompt_template_version,
             max_docs=5,
             freshness_minutes=freshness_minutes,
+            project_context=project_context,
         )
 
     @staticmethod
@@ -201,7 +203,7 @@ class LabContextBuilder:
             business_goals=business_goals,
             analysis_insights=analysis_insights,
         )
-        self.store.save_document(document)
+        self.store.save_document(document, project_context=project_context)
         logger.info(
             "Laboratory memory persisted with %d steps (session=%s request=%s)",
             len(workflow_state.steps),

@@ -456,8 +456,12 @@ class StreamWebSocketOrchestrator:
 
         cached_snapshots = self._lab_atom_snapshot_cache.get(sequence_id)
         if cached_snapshots is None and self.lab_memory_store and request_id:
+            project_context = self._sequence_project_context.get(sequence_id, {})
             cached_snapshots = self.lab_memory_store.load_atom_snapshots(
-                session_id=sequence_id, request_id=request_id, limit=25
+                session_id=sequence_id,
+                request_id=request_id,
+                limit=25,
+                project_context=project_context,
             )
             self._lab_atom_snapshot_cache[sequence_id] = cached_snapshots
 
@@ -2909,6 +2913,11 @@ WORKFLOW PLANNING:
         self._sequence_available_files[sequence_id] = available_files
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
+        if self.lab_memory_store:
+            try:
+                self.lab_memory_store.apply_context(project_context)
+            except Exception as ctx_exc:
+                logger.warning("⚠️ Failed to apply project context to lab memory store: %s", ctx_exc)
         if intent_route:
             self._sequence_intent_routing[sequence_id] = intent_route
         logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
@@ -2974,7 +2983,10 @@ WORKFLOW PLANNING:
                     "history_summary": history_summary,
                 },
             )
-            lab_bundle = self.lab_context_builder.load_context_bundle(lab_envelope)
+            lab_bundle = self.lab_context_builder.load_context_bundle(
+                lab_envelope,
+                project_context=project_context,
+            )
             effective_user_prompt = self.lab_context_builder.merge_context_into_prompt(
                 effective_user_prompt,
                 lab_bundle,

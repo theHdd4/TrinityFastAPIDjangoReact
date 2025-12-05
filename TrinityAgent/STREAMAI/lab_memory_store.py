@@ -5,8 +5,9 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from minio import Minio
 from pymongo import ASCENDING, MongoClient
@@ -40,9 +41,7 @@ class LabMemoryStore:
         self.mongo_client = mongo_client or self._build_mongo_client()
         self.bucket = bucket or settings.MINIO_BUCKET
         self.prefix = prefix.rstrip("/")
-        self.client_name = (getattr(settings, "CLIENT_NAME", None) or "default_client").strip("/") or "default_client"
-        self.app_name = (getattr(settings, "APP_NAME", None) or "default_app").strip("/") or "default_app"
-        self.project_name = (getattr(settings, "PROJECT_NAME", None) or "default_project").strip("/") or "default_project"
+        self.client_name, self.app_name, self.project_name = self._resolve_context()
         self._ensure_bucket()
         self.mongo_collection = self._ensure_collection()
 
@@ -99,6 +98,94 @@ class LabMemoryStore:
             logger.warning("Failed to create MongoDB indices for lab context: %s", exc)
         return collection
 
+    def _resolve_context_from_env(self) -> Tuple[str, str, str]:
+        """Resolve client/app/project from environment and settings overrides."""
+
+        def _first_non_empty(*candidates: Optional[str]) -> Optional[str]:
+            for candidate in candidates:
+                if candidate and str(candidate).strip():
+                    return str(candidate).strip("/")
+            return None
+
+        client = _first_non_empty(
+            os.getenv("CLIENT_NAME"),
+            os.getenv("REDIS_CLIENT_NAME"),
+            os.getenv("POSTGRES_CLIENT_NAME"),
+            os.getenv("MONGO_CLIENT_NAME"),
+            getattr(settings, "CLIENT_NAME", None),
+        )
+        app = _first_non_empty(
+            os.getenv("APP_NAME"),
+            os.getenv("REDIS_APP_NAME"),
+            os.getenv("POSTGRES_APP_NAME"),
+            os.getenv("MONGO_APP_NAME"),
+            getattr(settings, "APP_NAME", None),
+        )
+        project = _first_non_empty(
+            os.getenv("PROJECT_NAME"),
+            os.getenv("REDIS_PROJECT_NAME"),
+            os.getenv("POSTGRES_PROJECT_NAME"),
+            os.getenv("MONGO_PROJECT_NAME"),
+            getattr(settings, "PROJECT_NAME", None),
+        )
+
+        return (
+            (client or "default_client"),
+            (app or "default_app"),
+            (project or "default_project"),
+        )
+
+    def _resolve_context(self, overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, str, str]:
+        base_client, base_app, base_project = self._resolve_context_from_env()
+        overrides = overrides or {}
+
+        def _sanitize(value: Optional[str], fallback: str) -> str:
+            if value and str(value).strip():
+                return str(value).strip("/")
+            return fallback
+
+        client_name = _sanitize(
+            overrides.get("client_name") or overrides.get("client") or overrides.get("clientName"),
+            base_client,
+        )
+        app_name = _sanitize(
+            overrides.get("app_name") or overrides.get("app") or overrides.get("appName"),
+            base_app,
+        )
+        project_name = _sanitize(
+            overrides.get("project_name") or overrides.get("project") or overrides.get("projectName"),
+            base_project,
+        )
+
+        return client_name or "default_client", app_name or "default_app", project_name or "default_project"
+
+    def apply_context(self, project_context: Optional[Dict[str, Any]]) -> None:
+        """Update context using project context or environment fallbacks."""
+
+        if project_context is None:
+            return
+
+        resolved_client, resolved_app, resolved_project = self._resolve_context(project_context)
+        if (
+            resolved_client == self.client_name
+            and resolved_app == self.app_name
+            and resolved_project == self.project_name
+        ):
+            return
+
+        logger.info(
+            "🔧 Updating lab memory context to %s/%s/%s (previous %s/%s/%s)",
+            resolved_client,
+            resolved_app,
+            resolved_project,
+            self.client_name,
+            self.app_name,
+            self.project_name,
+        )
+        self.client_name = resolved_client
+        self.app_name = resolved_app
+        self.project_name = resolved_project
+
     def _object_prefix(self, session_id: str) -> str:
         return "/".join(
             [
@@ -119,7 +206,8 @@ class LabMemoryStore:
     def _atom_history_key(self, session_id: str, request_id: str, step_number: int) -> str:
         return f"{self._atom_history_prefix(session_id, request_id)}/{step_number:04d}.json"
 
-    def save_document(self, document: LaboratoryMemoryDocument) -> None:
+    def save_document(self, document: LaboratoryMemoryDocument, project_context: Optional[Dict[str, Any]] = None) -> None:
+        self.apply_context(project_context)
         payload = document.to_sorted_dict()
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
         data = serialized.encode("utf-8")
@@ -199,8 +287,11 @@ class LabMemoryStore:
         prompt_template_version: str,
         max_docs: int = 5,
         freshness_minutes: int = 360,
+        project_context: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Return recent lab documents that match freshness/version constraints."""
+
+        self.apply_context(project_context)
 
         threshold = datetime.utcnow() - timedelta(minutes=freshness_minutes)
         cursor = self.mongo_collection.find(
@@ -272,6 +363,7 @@ class LabMemoryStore:
     ) -> None:
         """Persist a real-time atom execution snapshot to MinIO for lab-mode drift prevention."""
 
+        self.apply_context(project_context)
         payload = {
             "envelope": envelope.model_dump(mode="python", exclude_none=True),
             "step": step_record.model_dump(mode="python", exclude_none=True),
@@ -349,9 +441,11 @@ class LabMemoryStore:
         session_id: str,
         request_id: str,
         limit: int = 20,
+        project_context: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve recent atom execution snapshots for the given session/request."""
 
+        self.apply_context(project_context)
         snapshots: List[Dict[str, Any]] = []
 
         # Prefer MongoDB for fast retrieval and richer filters
