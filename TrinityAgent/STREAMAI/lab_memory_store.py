@@ -76,8 +76,24 @@ class LabMemoryStore:
         database = self.mongo_client[settings.CONFIG_DB or "trinity_db"]
         collection = database.get_collection("Trinity_AI_Context")
         try:
-            collection.create_index([("session_id", ASCENDING), ("request_id", ASCENDING)])
-            collection.create_index([("model_version", ASCENDING), ("prompt_template_version", ASCENDING)])
+            collection.create_index(
+                [
+                    ("client_name", ASCENDING),
+                    ("app_name", ASCENDING),
+                    ("project_name", ASCENDING),
+                    ("session_id", ASCENDING),
+                    ("request_id", ASCENDING),
+                ]
+            )
+            collection.create_index(
+                [
+                    ("client_name", ASCENDING),
+                    ("app_name", ASCENDING),
+                    ("project_name", ASCENDING),
+                    ("model_version", ASCENDING),
+                    ("prompt_template_version", ASCENDING),
+                ]
+            )
             collection.create_index([("record_type", ASCENDING), ("step_number", ASCENDING)])
         except PyMongoError as exc:  # pragma: no cover - index creation best-effort
             logger.warning("Failed to create MongoDB indices for lab context: %s", exc)
@@ -124,6 +140,9 @@ class LabMemoryStore:
             mongo_payload = {
                 **payload,
                 "memory_type": "Trinity AI Persistent JSON Memory",
+                "client_name": self.client_name,
+                "app_name": self.app_name,
+                "project_name": self.project_name,
                 "session_id": document.envelope.session_id,
                 "request_id": document.envelope.request_id,
                 "timestamp": document.envelope.timestamp,
@@ -155,7 +174,13 @@ class LabMemoryStore:
                 ],
             }
             self.mongo_collection.replace_one(
-                {"session_id": document.envelope.session_id, "request_id": document.envelope.request_id},
+                {
+                    "client_name": self.client_name,
+                    "app_name": self.app_name,
+                    "project_name": self.project_name,
+                    "session_id": document.envelope.session_id,
+                    "request_id": document.envelope.request_id,
+                },
                 mongo_payload,
                 upsert=True,
             )
@@ -180,6 +205,9 @@ class LabMemoryStore:
         threshold = datetime.utcnow() - timedelta(minutes=freshness_minutes)
         cursor = self.mongo_collection.find(
             {
+                "client_name": self.client_name,
+                "app_name": self.app_name,
+                "project_name": self.project_name,
                 "session_id": session_id,
                 "model_version": model_version,
                 "prompt_template_version": prompt_template_version,
@@ -276,6 +304,9 @@ class LabMemoryStore:
             mongo_payload = {
                 "record_type": "atom_snapshot",
                 "memory_type": "Trinity AI Persistent JSON Memory",
+                "client_name": self.client_name,
+                "app_name": self.app_name,
+                "project_name": self.project_name,
                 "session_id": envelope.session_id,
                 "request_id": envelope.request_id,
                 "step_number": step_record.step_number,
@@ -293,6 +324,9 @@ class LabMemoryStore:
             }
             self.mongo_collection.replace_one(
                 {
+                    "client_name": self.client_name,
+                    "app_name": self.app_name,
+                    "project_name": self.project_name,
                     "session_id": envelope.session_id,
                     "request_id": envelope.request_id,
                     "step_number": step_record.step_number,
@@ -326,6 +360,9 @@ class LabMemoryStore:
                 self.mongo_collection.find(
                     {
                         "record_type": "atom_snapshot",
+                        "client_name": self.client_name,
+                        "app_name": self.app_name,
+                        "project_name": self.project_name,
                         "session_id": session_id,
                         "request_id": request_id,
                     }

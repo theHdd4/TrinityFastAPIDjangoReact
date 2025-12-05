@@ -1987,12 +1987,11 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           }
 
           case 'policy_shift': {
-            console.warn('⚠️ Policy shift detected, awaiting confirmation', data);
-            stopAutoRun();
+            console.warn('⚠️ Policy shift detected, auto-continuing', data);
 
             const policyShiftMessage: Message = {
               id: `policy-shift-${Date.now()}`,
-              content: data.message || 'Execution path changed; please confirm before proceeding.',
+              content: data.message || 'Detected a change in execution path; proceeding with the updated plan.',
               sender: 'ai',
               timestamp: new Date(),
               type: 'text'
@@ -2020,7 +2019,6 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               console.error('Failed to persist chat after policy shift:', persistError);
             }
 
-            setIsLoading(false);
             break;
           }
 
