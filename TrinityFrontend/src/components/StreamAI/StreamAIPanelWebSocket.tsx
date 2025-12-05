@@ -250,6 +250,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const wsRef = useRef<WebSocket | null>(null);
   const websocketWarmupCompleteRef = useRef(false);
   const websocketInitialRetryRef = useRef(false);
+  const workflowActiveRef = useRef(false);
+  const workflowFinishedRef = useRef(false);
+  const pendingPayloadRef = useRef<any | null>(null);
+  const pendingRetryRef = useRef(false);
   const backgroundStatusRef = useRef<TrinityAIBackgroundStatus | null>(null);
   const hasLoadedChatsRef = useRef(false);
 
@@ -1785,6 +1789,25 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           project_name: project.project_name || 'default'
         };
       }
+
+      const preparedPayload = appendSessionMetadata(
+        {
+          message: userMessage.content,
+          available_files: fileNames,  // Use freshly loaded files
+          project_context: projectContext,
+          user_id: 'current_user',
+        },
+        {
+          sessionId: ensuredSessionId,
+          websocketSessionId: ensuredWebsocketSessionId,
+          chatId: currentChatId,
+        }
+      );
+
+      pendingPayloadRef.current = preparedPayload;
+      workflowActiveRef.current = true;
+      workflowFinishedRef.current = false;
+      pendingRetryRef.current = false;
       
       // Create WebSocket connection
       const buildWebSocketUrl = () => {
@@ -1832,7 +1855,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
       websocketInitialRetryRef.current = false;
 
-      const establishWebSocket = async () => {
+      const establishWebSocket = async (isRetry = false) => {
         await warmUpWebsocketTarget();
 
         const ws = new WebSocket(wsUrl);
@@ -1841,30 +1864,17 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         ws.onopen = () => {
           isOpen = true;
           websocketInitialRetryRef.current = false;
+          pendingRetryRef.current = false;
           setWsConnection(ws);
           scheduleSessionTimeout(ws);
-          updateProgress('\n\n✅ Connected! Generating plan...');
+          updateProgress(isRetry ? '\n\n🔄 Reconnecting... resending prompt.' : '\n\n✅ Connected! Generating plan...');
 
           // Store original prompt for ADD functionality
           setOriginalPrompt(userMessage.content);
 
           try {
-            // Send initial message with available files
-            const initialPayload = appendSessionMetadata(
-              {
-                message: userMessage.content,
-                available_files: fileNames,  // Use freshly loaded files
-                project_context: projectContext,
-                user_id: 'current_user',
-              },
-              {
-                sessionId: ensuredSessionId,
-                websocketSessionId: ensuredWebsocketSessionId,
-                chatId: currentChatId,
-              }
-            );
-
-            ws.send(JSON.stringify(initialPayload));
+            const payloadToSend = pendingPayloadRef.current || preparedPayload;
+            ws.send(JSON.stringify(payloadToSend));
             console.log('✅ Message sent to WebSocket');
           } catch (sendError) {
             console.error('❌ Failed to send message to WebSocket:', sendError);
@@ -2397,6 +2407,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
             
           case 'workflow_completed':
+            workflowFinishedRef.current = true;
             updateProgress('\n\n🎉 Workflow complete!');
             // 🔧 CRITICAL FIX: Don't close connection yet - wait for workflow insight
             // Set loading state to show "Generating insights..."
@@ -2410,6 +2421,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
             
           case 'workflow_insight':
+            workflowFinishedRef.current = true;
+            pendingPayloadRef.current = null;
             console.log('✅ Workflow insight received:', data);
             const insightContent = data.insight || 'No insight generated';
             const insightText = `📊 **Workflow Insights**\n\n${insightContent}`;
@@ -2479,6 +2492,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
             
           case 'workflow_insight_failed':
+            workflowFinishedRef.current = true;
+            pendingPayloadRef.current = null;
             console.warn('⚠️ Workflow insight failed:', data.error);
             updateProgress(`\n\n⚠️ Insight generation failed: ${data.error || 'Unknown error'}`);
             // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
@@ -2897,10 +2912,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           case 'complete':
             // Handle completion event
             console.log('✅ Workflow/request completed:', data.status, data.intent);
-            
+
             // If it's a text_reply completion, we've already handled it above
             // If it's a workflow completion, the workflow_completed case handles it
             if (data.intent === 'text_reply') {
+              workflowFinishedRef.current = true;
+              pendingPayloadRef.current = null;
               setIsLoading(false);
               stopAutoRun();
             }
@@ -2973,6 +2990,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             updateProgress('\n\nℹ️ Connection finished without a close code. Ready for the next prompt.');
           }
 
+          const workflowCompletedCleanly = workflowFinishedRef.current;
+
           // CRITICAL: If connection closed unexpectedly (not clean), ensure message is saved
           if (!event.wasClean && event.code !== 1000) {
             console.warn('⚠️ WebSocket closed unexpectedly, ensuring message is persisted');
@@ -2995,9 +3014,28 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             }
           }
 
+          const shouldRetryEarlyClose =
+            workflowActiveRef.current &&
+            !workflowCompletedCleanly &&
+            !pendingRetryRef.current &&
+            pendingPayloadRef.current;
+
+          workflowActiveRef.current = false;
+
+          if (shouldRetryEarlyClose) {
+            console.warn('🔁 WebSocket closed before workflow finished; retrying connection');
+            pendingRetryRef.current = true;
+            setIsLoading(true);
+            setTimeout(() => {
+              establishWebSocket(true);
+            }, 300);
+          }
+
           // 🔧 CRITICAL FIX: Set loading to false ONLY when WebSocket connection closes
           // This ensures the loading icon tracks the complete process until the connection is fully closed
-          setIsLoading(false);
+          if (!shouldRetryEarlyClose) {
+            setIsLoading(false);
+          }
           console.log('✅ Loading stopped - WebSocket connection closed');
         };
       };
