@@ -20,6 +20,7 @@ from STREAMAI.lab_memory_models import (
     LaboratoryEnvelope,
     LaboratoryMemoryDocument,
     WorkflowState,
+    WorkflowStepRecord,
 )
 
 logger = logging.getLogger("trinity.trinityai.lab_memory_store")
@@ -94,6 +95,12 @@ class LabMemoryStore:
 
     def _object_key(self, session_id: str, request_id: str) -> str:
         return f"{self._object_prefix(session_id)}/{request_id}.json"
+
+    def _atom_history_prefix(self, session_id: str, request_id: str) -> str:
+        return f"{self._object_prefix(session_id)}/{request_id}/atoms"
+
+    def _atom_history_key(self, session_id: str, request_id: str, step_number: int) -> str:
+        return f"{self._atom_history_prefix(session_id, request_id)}/{step_number:04d}.json"
 
     def save_document(self, document: LaboratoryMemoryDocument) -> None:
         payload = document.to_sorted_dict()
@@ -226,3 +233,66 @@ class LabMemoryStore:
             business_goals=business_goals,
             analysis_insights=analysis_insights,
         )
+
+    def save_atom_snapshot(
+        self,
+        envelope: LaboratoryEnvelope,
+        step_record: WorkflowStepRecord,
+        project_context: Optional[Dict[str, Any]] = None,
+        available_files: Optional[List[str]] = None,
+    ) -> None:
+        """Persist a real-time atom execution snapshot to MinIO for lab-mode drift prevention."""
+
+        payload = {
+            "envelope": envelope.model_dump(mode="python", exclude_none=True),
+            "step": step_record.model_dump(mode="python", exclude_none=True),
+            "available_files": available_files or [],
+            "project_context": project_context or {},
+            "deterministic_params": envelope.deterministic_params,
+            "saved_at": datetime.utcnow().isoformat(),
+        }
+        data = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        key = self._atom_history_key(envelope.session_id, envelope.request_id, step_record.step_number)
+
+        try:
+            self.minio_client.put_object(
+                bucket_name=self.bucket,
+                object_name=key,
+                data=io.BytesIO(data),
+                length=len(data),
+            )
+            logger.info(
+                "Stored laboratory atom snapshot in MinIO at %s (step=%s, atom=%s)",
+                key,
+                step_record.step_number,
+                step_record.atom_id,
+            )
+        except Exception as exc:  # pragma: no cover - network/storage guard
+            logger.warning("Failed to store laboratory atom snapshot in MinIO: %s", exc)
+
+    def load_atom_snapshots(
+        self,
+        session_id: str,
+        request_id: str,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve recent atom execution snapshots for the given session/request."""
+
+        prefix = self._atom_history_prefix(session_id, request_id)
+        snapshots: List[Dict[str, Any]] = []
+        try:
+            objects = list(self.minio_client.list_objects(self.bucket, prefix=prefix))
+            objects.sort(key=lambda obj: obj.object_name, reverse=True)
+            for obj in objects:
+                if len(snapshots) >= limit:
+                    break
+                if not obj.object_name.endswith(".json"):
+                    continue
+                response = self.minio_client.get_object(self.bucket, obj.object_name)
+                with response as stream:
+                    raw = stream.read()
+                snapshots.append(json.loads(raw.decode("utf-8")))
+        except Exception as exc:  # pragma: no cover - network/storage guard
+            logger.warning("Failed to load laboratory atom snapshots from MinIO: %s", exc)
+
+        return snapshots
