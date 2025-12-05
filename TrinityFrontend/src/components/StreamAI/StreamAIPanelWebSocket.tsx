@@ -18,7 +18,7 @@ import {
 } from '@/types/streaming';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
-import { detectCommand, CommandContext } from '../TrinityAI/handlers/commandHandler';
+import { detectCommand, CommandContext, getAvailableCommands } from '../TrinityAI/handlers/commandHandler';
 import StreamWorkflowPreview from './StreamWorkflowPreview';
 import StreamStepMonitor from './StreamStepMonitor';
 import StreamStepApproval from './StreamStepApproval';
@@ -4482,6 +4482,51 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             size="sm"
             variant="ghost"
           />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
+                title="Tools - Available Agents"
+              >
+                <Wrench className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="rounded-xl max-h-[400px] overflow-y-auto w-64">
+              {getAvailableCommands().map((command) => (
+                <DropdownMenuItem
+                  key={command.name}
+                  onClick={() => {
+                    // Insert command into input with a space after it
+                    setInputValue(prev => {
+                      const trimmed = prev.trim();
+                      // If input is empty or ends with space, just add the command
+                      if (!trimmed || trimmed.endsWith(' ')) {
+                        return `${command.name} `;
+                      }
+                      // Otherwise, add space before command
+                      return `${trimmed} ${command.name} `;
+                    });
+                    // Focus the textarea
+                    if (textareaRef.current) {
+                      textareaRef.current.focus();
+                    }
+                  }}
+                  className="flex items-center gap-2 cursor-pointer"
+                >
+                  <div 
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: command.color }}
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium">{command.name}</span>
+                    <span className="text-xs text-muted-foreground">{command.description}</span>
+                  </div>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button 
             variant="ghost" 
             size="sm" 

@@ -17,6 +17,256 @@ export interface CommandContext {
   onAddAtom?: (cardId: string, atomName: string) => void;
 }
 
+// Atom type to endpoint mapping
+const ATOM_ENDPOINTS: Record<string, string> = {
+  'metric': `${TRINITY_AI_API}/metric`,
+  'concat': `${TRINITY_AI_API}/concat`,
+  'merge': `${TRINITY_AI_API}/merge`,
+  'chart-maker': `${TRINITY_AI_API}/chart-maker`,
+  'create-column': `${TRINITY_AI_API}/create-transform`,
+  'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
+  'explore': `${TRINITY_AI_API}/explore`,
+  'correlation': `${TRINITY_AI_API}/correlation`,
+  'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
+  'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
+};
+
+// Atom type to display name mapping
+const ATOM_DISPLAY_NAMES: Record<string, string> = {
+  'metric': 'Metric',
+  'concat': 'Concat',
+  'merge': 'Merge',
+  'chart-maker': 'Chart Maker',
+  'create-column': 'Create Column',
+  'groupby-wtg-avg': 'GroupBy',
+  'explore': 'Explore',
+  'correlation': 'Correlation',
+  'dataframe-operations': 'DataFrame Operations',
+  'data-upload-validate': 'Data Upload Validate',
+};
+
+/**
+ * Generic handler for atom commands
+ * Command handler's job: Ensure card/atom exists (except metricop), then call agent API
+ * The existing handlers will process the response (same as individual AI icon)
+ */
+async function handleAtomCommand(atomType: string, args: string, context: CommandContext): Promise<void> {
+  console.log(`🎯 /${atomType} command handler called - calling ${atomType} agent directly (no WebSocket)`);
+  console.log('  - Args:', args);
+  
+  if (!args) {
+    const displayName = ATOM_DISPLAY_NAMES[atomType] || atomType;
+    context.setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      content: `Please provide a ${displayName.toLowerCase()} operation after /${atomType}. For example: /${atomType} <your operation description>`,
+      sender: 'ai',
+      timestamp: new Date()
+    }]);
+    return;
+  }
+
+  // STEP 1: For all atoms except metric, automatically create NEW card and atom for each command
+  // Metric doesn't need a card/atom - it works differently
+  let atomId: string | null = null;
+  let targetCardId: string | undefined;
+  
+  if (atomType !== 'metric') {
+    const { cards, setCards, updateCard } = useLaboratoryStore.getState();
+    
+    // Helper to generate unique ID
+    const generateId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Always create a NEW card for each command execution
+    targetCardId = generateId('card');
+    const newCard = {
+      id: targetCardId,
+      atoms: [],
+      isExhibited: false,
+      variables: []
+    };
+    setCards([...cards, newCard]);
+    console.log(`🔧 Auto-created new card: ${targetCardId}`);
+    
+    // Wait a bit for card to be added to store
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Create atom in the new card
+    const newAtomId = generateId('atom');
+    const displayName = ATOM_DISPLAY_NAMES[atomType] || atomType;
+    const newAtom = {
+      id: newAtomId,
+      atomId: atomType,
+      title: displayName,
+      category: 'Atom',
+      color: 'bg-gray-400',
+      source: 'ai' as const,
+      settings: {}
+    };
+    
+    // Get updated cards and add atom to the new card
+    const updatedCards = useLaboratoryStore.getState().cards;
+    const createdCard = updatedCards.find(c => c.id === targetCardId);
+    if (createdCard) {
+      updateCard(targetCardId, {
+        atoms: [...(Array.isArray(createdCard.atoms) ? createdCard.atoms : []), newAtom]
+      });
+      atomId = newAtomId;
+      console.log(`🔧 Auto-created ${atomType} atom: ${atomId} in new card ${targetCardId}`);
+    } else {
+      // Retry if card not found yet
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const retryCards = useLaboratoryStore.getState().cards;
+      const retryCard = retryCards.find(c => c.id === targetCardId);
+      if (retryCard) {
+        updateCard(targetCardId, {
+          atoms: [...(Array.isArray(retryCard.atoms) ? retryCard.atoms : []), newAtom]
+        });
+        atomId = newAtomId;
+        console.log(`🔧 Auto-created ${atomType} atom: ${atomId} in new card ${targetCardId} (retry)`);
+      }
+    }
+    
+    // Verify atom was created
+    if (!atomId) {
+      console.error(`❌ Failed to create atom for ${atomType}`);
+      context.setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        content: `Unable to create ${ATOM_DISPLAY_NAMES[atomType] || atomType} atom. Please try again.`,
+        sender: 'ai',
+        timestamp: new Date()
+      }]);
+      return;
+    }
+  }
+
+  // STEP 2: Get environment context
+  let envContext = { client_name: '', app_name: '', project_name: '' };
+  try {
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      const env = JSON.parse(envStr);
+      envContext = {
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      };
+    }
+  } catch (error) {
+    console.warn('Failed to load environment context:', error);
+  }
+
+  // STEP 3: Call agent API (same as individual AI icon does)
+  const endpoint = ATOM_ENDPOINTS[atomType];
+  if (!endpoint) {
+    context.setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      content: `No endpoint configured for ${atomType} agent.`,
+      sender: 'ai',
+      timestamp: new Date()
+    }]);
+    return;
+  }
+
+  console.log(`📞 Calling ${atomType} agent API:`, endpoint);
+  console.log('  - Prompt:', args);
+  
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      prompt: args,
+      session_id: `${atomType}_${Date.now()}`,
+      ...envContext
+    })
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    const displayName = ATOM_DISPLAY_NAMES[atomType] || atomType;
+    context.setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      content: `${displayName} operation failed: ${errorText || 'Unknown error'}`,
+      sender: 'ai',
+      timestamp: new Date()
+    }]);
+    return;
+  }
+
+  const data = await res.json();
+  console.log(`✅ ${atomType} API response received:`, data);
+
+  // STEP 4: Process response using existing handlers (same as individual AI icon)
+  // This is exactly what AtomAIChatBot does - let the handlers do their work
+  const hasData = hasAtomData(atomType, data);
+  
+  if (hasData) {
+    const handler = getAtomHandler(atomType);
+    
+    if (handler) {
+      const updateAtomSettings = useLaboratoryStore.getState().updateAtomSettings;
+      const sessionId = `${atomType}_${Date.now()}`;
+      
+      // For metric, use temp atomId if no atom exists (metric works without atom)
+      const effectiveAtomId = atomId || (atomType === 'metric' ? `temp_metric_${Date.now()}` : null);
+      
+      if (!effectiveAtomId && atomType !== 'metric') {
+        context.setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          content: `Unable to process ${ATOM_DISPLAY_NAMES[atomType] || atomType} operation: atom not found.`,
+          sender: 'ai',
+          timestamp: new Date()
+        }]);
+        return;
+      }
+      
+      const handlerContext: AtomHandlerContext = {
+        atomId: effectiveAtomId!,
+        atomType,
+        atomTitle: ATOM_DISPLAY_NAMES[atomType] || atomType,
+        sessionId,
+        updateAtomSettings,
+        setMessages: context.setMessages,
+        isStreamMode: false // Individual AI mode - same as AtomAIChatBot
+      };
+
+      // Call handler (same as individual AI icon does)
+      try {
+        if (data.success !== false) {
+          await handler.handleSuccess(data, handlerContext);
+        } else {
+          await handler.handleFailure(data, handlerContext);
+        }
+      } catch (handlerError: any) {
+        console.error('❌ Error in handler execution:', handlerError);
+        const displayName = ATOM_DISPLAY_NAMES[atomType] || atomType;
+        context.setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          content: `Error processing ${displayName.toLowerCase()} operation: ${handlerError?.message || 'Unknown error'}`,
+          sender: 'ai',
+          timestamp: new Date()
+        }]);
+      }
+    } else {
+      // No handler - show general response
+      context.setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        content: data.smart_response || data.message || data.reasoning || 'Operation completed.',
+        sender: 'ai',
+        timestamp: new Date()
+      }]);
+    }
+  } else {
+    // No specific data - show general AI response
+    context.setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      content: data.smart_response || data.message || data.reasoning || 'Operation completed.',
+      sender: 'ai',
+      timestamp: new Date()
+    }]);
+  }
+}
+
 /**
  * Command Registry - Add new commands here
  * Each command can have a handler function and visual indicator
@@ -27,13 +277,55 @@ export const COMMAND_REGISTRY: Record<string, {
   description: string;
 }> = {
   'metricop': {
-    handler: handleMetricOp,
+    handler: (args, context) => handleAtomCommand('metric', args, context),
     indicatorColor: '#458EE2', // Blue color
     description: 'Execute metric operations (variables, column ops, input)'
   },
-  // Add more commands here in the future
-  // 'mergeop': { handler: handleMergeOp, indicatorColor: '#41C185', description: '...' },
-  // 'correlate': { handler: handleCorrelate, indicatorColor: '#FFBD59', description: '...' },
+  'concat': {
+    handler: (args, context) => handleAtomCommand('concat', args, context),
+    indicatorColor: '#458EE2',
+    description: 'Concatenate multiple dataframes'
+  },
+  'merge': {
+    handler: (args, context) => handleAtomCommand('merge', args, context),
+    indicatorColor: '#458EE2',
+    description: 'Merge dataframes with join operations'
+  },
+  'chartmaker': {
+    handler: (args, context) => handleAtomCommand('chart-maker', args, context),
+    indicatorColor: '#458EE2',
+    description: 'Create charts and visualizations'
+  },
+  'createcolumn': {
+    handler: (args, context) => handleAtomCommand('create-column', args, context),
+    indicatorColor: '#458EE2',
+    description: 'Create or transform columns'
+  },
+  'groupby': {
+    handler: (args, context) => handleAtomCommand('groupby-wtg-avg', args, context),
+    indicatorColor: '#458EE2',
+    description: 'Group by operations with weighted averages'
+  },
+  'explore': {
+    handler: (args, context) => handleAtomCommand('explore', args, context),
+    indicatorColor: '#458EE2',
+    description: 'Explore and analyze data'
+  },
+  'correlate': {
+    handler: (args, context) => handleAtomCommand('correlation', args, context),
+    indicatorColor: '#458EE2',
+    description: 'Calculate correlations between variables'
+  },
+  'dataframeop': {
+    handler: (args, context) => handleAtomCommand('dataframe-operations', args, context),
+    indicatorColor: '#458EE2',
+    description: 'Perform dataframe operations'
+  },
+  'validate': {
+    handler: (args, context) => handleAtomCommand('data-upload-validate', args, context),
+    indicatorColor: '#458EE2',
+    description: 'Validate uploaded data'
+  },
 };
 
 /**
@@ -73,225 +365,6 @@ export function detectCommand(input: string): CommandResult {
   return { isCommand: false };
 }
 
-/**
- * Handle /metricop command
- * This directly calls the metric agent API - NO WebSocket orchestration
- */
-async function handleMetricOp(args: string, context: CommandContext): Promise<void> {
-  console.log('🎯 /metricop command handler called - calling metric agent directly (no WebSocket)');
-  console.log('  - Args:', args);
-  
-  if (!args) {
-    context.setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      content: 'Please provide a metric operation after /metricop. For example: /metricop create a price variable by dividing SalesValue by Volume',
-      sender: 'ai',
-      timestamp: new Date()
-    }]);
-    return;
-  }
-
-  // Get environment context
-  let envContext = { client_name: '', app_name: '', project_name: '' };
-  try {
-    const envStr = localStorage.getItem('env');
-    if (envStr) {
-      const env = JSON.parse(envStr);
-      envContext = {
-        client_name: env.CLIENT_NAME || '',
-        app_name: env.APP_NAME || '',
-        project_name: env.PROJECT_NAME || ''
-      };
-    }
-  } catch (error) {
-    console.warn('Failed to load environment context:', error);
-  }
-
-  // DIRECT API CALL to metric agent - NO WebSocket orchestration
-  console.log('📞 Calling metric agent API directly:', `${TRINITY_AI_API}/metric`);
-  console.log('  - Prompt:', args);
-  console.log('  - Env context:', envContext);
-  
-  const res = await fetch(`${TRINITY_AI_API}/metric`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      prompt: args,
-      session_id: `metric_${Date.now()}`,
-      ...envContext
-    })
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    context.setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      content: `Metric operation failed: ${errorText || 'Unknown error'}`,
-      sender: 'ai',
-      timestamp: new Date()
-    }]);
-    return;
-  }
-
-  const data = await res.json();
-  
-  console.log('✅ Metric API response received:', data);
-  console.log('📊 Response structure:', {
-    success: data.success,
-    hasData: !!data.data,
-    hasOperationType: !!(data.operation_type || data.data?.operation_type),
-    hasOperationConfig: !!(data.operation_config || data.data?.operation_config),
-    topLevelKeys: Object.keys(data || {})
-  });
-  
-  // Find metric atom in any card (or use first card if context.cardId provided)
-  const cards = useLaboratoryStore.getState().cards;
-  let metricAtomId: string | null = null;
-  let targetCardId: string | undefined = context.cardId;
-
-  // First, try to find existing metric atom in the specified card or any card
-  for (const card of cards) {
-    if (context.cardId && card.id !== context.cardId) continue;
-    
-    if (Array.isArray(card.atoms)) {
-      const metricAtom = card.atoms.find(atom => atom.atomId === 'metric');
-      if (metricAtom) {
-        metricAtomId = metricAtom.id;
-        targetCardId = card.id;
-        break;
-      }
-    }
-  }
-
-  // If no metric atom found and we have a card, try to add one via callback
-  if (!metricAtomId && context.onAddAtom && targetCardId) {
-    context.onAddAtom(targetCardId, 'metric');
-    // Wait a bit and find the newly created atom
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const updatedCards = useLaboratoryStore.getState().cards;
-    const targetCard = updatedCards.find(c => c.id === targetCardId);
-    if (targetCard && Array.isArray(targetCard.atoms)) {
-      const newMetricAtom = targetCard.atoms.find(atom => atom.atomId === 'metric');
-      metricAtomId = newMetricAtom?.id || null;
-    }
-  }
-
-  // Follow the exact same flow as Atom_ai_chat.tsx
-  const atomType = 'metric';
-  
-  // Check if response has metric data (same as Atom_ai_chat)
-  const hasData = hasAtomData(atomType, data);
-  console.log('🔍 hasAtomData check for metric:', hasData);
-  console.log('🔍 metricAtomId:', metricAtomId);
-  
-  // CRITICAL FIX: Call handler even if no metric atom exists
-  // The handler can still process the response and show messages in chat
-  if (hasData) {
-    console.log('✅ hasData is true - proceeding to get handler');
-    // Get handler from registry (same as Atom_ai_chat)
-    const handler = getAtomHandler(atomType);
-    console.log('🔍 Handler retrieved:', {
-      hasHandler: !!handler,
-      handlerType: typeof handler,
-      hasHandleSuccess: handler ? typeof handler.handleSuccess === 'function' : false,
-      hasHandleFailure: handler ? typeof handler.handleFailure === 'function' : false
-    });
-    
-    if (handler) {
-      console.log('✅ Handler found, preparing to call...');
-      // Create handler context (same as Atom_ai_chat)
-      const updateAtomSettings = useLaboratoryStore.getState().updateAtomSettings;
-      const sessionId = `metric_${Date.now()}`;
-      
-      // Use a temporary atomId if no metric atom exists
-      // The handler will still process the response and show messages
-      const effectiveAtomId = metricAtomId || `temp_metric_${Date.now()}`;
-      
-      console.log('📋 Preparing to call handler with:', {
-        effectiveAtomId,
-        hasMetricAtom: !!metricAtomId,
-        hasData,
-        dataSuccess: data.success !== false
-      });
-      
-      const handlerContext: AtomHandlerContext = {
-        atomId: effectiveAtomId,
-        atomType: 'metric',
-        atomTitle: 'Metric',
-        sessionId,
-        updateAtomSettings,
-        setMessages: context.setMessages,
-        isStreamMode: false
-      };
-
-      // Call handler (same as Atom_ai_chat)
-      try {
-        console.log('📋 About to call handler with data structure:', {
-          hasData: !!data,
-          hasDataData: !!data.data,
-          success: data.success,
-          operationType: data.operation_type || data.data?.operation_type,
-          hasOperationConfig: !!(data.operation_config || data.data?.operation_config)
-        });
-        
-        if (data.success !== false) {
-          console.log('📋 Calling handler.handleSuccess...');
-          console.log('📋 Handler context:', {
-            atomId: handlerContext.atomId,
-            atomType: handlerContext.atomType,
-            hasSetMessages: typeof handlerContext.setMessages === 'function',
-            hasUpdateAtomSettings: typeof handlerContext.updateAtomSettings === 'function'
-          });
-          
-          const handlerResult = await handler.handleSuccess(data, handlerContext);
-          console.log('✅ Handler.handleSuccess completed with result:', handlerResult);
-          
-          if (handlerResult && handlerResult.success === false) {
-            console.error('⚠️ Handler returned failure:', handlerResult.error);
-            context.setMessages(prev => [...prev, {
-              id: Date.now().toString(),
-              content: `Metric operation failed: ${handlerResult.error || 'Unknown error'}`,
-              sender: 'ai',
-              timestamp: new Date()
-            }]);
-          }
-        } else {
-          console.log('📋 Calling handler.handleFailure...');
-          const handlerResult = await handler.handleFailure(data, handlerContext);
-          console.log('✅ Handler.handleFailure completed with result:', handlerResult);
-        }
-      } catch (handlerError: any) {
-        console.error('❌ Error in handler execution:', handlerError);
-        console.error('❌ Error stack:', handlerError?.stack);
-        context.setMessages(prev => [...prev, {
-          id: Date.now().toString(),
-          content: `Error processing metric operation: ${handlerError?.message || 'Unknown error'}`,
-          sender: 'ai',
-          timestamp: new Date()
-        }]);
-      }
-    } else {
-      // Fallback if no handler found
-      console.warn('⚠️ No handler found for metric');
-      context.setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        content: data.smart_response || data.message || data.reasoning || 'Metric operation completed, but handler not found.',
-        sender: 'ai',
-        timestamp: new Date()
-      }]);
-    }
-  } else {
-    // No metric-specific data - show general AI response
-    console.log('⚠️ No metric data detected in response, showing general message');
-    context.setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      content: data.smart_response || data.message || data.reasoning || data.data?.reasoning || 'Metric operation completed, but no specific data to process.',
-      sender: 'ai',
-      timestamp: new Date()
-    }]);
-  }
-}
 
 /**
  * Get available commands for autocomplete/help
