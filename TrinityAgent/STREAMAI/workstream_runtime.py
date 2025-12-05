@@ -231,16 +231,46 @@ class WorkstreamContextStore:
     snapshots: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     last_inputs: Dict[str, str] = field(default_factory=dict)
     telemetry: Optional[WorkstreamTelemetry] = None
+    max_backtracks: int = 3
+    consecutive_backtracks: int = 0
+    global_snapshots: List[Dict[str, Any]] = field(default_factory=list)
 
-    def register_execution(self, atom_id: str, input_hash: str, output: Dict[str, Any]) -> None:
+    def register_execution(
+        self,
+        atom_id: str,
+        input_hash: str,
+        output: Dict[str, Any],
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+        upstream: Optional[str] = None,
+    ) -> int:
         entries = self.snapshots.setdefault(atom_id, [])
         duplicate_count = sum(1 for entry in entries if entry.get("input_hash") == input_hash)
         if duplicate_count >= self.dedupe_budget:
             raise DedupeBudgetExceeded(f"Atom {atom_id} exceeded dedupe budget ({self.dedupe_budget})")
         if duplicate_count and self.telemetry:
             self.telemetry.record_duplicate(atom_id, input_hash, "repeat_execution")
-        entries.append({"input_hash": input_hash, "output": output, "timestamp": time.time()})
+
+        snapshot_id = len(self.global_snapshots)
+        metadata_hash = (metadata or {}).get("metadata_hash") or normalize_input(metadata or {})
+
+        snapshot = {
+            "id": snapshot_id,
+            "atom_id": atom_id,
+            "input_hash": input_hash,
+            "output": output,
+            "metadata": metadata or {},
+            "metadata_hash": metadata_hash,
+            "upstream": upstream,
+            "timestamp": time.time(),
+            "loop_flag": False,
+        }
+
+        entries.append(snapshot)
+        self.global_snapshots.append(snapshot)
         self.last_inputs[atom_id] = input_hash
+        self.consecutive_backtracks = 0
+        return snapshot_id
 
     def should_short_circuit(self, atom_id: str, input_hash: str) -> Optional[Dict[str, Any]]:
         entries = self.snapshots.get(atom_id, [])
@@ -252,6 +282,12 @@ class WorkstreamContextStore:
                 return entry.get("output")
         return None
 
+    def flag_snapshot(self, atom_id: str, input_hash: str) -> None:
+        for entry in reversed(self.snapshots.get(atom_id, [])):
+            if entry.get("input_hash") == input_hash:
+                entry["loop_flag"] = True
+                break
+
     def record_input_seen(self, atom_id: str, input_hash: str) -> None:
         self.last_inputs[atom_id] = input_hash
         if self.telemetry:
@@ -260,6 +296,36 @@ class WorkstreamContextStore:
     def latest_snapshot(self, atom_id: str) -> Optional[Dict[str, Any]]:
         entries = self.snapshots.get(atom_id, [])
         return entries[-1] if entries else None
+
+    def previous_snapshot(self, atom_id: str, current_snapshot_id: int) -> Optional[Dict[str, Any]]:
+        entries = self.snapshots.get(atom_id, [])
+        for entry in reversed(entries):
+            if entry["id"] < current_snapshot_id:
+                return entry
+        return None
+
+    def get_snapshot(self, snapshot_id: int) -> Optional[Dict[str, Any]]:
+        if 0 <= snapshot_id < len(self.global_snapshots):
+            return self.global_snapshots[snapshot_id]
+        return None
+
+    def find_divergent_snapshot(self, atom_id: str, current_input_hash: str, ancestors: Iterable[str]) -> Optional[Dict[str, Any]]:
+        for entry in reversed(self.snapshots.get(atom_id, [])):
+            if entry.get("input_hash") != current_input_hash and not entry.get("loop_flag"):
+                return entry
+
+        for parent in ancestors:
+            for entry in reversed(self.snapshots.get(parent, [])):
+                if entry.get("input_hash") != current_input_hash and not entry.get("loop_flag"):
+                    return entry
+        return None
+
+    def record_backtrack(self) -> bool:
+        self.consecutive_backtracks += 1
+        return self.consecutive_backtracks <= self.max_backtracks
+
+    def trim_completed_nodes(self, allowed_atoms: Set[str]) -> None:
+        self.last_inputs = {atom: h for atom, h in self.last_inputs.items() if atom in allowed_atoms}
 
     def upstream_snapshot_id(self, deps: Iterable[str]) -> str:
         """Generate a stable identifier for upstream state."""

@@ -17,7 +17,7 @@ import time
 import os
 import sys
 import uuid
-from typing import Dict, Any, List, Optional, Callable, Set
+from typing import Dict, Any, List, Optional, Callable, Set, Tuple
 from pathlib import Path
 from datetime import datetime
 
@@ -313,6 +313,8 @@ class StreamOrchestrator:
                 "failed_atoms": 1,
                 "errors": [str(exc)],
             }
+
+        atom_index_lookup = {atom.get("atom_id"): idx for idx, atom in enumerate(atoms)}
         
         # Create session in storage
         if self.storage:
@@ -382,20 +384,24 @@ class StreamOrchestrator:
                     stable_index=last_stable_index,
                 )
                 if loop_signal.detected:
-                    handled = await self._handle_loop_detection(
+                    handled, rewind_to = await self._handle_loop_detection(
                         atom=atom,
                         atom_index=i,
                         input_hash=input_hash,
+                        upstream_snapshot=upstream_snapshot,
                         loop_signal=loop_signal,
                         context_store=context_store,
                         results=results,
                         completed_nodes=completed_nodes,
                         progress_callback=progress_callback,
+                        atoms=atoms,
+                        atom_index_lookup=atom_index_lookup,
                     )
                     if handled:
-                        last_stable_index = max(last_stable_index, atom_index)
-                        loop_detector.mark_stable(atom_index if handled else last_stable_index)
-                        atom_index += 1
+                        target_index = atom_index if rewind_to is None else max(rewind_to, 0)
+                        last_stable_index = max(last_stable_index, target_index)
+                        loop_detector.mark_stable(target_index)
+                        atom_index = target_index
                         continue
                     break
 
@@ -527,7 +533,19 @@ class StreamOrchestrator:
                     })
 
                     try:
-                        context_store.register_execution(atom_id, input_hash, atom_result)
+                        snapshot_metadata = self._build_snapshot_metadata(
+                            atom=atom,
+                            atom_result=atom_result,
+                            upstream_snapshot=upstream_snapshot,
+                            output_hash=output_hash,
+                        )
+                        context_store.register_execution(
+                            atom_id,
+                            input_hash,
+                            atom_result,
+                            metadata=snapshot_metadata,
+                            upstream=upstream_snapshot,
+                        )
                     except DedupeBudgetExceeded as exc:
                         logger.error(str(exc))
                         results["failed_atoms"] += 1
@@ -604,11 +622,14 @@ class StreamOrchestrator:
                             atom=atom,
                             atom_index=i,
                             input_hash=input_hash,
+                            upstream_snapshot=upstream_snapshot,
                             loop_signal=signal,
                             context_store=context_store,
                             results=results,
                             completed_nodes=completed_nodes,
                             progress_callback=progress_callback,
+                            atoms=atoms,
+                            atom_index_lookup=atom_index_lookup,
                         )
                     break
                 
@@ -657,12 +678,15 @@ class StreamOrchestrator:
         atom: Dict[str, Any],
         atom_index: int,
         input_hash: str,
+        upstream_snapshot: str,
         loop_signal: LoopSignal,
         context_store: WorkstreamContextStore,
         results: Dict[str, Any],
         completed_nodes: Set[str],
         progress_callback: Optional[Callable],
-    ) -> bool:
+        atoms: List[Dict[str, Any]],
+        atom_index_lookup: Dict[str, int],
+    ) -> Tuple[bool, Optional[int]]:
         atom_id = atom.get("atom_id", "unknown")
         logger.warning(
             "🌀 Loop detected on atom %s (step %s): %s | details=%s",
@@ -683,36 +707,115 @@ class StreamOrchestrator:
             },
         )
 
-        snapshot = context_store.latest_snapshot(atom_id)
-        stable_output = snapshot.get("output") if snapshot else None
-        if stable_output is not None:
-            results["completed_atoms"] += 1
-            results["atoms_executed"].append(
+        context_store.flag_snapshot(atom_id, input_hash)
+        if not context_store.record_backtrack():
+            results["failed_atoms"] += 1
+            results["errors"].append(
                 {
                     "atom_id": atom_id,
                     "step": atom_index,
-                    "success": True,
-                    "duration": stable_output.get("duration", 0),
-                    "insight": stable_output.get("insight"),
-                    "skipped": True,
-                    "skip_reason": f"loop_rewind:{loop_signal.reason}",
-                    "loop_details": loop_signal.details,
+                    "error": "loop_backtrack_cap_reached",
+                    "details": {"max_backtracks": context_store.max_backtracks},
                 }
             )
-            completed_nodes.add(atom_id)
-            context_store.record_input_seen(atom_id, input_hash)
-            return True
+            return False, None
 
-        results["failed_atoms"] += 1
-        results["errors"].append(
+        ancestors = atom.get("depends_on", [])
+        candidate_snapshot = context_store.find_divergent_snapshot(atom_id, input_hash, ancestors)
+        target_atom_id = atom_id
+
+        if candidate_snapshot is None:
+            for parent in ancestors:
+                parent_snapshot = context_store.latest_snapshot(parent)
+                if parent_snapshot:
+                    candidate_snapshot = parent_snapshot
+                    target_atom_id = parent
+                    break
+
+        if candidate_snapshot is None:
+            target_index = 0
+            refreshed_metadata, _, _ = self._recalculate_metadata(atoms[target_index], None, upstream_snapshot)
+            atoms[target_index]["metadata"] = refreshed_metadata
+        else:
+            target_index = atom_index_lookup.get(target_atom_id, max(atom_index - 1, 0))
+            metadata_target = atoms[target_index]
+            refreshed_metadata, metadata_hash, changed = self._recalculate_metadata(
+                metadata_target, candidate_snapshot, upstream_snapshot
+            )
+            metadata_target["metadata"] = refreshed_metadata
+            probe = candidate_snapshot
+            while not changed and probe:
+                probe = context_store.previous_snapshot(target_atom_id, probe["id"])
+                if not probe:
+                    break
+                refreshed_metadata, metadata_hash, changed = self._recalculate_metadata(
+                    metadata_target, probe, upstream_snapshot
+                )
+                metadata_target["metadata"] = refreshed_metadata
+
+            if not changed and target_index > 0:
+                target_index = 0
+                metadata_target = atoms[target_index]
+                refreshed_metadata, _, _ = self._recalculate_metadata(metadata_target, None, upstream_snapshot)
+                metadata_target["metadata"] = refreshed_metadata
+
+            if candidate_snapshot:
+                candidate_snapshot["loop_flag"] = True
+
+        allowed_atoms = {atoms[idx].get("atom_id") for idx in range(target_index)}
+        completed_nodes.intersection_update(allowed_atoms)
+        context_store.trim_completed_nodes(allowed_atoms)
+
+        await self._emit_progress(
+            progress_callback,
             {
+                "type": "loop_backtrack",
                 "atom_id": atom_id,
                 "step": atom_index,
-                "error": f"loop_detected:{loop_signal.reason}",
-                "details": loop_signal.details,
+                "target_atom": atoms[target_index].get("atom_id"),
+                "target_index": target_index + 1,
+            },
+        )
+
+        return True, target_index
+
+    def _recalculate_metadata(
+        self,
+        atom: Dict[str, Any],
+        snapshot: Optional[Dict[str, Any]],
+        upstream_snapshot: Optional[str],
+    ) -> Tuple[Dict[str, Any], str, bool]:
+        base_context = getattr(self, "_current_context", {}) or {}
+        refreshed_context = {**base_context, "upstream_snapshot": upstream_snapshot}
+        metadata = {
+            "entities": refreshed_context.get("entities") or refreshed_context,
+            "goal_constraints": atom.get("constraints") or atom.get("goals") or {},
+            "routing_hints": atom.get("routing_hints") or atom.get("purpose"),
+            "normalized_input": normalize_input({"atom": atom, "context": refreshed_context}),
+            "refreshed_at": datetime.now().isoformat(),
+            "upstream": upstream_snapshot or (snapshot.get("upstream") if snapshot else None),
+        }
+        metadata_hash = normalize_input({k: v for k, v in metadata.items() if k != "refreshed_at"})
+        changed = metadata_hash != (snapshot.get("metadata_hash") if snapshot else None)
+        return metadata, metadata_hash, changed
+
+    def _build_snapshot_metadata(
+        self,
+        *,
+        atom: Dict[str, Any],
+        atom_result: Dict[str, Any],
+        upstream_snapshot: Optional[str],
+        output_hash: str,
+    ) -> Dict[str, Any]:
+        metadata, metadata_hash, _ = self._recalculate_metadata(atom, None, upstream_snapshot)
+        metadata.update(
+            {
+                "output_hash": output_hash,
+                "metadata_hash": metadata_hash,
+                "duration": atom_result.get("duration"),
             }
         )
-        return False
+        return metadata
     
     async def _execute_atom_3_steps(
         self,
