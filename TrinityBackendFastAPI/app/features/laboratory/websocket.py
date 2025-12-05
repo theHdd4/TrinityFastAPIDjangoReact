@@ -1,6 +1,10 @@
 """
 WebSocket handler for real-time collaborative Laboratory Mode synchronization.
 
+Ensure ASGI and proxy idle timeouts (e.g., uvicorn --timeout-keep-alive,
+nginx proxy_read_timeout, AWS ALB idle timeout) are configured above expected
+lab session lengths so connections are not closed prematurely.
+
 Handles:
 - Per-project WebSocket rooms
 - Broadcasting state updates to all connected clients
@@ -12,9 +16,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
-from typing import Dict, Set
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Dict, List, Set 
 from collections import defaultdict
+from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
@@ -23,6 +29,28 @@ from app.features.project_state.routes import save_atom_list_configuration, get_
 
 logger = logging.getLogger(__name__)
 logger.disabled = True  # Disable all logs from laboratory websocket
+
+
+@dataclass
+class SessionEntry:
+    session_id: str
+    created_at: datetime
+    last_activity_at: datetime
+    websocket: WebSocket | None = None
+    user_id: str | None = None
+    status: str = "active"
+    last_acked_sequence: int = 0
+    next_sequence: int = 1
+    message_buffer: List[dict] = field(default_factory=list)
+    closed_reason: str | None = None
+
+    def record_activity(self) -> None:
+        self.last_activity_at = datetime.utcnow()
+
+    def buffer_message(self, message: dict, max_length: int = 100) -> None:
+        self.message_buffer.append(message)
+        if len(self.message_buffer) > max_length:
+            self.message_buffer = self.message_buffer[-max_length:]
 
 
 def _dedupe_cards(cards: list[dict]) -> list[dict]:
@@ -51,7 +79,7 @@ def _dedupe_cards(cards: list[dict]) -> list[dict]:
 
 class ConnectionManager:
     """Manages WebSocket connections for collaborative editing."""
-    
+
     def __init__(self):
         # Map of project_key -> set of WebSocket connections
         self.active_connections: Dict[str, Set[WebSocket]] = defaultdict(set)
@@ -71,17 +99,255 @@ class ConnectionManager:
         self.card_editors: Dict[str, Dict[str, dict]] = defaultdict(dict)
         # Debounce delay in seconds (reduced to 1s to prevent race conditions with frontend)
         self.debounce_delay = 1.0
+        # Session registry keyed by session_id
+        self.sessions: Dict[str, SessionEntry] = {}
+        self.websocket_sessions: Dict[WebSocket, str] = {}
+        self.heartbeat_interval = 20  # seconds
+        self.heartbeat_timeout = 30  # seconds
+        self.session_sweep_interval = 30  # seconds
+        self._sweeper_task: asyncio.Task | None = None
         
     def _get_project_key(self, client_name: str, app_name: str, project_name: str) -> str:
         """Generate unique key for project room."""
         return f"{client_name}:{app_name}:{project_name}"
+
+    def _get_or_create_session(self, session_id: str, websocket: WebSocket) -> SessionEntry:
+        """Return an existing session or create a new one."""
+        existing = self.sessions.get(session_id)
+        if existing:
+            return existing
+
+        new_entry = SessionEntry(
+            session_id=session_id,
+            created_at=datetime.utcnow(),
+            last_activity_at=datetime.utcnow(),
+            websocket=websocket,
+        )
+        self.sessions[session_id] = new_entry
+        return new_entry
+
+    async def attach_websocket_to_session(
+        self, session_id: str, websocket: WebSocket, allow_replace: bool = False
+    ) -> SessionEntry:
+        """Attach a websocket to a session, optionally replacing an existing socket."""
+        session = self._get_or_create_session(session_id, websocket)
+
+        # Reject duplicate connections unless explicitly resuming
+        if (
+            session.websocket
+            and session.websocket.client_state == WebSocketState.CONNECTED
+            and session.websocket is not websocket
+            and not allow_replace
+        ):
+            try:
+                await websocket.close(code=4002, reason="duplicate session")
+            finally:
+                raise WebSocketDisconnect(code=4002)
+
+        if (
+            session.websocket
+            and session.websocket is not websocket
+            and allow_replace
+            and session.websocket.client_state == WebSocketState.CONNECTED
+        ):
+            try:
+                await session.websocket.close(code=4002, reason="session transferred")
+            except Exception:
+                pass
+
+        session.websocket = websocket
+        session.status = "active"
+        session.record_activity()
+        self.websocket_sessions[websocket] = session_id
+        return session
+
+    def _start_sweeper(self) -> None:
+        """Ensure the background sweeper is running."""
+        if self._sweeper_task and not self._sweeper_task.done():
+            return
+
+        self._sweeper_task = asyncio.create_task(self._session_sweeper())
+
+    async def _session_sweeper(self) -> None:
+        """Close stale sessions proactively with explicit codes."""
+        try:
+            while True:
+                await asyncio.sleep(self.session_sweep_interval)
+
+                now = datetime.utcnow()
+                for session in list(self.sessions.values()):
+                    # Skip explicitly closed sessions
+                    if session.status == "closed":
+                        continue
+
+                    websocket = session.websocket
+                    last_active = session.last_activity_at
+
+                    if (
+                        websocket
+                        and websocket.client_state == WebSocketState.CONNECTED
+                        and now - last_active > timedelta(seconds=self.heartbeat_timeout)
+                    ):
+                        try:
+                            await websocket.close(code=4000, reason="heartbeat timeout")
+                        finally:
+                            session.status = "stale"
+                            session.websocket = None
+                            session.closed_reason = "heartbeat timeout"
+
+                    if (
+                        (not websocket or websocket.client_state != WebSocketState.CONNECTED)
+                        and now - last_active > timedelta(seconds=self.heartbeat_timeout * 2)
+                    ):
+                        session.status = "stale"
+                        session.closed_reason = session.closed_reason or "idle timeout"
+        except asyncio.CancelledError:
+            # Task was cancelled because the server is shutting down
+            pass
+        except Exception:
+            # Keep the sweeper alive even if an unexpected error occurs
+            logger.exception("Session sweeper failed; restarting")
+            asyncio.create_task(self._session_sweeper())
+        finally:
+            self._sweeper_task = None
+
+    def detach_session(self, websocket: WebSocket) -> None:
+        """Detach a websocket from its session without closing the session."""
+        session_id = self.websocket_sessions.pop(websocket, None)
+        if not session_id:
+            return
+
+        session = self.sessions.get(session_id)
+        if not session:
+            return
+
+        session.websocket = None
+        session.status = "detached"
+
+    async def close_session(self, session_id: str, code: int = 1000, reason: str = "session ended") -> None:
+        """Mark a session as closed and close its websocket."""
+        session = self.sessions.get(session_id)
+        if not session:
+            return
+
+        session.status = "closed"
+        session.closed_reason = reason
+        websocket = session.websocket
+        if websocket and websocket.client_state == WebSocketState.CONNECTED:
+            try:
+                await websocket.close(code=code, reason=reason)
+            except Exception:
+                pass
+        session.websocket = None
+
+    async def send_to_websocket(self, websocket: WebSocket, message: dict, buffer: bool = True) -> None:
+        """Send a JSON message with sequencing and buffering for resumption."""
+        # Skip sends if the application has already initiated close
+        websocket_state = getattr(websocket, "client_state", WebSocketState.DISCONNECTED)
+        app_state = getattr(websocket, "application_state", WebSocketState.DISCONNECTED)
+
+        if websocket_state != WebSocketState.CONNECTED or app_state != WebSocketState.CONNECTED:
+            return
+
+        session_id = self.websocket_sessions.get(websocket)
+        if not session_id:
+            try:
+                await websocket.send_json(message)
+            except RuntimeError:
+                # A close frame was already initiated; treat as best-effort
+                return
+            return
+
+        session = self.sessions.get(session_id)
+        if not session:
+            try:
+                await websocket.send_json(message)
+            except RuntimeError:
+                return
+            return
+
+        seq = session.next_sequence
+        session.next_sequence += 1
+        message_with_meta = {
+            **message,
+            "sequence": seq,
+            "session_id": session_id,
+        }
+
+        if buffer:
+            session.buffer_message(message_with_meta)
+
+        try:
+            await websocket.send_json(message_with_meta)
+        except RuntimeError:
+            # Ignore late sends after close was initiated
+            return
+
+    async def replay_missed_messages(self, session: SessionEntry, last_acked: int) -> None:
+        """Replay buffered messages newer than the last acked sequence."""
+        websocket = session.websocket
+        if not websocket or websocket.client_state != WebSocketState.CONNECTED:
+            return
+
+        for buffered in session.message_buffer:
+            if buffered.get("sequence", 0) > last_acked:
+                try:
+                    await websocket.send_json(buffered)
+                except Exception:
+                    break
+
+    async def heartbeat_loop(self, session: SessionEntry) -> None:
+        """Periodic heartbeat pings and stale detection."""
+        while True:
+            await asyncio.sleep(self.heartbeat_interval)
+
+            websocket = session.websocket
+            if not websocket or websocket.client_state != WebSocketState.CONNECTED:
+                return
+
+            now = datetime.utcnow()
+            if now - session.last_activity_at > timedelta(seconds=self.heartbeat_timeout):
+                try:
+                    await websocket.close(code=4000, reason="heartbeat timeout")
+                finally:
+                    session.status = "stale"
+                    return
+
+            try:
+                await self.send_to_websocket(
+                    websocket,
+                    {
+                        "type": "heartbeat",
+                        "op": "ping",
+                        "timestamp": now.isoformat(),
+                    },
+                    buffer=False,
+                )
+            except Exception:
+                session.status = "error"
+                return
     
-    async def connect(self, websocket: WebSocket, client_name: str, app_name: str, project_name: str, user_email: str = None, user_name: str = None, client_id: str = None):
+    async def connect(
+        self,
+        websocket: WebSocket,
+        client_name: str,
+        app_name: str,
+        project_name: str,
+        user_email: str = None,
+        user_name: str = None,
+        client_id: str = None,
+        session_id: str | None = None,
+        allow_replace: bool = False,
+    ):
         """Accept and register a new WebSocket connection."""
         await websocket.accept()
         project_key = self._get_project_key(client_name, app_name, project_name)
         self.active_connections[project_key].add(websocket)
-        
+        self._start_sweeper()
+
+        if session_id:
+            await self.attach_websocket_to_session(session_id, websocket, allow_replace=allow_replace)
+
         # Store user info
         user_data = {
             "email": user_email or "Anonymous",
@@ -91,12 +357,12 @@ class ConnectionManager:
         }
         self.user_info[websocket] = user_data
         self.active_users[project_key].append(user_data)
-        
+
         logger.info(
             f"Client {user_email or 'Anonymous'} connected to project {project_key}. "
             f"Total connections: {len(self.active_connections[project_key])}"
         )
-        
+
         # Broadcast updated user list to all clients
         await self._broadcast_user_list(client_name, app_name, project_name)
     
@@ -106,6 +372,11 @@ class ConnectionManager:
         self.active_connections[project_key].discard(websocket)
         
         # Remove user info and mode
+
+        # Detach from session registry but keep session alive for potential resumption
+        self.detach_session(websocket)
+
+        # Remove user info
         user_data = self.user_info.pop(websocket, None)
         self.client_mode.pop(websocket, None)
         if user_data and project_key in self.active_users:
@@ -187,7 +458,6 @@ class ConnectionManager:
             connections.discard(connection)
 
         # Broadcast to active connections (filtered by mode if provided)
-        message_json = json.dumps(message)
         for connection in connections_snapshot:
             if connection == exclude:
                 continue
@@ -203,7 +473,7 @@ class ConnectionManager:
                     continue
             
             try:
-                await connection.send_text(message_json)
+                await self.send_to_websocket(connection, message)
             except Exception as e:
                 logger.error(f"Error broadcasting to client: {e}")
                 disconnected.add(connection)
@@ -333,7 +603,7 @@ class ConnectionManager:
             "type": "ack",
             "timestamp": datetime.utcnow().isoformat(),
         }
-        await websocket.send_json(ack_message)
+        await self.send_to_websocket(websocket, ack_message)
     
     async def handle_card_update(
         self,
@@ -439,7 +709,7 @@ class ConnectionManager:
             "type": "ack",
             "timestamp": datetime.utcnow().isoformat(),
         }
-        await websocket.send_json(ack_message)
+        await self.send_to_websocket(websocket, ack_message)
     
     async def handle_full_sync(
         self,
@@ -491,7 +761,7 @@ class ConnectionManager:
             "type": "ack",
             "timestamp": datetime.utcnow().isoformat(),
         }
-        await websocket.send_json(ack_message)
+        await self.send_to_websocket(websocket, ack_message)
 
 
 # Global connection manager instance
@@ -506,26 +776,61 @@ async def handle_laboratory_sync(
 ):
     """
     WebSocket endpoint handler for laboratory synchronization.
-    
+
     Manages real-time collaborative editing for a specific project.
     """
-    # Initial connection without user info
-    await manager.connect(websocket, client_name, app_name, project_name)
-    
+    requested_session_id = websocket.query_params.get("session_id") or str(uuid4())
+    resume_requested = websocket.query_params.get("resume", "false").lower() in {"1", "true", "yes"}
+
+    existing_session = manager.sessions.get(requested_session_id)
+    if existing_session and existing_session.status == "closed":
+        await websocket.close(code=4001, reason="invalid session")
+        return
+
+    try:
+        await manager.connect(
+            websocket,
+            client_name,
+            app_name,
+            project_name,
+            session_id=requested_session_id,
+            allow_replace=resume_requested,
+        )
+    except WebSocketDisconnect:
+        return
+
+    session = manager.sessions.get(requested_session_id)
+    heartbeat_task = asyncio.create_task(manager.heartbeat_loop(session)) if session else None
+
+    await manager.send_to_websocket(
+        websocket,
+        {
+            "type": "session_ack",
+            "session_id": requested_session_id,
+            "status": "ready",
+            "created_at": session.created_at.isoformat() if session else datetime.utcnow().isoformat(),
+        },
+        buffer=False,
+    )
+
     try:
         while True:
-            # Receive message from client
             data = await websocket.receive_text()
             message = json.loads(data)
-            
             message_type = message.get("type")
-            
+
+            if session:
+                session.record_activity()
+
             if message_type == "connect":
                 # Update connection with user info and mode
                 user_email = message.get("user_email")
                 user_name = message.get("user_name")
                 client_id = message.get("client_id")
-                project_context = message.get("project_context", {})
+                
+                # Set user_id on session
+                if session and user_email:
+                    session.user_id = user_email
                 
                 # CRITICAL FIX: Extract mode from project context or payload
                 # Mode can be in payload.mode or we need to infer from subMode in frontend
@@ -561,36 +866,38 @@ async def handle_laboratory_sync(
                     }
                 ]
                 manager.active_users[project_key].append(user_data)
-                
+
                 logger.info(
                     f"Client {user_email or 'Anonymous'} ({client_id}) connected to "
                     f"{client_name}/{app_name}/{project_name}"
                 )
-                
-                # Send acknowledgment
-                await websocket.send_json({
-                    "type": "ack",
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
-                
-                # Broadcast updated user list
+
+                await manager.send_to_websocket(
+                    websocket,
+                    {
+                        "type": "ack",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
+                )
+
                 await manager._broadcast_user_list(client_name, app_name, project_name)
-            
+
             elif message_type == "card_update":
                 # CRITICAL FIX: Update client mode from pending state if available
                 project_key = manager._get_project_key(client_name, app_name, project_name)
                 if project_key in manager.pending_states:
-                    state_mode = manager.pending_states[project_key].get("mode")
-                    if state_mode:
-                        manager.client_mode[websocket] = state_mode
+                    # Check all modes in pending_states
+                    for state_mode, state_data in manager.pending_states[project_key].items():
+                        if state_mode:
+                            manager.client_mode[websocket] = state_mode
+                            break
                 
                 # Handle granular card-level update
                 await manager.handle_card_update(
                     websocket, client_name, app_name, project_name, message
                 )
-            
+
             elif message_type == "card_focus":
-                # Handle user focusing on a card
                 project_key = manager._get_project_key(client_name, app_name, project_name)
                 card_id = message.get("card_id")
                 if card_id:
@@ -599,18 +906,15 @@ async def handle_laboratory_sync(
                         "user_name": message.get("user_name", "Anonymous User"),
                         "client_id": message.get("client_id"),
                     }
-                    # Broadcast focus event to other clients
                     await manager.broadcast(message, client_name, app_name, project_name, exclude=websocket)
-            
+
             elif message_type == "card_blur":
-                # Handle user unfocusing from a card
                 project_key = manager._get_project_key(client_name, app_name, project_name)
                 card_id = message.get("card_id")
                 if card_id and card_id in manager.card_editors[project_key]:
                     del manager.card_editors[project_key][card_id]
-                    # Broadcast blur event to other clients
                     await manager.broadcast(message, client_name, app_name, project_name, exclude=websocket)
-            
+
             elif message_type == "state_update":
                 # CRITICAL FIX: Update client mode from payload if present
                 payload = message.get("payload", {})
@@ -621,7 +925,7 @@ async def handle_laboratory_sync(
                 await manager.handle_state_update(
                     websocket, client_name, app_name, project_name, message
                 )
-            
+
             elif message_type == "full_sync":
                 # CRITICAL FIX: Update client mode from payload if present
                 payload = message.get("payload", {})
@@ -632,29 +936,66 @@ async def handle_laboratory_sync(
                 await manager.handle_full_sync(
                     websocket, client_name, app_name, project_name, message
                 )
-            
+
             elif message_type == "heartbeat":
-                # Respond to heartbeat
-                await websocket.send_json({
-                    "type": "heartbeat",
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
-            
+                await manager.send_to_websocket(
+                    websocket,
+                    {
+                        "type": "heartbeat",
+                        "op": "pong",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
+                    buffer=False,
+                )
+            elif message_type == "resume":
+                if not session:
+                    continue
+                last_acked = int(message.get("last_acked_sequence") or 0)
+                session.last_acked_sequence = last_acked
+                session.status = "resumed"
+                await manager.send_to_websocket(
+                    websocket,
+                    {
+                        "type": "resume_ack",
+                        "last_acked_sequence": last_acked,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
+                    buffer=False,
+                )
+                await manager.replay_missed_messages(session, last_acked)
+            elif message_type == "close_session":
+                await manager.close_session(
+                    requested_session_id,
+                    code=1000,
+                    reason=message.get("reason") or "session ended",
+                )
+                break
             else:
                 logger.warning(f"Unknown message type: {message_type}")
-    
+
     except WebSocketDisconnect:
         logger.info(f"Client disconnected from {client_name}/{app_name}/{project_name}")
+    except asyncio.CancelledError:
+        logger.info(
+            "WebSocket handler cancelled; treating as disconnect for "
+            f"{client_name}/{app_name}/{project_name}"
+        )
     except Exception as e:
         logger.error(f"Error in WebSocket handler: {e}")
         try:
-            await websocket.send_json({
-                "type": "error",
-                "payload": {"message": str(e)},
-                "timestamp": datetime.utcnow().isoformat(),
-            })
+            await manager.send_to_websocket(
+                websocket,
+                {
+                    "type": "error",
+                    "payload": {"message": str(e)},
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+                buffer=False,
+            )
         except:
             pass
     finally:
         await manager.disconnect(websocket, client_name, app_name, project_name)
+        if heartbeat_task:
+            heartbeat_task.cancel()
 

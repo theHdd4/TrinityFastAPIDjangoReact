@@ -48,3 +48,4 @@ const TableExhibition: React.FC<Props> = ({ atomId }) => {
 export default TableExhibition;
 
 
+

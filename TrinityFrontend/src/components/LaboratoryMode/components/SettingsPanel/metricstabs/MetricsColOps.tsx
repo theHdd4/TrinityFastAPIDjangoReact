@@ -362,6 +362,7 @@ const MetricsColOps: React.FC = () => {
   };
 
   // Fetch identifiers from MongoDB or fallback to categorical columns after file selection
+  // Always use backend logic - never skip or preserve identifiers from AI/hardcoded values
   React.useEffect(() => {
     async function fetchIdentifiers() {
       updateMetricsInputs({ columnOpsSelectedIdentifiers: [] });
@@ -473,6 +474,14 @@ const MetricsColOps: React.FC = () => {
       return;
     }
     
+    // Skip fetching if file path contains 'create-data' (newly created files may not be immediately available)
+    // This prevents CORS/500 errors for newly saved files
+    if (objectName.includes('create-data') || objectName.includes('create_data')) {
+      console.log('[MetricsColOps] Skipping columns_with_missing_values fetch for newly created file:', objectName);
+      setColumnsWithMissingValues([]);
+      return;
+    }
+    
     try {
       // Call createcolumn API to get columns with missing values
       const res = await fetch(`${CREATECOLUMN_API}/columns_with_missing_values?object_name=${encodeURIComponent(objectName)}`);
@@ -482,10 +491,25 @@ const MetricsColOps: React.FC = () => {
         const columns = (data.columns_with_missing_values || []).filter(Boolean);
         setColumnsWithMissingValues(columns);
       } else {
+        // Silently fail - this is not critical functionality
+        // Only log if it's not a 500/CORS error (which are common and expected)
+        if (res.status !== 500 && res.status !== 0) {
+          console.warn('[MetricsColOps] Failed to fetch columns with missing values:', res.status, res.statusText);
+        }
         setColumnsWithMissingValues([]);
       }
-    } catch (error) {
-      console.error('Failed to fetch columns with missing values', error);
+    } catch (error: any) {
+      // Silently fail - this is not critical functionality (only used for fill_na operation)
+      // CORS errors and network errors are common and expected - don't log them
+      const errorMessage = error?.message || String(error);
+      const isCorsOrNetworkError = errorMessage.includes('CORS') || 
+                                   errorMessage.includes('Failed to fetch') || 
+                                   errorMessage.includes('NetworkError') ||
+                                   errorMessage.includes('net::ERR_FAILED');
+      
+      if (!isCorsOrNetworkError) {
+        console.warn('[MetricsColOps] Failed to fetch columns with missing values (non-critical):', error);
+      }
       setColumnsWithMissingValues([]);
     }
   };

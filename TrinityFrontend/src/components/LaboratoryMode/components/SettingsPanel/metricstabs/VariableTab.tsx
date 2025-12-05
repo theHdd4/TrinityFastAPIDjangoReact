@@ -197,10 +197,13 @@ const VariableTab: React.FC<VariableTabProps> = ({
     }
   };
 
-  // Fetch variables on mount
+  // Get refresh trigger from store
+  const variablesRefreshTrigger = metricsInputs.variablesRefreshTrigger;
+  
+  // Fetch variables on mount and when refresh trigger changes
   useEffect(() => {
     fetchSavedVariables();
-  }, []);
+  }, [variablesRefreshTrigger]);
 
   // Handle confirmed overwrite
   const handleConfirmOverwrite = async () => {

@@ -51,3 +51,4 @@ const TableProperties: React.FC<Props> = ({ atomId }) => {
 export default TableProperties;
 
 
+

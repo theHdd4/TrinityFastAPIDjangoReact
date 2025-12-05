@@ -30,6 +30,9 @@ ATOM_MAPPING = {
     "data-upload-validate": {"endpoint": "/trinityai/data-upload-validate"},
     "scope-selector": {"endpoint": "/trinityai/scope"},
     "fetch-atom": {"endpoint": "/trinityai/fetch-atom"},
+    "metric": {"endpoint": "/trinityai/metric"},
+    "metric-operations": {"endpoint": "/trinityai/metric"},  # Metric operations engine
+    "metrics": {"endpoint": "/trinityai/metric"},  # Support both singular and plural
 }
 
 

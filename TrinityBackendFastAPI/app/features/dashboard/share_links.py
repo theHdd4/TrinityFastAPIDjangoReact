@@ -177,3 +177,4 @@ def _set_search_path_sync(cursor: "psycopg2.extensions.cursor") -> None:  # type
         cursor.execute('SET search_path TO public')
 
 
+

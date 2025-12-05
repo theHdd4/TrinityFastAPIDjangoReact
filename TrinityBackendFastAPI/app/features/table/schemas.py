@@ -69,3 +69,4 @@ class TableAggregateRequest(BaseModel):
     aggregations: Dict[str, List[str]]  # column -> [agg_functions]
 
 
+
