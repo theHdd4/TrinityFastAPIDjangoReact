@@ -100,6 +100,7 @@ try:
         AtomMemoizer,
         DedupeBudgetExceeded,
         WorkstreamContextStore,
+        WorkstreamTelemetry,
         WorkstreamValidator,
         normalize_input,
     )
@@ -111,6 +112,7 @@ except ImportError:
         AtomMemoizer,
         DedupeBudgetExceeded,
         WorkstreamContextStore,
+        WorkstreamTelemetry,
         WorkstreamValidator,
         normalize_input,
     )
@@ -318,8 +320,11 @@ class StreamOrchestrator:
 
         # Workstream runtime context
         dedupe_budget = int(sequence.get("dedupe_budget", 5))
-        context_store = WorkstreamContextStore(dedupe_budget=dedupe_budget)
+        telemetry = WorkstreamTelemetry(session_id=session_id, mode=mode)
+        context_store = WorkstreamContextStore(dedupe_budget=dedupe_budget, telemetry=telemetry)
+        self.execution_policy.telemetry = telemetry
         completed_nodes = set()
+        last_inputs = context_store.last_inputs
 
         # Mode flag (laboratory vs workflow) defaults to laboratory for HITL
         mode = (sequence.get("mode") or "laboratory").lower()
@@ -352,13 +357,19 @@ class StreamOrchestrator:
             })
 
             try:
-                WorkstreamValidator.runtime_validate(atom, completed_nodes)
-
                 idempotency = atom.get("idempotency", "pure")
                 atom_version = atom.get("version", "v1")
                 normalized_input = normalize_input({"atom": atom, "context": self._current_context})
                 atom_identity = AtomIdentity(atom_id, normalized_input, atom_version)
                 force_execution = bool(atom.get("force"))
+
+                input_changed = WorkstreamValidator.runtime_validate(
+                    atom,
+                    completed_nodes,
+                    normalized_input=normalized_input,
+                    previous_inputs=last_inputs,
+                    force_execution=force_execution,
+                )
 
                 cached_output = None if force_execution else context_store.should_short_circuit(atom_id, normalized_input)
                 memoized_result = None if force_execution or idempotency == "effectful" else self.memoizer.get(atom_identity)
@@ -377,6 +388,7 @@ class StreamOrchestrator:
                         "skip_reason": "input_unchanged",
                     })
                     completed_nodes.add(atom_id)
+                    context_store.record_input_seen(atom_id, normalized_input)
                     continue
 
                 if memoized_result is not None:
@@ -392,6 +404,24 @@ class StreamOrchestrator:
                         "skipped": True,
                         "skip_reason": "memoized",
                     })
+                    completed_nodes.add(atom_id)
+                    context_store.record_input_seen(atom_id, normalized_input)
+                    continue
+
+                if not input_changed and cached_output is None and memoized_result is None:
+                    logger.info("⚠️ Input hash unchanged for atom %s; skipping to avoid duplicate execution", atom_id)
+                    results["completed_atoms"] += 1
+                    results["atoms_executed"].append({
+                        "atom_id": atom_id,
+                        "step": i,
+                        "success": True,
+                        "output_name": atom.get("output_name"),
+                        "duration": 0,
+                        "insight": None,
+                        "skipped": True,
+                        "skip_reason": "unchanged_input",
+                    })
+                    context_store.record_input_seen(atom_id, normalized_input)
                     completed_nodes.add(atom_id)
                     continue
 
@@ -456,7 +486,14 @@ class StreamOrchestrator:
                     try:
                         context_store.register_execution(atom_id, normalized_input, atom_result)
                     except DedupeBudgetExceeded as exc:
-                        logger.warning(str(exc))
+                        logger.error(str(exc))
+                        results["failed_atoms"] += 1
+                        results["errors"].append({
+                            "atom_id": atom_id,
+                            "step": i,
+                            "error": str(exc)
+                        })
+                        break
 
                     if idempotency != "effectful" and not force_execution:
                         self.memoizer.set(atom_identity, atom_result)
@@ -526,7 +563,14 @@ class StreamOrchestrator:
         logger.info(f"✅ Completed: {results['completed_atoms']}/{total_atoms}")
         logger.info(f"❌ Failed: {results['failed_atoms']}/{total_atoms}")
         logger.info(f"{'='*80}\n")
-        
+
+        results["telemetry"] = {
+            "retries": telemetry.retries,
+            "duplicates": telemetry.duplicates,
+            "circuit_trips": telemetry.circuit_trips,
+            "dedupe_budget": dedupe_budget,
+        }
+
         await self._append_workflow_insight(sequence, results)
         return results
     
