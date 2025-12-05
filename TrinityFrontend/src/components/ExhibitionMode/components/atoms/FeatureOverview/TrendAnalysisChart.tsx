@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 // import * as d3 from 'd3';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { ChartRendererConfig } from './shared';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 // OLD D3-specific types - commented out (now using Recharts)
 // type XValueType = 'date' | 'number' | 'category';
@@ -57,6 +58,8 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
   // useEffect(() => { ... D3 SVG rendering logic ... }, [config.height, config.showAxisLabels, config.showGrid, series, width, xLabel, xType, yLabel]);
 
   // NEW Recharts implementation
+  const isMobile = useIsMobile();
+  
   const chartData = useMemo(() => {
     return Array.isArray(config.data) ? config.data : [];
   }, [config.data]);
@@ -177,6 +180,7 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
     theme: config.theme || 'default',
     sortOrder: config.sortOrder || null,
     seriesSettings: mappedSeriesSettings,
+    isMobile: isMobile,
   };
 
   // Debug: Log seriesSettings being passed to renderer

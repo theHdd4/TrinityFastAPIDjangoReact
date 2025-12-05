@@ -117,52 +117,6 @@
         }
       ]
     },
-    "metric-operations": {
-      "purpose": "Execute predefined metric operations to create new columns, apply arithmetic, conditional logic, aggregations, normalization, filtering, and advanced derived metrics on DataFrames.",
-      "prompt_guidelines": [
-        "Identify the operation category from user intent: arithmetic, conditional, aggregation, string, date, derived_metrics, normalization, or filtering.",
-        "Specify the operation_type and operation_config with required columns and parameters.",
-        "For arithmetic: specify columns and operation (add, subtract, multiply, divide).",
-        "For conditional: specify condition logic and true/false values.",
-        "For aggregation: specify group_by columns (identifiers) and metric columns with aggregation method.",
-        "For derived metrics: specify metric type (ratio, percentage, rank, percentile, contribution, growth_rate) and required columns.",
-        "For normalization: specify normalization method (min_max, z_score) and columns to normalize.",
-        "For filtering: specify filter type (top_n_per_group, percentile, conditional) and filter parameters.",
-        "Reference the dataset alias from previous step as data_source.",
-        "Each operation creates new columns - specify output column names clearly."
-      ],
-      "dynamic_slots": {
-        "input_alias": "Dataset receiving metric operations.",
-        "operation_type": "Category: arithmetic, conditional, aggregation, string, date, derived_metrics, normalization, filtering.",
-        "operation_config": "Dictionary with operation-specific parameters including required_columns, parameters, and output column names."
-      },
-      "example_templates": [
-        {
-          "scenario": "Arithmetic metric",
-          "prompt": "On `{{input_alias}}`, use metric-operations with operation_type='arithmetic' to create `profit` column by subtracting `cost` from `revenue` using subtract operation."
-        },
-        {
-          "scenario": "Aggregation metric",
-          "prompt": "Apply metric-operations on `{{input_alias}}` with operation_type='aggregation' to calculate `avg_sales_per_region` by grouping on `Region` column, aggregating `Sales` column with method='mean'."
-        },
-        {
-          "scenario": "Derived metric - ratio",
-          "prompt": "Use metric-operations on `{{input_alias}}` with operation_type='derived_metrics' to create `margin_ratio` as a ratio metric dividing `profit` by `revenue`."
-        },
-        {
-          "scenario": "Normalization",
-          "prompt": "Apply metric-operations on `{{input_alias}}` with operation_type='normalization' to normalize `Price` and `Volume` columns using min_max scaling method, creating normalized columns `Price_normalized` and `Volume_normalized`."
-        },
-        {
-          "scenario": "Filtering metric",
-          "prompt": "Use metric-operations on `{{input_alias}}` with operation_type='filtering' to filter top 10 products per category using filter_type='top_n_per_group', n=10, group_by=['Category'], metric_col='Sales'."
-        },
-        {
-          "scenario": "Conditional metric",
-          "prompt": "Apply metric-operations on `{{input_alias}}` with operation_type='conditional' to create `product_tier` column: if `revenue` > 10000 then 'Premium' else 'Standard'."
-        }
-      ]
-    },
     "groupby-wtg-avg": {
       "purpose": "Aggregate a dataset by categories while computing weighted metrics and standard summaries.",
       "prompt_guidelines": [

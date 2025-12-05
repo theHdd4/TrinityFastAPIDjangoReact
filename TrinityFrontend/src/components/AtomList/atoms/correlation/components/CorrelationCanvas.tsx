@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -306,6 +307,19 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   data,
   onDataChange,
 }) => {
+  // Handle note input change - save directly to correlation config
+  const handleNoteChange = (value: string) => {
+    onDataChange({ note: value });
+  };
+
+  // Handle note input keydown - save and blur on Enter
+  const handleNoteKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.currentTarget.blur();
+    }
+  };
+
   const heatmapRef = useRef<SVGSVGElement>(null);
   const prevMatrixRef = useRef<string>("");
   const [canvasWidth, setCanvasWidth] = useState(0);
@@ -1880,6 +1894,19 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         settings={matrixSettings}
         onSave={handleSaveSettings}
       />
+
+      {/* Note Input Section */}
+      {data.showNote && (
+        <div className="mt-4 pt-4 border-t px-4 pb-4">
+          <Input
+            placeholder="Add note"
+            value={data.note || ''}
+            onChange={(e) => handleNoteChange(e.target.value)}
+            onKeyDown={handleNoteKeyDown}
+            className="w-full text-sm"
+          />
+        </div>
+      )}
     </div>
   );
 };

@@ -31,7 +31,8 @@ class Command(BaseCommand):
             'scenario-planner',
             'clustering',  # Added missing clustering atom
             'pivot-table',
-            'unpivot'
+            'unpivot',
+            'table'  # Table atom - display and manipulate data in table format
         ]
         
         updated_count = 0

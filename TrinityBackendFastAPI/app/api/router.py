@@ -22,6 +22,7 @@ from app.features.scenario_planner_category_forecasting.endpoint import router a
 from app.features.select_models_feature_based.endpoint import router as select_models_router
 from app.features.evaluate_models_feature_based.endpoint import router as evaluate_router
 from app.features.exhibition.endpoint import router as exhibition_router
+from app.features.dashboard.endpoint import router as dashboard_router
 from app.features.images.endpoint import router as images_router
 from app.features.explore.endpoint import router as explore_router
 from app.features.correlation.endpoint import router as correlation_router
@@ -31,6 +32,7 @@ from app.features.laboratory.endpoint import router as laboratory_router
 from app.features.pivot_table.endpoint import router as pivot_table_router
 from app.features.unpivot.endpoint import router as unpivot_router
 from app.features.task_queue.endpoint import router as task_queue_router
+from app.features.table.endpoint import router as table_router
 
 api_router = APIRouter()
 text_router = APIRouter()
@@ -61,6 +63,11 @@ api_router.include_router(explore_router)
 api_router.include_router(laboratory_router)
 api_router.include_router(pivot_table_router)
 api_router.include_router(unpivot_router)
+api_router.include_router(
+    table_router,
+    prefix="/v1/atoms/table",
+    tags=["Table"]
+)
 
 api_router.include_router(build_feature_router)
 api_router.include_router(build_model_router)
@@ -70,6 +77,7 @@ api_router.include_router(scenario_planner_router)
 api_router.include_router(correlation_router)
 api_router.include_router(images_router)
 api_router.include_router(exhibition_router)
+api_router.include_router(dashboard_router)
 api_router.include_router(task_queue_router)
 
 # Machine learning and model routers
