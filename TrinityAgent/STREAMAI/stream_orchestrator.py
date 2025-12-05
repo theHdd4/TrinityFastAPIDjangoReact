@@ -360,8 +360,9 @@ class StreamOrchestrator:
             logger.info(f"{'='*80}")
 
             context_store.register_attempt(atom_id)
+            current_metadata_hash = self._metadata_hash(atom)
             last_exec = context_store.last_executed_at.get(atom_id)
-            if last_exec and context_store.cooldown_due(atom_id):
+            if last_exec and context_store.cooldown_due(atom_id, current_metadata_hash):
                 remaining = max(0.0, context_store.cooldown_seconds - (time.time() - last_exec))
                 await self._emit_progress(
                     progress_callback,
@@ -370,6 +371,7 @@ class StreamOrchestrator:
                         "atom_id": atom_id,
                         "cooldown_seconds": context_store.cooldown_seconds,
                         "remaining": remaining,
+                        "metadata_hash": current_metadata_hash,
                     },
                 )
                 await asyncio.sleep(remaining)
@@ -391,6 +393,7 @@ class StreamOrchestrator:
                 input_hash = hashlib.sha256(f"{atom_id}|{normalized_input}|{upstream_snapshot}".encode("utf-8")).hexdigest()
                 atom_identity = AtomIdentity(atom_id, normalized_input, atom_version)
                 force_execution = bool(atom.get("force"))
+                metadata_changed = current_metadata_hash != context_store.last_metadata_hash.get(atom_id)
 
                 loop_signal = loop_detector.note_attempt(
                     atom_id=atom_id,
@@ -429,6 +432,22 @@ class StreamOrchestrator:
                     previous_inputs=last_inputs,
                     force_execution=force_execution,
                 )
+
+                if context_store.consecutive_gate_blocked(
+                    atom_id, input_hash, current_metadata_hash, force_execution
+                ):
+                    await self._emit_progress(
+                        progress_callback,
+                        {
+                            "type": "consecutive_gate_blocked",
+                            "atom_id": atom_id,
+                            "input_hash": input_hash,
+                            "metadata_hash": current_metadata_hash,
+                        },
+                    )
+                    context_store.last_executed_at[atom_id] = time.time()
+                    await asyncio.sleep(context_store.cooldown_seconds)
+                    continue
 
                 cached_output = None if force_execution else context_store.should_short_circuit(atom_id, input_hash)
                 memoized_result = None if force_execution or idempotency == "effectful" else self.memoizer.get(atom_identity)
@@ -471,8 +490,12 @@ class StreamOrchestrator:
                     atom_index += 1
                     continue
 
-                if not input_changed and cached_output is None and memoized_result is None:
-                    logger.info("⚠️ Input hash unchanged for atom %s; skipping to avoid duplicate execution", atom_id)
+                freshness_allows_run = force_execution or input_changed or metadata_changed
+
+                if not freshness_allows_run and cached_output is None and memoized_result is None:
+                    logger.info(
+                        "⚠️ Freshness guard blocking atom %s; input/metadata unchanged and no override", atom_id
+                    )
                     results["completed_atoms"] += 1
                     results["atoms_executed"].append({
                         "atom_id": atom_id,
@@ -482,7 +505,7 @@ class StreamOrchestrator:
                         "duration": 0,
                         "insight": None,
                         "skipped": True,
-                        "skip_reason": "unchanged_input",
+                        "skip_reason": "freshness_guard",
                     })
                     context_store.record_input_seen(atom_id, input_hash)
                     completed_nodes.add(atom_id)
@@ -708,6 +731,7 @@ class StreamOrchestrator:
         loop_detector: WorkstreamLoopDetector,
     ) -> Tuple[bool, Optional[int], List[Dict[str, Any]], Dict[str, int]]:
         atom_id = atom.get("atom_id", "unknown")
+        current_metadata_hash = self._metadata_hash(atom)
         logger.warning(
             "🌀 Loop detected on atom %s (step %s): %s | details=%s",
             atom_id,
@@ -730,6 +754,9 @@ class StreamOrchestrator:
         await self._emit_progress(progress_callback, paused_payload)
 
         context_store.flag_snapshot(atom_id, input_hash)
+        context_store.note_cooldown_metadata(atom_id, current_metadata_hash)
+        context_store.last_executed_at[atom_id] = time.time()
+        context_store.mark_backtrack_block(atom_id, input_hash, current_metadata_hash)
         if not context_store.record_backtrack() or context_store.backtrack_time_exhausted():
             results["failed_atoms"] += 1
             exhaustion_reason = (
@@ -814,6 +841,34 @@ class StreamOrchestrator:
             atoms=atoms,
             completed_nodes=completed_nodes,
             start_index=target_index,
+        )
+
+        downstream_atoms = {a.get("atom_id") for a in atoms[target_index + 1 :]} if len(atoms) > target_index else set()
+        context_store.reset_dedupe_guards(downstream_atoms)
+
+        target_atom_label = atoms[target_index].get("atom_id") if atoms else atom_id
+        target_input_hash = context_store.last_inputs.get(target_atom_label)
+        context_store.record_backtrack_event(
+            cause=loop_signal.reason or "loop_detected",
+            source_atom=atom_id,
+            target_atom=target_atom_label,
+            source_input_hash=input_hash,
+            target_input_hash=target_input_hash,
+            metadata_hash=current_metadata_hash,
+        )
+
+        await self._emit_progress(
+            progress_callback,
+            {
+                "type": "backtrack_event",
+                "cause": loop_signal.reason,
+                "source_atom": atom_id,
+                "target_atom": target_atom_label,
+                "source_input_hash": input_hash,
+                "target_input_hash": target_input_hash,
+                "metadata_hash": current_metadata_hash,
+                "downstream_reset": list(downstream_atoms),
+            },
         )
 
         await self._emit_progress(
@@ -912,7 +967,15 @@ class StreamOrchestrator:
             }
         )
         return metadata
-    
+
+    def _metadata_hash(self, atom: Dict[str, Any]) -> Optional[str]:
+        metadata = atom.get("metadata") or {}
+        if not metadata:
+            return None
+        if metadata.get("metadata_hash"):
+            return metadata.get("metadata_hash")
+        return normalize_input({k: v for k, v in metadata.items() if k != "refreshed_at"})
+
     async def _execute_atom_3_steps(
         self,
         atom: Dict[str, Any],

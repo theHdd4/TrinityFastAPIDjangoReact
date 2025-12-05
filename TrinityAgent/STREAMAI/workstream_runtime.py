@@ -44,6 +44,7 @@ class WorkstreamTelemetry:
     duplicates: List[Dict[str, Any]] = field(default_factory=list)
     circuit_trips: int = 0
     loops: List[Dict[str, Any]] = field(default_factory=list)
+    backtracks: List[Dict[str, Any]] = field(default_factory=list)
 
     def record_retry(self, atom_identity: AtomIdentity, attempt: int, reason: str) -> None:
         self.retries.append(
@@ -74,6 +75,27 @@ class WorkstreamTelemetry:
             "reason": reason,
             "details": details or {},
         })
+
+    def record_backtrack(
+        self,
+        *,
+        cause: str,
+        source_atom: str,
+        target_atom: str,
+        source_input_hash: str,
+        target_input_hash: Optional[str],
+        metadata_hash: Optional[str] = None,
+    ) -> None:
+        self.backtracks.append(
+            {
+                "cause": cause,
+                "source_atom": source_atom,
+                "target_atom": target_atom,
+                "source_input_hash": source_input_hash,
+                "target_input_hash": target_input_hash,
+                "metadata_hash": metadata_hash,
+            }
+        )
 
 
 @dataclass
@@ -234,11 +256,16 @@ class WorkstreamContextStore:
     backtrack_time_budget: float = 180.0
     snapshots: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     last_inputs: Dict[str, str] = field(default_factory=dict)
+    last_metadata_hash: Dict[str, str] = field(default_factory=dict)
     last_executed_at: Dict[str, float] = field(default_factory=dict)
     consecutive_backtracks: int = 0
     global_snapshots: List[Dict[str, Any]] = field(default_factory=list)
     backtrack_window_start: Optional[float] = None
     last_atom_run: Optional[str] = None
+    dedupe_reset_cursor: Dict[str, int] = field(default_factory=dict)
+    cooldown_metadata: Dict[str, str] = field(default_factory=dict)
+    backtrack_events: List[Dict[str, Any]] = field(default_factory=list)
+    backtrack_blocks: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def register_attempt(self, atom_id: str) -> None:
         self.last_atom_run = atom_id
@@ -253,7 +280,12 @@ class WorkstreamContextStore:
         upstream: Optional[str] = None,
     ) -> int:
         entries = self.snapshots.setdefault(atom_id, [])
-        duplicate_count = sum(1 for entry in entries if entry.get("input_hash") == input_hash)
+        reset_cursor = self.dedupe_reset_cursor.get(atom_id, 0)
+        duplicate_count = sum(
+            1
+            for entry in entries
+            if entry.get("input_hash") == input_hash and entry.get("id", 0) >= reset_cursor
+        )
         if duplicate_count >= self.dedupe_budget:
             raise DedupeBudgetExceeded(f"Atom {atom_id} exceeded dedupe budget ({self.dedupe_budget})")
         if duplicate_count and self.telemetry:
@@ -277,8 +309,10 @@ class WorkstreamContextStore:
         entries.append(snapshot)
         self.global_snapshots.append(snapshot)
         self.last_inputs[atom_id] = input_hash
+        self.last_metadata_hash[atom_id] = metadata_hash
         self.last_executed_at[atom_id] = time.time()
         self.consecutive_backtracks = 0
+        self.backtrack_blocks.pop(atom_id, None)
         return snapshot_id
 
     def should_short_circuit(self, atom_id: str, input_hash: str) -> Optional[Dict[str, Any]]:
@@ -343,6 +377,7 @@ class WorkstreamContextStore:
     def trim_completed_nodes(self, allowed_atoms: Set[str]) -> None:
         self.last_inputs = {atom: h for atom, h in self.last_inputs.items() if atom in allowed_atoms}
         self.last_executed_at = {atom: t for atom, t in self.last_executed_at.items() if atom in allowed_atoms}
+        self.last_metadata_hash = {atom: h for atom, h in self.last_metadata_hash.items() if atom in allowed_atoms}
 
     def summarize_context(self, atom_id: str, input_hash: str, upstream: Optional[str]) -> Dict[str, Any]:
         return {
@@ -352,13 +387,78 @@ class WorkstreamContextStore:
             "last_inputs": dict(self.last_inputs),
             "snapshot_count": len(self.global_snapshots),
             "consecutive_backtracks": self.consecutive_backtracks,
+            "last_metadata_hash": dict(self.last_metadata_hash),
         }
 
-    def cooldown_due(self, atom_id: str) -> bool:
+    def cooldown_due(self, atom_id: str, metadata_hash: Optional[str] = None) -> bool:
         last_exec = self.last_executed_at.get(atom_id)
         if last_exec is None:
             return False
+        if metadata_hash and self.cooldown_metadata.get(atom_id) not in (None, metadata_hash):
+            return False
         return (time.time() - last_exec) < self.cooldown_seconds
+
+    def reset_dedupe_guards(self, downstream_atoms: Iterable[str]) -> None:
+        reset_index = len(self.global_snapshots)
+        for atom in downstream_atoms:
+            self.dedupe_reset_cursor[atom] = reset_index
+            self.last_inputs.pop(atom, None)
+            self.last_executed_at.pop(atom, None)
+            self.last_metadata_hash.pop(atom, None)
+
+    def note_cooldown_metadata(self, atom_id: str, metadata_hash: Optional[str]) -> None:
+        if metadata_hash:
+            self.cooldown_metadata[atom_id] = metadata_hash
+
+    def clear_cooldown_metadata(self, atom_id: str) -> None:
+        self.cooldown_metadata.pop(atom_id, None)
+
+    def record_backtrack_event(
+        self,
+        *,
+        cause: str,
+        source_atom: str,
+        target_atom: str,
+        source_input_hash: str,
+        target_input_hash: Optional[str],
+        metadata_hash: Optional[str],
+    ) -> None:
+        event = {
+            "cause": cause,
+            "source_atom": source_atom,
+            "target_atom": target_atom,
+            "source_input_hash": source_input_hash,
+            "target_input_hash": target_input_hash,
+            "metadata_hash": metadata_hash,
+            "timestamp": time.time(),
+        }
+        self.backtrack_events.append(event)
+        if self.telemetry:
+            self.telemetry.record_backtrack(
+                cause=cause,
+                source_atom=source_atom,
+                target_atom=target_atom,
+                source_input_hash=source_input_hash,
+                target_input_hash=target_input_hash,
+                metadata_hash=metadata_hash,
+            )
+
+    def mark_backtrack_block(self, atom_id: str, input_hash: str, metadata_hash: Optional[str]) -> None:
+        self.backtrack_blocks[atom_id] = {
+            "input_hash": input_hash,
+            "metadata_hash": metadata_hash,
+            "timestamp": time.time(),
+        }
+
+    def consecutive_gate_blocked(self, atom_id: str, input_hash: str, metadata_hash: Optional[str], force: bool) -> bool:
+        if force:
+            return False
+        block = self.backtrack_blocks.get(atom_id)
+        if not block:
+            return False
+        if metadata_hash and block.get("metadata_hash") and metadata_hash != block.get("metadata_hash"):
+            return False
+        return block.get("input_hash") == input_hash
 
     def upstream_snapshot_id(self, deps: Iterable[str]) -> str:
         """Generate a stable identifier for upstream state."""
