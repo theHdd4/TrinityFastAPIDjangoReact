@@ -40,6 +40,7 @@ import StreamWorkflowPreview from './StreamWorkflowPreview';
 import StreamStepMonitor from './StreamStepMonitor';
 import StreamStepApproval from './StreamStepApproval';
 import VoiceInputButton from './VoiceInputButton';
+import { getAvailableCommands, detectCommand } from '../TrinityAI/handlers/commandHandler';
 
 interface Message {
   id: string;
@@ -165,6 +166,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 }) => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isPanelHidden, setIsPanelHidden] = useState(false);
+  const [activeCommand, setActiveCommand] = useState<{ name: string; color: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -172,6 +174,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  // Detect commands as user types for visual indicator
+  useEffect(() => {
+    if (!inputValue.trim()) {
+      setActiveCommand(null);
+      return;
+    }
+    
+    const commandResult = detectCommand(inputValue);
+    
+    if (commandResult.isCommand && commandResult.indicatorColor) {
+      setActiveCommand({
+        name: commandResult.commandName || '',
+        color: commandResult.indicatorColor
+      });
+    } else {
+      setActiveCommand(null);
+    }
+  }, [inputValue]);
 
   // Reset hidden state when panel is opened via AI icon
   useEffect(() => {
@@ -510,15 +531,32 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   <ChevronUp className="w-4 h-4" />
                 )}
               </Button>
-              <Textarea
-                ref={textareaRef}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={handleKeyPress}
-                placeholder="Send a message..."
-                className="min-h-[52px] max-h-[130px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-foreground placeholder:text-muted-foreground/60 text-sm leading-relaxed flex-1"
-                disabled={isLoading || isPaused}
-              />
+              <div className="relative flex-1">
+                {activeCommand && (
+                  <div 
+                    className="absolute top-2 left-3 z-10 px-2 py-1 rounded-md text-xs font-semibold text-white shadow-md"
+                    style={{ backgroundColor: activeCommand.color }}
+                  >
+                    /{activeCommand.name}
+                  </div>
+                )}
+                <Textarea
+                  ref={textareaRef}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyPress}
+                  placeholder="Send a message..."
+                  className={`min-h-[52px] max-h-[130px] resize-none bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-foreground placeholder:text-muted-foreground/60 text-sm leading-relaxed flex-1 rounded-xl ${
+                    activeCommand ? 'pt-10 border-2' : 'border-0'
+                  }`}
+                  style={activeCommand ? {
+                    paddingTop: '2.5rem',
+                    borderColor: activeCommand.color,
+                    boxShadow: `0 0 0 3px ${activeCommand.color}40, 0 0 0 1px ${activeCommand.color}`,
+                  } : {}}
+                  disabled={isLoading || isPaused}
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-between px-5 pb-4 pt-0 border-t border-border/30">
@@ -554,10 +592,38 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       <span className="text-xs font-medium">Tools</span>
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent className="rounded-xl">
-                    <DropdownMenuItem>Data Analysis</DropdownMenuItem>
-                    <DropdownMenuItem>Visualization</DropdownMenuItem>
-                    <DropdownMenuItem>Code Generation</DropdownMenuItem>
+                  <DropdownMenuContent className="rounded-xl max-h-[400px] overflow-y-auto">
+                    {getAvailableCommands().map((command) => (
+                      <DropdownMenuItem
+                        key={command.name}
+                        onClick={() => {
+                          // Insert command into input with a space after it
+                          setInputValue(prev => {
+                            const trimmed = prev.trim();
+                            // If input is empty or ends with space, just add the command
+                            if (!trimmed || trimmed.endsWith(' ')) {
+                              return `${command.name} `;
+                            }
+                            // Otherwise, add space before command
+                            return `${trimmed} ${command.name} `;
+                          });
+                          // Focus the textarea if ref is available
+                          if (textareaRef?.current) {
+                            textareaRef.current.focus();
+                          }
+                        }}
+                        className="flex items-center gap-2 cursor-pointer"
+                      >
+                        <div 
+                          className="w-2 h-2 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: command.color }}
+                        />
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium">{command.name}</span>
+                          <span className="text-xs text-muted-foreground">{command.description}</span>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
 
