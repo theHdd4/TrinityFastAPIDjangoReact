@@ -85,6 +85,9 @@ class WorkstreamTelemetry:
         source_input_hash: str,
         target_input_hash: Optional[str],
         metadata_hash: Optional[str] = None,
+        source_snapshot_id: Optional[int] = None,
+        target_snapshot_id: Optional[int] = None,
+        upstream_snapshot: Optional[str] = None,
     ) -> None:
         self.backtracks.append(
             {
@@ -94,6 +97,9 @@ class WorkstreamTelemetry:
                 "source_input_hash": source_input_hash,
                 "target_input_hash": target_input_hash,
                 "metadata_hash": metadata_hash,
+                "source_snapshot_id": source_snapshot_id,
+                "target_snapshot_id": target_snapshot_id,
+                "upstream_snapshot": upstream_snapshot,
             }
         )
 
@@ -254,6 +260,7 @@ class WorkstreamContextStore:
     max_backtracks: int = 3
     cooldown_seconds: float = 1.5
     backtrack_time_budget: float = 180.0
+    loop_guard_enabled: bool = True
     snapshots: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     last_inputs: Dict[str, str] = field(default_factory=dict)
     last_metadata_hash: Dict[str, str] = field(default_factory=dict)
@@ -266,6 +273,7 @@ class WorkstreamContextStore:
     cooldown_metadata: Dict[str, str] = field(default_factory=dict)
     backtrack_events: List[Dict[str, Any]] = field(default_factory=list)
     backtrack_blocks: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    pinned_snapshot_id: Optional[int] = None
 
     def register_attempt(self, atom_id: str) -> None:
         self.last_atom_run = atom_id
@@ -422,6 +430,9 @@ class WorkstreamContextStore:
         source_input_hash: str,
         target_input_hash: Optional[str],
         metadata_hash: Optional[str],
+        source_snapshot_id: Optional[int],
+        target_snapshot_id: Optional[int],
+        upstream_snapshot: Optional[str] = None,
     ) -> None:
         event = {
             "cause": cause,
@@ -430,7 +441,11 @@ class WorkstreamContextStore:
             "source_input_hash": source_input_hash,
             "target_input_hash": target_input_hash,
             "metadata_hash": metadata_hash,
+            "source_snapshot_id": source_snapshot_id,
+            "target_snapshot_id": target_snapshot_id,
+            "upstream_snapshot": upstream_snapshot,
             "timestamp": time.time(),
+            "lineage": self._lineage_payload(source_snapshot_id, target_snapshot_id),
         }
         self.backtrack_events.append(event)
         if self.telemetry:
@@ -441,7 +456,38 @@ class WorkstreamContextStore:
                 source_input_hash=source_input_hash,
                 target_input_hash=target_input_hash,
                 metadata_hash=metadata_hash,
+                source_snapshot_id=source_snapshot_id,
+                target_snapshot_id=target_snapshot_id,
+                upstream_snapshot=upstream_snapshot,
             )
+
+    def _lineage_payload(
+        self, source_snapshot_id: Optional[int], target_snapshot_id: Optional[int]
+    ) -> List[Dict[str, Any]]:
+        lineage: List[Dict[str, Any]] = []
+        if source_snapshot_id is not None:
+            source = self.get_snapshot(source_snapshot_id)
+            if source:
+                lineage.append(
+                    {
+                        "id": source_snapshot_id,
+                        "atom_id": source.get("atom_id"),
+                        "input_hash": source.get("input_hash"),
+                        "metadata_hash": source.get("metadata_hash"),
+                    }
+                )
+        if target_snapshot_id is not None and target_snapshot_id != source_snapshot_id:
+            target = self.get_snapshot(target_snapshot_id)
+            if target:
+                lineage.append(
+                    {
+                        "id": target_snapshot_id,
+                        "atom_id": target.get("atom_id"),
+                        "input_hash": target.get("input_hash"),
+                        "metadata_hash": target.get("metadata_hash"),
+                    }
+                )
+        return lineage
 
     def mark_backtrack_block(self, atom_id: str, input_hash: str, metadata_hash: Optional[str]) -> None:
         self.backtrack_blocks[atom_id] = {
@@ -459,6 +505,27 @@ class WorkstreamContextStore:
         if metadata_hash and block.get("metadata_hash") and metadata_hash != block.get("metadata_hash"):
             return False
         return block.get("input_hash") == input_hash
+
+    def pin_snapshot(self, snapshot_id: int) -> Optional[Dict[str, Any]]:
+        snapshot = self.get_snapshot(snapshot_id)
+        if snapshot:
+            self.pinned_snapshot_id = snapshot_id
+        return snapshot
+
+    def hard_reset(self) -> None:
+        self.snapshots.clear()
+        self.last_inputs.clear()
+        self.last_metadata_hash.clear()
+        self.last_executed_at.clear()
+        self.global_snapshots.clear()
+        self.consecutive_backtracks = 0
+        self.backtrack_window_start = None
+        self.last_atom_run = None
+        self.dedupe_reset_cursor.clear()
+        self.cooldown_metadata.clear()
+        self.backtrack_events.clear()
+        self.backtrack_blocks.clear()
+        self.pinned_snapshot_id = None
 
     def upstream_snapshot_id(self, deps: Iterable[str]) -> str:
         """Generate a stable identifier for upstream state."""
@@ -507,6 +574,20 @@ class WorkstreamLoopDetector:
         self.last_progress_time = time.time()
         self.last_stable_index: int = -1
         self.last_completed_count: int = 0
+
+    def reset(self) -> None:
+        self.input_windows.clear()
+        self.baseline_completed.clear()
+        self.first_seen.clear()
+        self.output_hashes.clear()
+        self.last_output_time.clear()
+        self.attempt_log.clear()
+        self.executed_atoms_count = 0
+        self.unique_nodes_visited.clear()
+        self.attempts_since_progress = 0
+        self.last_progress_time = time.time()
+        self.last_stable_index = -1
+        self.last_completed_count = 0
 
     def note_attempt(self, *, atom_id: str, input_hash: str, completed_nodes: Set[str], stable_index: int) -> LoopSignal:
         now = time.time()

@@ -224,6 +224,7 @@ class StreamOrchestrator:
             self.file_analyzer = None
             self.file_context_resolver = FileContextResolver()
 
+        self.loop_guard_config = self._load_loop_guard_config()
         logger.info("✅ StreamOrchestrator initialized")
 
     async def _emit_progress(self, progress_callback: Optional[Callable], payload: Dict[str, Any]) -> None:
@@ -238,6 +239,16 @@ class StreamOrchestrator:
                 await result
         except Exception as exc:
             logger.debug("Progress callback raised an exception: %s", exc)
+
+    def _resolve_loop_guard_settings(self, sequence: Dict[str, Any], mode: str) -> Tuple[bool, Dict[str, Any]]:
+        intent = sequence.get("intent") or "default"
+        default_cfg = self.loop_guard_config.get("default", {})
+        intent_cfg = (self.loop_guard_config.get("intents", {}) or {}).get(intent, {})
+        override_cfg = sequence.get("loop_guard_config") or {}
+
+        merged = {**default_cfg, **intent_cfg, **override_cfg}
+        enabled = bool(merged.get("enabled", mode == "laboratory")) and mode == "laboratory"
+        return enabled, merged
     
     async def execute_sequence(
         self,
@@ -331,11 +342,31 @@ class StreamOrchestrator:
         mode = (sequence.get("mode") or "laboratory").lower()
         dedupe_budget = int(sequence.get("dedupe_budget", 5))
         telemetry = WorkstreamTelemetry(session_id=session_id, mode=mode)
-        context_store = WorkstreamContextStore(dedupe_budget=dedupe_budget, telemetry=telemetry)
+        loop_guard_enabled, loop_guard_config = self._resolve_loop_guard_settings(sequence, mode)
+        context_store = WorkstreamContextStore(
+            dedupe_budget=dedupe_budget,
+            telemetry=telemetry,
+            max_backtracks=int(loop_guard_config.get("max_backtracks", 3)),
+            cooldown_seconds=float(loop_guard_config.get("cooldown_seconds", 1.5)),
+            backtrack_time_budget=float(loop_guard_config.get("backtrack_time_budget", 180.0)),
+            loop_guard_enabled=loop_guard_enabled,
+        )
         self.execution_policy.telemetry = telemetry
-        loop_detector = WorkstreamLoopDetector(telemetry=telemetry)
+        loop_detector = (
+            WorkstreamLoopDetector(
+                input_repeat_threshold=int(loop_guard_config.get("input_repeat_threshold", 3)),
+                stall_threshold=int(loop_guard_config.get("stall_threshold", 5)),
+                ratio_threshold=float(loop_guard_config.get("ratio_threshold", 3.0)),
+                window_seconds=float(loop_guard_config.get("window_seconds", 45.0)),
+                per_node_time_budget=float(loop_guard_config.get("per_node_time_budget", 60.0)),
+                telemetry=telemetry,
+            )
+            if loop_guard_enabled
+            else None
+        )
         completed_nodes = set()
         last_inputs = context_store.last_inputs
+        operator_controls = sequence.get("operator_controls") or {}
         
         results = {
             "session_id": session_id,
@@ -358,6 +389,28 @@ class StreamOrchestrator:
             logger.info(f"\n{'='*80}")
             logger.info(f"📍 Executing Atom {i}/{total_atoms}: {atom_id}")
             logger.info(f"{'='*80}")
+
+            control_action = await self._apply_operator_controls(
+                operator_controls=operator_controls,
+                atom=atom,
+                atom_index=atom_index,
+                atoms=atoms,
+                completed_nodes=completed_nodes,
+                context_store=context_store,
+                results=results,
+                progress_callback=progress_callback,
+                loop_detector=loop_detector,
+                loop_guard_config=loop_guard_config,
+            )
+
+            if control_action == "hard_reset":
+                last_stable_index = -1
+                total_atoms = len(atoms)
+                atom_index = 0
+                continue
+            if control_action == "skip_atom":
+                atom_index += 1
+                continue
 
             context_store.register_attempt(atom_id)
             current_metadata_hash = self._metadata_hash(atom)
@@ -395,35 +448,38 @@ class StreamOrchestrator:
                 force_execution = bool(atom.get("force"))
                 metadata_changed = current_metadata_hash != context_store.last_metadata_hash.get(atom_id)
 
-                loop_signal = loop_detector.note_attempt(
-                    atom_id=atom_id,
-                    input_hash=input_hash,
-                    completed_nodes=completed_nodes,
-                    stable_index=last_stable_index,
-                )
-                if loop_signal.detected:
-                    handled, rewind_to, atoms, atom_index_lookup = await self._handle_loop_detection(
-                        atom=atom,
-                        atom_index=i,
+                loop_signal = LoopSignal(detected=False)
+                if loop_detector:
+                    loop_signal = loop_detector.note_attempt(
+                        atom_id=atom_id,
                         input_hash=input_hash,
-                        upstream_snapshot=upstream_snapshot,
-                        loop_signal=loop_signal,
-                        context_store=context_store,
-                        results=results,
                         completed_nodes=completed_nodes,
-                        progress_callback=progress_callback,
-                        atoms=atoms,
-                        atom_index_lookup=atom_index_lookup,
-                        loop_detector=loop_detector,
+                        stable_index=last_stable_index,
                     )
-                    total_atoms = len(atoms)
-                    if handled:
-                        target_index = atom_index if rewind_to is None else max(rewind_to, 0)
-                        last_stable_index = max(last_stable_index, target_index)
-                        loop_detector.mark_stable(target_index)
-                        atom_index = target_index
-                        continue
-                    break
+                    if loop_signal.detected:
+                        handled, rewind_to, atoms, atom_index_lookup = await self._handle_loop_detection(
+                            atom=atom,
+                            atom_index=i,
+                            input_hash=input_hash,
+                            upstream_snapshot=upstream_snapshot,
+                            loop_signal=loop_signal,
+                            context_store=context_store,
+                            results=results,
+                            completed_nodes=completed_nodes,
+                            progress_callback=progress_callback,
+                            atoms=atoms,
+                            atom_index_lookup=atom_index_lookup,
+                            loop_detector=loop_detector,
+                        )
+                        total_atoms = len(atoms)
+                        if handled:
+                            target_index = atom_index if rewind_to is None else max(rewind_to, 0)
+                            last_stable_index = max(last_stable_index, target_index)
+                            if loop_detector:
+                                loop_detector.mark_stable(target_index)
+                            atom_index = target_index
+                            continue
+                        break
 
                 input_changed = WorkstreamValidator.runtime_validate(
                     atom,
@@ -467,7 +523,8 @@ class StreamOrchestrator:
                     })
                     completed_nodes.add(atom_id)
                     context_store.record_input_seen(atom_id, input_hash)
-                    loop_detector.mark_stable(atom_index)
+                    if loop_detector:
+                        loop_detector.mark_stable(atom_index)
                     atom_index += 1
                     continue
 
@@ -486,7 +543,8 @@ class StreamOrchestrator:
                     })
                     completed_nodes.add(atom_id)
                     context_store.record_input_seen(atom_id, input_hash)
-                    loop_detector.mark_stable(atom_index)
+                    if loop_detector:
+                        loop_detector.mark_stable(atom_index)
                     atom_index += 1
                     continue
 
@@ -509,7 +567,8 @@ class StreamOrchestrator:
                     })
                     context_store.record_input_seen(atom_id, input_hash)
                     completed_nodes.add(atom_id)
-                    loop_detector.mark_stable(atom_index)
+                    if loop_detector:
+                        loop_detector.mark_stable(atom_index)
                     atom_index += 1
                     continue
 
@@ -600,16 +659,17 @@ class StreamOrchestrator:
                         self.memoizer.set(atom_identity, atom_result)
                     completed_nodes.add(atom_id)
                     last_stable_index = atom_index
-                    loop_detector.mark_stable(atom_index)
-                    loop_detector.note_result(
-                        atom_id=atom_id,
-                        input_hash=input_hash,
-                        output_hash=output_hash,
-                        success=True,
-                        error=None,
-                        completed_nodes=completed_nodes,
-                        stable_index=atom_index,
-                    )
+                    if loop_detector:
+                        loop_detector.mark_stable(atom_index)
+                        loop_detector.note_result(
+                            atom_id=atom_id,
+                            input_hash=input_hash,
+                            output_hash=output_hash,
+                            success=True,
+                            error=None,
+                            completed_nodes=completed_nodes,
+                            stable_index=atom_index,
+                        )
 
                     # Store result
                     if self.storage:
@@ -648,31 +708,32 @@ class StreamOrchestrator:
                     # Decide whether to continue or stop
                     # For now, stop on first error
                     logger.error("⚠️ Stopping sequence execution due to error")
-                    signal = loop_detector.note_result(
-                        atom_id=atom_id,
-                        input_hash=input_hash,
-                        output_hash=None,
-                        success=False,
-                        error=error_msg,
-                        completed_nodes=completed_nodes,
-                        stable_index=last_stable_index,
-                    )
-                    if signal.detected:
-                        _, _, atoms, atom_index_lookup = await self._handle_loop_detection(
-                            atom=atom,
-                            atom_index=i,
+                    if loop_detector:
+                        signal = loop_detector.note_result(
+                            atom_id=atom_id,
                             input_hash=input_hash,
-                            upstream_snapshot=upstream_snapshot,
-                            loop_signal=signal,
-                            context_store=context_store,
-                            results=results,
+                            output_hash=None,
+                            success=False,
+                            error=error_msg,
                             completed_nodes=completed_nodes,
-                            progress_callback=progress_callback,
-                            atoms=atoms,
-                            atom_index_lookup=atom_index_lookup,
-                            loop_detector=loop_detector,
+                            stable_index=last_stable_index,
                         )
-                        total_atoms = len(atoms)
+                        if signal.detected:
+                            _, _, atoms, atom_index_lookup = await self._handle_loop_detection(
+                                atom=atom,
+                                atom_index=i,
+                                input_hash=input_hash,
+                                upstream_snapshot=upstream_snapshot,
+                                loop_signal=signal,
+                                context_store=context_store,
+                                results=results,
+                                completed_nodes=completed_nodes,
+                                progress_callback=progress_callback,
+                                atoms=atoms,
+                                atom_index_lookup=atom_index_lookup,
+                                loop_detector=loop_detector,
+                            )
+                            total_atoms = len(atoms)
                     break
                 
             except Exception as e:
@@ -708,11 +769,95 @@ class StreamOrchestrator:
             "duplicates": telemetry.duplicates,
             "circuit_trips": telemetry.circuit_trips,
             "loops": telemetry.loops,
+            "backtracks": telemetry.backtracks,
             "dedupe_budget": dedupe_budget,
         }
+        results["backtrack_events"] = context_store.backtrack_events
 
         await self._append_workflow_insight(sequence, results)
         return results
+
+    async def _apply_operator_controls(
+        self,
+        *,
+        operator_controls: Dict[str, Any],
+        atom: Dict[str, Any],
+        atom_index: int,
+        atoms: List[Dict[str, Any]],
+        completed_nodes: Set[str],
+        context_store: WorkstreamContextStore,
+        results: Dict[str, Any],
+        progress_callback: Optional[Callable],
+        loop_detector: Optional[WorkstreamLoopDetector],
+        loop_guard_config: Dict[str, Any],
+    ) -> str:
+        atom_id = atom.get("atom_id", "unknown")
+        pin_id = operator_controls.pop("pin_snapshot_id", None)
+        if pin_id is not None:
+            pinned = context_store.pin_snapshot(int(pin_id))
+            await self._emit_progress(
+                progress_callback,
+                {
+                    "type": "operator_pin_snapshot",
+                    "atom_id": atom_id,
+                    "snapshot_id": pin_id,
+                    "found": bool(pinned),
+                    "pinned_snapshot": pinned,
+                },
+            )
+
+        if operator_controls.get("hard_reset"):
+            operator_controls["hard_reset"] = False
+            context_store.hard_reset()
+            if loop_detector:
+                loop_detector.reset()
+            completed_nodes.clear()
+            results["atoms_executed"] = []
+            results["completed_atoms"] = 0
+            results["failed_atoms"] = 0
+            results["errors"] = []
+            await self._emit_progress(
+                progress_callback,
+                {
+                    "type": "operator_hard_reset",
+                    "atom_id": atom_id,
+                    "reason": "manual_override",
+                    "cooldown_seconds": loop_guard_config.get("cooldown_seconds", 1.5),
+                },
+            )
+            return "hard_reset"
+
+        skip_atoms = set(operator_controls.get("skip_atoms") or [])
+        if atom_id in skip_atoms:
+            skip_atoms.discard(atom_id)
+            operator_controls["skip_atoms"] = list(skip_atoms)
+            results["atoms_executed"].append(
+                {
+                    "atom_id": atom_id,
+                    "step": atom_index + 1,
+                    "success": True,
+                    "skipped": True,
+                    "skip_reason": "operator_skip",
+                    "duration": 0,
+                    "insight": None,
+                }
+            )
+            results["completed_atoms"] += 1
+            completed_nodes.add(atom_id)
+            context_store.last_executed_at[atom_id] = time.time()
+            if loop_detector:
+                loop_detector.mark_stable(atom_index)
+            await self._emit_progress(
+                progress_callback,
+                {
+                    "type": "operator_skip_atom",
+                    "atom_id": atom_id,
+                    "step": atom_index + 1,
+                },
+            )
+            return "skip_atom"
+
+        return "none"
 
     async def _handle_loop_detection(
         self,
@@ -732,6 +877,8 @@ class StreamOrchestrator:
     ) -> Tuple[bool, Optional[int], List[Dict[str, Any]], Dict[str, int]]:
         atom_id = atom.get("atom_id", "unknown")
         current_metadata_hash = self._metadata_hash(atom)
+        source_snapshot = context_store.latest_snapshot(atom_id)
+        source_snapshot_id = (source_snapshot or {}).get("id")
         logger.warning(
             "🌀 Loop detected on atom %s (step %s): %s | details=%s",
             atom_id,
@@ -789,8 +936,13 @@ class StreamOrchestrator:
             return False, None, atoms, atom_index_lookup
 
         ancestors = atom.get("depends_on", [])
-        candidate_snapshot = context_store.find_divergent_snapshot(atom_id, input_hash, ancestors)
-        target_atom_id = atom_id
+        pinned_snapshot = None
+        if context_store.pinned_snapshot_id is not None:
+            probe = context_store.get_snapshot(context_store.pinned_snapshot_id)
+            if probe and not probe.get("loop_flag"):
+                pinned_snapshot = probe
+        candidate_snapshot = pinned_snapshot or context_store.find_divergent_snapshot(atom_id, input_hash, ancestors)
+        target_atom_id = (candidate_snapshot or {}).get("atom_id", atom_id)
 
         if candidate_snapshot is None:
             for parent in ancestors:
@@ -848,6 +1000,8 @@ class StreamOrchestrator:
 
         target_atom_label = atoms[target_index].get("atom_id") if atoms else atom_id
         target_input_hash = context_store.last_inputs.get(target_atom_label)
+        target_snapshot_id = (candidate_snapshot or {}).get("id")
+        lineage = context_store._lineage_payload(source_snapshot_id, target_snapshot_id)
         context_store.record_backtrack_event(
             cause=loop_signal.reason or "loop_detected",
             source_atom=atom_id,
@@ -855,6 +1009,16 @@ class StreamOrchestrator:
             source_input_hash=input_hash,
             target_input_hash=target_input_hash,
             metadata_hash=current_metadata_hash,
+            source_snapshot_id=source_snapshot_id,
+            target_snapshot_id=target_snapshot_id,
+            upstream_snapshot=upstream_snapshot,
+        )
+
+        logger.info(
+            "↩️ Backtracking lineage | source_snapshot=%s target_snapshot=%s target_atom=%s",
+            source_snapshot_id,
+            target_snapshot_id,
+            target_atom_label,
         )
 
         await self._emit_progress(
@@ -868,6 +1032,7 @@ class StreamOrchestrator:
                 "target_input_hash": target_input_hash,
                 "metadata_hash": current_metadata_hash,
                 "downstream_reset": list(downstream_atoms),
+                "lineage": lineage,
             },
         )
 
@@ -1912,6 +2077,31 @@ class StreamOrchestrator:
             return json.dumps(payload, indent=2, default=str)
         except (TypeError, ValueError):
             return str(payload)
+
+    def _load_loop_guard_config(self) -> Dict[str, Any]:
+        config_path = Path(__file__).resolve().parent / "config" / "loop_guard_config.json"
+        default_config = {
+            "default": {
+                "enabled": True,
+                "input_repeat_threshold": 3,
+                "stall_threshold": 5,
+                "ratio_threshold": 3.0,
+                "window_seconds": 45.0,
+                "per_node_time_budget": 60.0,
+                "max_backtracks": 3,
+                "cooldown_seconds": 1.5,
+                "backtrack_time_budget": 180.0,
+            }
+        }
+
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    default_config.update(loaded)
+            except Exception as exc:
+                logger.warning("Unable to load loop_guard_config.json: %s", exc)
+        return default_config
 
 
 # Global instance
