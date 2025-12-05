@@ -1,3 +1,4 @@
+name: trinity-dev
 x-redis-env: &redis-env
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   REDIS_HOST: ${REDIS_HOST:-redis}
