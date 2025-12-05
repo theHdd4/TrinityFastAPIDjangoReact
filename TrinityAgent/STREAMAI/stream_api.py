@@ -340,13 +340,14 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     continue
 
                 if policy_flip:
-                    await _safe_send_json(websocket, {
-                        "type": "policy_shift",
-                        "message": "Detected a change in execution path; please confirm before continuing.",
-                    })
-                    close_code = 1000
-                    close_reason = "policy_shift"
-                    return
+                    await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "policy_shift",
+                            "message": "Detected a change in execution path; proceeding with the updated plan.",
+                        },
+                    )
+                    # Continue execution without requesting user confirmation
 
                 if decision.requires_files and not available_files:
                     await _safe_send_json(websocket, {

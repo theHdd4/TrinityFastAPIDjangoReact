@@ -78,6 +78,7 @@ class LabMemoryStore:
         try:
             collection.create_index([("session_id", ASCENDING), ("request_id", ASCENDING)])
             collection.create_index([("model_version", ASCENDING), ("prompt_template_version", ASCENDING)])
+            collection.create_index([("record_type", ASCENDING), ("step_number", ASCENDING)])
         except PyMongoError as exc:  # pragma: no cover - index creation best-effort
             logger.warning("Failed to create MongoDB indices for lab context: %s", exc)
         return collection
@@ -270,6 +271,45 @@ class LabMemoryStore:
         except Exception as exc:  # pragma: no cover - network/storage guard
             logger.warning("Failed to store laboratory atom snapshot in MinIO: %s", exc)
 
+        # Persist snapshot to MongoDB for queryable lineage and repeat detection
+        try:
+            mongo_payload = {
+                "record_type": "atom_snapshot",
+                "memory_type": "Trinity AI Persistent JSON Memory",
+                "session_id": envelope.session_id,
+                "request_id": envelope.request_id,
+                "step_number": step_record.step_number,
+                "atom_id": step_record.atom_id,
+                "description": step_record.decision_rationale,
+                "timestamp": step_record.timestamp or datetime.utcnow(),
+                "model_version": envelope.model_version,
+                "prompt_template_version": envelope.prompt_template_version,
+                "prompt_template_hash": envelope.prompt_template_hash,
+                "input_hash": envelope.input_hash,
+                "deterministic_params": envelope.deterministic_params,
+                "project_context": project_context or {},
+                "available_files": available_files or [],
+                "step_payload": step_record.model_dump(mode="python", exclude_none=True),
+            }
+            self.mongo_collection.replace_one(
+                {
+                    "session_id": envelope.session_id,
+                    "request_id": envelope.request_id,
+                    "step_number": step_record.step_number,
+                    "record_type": "atom_snapshot",
+                },
+                mongo_payload,
+                upsert=True,
+            )
+            logger.info(
+                "Persisted laboratory atom snapshot to MongoDB for session=%s request=%s step=%s",
+                envelope.session_id,
+                envelope.request_id,
+                step_record.step_number,
+            )
+        except PyMongoError as exc:  # pragma: no cover - database guard
+            logger.warning("Failed to persist laboratory atom snapshot to MongoDB: %s", exc)
+
     def load_atom_snapshots(
         self,
         session_id: str,
@@ -278,21 +318,41 @@ class LabMemoryStore:
     ) -> List[Dict[str, Any]]:
         """Retrieve recent atom execution snapshots for the given session/request."""
 
-        prefix = self._atom_history_prefix(session_id, request_id)
         snapshots: List[Dict[str, Any]] = []
+
+        # Prefer MongoDB for fast retrieval and richer filters
         try:
-            objects = list(self.minio_client.list_objects(self.bucket, prefix=prefix))
-            objects.sort(key=lambda obj: obj.object_name, reverse=True)
-            for obj in objects:
-                if len(snapshots) >= limit:
-                    break
-                if not obj.object_name.endswith(".json"):
-                    continue
-                response = self.minio_client.get_object(self.bucket, obj.object_name)
-                with response as stream:
-                    raw = stream.read()
-                snapshots.append(json.loads(raw.decode("utf-8")))
-        except Exception as exc:  # pragma: no cover - network/storage guard
-            logger.warning("Failed to load laboratory atom snapshots from MinIO: %s", exc)
+            cursor = (
+                self.mongo_collection.find(
+                    {
+                        "record_type": "atom_snapshot",
+                        "session_id": session_id,
+                        "request_id": request_id,
+                    }
+                )
+                .sort("step_number", -1)
+                .limit(limit)
+            )
+            snapshots.extend(list(cursor))
+        except PyMongoError as exc:  # pragma: no cover - database guard
+            logger.warning("Failed to load lab atom snapshots from MongoDB: %s", exc)
+
+        # Fallback to MinIO when MongoDB has no records or retrieval fails
+        if not snapshots:
+            prefix = self._atom_history_prefix(session_id, request_id)
+            try:
+                objects = list(self.minio_client.list_objects(self.bucket, prefix=prefix))
+                objects.sort(key=lambda obj: obj.object_name, reverse=True)
+                for obj in objects:
+                    if len(snapshots) >= limit:
+                        break
+                    if not obj.object_name.endswith(".json"):
+                        continue
+                    response = self.minio_client.get_object(self.bucket, obj.object_name)
+                    with response as stream:
+                        raw = stream.read()
+                    snapshots.append(json.loads(raw.decode("utf-8")))
+            except Exception as exc:  # pragma: no cover - network/storage guard
+                logger.warning("Failed to load laboratory atom snapshots from MinIO: %s", exc)
 
         return snapshots
