@@ -1,7 +1,7 @@
 {
   "metadata": {
     "version": "2.2.0",
-    "total_atoms": 21,
+    "total_atoms": 20,
     "categories": 6,
     "last_updated": "2025-01-28"
   },
@@ -294,96 +294,6 @@
           "typical_workflow_role": "Flexible - used throughout pipeline for data scoping",
           "business_value": "Enables focusing analysis on relevant data, improving processing speed and clarity",
           "typical_next_atoms": ["groupby-wtg-avg", "correlation", "chart-maker", "dataframe-operations"]
-        },
-        {
-          "id": "metric-operations",
-          "title": "Metric Operations Engine",
-          "description": "Comprehensive metric operations atom that provides predefined transformations to create new columns, apply arithmetic, conditional logic, aggregations, normalization, filtering, and advanced derived metrics on DataFrames. Each operation has structured parameters including required columns, operation-specific parameters, example usage, and output structure. Supports REST API endpoints for execution.",
-          "tags": ["metrics", "transformations", "arithmetic", "conditional", "aggregation", "derived-metrics", "normalize", "filter"],
-          "capabilities": [
-            "Arithmetic Operations: Add, subtract, multiply, divide columns or values",
-            "Conditional Operations: If-else logic, case-when statements, conditional column creation",
-            "Aggregation Operations: Sum over groups, mean, standard deviation, count, min, max within groups",
-            "String Operations: Concatenate, split, extract, format, transform string columns",
-            "Date Operations: Extract date parts, calculate date differences, normalize dates",
-            "Derived Metrics: Calculate ratios, percentages, ranks, percentiles, contributions",
-            "Normalization: Min-max scaling, z-score standardization, unit conversions",
-            "Filtering: Filter top N per group, filter by percentile, conditional filtering",
-            "Group-based Metrics: Compute metrics within groups, group share of total, group contribution",
-            "Advanced Metrics: Rolling calculations, cumulative metrics, period-over-period comparisons"
-          ],
-          "use_cases": [
-            "Create calculated columns from existing data (e.g., profit = revenue - cost)",
-            "Apply conditional logic to categorize or flag data (e.g., if sales > threshold then 'high' else 'low')",
-            "Calculate aggregated metrics within groups (e.g., average price by region)",
-            "Normalize or standardize numeric columns for analysis",
-            "Derive business KPIs and ratios (e.g., margin percentage, growth rates)",
-            "Filter data based on metric thresholds (e.g., top 10% by sales)",
-            "Compute group-level contributions and shares",
-            "Transform and manipulate string and date columns",
-            "Create advanced derived metrics for analytics and reporting"
-          ],
-          "outputs": ["Transformed DataFrame with new metric columns", "Operation metadata and configuration"],
-          "typical_workflow_role": "Mid-pipeline - metric calculation and transformation phase",
-          "business_value": "Enables rapid creation of business metrics, KPIs, and derived columns without manual coding. Provides structured, reusable metric operations for consistent analytics.",
-          "typical_next_atoms": ["groupby-wtg-avg", "chart-maker", "correlation", "dataframe-operations", "feature-overview"],
-          "operation_categories": [
-            {
-              "category": "Arithmetic Operations",
-              "operations": ["add", "subtract", "multiply", "divide", "power", "modulo"],
-              "description": "Basic mathematical operations between columns or with constants"
-            },
-            {
-              "category": "Conditional Operations",
-              "operations": ["if_else", "case_when", "conditional_column"],
-              "description": "Apply conditional logic to create new columns based on conditions"
-            },
-            {
-              "category": "Aggregation Operations",
-              "operations": ["sum_over_group", "mean_over_group", "std_over_group", "count_over_group", "min_over_group", "max_over_group"],
-              "description": "Calculate aggregations within groups defined by identifier columns"
-            },
-            {
-              "category": "String Operations",
-              "operations": ["concatenate", "split", "extract", "format", "upper", "lower", "trim"],
-              "description": "Manipulate and transform string columns"
-            },
-            {
-              "category": "Date Operations",
-              "operations": ["extract_year", "extract_month", "extract_day", "date_diff", "normalize_date"],
-              "description": "Extract date parts and calculate date differences"
-            },
-            {
-              "category": "Derived Metrics",
-              "operations": ["ratio", "percentage", "rank", "percentile", "contribution", "growth_rate"],
-              "description": "Calculate advanced business metrics and derived KPIs"
-            },
-            {
-              "category": "Normalization",
-              "operations": ["min_max_scale", "z_score_normalize", "unit_convert"],
-              "description": "Normalize and standardize numeric columns"
-            },
-            {
-              "category": "Filtering",
-              "operations": ["filter_top_n_per_group", "filter_percentile", "filter_conditional"],
-              "description": "Filter data based on metric thresholds and conditions"
-            }
-          ],
-          "api_endpoints": [
-            "POST /api/createcolumn/perform - Execute metric operations",
-            "POST /api/createcolumn/save - Save transformed DataFrame",
-            "GET /api/createcolumn/results - Get operation results",
-            "GET /api/createcolumn/options - Get available operation types"
-          ],
-          "example_usage": [
-            "Create a profit column by subtracting cost from revenue",
-            "Calculate average sales per region using aggregation operations",
-            "Apply conditional logic to categorize products as 'premium' or 'standard'",
-            "Normalize price columns to 0-1 range for comparison",
-            "Filter top 10 products by sales volume per category",
-            "Calculate percentage contribution of each region to total sales",
-            "Derive growth rate metric comparing current period to previous period"
-          ]
         }
       ]
     },

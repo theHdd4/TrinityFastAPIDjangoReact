@@ -526,25 +526,6 @@ class StreamRAGEngine:
 - Example: After merging datasets, use correlation to find relationships between numeric columns
 - Example: Use correlation early in EDA workflow to guide further analysis
 """,
-            "metric-operations": """
-## Parameter Generation Guidance:
-- Requires data_source parameter (file path or result from previous step)
-- Specify operation_type: one of the metric operation categories (arithmetic, conditional, aggregation, string, date, derived_metrics, normalization, filtering)
-- Specify operation_config: dictionary with operation-specific parameters
-- For arithmetic operations: specify columns to operate on and operation (add, subtract, multiply, divide)
-- For conditional operations: specify condition logic and true/false values
-- For aggregation operations: specify group_by columns (identifiers) and metric columns with aggregation method
-- For derived metrics: specify metric type (ratio, percentage, rank, percentile, contribution, growth_rate) and required columns
-- For normalization: specify normalization method (min_max, z_score) and columns to normalize
-- For filtering: specify filter type (top_n_per_group, percentile, conditional) and filter parameters
-- Use output from previous step as data_source
-- Each operation creates new columns - specify output column names
-- Example: Create profit metric by subtracting cost from revenue using arithmetic operation
-- Example: Calculate average sales per region using aggregation operation with group_by=['Region'], metric_cols=['Sales'], method='mean'
-- Example: Normalize price columns using normalization operation with method='min_max', columns=['Price']
-- Example: Filter top 10 products per category using filtering operation with filter_type='top_n_per_group', n=10, group_by=['Category'], metric_col='Sales'
-- REST API: POST /api/createcolumn/perform with operation_type and operation_config
-"""
         }
         
         return guidance_map.get(atom_id, "\n## Parameter Generation Guidance:\nFollow the parameter schema and use previous step outputs when applicable.\n")
