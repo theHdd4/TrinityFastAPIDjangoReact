@@ -131,3 +131,4 @@ export {
   dfValidateHandler,
   metricHandler 
 };
+export { detectCommand, getAvailableCommands, type CommandResult, type CommandContext } from './commandHandler';

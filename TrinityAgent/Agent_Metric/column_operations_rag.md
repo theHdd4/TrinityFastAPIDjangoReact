@@ -35,19 +35,22 @@ This document provides comprehensive information about all available column oper
 - **Example**: `divide_0: "column1,column2"` → `column1 / column2`
 
 #### `pct_change`
-- **Required Columns**: Exactly 2
+- **Required Columns**: Exactly 2 (MANDATORY - backend enforces this)
 - **Description**: Calculates percentage change between two columns
 - **Formula**: `((column2 - column1) / column1) * 100`
 - **Parameters**: None
 - **Example**: `pct_change_0: "column1,column2"`
+- **CRITICAL**: Must provide exactly 2 columns - backend will reject if more or less
 
 #### `residual`
-- **Required Columns**: 2 or more (first is dependent variable, rest are independent)
+- **Required Columns**: 2 or more (first is dependent variable y, rest are independent variables x1, x2, ...)
 - **Description**: Calculates residuals from linear regression (y - predicted_y)
 - **Formula**: Uses linear regression: `y - (a + b1*x1 + b2*x2 + ...)`
 - **Parameters**: None
-- **Requires Grouping**: Yes (uses identifiers for grouped regression)
-- **Example**: `residual_0: "y_column,x1_column,x2_column"`
+- **Requires Grouping**: Yes (MANDATORY - backend uses group_apply for grouped regression)
+- **Requires Identifiers**: Yes (MUST provide identifiers array - backend will compute globally without grouping if not provided, which may not be desired)
+- **Example**: `residual_0: "y_column,x1_column,x2_column"` with `identifiers: ["group1", "group2"]`
+- **CRITICAL**: Always provide identifiers for proper grouped regression analysis
 
 ---
 

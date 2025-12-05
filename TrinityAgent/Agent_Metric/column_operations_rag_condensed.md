@@ -13,11 +13,13 @@
 - `logistic` (needs param: JSON with gr/co/mp, needs identifiers)
 - `select_columns`, `drop_columns`, `rename` (needs rename param), `reorder`, `deduplicate`, `sort_rows`
 
-**2 Columns Required:**
-- `pct_change` (exactly 2), `divide`, `subtract`, `multiply`, `add` (minimum 2)
+**2 Columns Required (EXACTLY):**
+- `pct_change` (MUST be exactly 2 columns - backend enforces this)
 
 **2+ Columns Required:**
-- `add`, `subtract`, `multiply`, `divide`, `residual` (needs identifiers), `rpi`
+- `add`, `subtract`, `multiply`, `divide` (minimum 2 columns)
+- `residual` (minimum 2 columns: first is dependent variable y, rest are independent variables x1, x2, ...)
+- `rpi` (2+ columns)
 
 **No Columns Required:**
 - `filter_percentile` (uses metric_col parameter instead)
@@ -37,7 +39,7 @@
 - `detrend`, `deseasonalize`, `detrend_deseasonalize`, `stl_outlier`
 
 **Requires Identifiers (Grouping):**
-- `residual`, `exp`, `logistic`, `lag`, `lead`, `diff`, `growth_rate`, `rolling_mean`, `rolling_sum`, `rolling_min`, `rolling_max`, `cumulative_sum`
+- `residual` (REQUIRED - uses group_apply for grouped regression), `exp`, `logistic`, `lag`, `lead`, `diff`, `growth_rate`, `rolling_mean`, `rolling_sum`, `rolling_min`, `rolling_max`, `cumulative_sum`
 - `detrend`, `deseasonalize`, `detrend_deseasonalize`, `stl_outlier`
 - `standardize_zscore`, `standardize_minmax`
 - `compute_metrics_within_group`, `group_share_of_total`, `group_contribution`, `filter_top_n_per_group`

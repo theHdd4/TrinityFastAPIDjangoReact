@@ -1,9 +1,9 @@
 import { LABORATORY_API, CREATECOLUMN_API, VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
 import { 
-  getEnvironmentContext, 
+  getEnvironmentContext,
   getFilename, 
-  createMessage, 
+  createMessage,
   createSuccessMessage, 
   createErrorMessage,
   processSmartResponse,
@@ -104,7 +104,7 @@ export const metricHandler: AtomHandler = {
       console.log('🔢 SessionId:', context.sessionId);
       
       errorLocation.push('STEP 0.4: Destructure context');
-      const { atomId, updateAtomSettings, setMessages, sessionId } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
       // Validate context
       errorLocation.push('STEP 1: Validate context properties');
@@ -181,20 +181,57 @@ export const metricHandler: AtomHandler = {
       
       try {
         // Handle nested structure: API returns {success: true, data: {actual_json}, ...}
-        // The actual JSON from AI is in data.data
+        // OR top-level structure: {success: true, operation_type: "...", operation_config: {...}, ...}
+        // The actual JSON from AI can be in data.data, data, or at top level
         responseData = data.data?.data || data.data || data;
         
         console.log('🔍 DEBUGGING - Extraction check:');
+        console.log('  - Full data object:', JSON.stringify(data, null, 2));
+        console.log('  - data.data:', data.data);
+        console.log('  - data.data?.data:', data.data?.data);
         console.log('  - responseData:', responseData);
         console.log('  - responseData.operation_type:', responseData.operation_type);
         console.log('  - responseData.operation_config:', responseData.operation_config);
         console.log('  - responseData.columns:', responseData.operation_config?.columns);
+        console.log('  - Top-level data.operation_type:', data.operation_type);
+        console.log('  - Top-level data.operation_config:', data.operation_config);
         
-        operationType = (responseData.operation_type || data.operation_type || data.data?.operation_type || data.data?.data?.operation_type || '').toLowerCase();
-        operationConfig = responseData.operation_config || data.operation_config || data.data?.operation_config || data.data?.data?.operation_config || {};
-        dataSource = responseData.data_source || data.data_source || data.data?.data_source || data.data?.data?.data_source || '';
-        apiEndpoint = responseData.api_endpoint || data.api_endpoint || data.data?.api_endpoint || data.data?.data?.api_endpoint || '';
-        apiEndpointSave = responseData.api_endpoint_save || data.api_endpoint_save || data.data?.api_endpoint_save || data.data?.data?.api_endpoint_save || '';
+        // Extract with fallback chain - check all possible locations
+        operationType = (
+          responseData.operation_type || 
+          data.operation_type || 
+          data.data?.operation_type || 
+          data.data?.data?.operation_type || 
+          ''
+        ).toLowerCase();
+        
+        operationConfig = 
+          responseData.operation_config || 
+          data.operation_config || 
+          data.data?.operation_config || 
+          data.data?.data?.operation_config || 
+          {};
+        
+        dataSource = 
+          responseData.data_source || 
+          data.data_source || 
+          data.data?.data_source || 
+          data.data?.data?.data_source || 
+          '';
+        
+        apiEndpoint = 
+          responseData.api_endpoint || 
+          data.api_endpoint || 
+          data.data?.api_endpoint || 
+          data.data?.data?.api_endpoint || 
+          '';
+        
+        apiEndpointSave = 
+          responseData.api_endpoint_save || 
+          data.api_endpoint_save || 
+          data.data?.api_endpoint_save || 
+          data.data?.data?.api_endpoint_save || 
+          '';
         
         console.log('✅ Extracted values:', {
           operationType,
@@ -204,8 +241,26 @@ export const metricHandler: AtomHandler = {
           apiEndpoint,
           apiEndpointSave,
           columnsType: operationConfig.columns ? typeof operationConfig.columns : 'undefined',
-          columnsIsArray: Array.isArray(operationConfig.columns)
+          columnsIsArray: Array.isArray(operationConfig.columns),
+          operationConfigMethod: operationConfig.method,
+          operationConfigColumns: operationConfig.columns,
+          operationConfigRename: operationConfig.rename
         });
+        
+        // CRITICAL VALIDATION: Ensure we have required data
+        if (!operationType) {
+          console.error('❌ CRITICAL: operationType is empty after extraction!');
+          console.error('❌ Available data keys:', Object.keys(data || {}));
+          console.error('❌ responseData keys:', Object.keys(responseData || {}));
+          throw new Error('Failed to extract operation_type from response');
+        }
+        
+        if (!operationConfig || typeof operationConfig !== 'object' || Object.keys(operationConfig).length === 0) {
+          console.error('❌ CRITICAL: operationConfig is empty or invalid after extraction!');
+          throw new Error('Failed to extract operation_config from response');
+        }
+        
+        console.log('✅ Validation passed - proceeding with operation type:', operationType);
       } catch (extractError: any) {
         console.error('❌ Error extracting operation data:', extractError);
         console.error('❌ Error stack:', extractError?.stack);
@@ -226,17 +281,17 @@ export const metricHandler: AtomHandler = {
       columnsIsArray: Array.isArray(operationConfig?.columns)
     });
     
-      // Show reasoning in chat
+    // Show reasoning in chat
       errorLocation.push('STEP 4: Show reasoning');
       const reasoningText = responseData.reasoning || data.reasoning || data.data?.reasoning || data.data?.data?.reasoning || '';
-      if (reasoningText) {
+    if (reasoningText) {
         try {
-          const reasoningMsg: Message = {
+      const reasoningMsg: Message = {
             id: (Date.now() + 2).toString(),
-            content: `**Reasoning:**\n${reasoningText}`,
-            sender: 'ai',
-            timestamp: new Date(),
-          };
+        content: `**Reasoning:**\n${reasoningText}`,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
           // Add defensive check for setMessages
           setMessages((prev: Message[]) => {
             if (!Array.isArray(prev)) {
@@ -265,8 +320,8 @@ export const metricHandler: AtomHandler = {
         
         // Try to update card text box, but don't fail if atom doesn't exist
         if (typeof updateCardTextBox === 'function') {
-          try {
-            await updateCardTextBox(atomId, textBoxContent);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
           } catch (textBoxError: any) {
             // Atom might not exist - that's okay for metric handler
             if (textBoxError?.message?.includes('Atom not found')) {
@@ -288,22 +343,22 @@ export const metricHandler: AtomHandler = {
       // Store agent response in atom settings
       errorLocation.push('STEP 6: Store agent response');
       try {
-        updateAtomSettings(atomId, {
+    updateAtomSettings(atomId, {
           agentResponse: { reasoning: reasoningText, formattedText: textBoxContent }
-        });
+    });
       } catch (settingsError: any) {
         console.error('❌ Error updating atom settings:', settingsError);
         console.error('❌ Error stack:', settingsError?.stack);
         console.error('❌ Error location:', errorLocation.join(' -> '));
       }
-      
+    
       // Add "Generating insight..." message (optional - skip if atom doesn't exist)
       errorLocation.push('STEP 7: Add insight text box');
-      await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
       try {
         if (typeof addCardTextBox === 'function') {
-          try {
-            await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
           } catch (textBoxError: any) {
             // Atom might not exist - that's okay for metric handler
             if (textBoxError?.message?.includes('Atom not found')) {
@@ -550,10 +605,10 @@ export const metricHandler: AtomHandler = {
         file_key: resolvedDataSource,
         envContext: envWithFallback,
         lastUpdateTime: Date.now()
-      });
-      
-      const successMsg = createSuccessMessage(
-        'Data source selected',
+        });
+        
+        const successMsg = createSuccessMessage(
+          'Data source selected',
         { message: `Selected data source: ${getFilename(resolvedDataSource)}`, fileName: getFilename(resolvedDataSource) }
       );
       try {
@@ -748,11 +803,11 @@ export const metricHandler: AtomHandler = {
             const formatted: any = {
               id: op.id || String(index + 1),  // Backend requires id field (use provided or generate)
               numericalColumn: mappedNumericalColumn,  // camelCase + correct case
-              method: op.method || 'sum'
-            };
-            
+                method: op.method || 'sum'
+              };
+              
             // Map secondColumn to actual case from backend (if present)
-            if (op.secondColumn || op.second_column) {
+              if (op.secondColumn || op.second_column) {
               const llmSecondCol = (op.secondColumn || op.second_column).trim();
               const lowerSecondCol = llmSecondCol.toLowerCase();
               formatted.secondColumn = actualColumnMap[lowerSecondCol] || llmSecondCol;  // camelCase + correct case
@@ -762,7 +817,7 @@ export const metricHandler: AtomHandler = {
               formatted.secondValue = op.second_value;
             }
             
-            if (op.customName || op.custom_name) {
+              if (op.customName || op.custom_name) {
               formatted.customName = op.customName || op.custom_name;  // camelCase
             }
             
@@ -918,9 +973,9 @@ export const metricHandler: AtomHandler = {
       } catch (error) {
         console.error('❌ Error calling variables endpoint:', error);
         try {
-          const errorMsg = createErrorMessage(
-            'Variables operation',
-            (error as Error).message || 'Unknown error',
+        const errorMsg = createErrorMessage(
+          'Variables operation',
+          (error as Error).message || 'Unknown error',
             ''
           );
           setMessages((prev: Message[]) => {
@@ -938,7 +993,15 @@ export const metricHandler: AtomHandler = {
     }
     
     // STEP 3: Handle Column Ops Operation
+    console.log('🔍 Checking operation type:', {
+      operationType,
+      isColumnOps: operationType === 'column_ops',
+      operationTypeLower: operationType?.toLowerCase(),
+      allOperationTypes: ['input', 'variables', 'column_ops']
+    });
+    
     if (operationType === 'column_ops') {
+      console.log('✅ MATCHED: Column Ops operation detected - proceeding with handler');
       console.log('📋 Handling Column Ops operation');
       
       if (!resolvedDataSource) {
@@ -1137,13 +1200,28 @@ export const metricHandler: AtomHandler = {
           mappingApplied: Object.keys(actualColumnMap).length > 0
         });
         
-        // Validate: For divide operation, need at least 2 columns
+        // Validate column count requirements
+        if (filteredColumns.length === 0) {
+          throw new Error('No valid columns provided');
+        }
+        
+        // Validate: pct_change requires EXACTLY 2 columns (backend requirement)
+        if (method === 'pct_change' && filteredColumns.length !== 2) {
+          throw new Error(`pct_change operation requires exactly 2 columns, got ${filteredColumns.length}`);
+        }
+        
+        // Validate: Operations requiring at least 2 columns
         if (filteredColumns.length < 2 && ['add', 'subtract', 'multiply', 'divide', 'residual'].includes(method)) {
           throw new Error(`${method} operation requires at least 2 columns`);
         }
         
-        if (filteredColumns.length === 0) {
-          throw new Error('No valid columns provided');
+        // Validate: residual requires identifiers for grouping (backend uses group_apply)
+        if (method === 'residual') {
+          const hasIdentifiers = identifiers && Array.isArray(identifiers) && identifiers.length > 0;
+          if (!hasIdentifiers) {
+            console.warn('⚠️ Residual operation requires identifiers for grouping. Backend will compute globally without grouping, which may not be desired.');
+            // Don't throw error, but warn - backend will handle it
+          }
         }
         
         // Format: {method}_0 = comma-separated columns (use actual column names from backend)
@@ -1172,11 +1250,11 @@ export const metricHandler: AtomHandler = {
           }
         } else {
           // For other operations, use standard format: {method}_0_{paramName}
-          Object.entries(parameters).forEach(([key, value]) => {
+        Object.entries(parameters).forEach(([key, value]) => {
             if (value !== null && value !== undefined) {
-              formData.append(`${operationKey}_${key}`, String(value));
+          formData.append(`${operationKey}_${key}`, String(value));
             }
-          });
+        });
         }
         
         // Add options field (required) - operation type
@@ -1250,7 +1328,16 @@ export const metricHandler: AtomHandler = {
         
         const performData = await resolveTaskResponse<Record<string, any>>(raw);
         
+        console.log('📥 Raw perform response:', raw);
+        console.log('📥 Resolved perform data:', performData);
+        console.log('📥 Perform data keys:', Object.keys(performData || {}));
+        
         if (performData.status && performData.status !== 'SUCCESS') {
+          console.error('❌ Perform operation failed:', {
+            status: performData.status,
+            error: performData.error,
+            fullData: performData
+          });
           if (performData.error && performData.error.includes('Unsupported or custom frequency')) {
             throw new Error('The frequency of your data could not be detected. Please enter the period (number of intervals in a season) for your data.');
           }
@@ -1261,13 +1348,32 @@ export const metricHandler: AtomHandler = {
         let results: any[] = [];
         if (performData.results && Array.isArray(performData.results)) {
           results = performData.results;
+          console.log('✅ Found results in performData.results');
         } else if (Array.isArray(performData)) {
           results = performData;
+          console.log('✅ Found results as array in performData');
         } else if (performData.data && Array.isArray(performData.data)) {
           results = performData.data;
+          console.log('✅ Found results in performData.data');
+        } else {
+          console.warn('⚠️ No results array found in performData. Available keys:', Object.keys(performData || {}));
+          console.warn('⚠️ performData structure:', performData);
+        }
+        
+        if (results.length === 0) {
+          console.warn('⚠️ Perform operation returned empty results. This might indicate an issue.');
         }
         
         console.log('✅ Perform operation successful, results count:', results.length);
+        console.log('📊 Perform operation details:', {
+          status: performData.status,
+          newColumns: performData.new_columns,
+          rowCount: performData.row_count,
+          columns: performData.columns,
+          resultFile: performData.result_file,
+          hasResults: results.length > 0,
+          firstResultSample: results.length > 0 ? results[0] : null
+        });
         
         // STEP 3.2: Save results (POST /create-column/save)
         // Convert preview data to CSV (EXACTLY as MetricsColOps.tsx previewToCSV function)
@@ -1487,9 +1593,9 @@ export const metricHandler: AtomHandler = {
               
               if (dfOpsAtom) {
                 updateAtomSettings(dfOpsAtom.id, {
-                  dataSource: objectName,
-                  selectedDataSource: objectName,
-                  fileName: getFilename(objectName),
+                dataSource: objectName,
+                selectedDataSource: objectName,
+                fileName: getFilename(objectName),
                   fileId: saveResult.file_id
                 });
                 try {
@@ -1517,9 +1623,9 @@ export const metricHandler: AtomHandler = {
         // Generate insight
         generateAtomInsight({
           data: {
-            ...data,
+          ...data,
             backend_result: saveResult,
-            operation_type: operationType,
+          operation_type: operationType,
             file_id: saveResult.file_id,
             object_name: objectName
           },
@@ -1552,9 +1658,29 @@ export const metricHandler: AtomHandler = {
       }
     }
     
-      // Unknown operation type or no operation - just show reasoning
-      console.log('ℹ️ No backend operation to execute, showing reasoning only');
-      return { success: true };
+    // Unknown operation type or no operation - just show reasoning
+      console.log('⚠️ WARNING: Unknown operation type or no operation matched');
+      console.log('  - operationType:', operationType);
+      console.log('  - Expected types: input, variables, column_ops');
+      console.log('  - Showing reasoning only');
+      
+      // Show a message to the user about the unknown operation
+      try {
+        const unknownOpMsg: Message = {
+          id: Date.now().toString(),
+          content: `Unknown operation type: ${operationType || 'none'}. Please check the operation configuration.`,
+          sender: 'ai',
+          timestamp: new Date(),
+        };
+        setMessages((prev: Message[]) => {
+          if (!Array.isArray(prev)) return [unknownOpMsg];
+          return [...prev, unknownOpMsg];
+        });
+      } catch (msgError) {
+        console.error('❌ Error setting unknown operation message:', msgError);
+      }
+      
+    return { success: true };
     } catch (error: any) {
       console.error('='.repeat(80));
       console.error('❌ CRITICAL ERROR in metricHandler.handleSuccess');
@@ -1625,12 +1751,12 @@ export const metricHandler: AtomHandler = {
     const reasoningText = data.reasoning || data.data?.reasoning || data.data?.data?.reasoning || '';
     if (reasoningText) {
       try {
-        const reasoningMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          content: `**Reasoning:**\n${reasoningText}`,
-          sender: 'ai',
-          timestamp: new Date(),
-        };
+      const reasoningMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        content: `**Reasoning:**\n${reasoningText}`,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
         setMessages((prev: Message[]) => {
           if (!Array.isArray(prev)) {
             console.warn('⚠️ setMessages prev is not an array:', prev);

@@ -39,6 +39,11 @@ const ENDPOINTS: Record<string, string> = {
 };
 
 const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {
+  // Disable AI icon for metric atoms - use /metricop command in central AI instead
+  if (atomType === 'metric' || atomType === 'metrics') {
+    return null;
+  }
+  
   // For correlation, force it to always render (bypass disabled check temporarily)
   const isCorrelation = atomType === 'correlation';
   const shouldRender = isCorrelation ? true : !disabled;

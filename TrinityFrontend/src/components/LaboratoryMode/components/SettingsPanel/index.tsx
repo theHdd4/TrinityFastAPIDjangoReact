@@ -1,13 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChevronRight, Sliders, Sparkles } from 'lucide-react';
+import { ChevronRight, Sliders } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
-import { TRINITY_AI_API } from '@/lib/api';
-import { getAtomHandler } from '@/components/TrinityAI/handlers';
-import { useToast } from '@/hooks/use-toast';
-import { Message } from '@/components/TrinityAI/handlers/types';
 
 import {
   useLaboratoryStore,
@@ -88,14 +82,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const updateCardVariable = useLaboratoryStore(state => state.updateCardVariable);
   const deleteCardVariable = useLaboratoryStore(state => state.deleteCardVariable);
   const toggleCardVariableAppend = useLaboratoryStore(state => state.toggleCardVariableAppend);
-  const addCard = useLaboratoryStore(state => state.addCard);
-  const { toast } = useToast();
-  
-  // State for metric prompt dialog
-  const [metricPromptOpen, setMetricPromptOpen] = useState(false);
-  const [metricPromptText, setMetricPromptText] = useState('');
-  const [sendingMetricPrompt, setSendingMetricPrompt] = useState(false);
-  const [metricMessages, setMetricMessages] = useState<Message[]>([]);
 
   const selectedCard = useMemo(
     () => {
@@ -236,18 +222,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               {(selectedAtomId || selectedCardId) && (
                 <TabsTrigger value="settings" className="text-sm font-bold">Settings</TabsTrigger>
               )}
-              <div className="flex items-center gap-1">
-                <TabsTrigger value="metrics" className="text-sm font-bold flex-1">Metrics</TabsTrigger>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setMetricPromptOpen(true)}
-                  className="h-6 w-6 p-0 text-gray-500 hover:text-blue-600"
-                  title="AI Prompt for Metrics"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                </Button>
-              </div>
+              <TabsTrigger value="metrics" className="text-sm font-bold">Metrics</TabsTrigger>
             </TabsList>
 
             {/* Settings Tab Content */}
@@ -327,220 +302,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </Tabs>
         </div>
       )}
-      
-      {/* Metric Prompt Dialog */}
-      <Dialog open={metricPromptOpen} onOpenChange={setMetricPromptOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>AI Metric Prompt</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <Textarea
-              placeholder="Describe what metric operation you want to perform... (e.g., 'create a variable that sums sales by region', 'filter rows where channel equals iceland')"
-              value={metricPromptText}
-              onChange={(e) => setMetricPromptText(e.target.value)}
-              className="min-h-[100px] text-sm"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  handleSendMetricPrompt();
-                }
-              }}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setMetricPromptOpen(false);
-                setMetricPromptText('');
-              }}
-              disabled={sendingMetricPrompt}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSendMetricPrompt}
-              disabled={!metricPromptText.trim() || sendingMetricPrompt}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              {sendingMetricPrompt ? 'Sending...' : 'Send'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
-  
-  // Function to send metric prompt via REST API (like other atoms)
-  async function handleSendMetricPrompt() {
-    if (!metricPromptText.trim() || sendingMetricPrompt) return;
-    
-    setSendingMetricPrompt(true);
-    
-    console.log('🚀🚀🚀 handleSendMetricPrompt START');
-    console.log('  - metricPromptText:', metricPromptText);
-    console.log('  - sendingMetricPrompt:', sendingMetricPrompt);
-    
-    try {
-      console.log('📋 ENTERING TRY BLOCK');
-      // Get environment context
-      const envStr = localStorage.getItem('env');
-      let client_name = '';
-      let app_name = '';
-      let project_name = '';
-      
-      if (envStr) {
-        try {
-          const env = JSON.parse(envStr);
-          client_name = env.CLIENT_NAME || '';
-          app_name = env.APP_NAME || '';
-          project_name = env.PROJECT_NAME || '';
-        } catch {
-          // Ignore parse errors
-        }
-      }
-      
-      // Get session ID
-      const sessionId = localStorage.getItem('current_session_id') || `session_${Date.now()}`;
-      
-      // Call metric REST endpoint directly (like other atoms)
-      const endpoint = `${TRINITY_AI_API}/metric`;
-      console.log('🔗 Calling metric REST endpoint:', endpoint);
-      
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          prompt: metricPromptText.trim(),
-          session_id: sessionId,
-          client_name,
-          app_name,
-          project_name
-        }),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('✅ Metric API response:', data);
-      
-      // Handle the response using metricHandler - NO CARD CREATION NEEDED
-      // Just update the metrics section UI directly
-      console.log('='.repeat(80));
-      console.log('📋 SETTINGS PANEL - METRIC HANDLER FLOW');
-      console.log('='.repeat(80));
-      console.log('📋 STEP 1: Processing metric response...');
-      console.log('  - data.success:', data.success);
-      console.log('  - data structure:', {
-        hasData: !!data.data,
-        operationType: data.operation_type || data.data?.operation_type,
-        topLevelKeys: Object.keys(data)
-      });
-      
-      if (data.success !== false) {
-        // Use selectedAtomId if available, otherwise generate a temporary one
-        const metricAtomId = selectedAtomId || `metric_${Date.now()}`;
-        console.log('📋 STEP 2: Using atomId:', metricAtomId);
-        console.log('📋 STEP 3: Getting metric handler...');
-        const metricHandler = getAtomHandler('metric');
-        console.log('  - Handler found:', !!metricHandler);
-        
-        if (metricHandler) {
-          // Create a safe wrapper for setMessages
-          const safeSetMessages = (updater: (prev: Message[]) => Message[]) => {
-            if (typeof setMetricMessages !== 'function') {
-              console.warn('⚠️ setMetricMessages is not a function, skipping');
-              return;
-            }
-            setMetricMessages((prev: Message[]) => {
-              if (!Array.isArray(prev)) {
-                return updater([]);
-              }
-              return updater(prev);
-            });
-          };
-          
-          console.log('📋 STEP 4: Creating handler context...');
-          const context = {
-            atomId: metricAtomId,
-            atomType: 'metric',
-            atomTitle: 'Metric',
-            sessionId: sessionId,
-            updateAtomSettings: (id: string, settings: any) => {
-              useLaboratoryStore.getState().updateAtomSettings(id, settings);
-            },
-            setMessages: safeSetMessages
-          };
-          
-          console.log('📋 STEP 5: Calling metricHandler.handleSuccess...');
-          try {
-            await metricHandler.handleSuccess(data, context);
-            console.log('✅ Handler completed successfully');
-            
-            toast({
-              title: "Success",
-              description: "Metric operation completed successfully!",
-            });
-          } catch (handlerError: any) {
-            console.error('❌ Error in metricHandler.handleSuccess:', handlerError);
-            console.error('  - Error message:', handlerError?.message);
-            console.error('  - Error stack:', handlerError?.stack);
-            
-            toast({
-              title: "Error",
-              description: handlerError.message || "Failed to process metric operation",
-              variant: "destructive",
-            });
-            throw handlerError;
-          }
-        } else {
-          console.error('❌ Metric handler not found');
-          toast({
-            title: "Error",
-            description: "Metric handler not found",
-            variant: "destructive",
-          });
-        }
-      } else {
-        // Handle failure case
-        toast({
-          title: "Error",
-          description: data.error || data.smart_response || "Failed to process metric request",
-          variant: "destructive",
-        });
-      }
-      
-      // Close dialog and reset
-      setMetricPromptOpen(false);
-      setMetricPromptText('');
-      
-    } catch (error: any) {
-      console.error('='.repeat(80));
-      console.error('❌ OUTER CATCH: Failed to process metric prompt');
-      console.error('='.repeat(80));
-      console.error('  - Error type:', typeof error);
-      console.error('  - Error name:', error?.name);
-      console.error('  - Error message:', error?.message);
-      console.error('  - Error stack:', error?.stack);
-      console.error('  - Full error:', error);
-      console.error('='.repeat(80));
-      
-      toast({
-        title: "Error",
-        description: error.message || "Failed to process metric request",
-        variant: "destructive",
-      });
-    } finally {
-      setSendingMetricPrompt(false);
-    }
-  }
 };
 
 export default SettingsPanel;

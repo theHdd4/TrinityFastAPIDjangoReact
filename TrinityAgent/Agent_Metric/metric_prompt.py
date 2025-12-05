@@ -280,7 +280,7 @@ class MetricPromptBuilder:
         operations_section += "Refer to column_operations_rag.md for complete operation reference.\n"
         operations_section += "\n"
         operations_section += "QUICK REFERENCE:\n"
-        operations_section += "- Arithmetic (2+ columns): add, subtract, multiply, divide, pct_change (exactly 2), residual (2+)\n"
+        operations_section += "- Arithmetic: add, subtract, multiply, divide (2+ columns), pct_change (EXACTLY 2 columns required), residual (2+ columns, REQUIRES identifiers for grouping)\n"
         operations_section += "- Single Column Numeric: abs, log, sqrt, exp, power (needs param: exponent)\n"
         operations_section += "- String Ops (in-place): lower, upper, strip, replace (needs oldValue, newValue)\n"
         operations_section += "- Missing Values: fill_na (needs strategy: mean/median/mode/zero/empty/drop/custom)\n"

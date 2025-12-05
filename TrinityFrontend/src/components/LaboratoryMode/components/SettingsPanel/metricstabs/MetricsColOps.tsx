@@ -492,12 +492,24 @@ const MetricsColOps: React.FC = () => {
         setColumnsWithMissingValues(columns);
       } else {
         // Silently fail - this is not critical functionality
-        console.warn('[MetricsColOps] Failed to fetch columns with missing values:', res.status, res.statusText);
+        // Only log if it's not a 500/CORS error (which are common and expected)
+        if (res.status !== 500 && res.status !== 0) {
+          console.warn('[MetricsColOps] Failed to fetch columns with missing values:', res.status, res.statusText);
+        }
         setColumnsWithMissingValues([]);
       }
-    } catch (error) {
+    } catch (error: any) {
       // Silently fail - this is not critical functionality (only used for fill_na operation)
-      console.warn('[MetricsColOps] Failed to fetch columns with missing values (non-critical):', error);
+      // CORS errors and network errors are common and expected - don't log them
+      const errorMessage = error?.message || String(error);
+      const isCorsOrNetworkError = errorMessage.includes('CORS') || 
+                                   errorMessage.includes('Failed to fetch') || 
+                                   errorMessage.includes('NetworkError') ||
+                                   errorMessage.includes('net::ERR_FAILED');
+      
+      if (!isCorsOrNetworkError) {
+        console.warn('[MetricsColOps] Failed to fetch columns with missing values (non-critical):', error);
+      }
       setColumnsWithMissingValues([]);
     }
   };
