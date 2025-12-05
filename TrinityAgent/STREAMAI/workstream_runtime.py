@@ -283,7 +283,6 @@ class WorkstreamLoopDetector:
         self,
         *,
         input_repeat_threshold: int = 3,
-        error_repeat_threshold: int = 3,
         stall_threshold: int = 5,
         ratio_threshold: float = 3.0,
         window_seconds: float = 45.0,
@@ -291,46 +290,68 @@ class WorkstreamLoopDetector:
         telemetry: Optional[WorkstreamTelemetry] = None,
     ) -> None:
         self.input_repeat_threshold = input_repeat_threshold
-        self.error_repeat_threshold = error_repeat_threshold
         self.stall_threshold = stall_threshold
         self.ratio_threshold = ratio_threshold
         self.window_seconds = window_seconds
         self.per_node_time_budget = per_node_time_budget
         self.telemetry = telemetry
 
-        self.input_counts: Dict[Tuple[str, str], int] = {}
-        self.last_completed_counts: Dict[Tuple[str, str], int] = {}
-        self.input_first_seen: Dict[Tuple[str, str], float] = {}
-        self.error_counts: Dict[Tuple[str, str, str], int] = {}
+        self.input_windows: Dict[Tuple[str, str], List[float]] = {}
+        self.baseline_completed: Dict[Tuple[str, str], int] = {}
+        self.first_seen: Dict[Tuple[str, str], float] = {}
         self.output_hashes: Dict[Tuple[str, str], Set[str]] = {}
-        self.attempt_timestamps: List[Tuple[float, str]] = []
-        self.node_visit_log: List[Tuple[float, str]] = []
+        self.last_output_time: Dict[Tuple[str, str], float] = {}
+        self.attempt_log: List[Tuple[float, str]] = []
         self.executed_atoms_count = 0
         self.unique_nodes_visited: Set[str] = set()
         self.attempts_since_progress = 0
         self.last_progress_time = time.time()
         self.last_stable_index: int = -1
+        self.last_completed_count: int = 0
 
     def note_attempt(self, *, atom_id: str, input_hash: str, completed_nodes: Set[str], stable_index: int) -> LoopSignal:
         now = time.time()
         key = (atom_id, input_hash)
         self.executed_atoms_count += 1
-        self.input_counts[key] = self.input_counts.get(key, 0) + 1
-        self.input_first_seen.setdefault(key, now)
-        self.last_completed_counts.setdefault(key, len(completed_nodes))
-        self.attempt_timestamps.append((now, atom_id))
-        self._trim_windows(now)
         self.last_stable_index = max(self.last_stable_index, stable_index)
 
-        if self.input_counts[key] > self.input_repeat_threshold and self.last_completed_counts.get(key, 0) == len(completed_nodes):
-            return self._signal("repeated_identical_input", atom_id, input_hash, {"count": self.input_counts[key]})
+        self._record_attempt(now, atom_id)
+        self._trim_windows(now)
+
+        window = self.input_windows.setdefault(key, [])
+        window.append(now)
+        self._trim_list(window, now)
+
+        baseline = self.baseline_completed.get(key)
+        if not window or baseline is None:
+            self.baseline_completed[key] = len(completed_nodes)
+            self.first_seen[key] = now
+            window[:] = [now]
+        elif len(completed_nodes) > baseline:
+            # Downstream progress observed; reset the window for this input
+            self.baseline_completed[key] = len(completed_nodes)
+            self.first_seen[key] = now
+            window[:] = [now]
+
+        if len(window) >= self.input_repeat_threshold and len(completed_nodes) <= self.baseline_completed.get(key, 0):
+            return self._signal(
+                "loop_detected_input_repeat",
+                atom_id,
+                input_hash,
+                {"count": len(window), "baseline_completed": self.baseline_completed.get(key, 0)},
+            )
 
         ratio_signal = self._check_ratio(now)
         if ratio_signal:
-            return self._signal("execution_to_unique_ratio", atom_id, input_hash, ratio_signal)
+            return self._signal("loop_suspected_ratio", atom_id, input_hash, ratio_signal)
 
         if self.attempts_since_progress >= self.stall_threshold:
-            return self._signal("dag_stall", atom_id, input_hash, {"attempts_since_progress": self.attempts_since_progress})
+            return self._signal(
+                "loop_suspected_stall",
+                atom_id,
+                input_hash,
+                {"attempts_since_progress": self.attempts_since_progress},
+            )
 
         return LoopSignal(detected=False)
 
@@ -347,55 +368,69 @@ class WorkstreamLoopDetector:
     ) -> LoopSignal:
         now = time.time()
         key = (atom_id, input_hash)
-        prev_completed = self.last_completed_counts.get(key, 0)
         self.last_stable_index = max(self.last_stable_index, stable_index)
 
+        output_changed = False
         if output_hash:
             outputs = self.output_hashes.setdefault(key, set())
-            outputs.add(output_hash)
+            if output_hash not in outputs:
+                outputs.add(output_hash)
+                output_changed = True
+            self.last_output_time[key] = now
 
-        if success and len(completed_nodes) > len(self.unique_nodes_visited):
-            self.unique_nodes_visited = set(completed_nodes)
+        if success and len(completed_nodes) > self.last_completed_count:
+            self.last_completed_count = len(completed_nodes)
             self.attempts_since_progress = 0
             self.last_progress_time = now
-            self.node_visit_log.append((now, atom_id))
-            self.last_completed_counts[key] = len(completed_nodes)
+            self.unique_nodes_visited.update(completed_nodes)
         else:
             self.attempts_since_progress += 1
 
-        if error:
-            error_key = (atom_id, input_hash, error)
-            self.error_counts[error_key] = self.error_counts.get(error_key, 0) + 1
-            if self.error_counts[error_key] > self.error_repeat_threshold:
-                return self._signal("repeated_error", atom_id, input_hash, {"error": error, "count": self.error_counts[error_key]})
-
-        if output_hash:
-            first_seen = self.input_first_seen.get(key, now)
-            if (now - first_seen) > self.per_node_time_budget and len(self.output_hashes.get(key, set())) == 1:
+        if not output_changed:
+            first_seen = self.first_seen.get(key, now)
+            elapsed_since_change = now - min(self.last_output_time.get(key, first_seen), first_seen)
+            if elapsed_since_change > self.per_node_time_budget:
                 return self._signal(
-                    "time_budget_exceeded",
+                    "loop_suspected_time_budget",
                     atom_id,
                     input_hash,
-                    {"elapsed": now - first_seen, "output_hash": output_hash},
+                    {"elapsed": elapsed_since_change},
                 )
 
-        if not success and len(completed_nodes) == prev_completed and (now - self.last_progress_time) > self.per_node_time_budget:
-            return self._signal("no_progress_time_budget", atom_id, input_hash, {"elapsed": now - self.last_progress_time})
+        if not success and (now - self.last_progress_time) > self.per_node_time_budget:
+            return self._signal(
+                "loop_suspected_error_repetition",
+                atom_id,
+                input_hash,
+                {"elapsed": now - self.last_progress_time, "error": error},
+            )
 
         return LoopSignal(detected=False)
 
     def mark_stable(self, index: int) -> None:
         self.last_stable_index = max(self.last_stable_index, index)
 
+    def _record_attempt(self, timestamp: float, atom_id: str) -> None:
+        self.attempt_log.append((timestamp, atom_id))
+
     def _trim_windows(self, now: float) -> None:
         window_start = now - self.window_seconds
-        self.attempt_timestamps = [(t, a) for t, a in self.attempt_timestamps if t >= window_start]
-        self.node_visit_log = [(t, a) for t, a in self.node_visit_log if t >= window_start]
+        self.attempt_log = [(t, a) for t, a in self.attempt_log if t >= window_start]
+        for key, times in list(self.input_windows.items()):
+            self._trim_list(times, now)
+            if not times:
+                self.input_windows.pop(key, None)
+                self.baseline_completed.pop(key, None)
+                self.first_seen.pop(key, None)
+
+    def _trim_list(self, values: List[float], now: float) -> None:
+        window_start = now - self.window_seconds
+        values[:] = [t for t in values if t >= window_start]
 
     def _check_ratio(self, now: float) -> Optional[Dict[str, Any]]:
         self._trim_windows(now)
-        attempts = len(self.attempt_timestamps)
-        unique = len({a for _, a in self.node_visit_log}) or 1
+        attempts = len(self.attempt_log)
+        unique = len({a for _, a in self.attempt_log}) or 1
         ratio = attempts / unique
         if ratio > self.ratio_threshold:
             return {"ratio": ratio, "attempts": attempts, "unique_nodes": unique}
