@@ -39,6 +39,9 @@ class LabMemoryStore:
         self.mongo_client = mongo_client or self._build_mongo_client()
         self.bucket = bucket or settings.MINIO_BUCKET
         self.prefix = prefix.rstrip("/")
+        self.client_name = (getattr(settings, "CLIENT_NAME", None) or "default_client").strip("/") or "default_client"
+        self.app_name = (getattr(settings, "APP_NAME", None) or "default_app").strip("/") or "default_app"
+        self.project_name = (getattr(settings, "PROJECT_NAME", None) or "default_project").strip("/") or "default_project"
         self._ensure_bucket()
         self.mongo_collection = self._ensure_collection()
 
@@ -78,8 +81,19 @@ class LabMemoryStore:
             logger.warning("Failed to create MongoDB indices for lab context: %s", exc)
         return collection
 
+    def _object_prefix(self, session_id: str) -> str:
+        return "/".join(
+            [
+                self.client_name,
+                self.app_name,
+                self.project_name,
+                self.prefix,
+                session_id,
+            ]
+        )
+
     def _object_key(self, session_id: str, request_id: str) -> str:
-        return f"{self.prefix}/{session_id}/{request_id}.json"
+        return f"{self._object_prefix(session_id)}/{request_id}.json"
 
     def save_document(self, document: LaboratoryMemoryDocument) -> None:
         payload = document.to_sorted_dict()
@@ -101,6 +115,7 @@ class LabMemoryStore:
         try:
             mongo_payload = {
                 **payload,
+                "memory_type": "Trinity AI Persistent JSON Memory",
                 "session_id": document.envelope.session_id,
                 "request_id": document.envelope.request_id,
                 "timestamp": document.envelope.timestamp,
@@ -109,6 +124,27 @@ class LabMemoryStore:
                 "prompt_template_hash": document.envelope.prompt_template_hash,
                 "input_hash": document.envelope.input_hash,
                 "response_hash": LaboratoryMemoryDocument.compute_hash_for_payload(payload),
+                "freshness_state": {
+                    "template_hash": document.envelope.prompt_template_hash,
+                    "input_hash": document.envelope.input_hash,
+                    "deterministic_params": document.envelope.deterministic_params,
+                    "retrieved_at": datetime.utcnow(),
+                },
+                "session_management": {
+                    "user_id": document.envelope.user_id,
+                    "feature_flags": document.envelope.feature_flags,
+                },
+                "atom_execution_metadata": [
+                    {
+                        "step_number": step.step_number,
+                        "atom_id": step.atom_id,
+                        "tool_calls": step.tool_calls,
+                        "inputs": step.inputs,
+                        "outputs": step.outputs,
+                        "timestamp": step.timestamp,
+                    }
+                    for step in document.workflow_state.steps
+                ],
             }
             self.mongo_collection.replace_one(
                 {"session_id": document.envelope.session_id, "request_id": document.envelope.request_id},
@@ -142,7 +178,40 @@ class LabMemoryStore:
                 "timestamp": {"$gte": threshold},
             }
         ).sort("timestamp", -1).limit(max_docs)
-        return list(cursor)
+        documents = list(cursor)
+        if documents:
+            return documents
+
+        # Fallback to MinIO retrieval when Mongo has no matching fresh documents
+        try:
+            records: List[Dict[str, Any]] = []
+            for obj in self.minio_client.list_objects(self.bucket, prefix=self._object_prefix(session_id)):
+                if not obj.object_name.endswith(".json"):
+                    continue
+                response = self.minio_client.get_object(self.bucket, obj.object_name)
+                with response as stream:
+                    raw = stream.read()
+                record = json.loads(raw.decode("utf-8"))
+                timestamp = record.get("envelope", {}).get("timestamp")
+                if timestamp:
+                    try:
+                        record_timestamp = datetime.fromisoformat(str(timestamp))
+                    except Exception:
+                        record_timestamp = None
+                else:
+                    record_timestamp = None
+                if record_timestamp and record_timestamp < threshold:
+                    continue
+                if record.get("envelope", {}).get("model_version") != model_version:
+                    continue
+                if record.get("envelope", {}).get("prompt_template_version") != prompt_template_version:
+                    continue
+                records.append(record)
+            records.sort(key=lambda r: r.get("envelope", {}).get("timestamp", ""), reverse=True)
+            return records[:max_docs]
+        except Exception as exc:  # pragma: no cover - network/storage guard
+            logger.warning("Failed MinIO fallback retrieval for lab context: %s", exc)
+            return []
 
     def build_document(
         self,
