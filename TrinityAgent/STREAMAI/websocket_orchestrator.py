@@ -119,7 +119,6 @@ DATASET_OUTPUT_ATOMS = {
     "groupby-wtg-avg",
     "create-column",
     "create-transform",
-    "metric-operations",
     "merge",
     "concat",
     "pivot-table",
@@ -131,7 +130,6 @@ PREFERS_LATEST_DATASET_ATOMS = {
     "groupby-wtg-avg",
     "create-column",
     "create-transform",
-    "metric-operations",
     "chart-maker",
 }
 
@@ -318,14 +316,12 @@ class StreamWebSocketOrchestrator:
         self.llm_attempt_timeout_seconds: float = 60.0  # Guardrail for individual LLM attempts
         self.llm_status_interval_seconds: float = 10.0  # Periodic heartbeat interval
 
-        # Determine FastAPI base for downstream atom services (merge, concat, metric-operations, etc.)
+        # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
         self.merge_save_endpoint = f"{self.fastapi_base_url}/api/merge/save"
         self.concat_save_endpoint = f"{self.fastapi_base_url}/api/concat/save"
-        self.metric_save_endpoint = f"{self.fastapi_base_url}/api/createcolumn/save"
         self.merge_perform_endpoint = f"{self.fastapi_base_url}/api/merge/perform"
         self.concat_perform_endpoint = f"{self.fastapi_base_url}/api/concat/perform"
-        self.metric_perform_endpoint = f"{self.fastapi_base_url}/api/createcolumn/perform"
         logger.info(f"🔗 FastAPI base URL for auto-save: {self.fastapi_base_url}")
 
         # Get LLM config from centralized settings
@@ -1809,7 +1805,6 @@ WORKFLOW PLANNING:
                     "explore": ["explore", "analyze", "examine"],
                     "create-column": ["create column", "add column", "transform"],
                     "dataframe-operations": ["dataframe", "filter", "sort"],
-                    "metric-operations": ["metric operation", "calculate metric", "arithmetic", "conditional", "aggregate", "normalize", "filter", "derived metric", "ratio", "percentage", "rank", "percentile"],
                     "groupby-wtg-avg": ["group", "aggregate", "average"],
                     "correlation": ["correlation", "correlate"],
                     "feature-overview": ["feature", "overview", "summary"],
@@ -1904,7 +1899,7 @@ WORKFLOW PLANNING:
                             saved_path = result.get("merge_json", {}).get("result_file") or result.get("saved_path")
                         elif hist_atom == "concat" and result.get("concat_json"):
                             saved_path = result.get("concat_json", {}).get("result_file") or result.get("saved_path")
-                        elif hist_atom in ["create-column", "create-transform", "metric-operations", "groupby-wtg-avg", "dataframe-operations"]:
+                        elif hist_atom in ["create-column", "create-transform", "groupby-wtg-avg", "dataframe-operations"]:
                             saved_path = result.get("output_file") or result.get("saved_path")
                         elif result.get("output_file"):
                             saved_path = result.get("output_file")
@@ -2216,8 +2211,6 @@ WORKFLOW PLANNING:
                         saved_path = result.get("concat_json", {}).get("result_file") or result.get("saved_path")
                     elif atom_id in ["create-column", "create-transform"] and result.get("create_transform_json"):
                         saved_path = result.get("create_transform_json", {}).get("result_file") or result.get("saved_path")
-                    elif atom_id == "metric-operations" and (result.get("metrics_json") or result.get("operation_config")):
-                        saved_path = result.get("result_file") or result.get("saved_path") or result.get("metrics_json", {}).get("result_file")
                     elif result.get("output_file"):
                         saved_path = result.get("output_file")
                     elif result.get("saved_path"):
@@ -2318,11 +2311,10 @@ WORKFLOW PLANNING:
         lines.append("2. **Review USER REQUEST**: What did the user ask for? What still needs to be done?")
         lines.append("3. **Review AVAILABLE FILES**: Which files are available? Which is the most recent output?")
         lines.append("4. **Review DATAFRAME SCHEMA**: What columns exist in the current DataFrame? (Check FILE METADATA above)")
-        lines.append("5. **Check REQUIRED COLUMNS**: Does the next step require columns that exist? If not, use metric-operations first.")
-        lines.append("6. **Determine NEXT ACTION**: What specific operation needs to be done next?")
-        lines.append("7. **Check CHART REQUIREMENT**: Has chart-maker been used? If not, plan to use it (usually at the end)")
-        lines.append("8. **Select APPROPRIATE TOOL**: Which atom_id matches the next action? (Use metric-operations if columns are missing)")
-        lines.append("9. **Verify FILE SELECTION**: Which file(s) should be used? Use the most recent output file if available.")
+        lines.append("5. **Determine NEXT ACTION**: What specific operation needs to be done next?")
+        lines.append("6. **Check CHART REQUIREMENT**: Has chart-maker been used? If not, plan to use it (usually at the end)")
+        lines.append("7. **Select APPROPRIATE TOOL**: Which atom_id matches the next action?")
+        lines.append("8. **Verify FILE SELECTION**: Which file(s) should be used? Use the most recent output file if available.")
         lines.append("")
         lines.append("**ACTION (REQUIRED - Be specific):**")
         lines.append("- Select the next tool (atom_id) - must match one of the available atoms")
@@ -2352,40 +2344,6 @@ WORKFLOW PLANNING:
         lines.append("8. ⚠️ **Use files marked with ⭐** (recently created) when possible")
         lines.append("9. ⚠️ **Use ONLY column names** shown in FILE METADATA above - do NOT invent column names")
         lines.append("10. ⚠️ **User requests take priority** - If user asks for chart, redo, or any operation, you MUST execute it")
-        lines.append("")
-        lines.append("## 🔧 METRIC OPERATIONS REPAIR ENGINE (CRITICAL):")
-        lines.append("**BEFORE executing any step, ALWAYS check if required columns exist:**")
-        lines.append("")
-        lines.append("1. **Check DataFrame Schema**: Review the current DataFrame columns from FILE METADATA above")
-        lines.append("2. **Validate Required Columns**: If a step requires columns that don't exist:")
-        lines.append("   → **DO NOT proceed** - Use metric-operations to create them first")
-        lines.append("   → **Call metric-operations** to create missing columns (arithmetic, conditional, derived metrics)")
-        lines.append("   → **Update the DataFrame** with new columns")
-        lines.append("   → **Then execute** the original step")
-        lines.append("")
-        lines.append("3. **If a step fails due to missing columns:**")
-        lines.append("   → **Detect the missing column** from the error message")
-        lines.append("   → **Use metric-operations** to create it")
-        lines.append("   → **Retry the step** with the repaired DataFrame")
-        lines.append("")
-        lines.append("4. **Metric Operations Categories:**")
-        lines.append("   - **Arithmetic**: Create columns from existing columns (e.g., profit = revenue - cost)")
-        lines.append("   - **Conditional**: Create columns with if-else logic (e.g., category = 'high' if value > threshold)")
-        lines.append("   - **Aggregation**: Create aggregated columns (e.g., avg_sales_per_region)")
-        lines.append("   - **Derived Metrics**: Create ratios, percentages, ranks, etc.")
-        lines.append("   - **Normalization**: Normalize numeric columns")
-        lines.append("")
-        lines.append("5. **Reasoning with DataFrame Schema:**")
-        lines.append("   - **Always reason step-by-step** using the actual DataFrame schema")
-        lines.append("   - **Check column existence** before referencing columns in operations")
-        lines.append("   - **Use metric-operations** as the repair + computation engine")
-        lines.append("   - **Never proceed** to next step with missing data")
-        lines.append("")
-        lines.append("**Example Reasoning:**")
-        lines.append("- Current DataFrame has columns: [Sales, Cost, Region]")
-        lines.append("- Step requires 'Profit' column → Profit doesn't exist")
-        lines.append("- Action: Use metric-operations to create Profit = Sales - Cost")
-        lines.append("- Then proceed with the original step")
         lines.append("")
         lines.append("## ⚠️ CRITICAL: CHART-MAKER MUST ALWAYS BE INCLUDED")
         lines.append("**MANDATORY RULE**: Chart-maker MUST be used in EVERY workflow:")
@@ -3949,8 +3907,6 @@ WORKFLOW PLANNING:
                 logger.warning(f"⚠️ Merge atom result missing 'merge_json' key. Available keys: {list(execution_result.keys())}")
             elif atom_id == "concat" and "concat_json" not in execution_result:
                 logger.warning(f"⚠️ Concat atom result missing 'concat_json' key. Available keys: {list(execution_result.keys())}")
-            elif atom_id == "metric-operations" and "metrics_json" not in execution_result and "operation_config" not in execution_result:
-                logger.warning(f"⚠️ Metric-operations atom result missing 'metrics_json' or 'operation_config' key. Available keys: {list(execution_result.keys())}")
             elif atom_id == "groupby-wtg-avg" and "groupby_json" not in execution_result:
                 logger.warning(f"⚠️ Groupby atom result missing 'groupby_json' key. Available keys: {list(execution_result.keys())}")
             elif atom_id == "chart-maker" and "chart_json" not in execution_result:
@@ -4800,14 +4756,6 @@ WORKFLOW PLANNING:
                 frontend_chat_id=frontend_chat_id,
                 sequence_id=sequence_id
             )
-        elif atom_id == "metric-operations":
-            saved_path, auto_save_response = await self._auto_save_metric_operation(
-                workflow_step=workflow_step,
-                execution_result=execution_result,
-                step_cache=step_cache,
-                frontend_chat_id=frontend_chat_id,
-                sequence_id=sequence_id
-            )
         elif atom_id == "data-upload-validate":
             # 🔧 CRITICAL FIX: data-upload-validate doesn't create new files, it loads existing ones
             # We need to preserve the original file name for downstream steps
@@ -5082,124 +5030,6 @@ WORKFLOW PLANNING:
             "message": f"Preserved original file name '{original_file_path}' for downstream steps"
         }
 
-    async def _perform_metric_operation(
-        self,
-        object_names: str,
-        bucket_name: str,
-        operation_type: str,
-        operation_config: Dict[str, Any],
-        identifiers: Optional[str] = None,
-        client_name: str = "",
-        app_name: str = "",
-        project_name: str = ""
-    ) -> Dict[str, Any]:
-        """Invoke metric operation perform endpoint to execute metric operations."""
-        if aiohttp is None:
-            raise RuntimeError("aiohttp is required for metric operation perform calls but is not installed")
-
-        form = aiohttp.FormData()
-        form.add_field("object_names", object_names)
-        form.add_field("bucket_name", bucket_name)
-        if identifiers:
-            form.add_field("identifiers", identifiers)
-        form.add_field("client_name", client_name)
-        form.add_field("app_name", app_name)
-        form.add_field("project_name", project_name)
-        
-        # Add operation_type and operation_config as JSON strings
-        form.add_field("operation_type", operation_type)
-        form.add_field("operation_config", json.dumps(operation_config))
-
-        logger.info(
-            f"🧪 Calling metric operation perform endpoint {self.metric_perform_endpoint} with "
-            f"object_names={object_names}, operation_type={operation_type}"
-        )
-
-        return await self._post_form(self.metric_perform_endpoint, form)
-
-    async def _auto_save_metric_operation(
-        self,
-        workflow_step: WorkflowStepPlan,
-        execution_result: Dict[str, Any],
-        step_cache: Dict[str, Any],
-        frontend_chat_id: Optional[str] = None,
-        sequence_id: Optional[str] = None
-    ) -> Tuple[str, Dict[str, Any]]:
-        """Auto-save helper for metric-operations atom outputs."""
-        metric_cfg = execution_result.get("metrics_json") or execution_result.get("operation_config") or {}
-        if not metric_cfg:
-            raise ValueError("Metric operation execution result did not include 'metrics_json' or 'operation_config' for auto-save")
-
-        object_names = metric_cfg.get("object_names") or execution_result.get("data_source") or execution_result.get("file_name")
-        operation_type = execution_result.get("operation_type") or metric_cfg.get("operation_type", "")
-        operation_config = metric_cfg.get("operation_config") or metric_cfg
-
-        if not object_names:
-            raise ValueError(f"Metric operation configuration missing object_names/data_source: {metric_cfg}")
-
-        csv_data = execution_result.get("data") or execution_result.get("csv_data")
-        perform_response: Optional[Dict[str, Any]] = None
-
-        # Extract bucket and context from workflow step or execution result
-        bucket_name = execution_result.get("bucket_name", "trinity-data")
-        client_name = execution_result.get("client_name", "")
-        app_name = execution_result.get("app_name", "")
-        project_name = execution_result.get("project_name", "")
-        identifiers = metric_cfg.get("identifiers")
-
-        if not csv_data:
-            # Try to get CSV data from perform endpoint
-            try:
-                perform_response = await self._perform_metric_operation(
-                    object_names=object_names,
-                    bucket_name=bucket_name,
-                    operation_type=operation_type,
-                    operation_config=operation_config,
-                    identifiers=identifiers,
-                    client_name=client_name,
-                    app_name=app_name,
-                    project_name=project_name
-                )
-                csv_data = perform_response.get("data") or perform_response.get("csv_data")
-            except Exception as e:
-                logger.warning(f"⚠️ Could not get CSV data from perform endpoint: {e}")
-
-        # Check if result_file already exists in execution_result
-        result_file = execution_result.get("result_file") or metric_cfg.get("result_file")
-        if result_file:
-            logger.info(f"✅ Metric operation result already saved by perform endpoint: {result_file}")
-            return result_file, execution_result
-
-        if not csv_data:
-            logger.warning(f"⚠️ Metric operation auto-save: No CSV data available and no result_file found")
-            # Still try to save with minimal data
-            filename = self._build_auto_save_filename(workflow_step, default_prefix="metric_operation")
-        else:
-            filename = self._build_auto_save_filename(workflow_step, default_prefix="metric_operation")
-
-        payload = {
-            "csv_data": csv_data if csv_data else "",
-            "filename": filename,
-            "client_name": client_name,
-            "app_name": app_name,
-            "project_name": project_name,
-            "operation_details": f"Metric operation: {operation_type}"
-        }
-
-        response = await self._post_json(self.metric_save_endpoint, payload)
-        saved_path = (
-            response.get("result_file")
-            or response.get("object_name")
-            or response.get("path")
-            or response.get("filename")
-            or filename
-        )
-
-        if perform_response:
-            step_cache["perform_response"] = perform_response
-
-        return saved_path, response
-    
     async def _auto_save_create_transform(
         self,
         workflow_step: WorkflowStepPlan,
@@ -7481,189 +7311,6 @@ WORKFLOW PLANNING:
         
         return required_columns
 
-    def _extract_missing_columns_from_error(self, error_message: str) -> List[str]:
-        """
-        Extract missing column names from error messages.
-        
-        Args:
-            error_message: Error message string
-            
-        Returns:
-            List of column names mentioned in error
-        """
-        import re
-        missing_columns: List[str] = []
-        
-        # Pattern 1: "column 'X' not found" or "column 'X' does not exist"
-        patterns = [
-            r"column\s+['\"`]([^'\"`]+)['\"`]\s+(?:not\s+found|does\s+not\s+exist|missing|unknown)",
-            r"['\"`]([^'\"`]+)['\"`]\s+column\s+(?:not\s+found|does\s+not\s+exist|missing)",
-            r"unknown\s+column\s+['\"`]([^'\"`]+)['\"`]",
-            r"invalid\s+column\s+['\"`]([^'\"`]+)['\"`]",
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, error_message, re.IGNORECASE)
-            missing_columns.extend(matches)
-        
-        # Remove duplicates
-        missing_columns = list(set([col.strip() for col in missing_columns if col.strip()]))
-        
-        return missing_columns
-
-    async def _repair_with_metric_operations(
-        self,
-        missing_columns: List[str],
-        data_source: str,
-        sequence_id: str,
-        websocket,
-        step_number: int,
-        atom_id: str
-    ) -> Dict[str, Any]:
-        """
-        Use Metric Operations to create missing columns.
-        This is the repair engine for missing data transformations.
-        
-        Args:
-            missing_columns: List of column names that need to be created
-            data_source: Path to the DataFrame file
-            sequence_id: Sequence ID for context
-            websocket: WebSocket connection for events
-            step_number: Current step number
-            atom_id: The atom that requires these columns
-            
-        Returns:
-            Result dictionary with success status and result_file
-        """
-        if not missing_columns:
-            return {"success": True, "message": "No columns to repair"}
-        
-        logger.info(f"🔧 METRIC OPERATIONS REPAIR: Creating {len(missing_columns)} missing columns")
-        logger.info(f"   Missing columns: {missing_columns}")
-        logger.info(f"   Data source: {data_source}")
-        
-        # Get project context
-        project_context = self._sequence_project_context.get(sequence_id, {})
-        client_name = project_context.get("client_name", "")
-        app_name = project_context.get("app_name", "")
-        project_name = project_context.get("project_name", "")
-        
-        # Get current DataFrame schema to understand available columns
-        file_metadata = self._get_file_metadata([data_source], sequence_id=sequence_id)
-        available_columns = []
-        if file_metadata and data_source in file_metadata:
-            available_columns = file_metadata[data_source].get("columns", [])
-        
-        # Build metric operation prompt
-        # For each missing column, try to infer how to create it
-        repair_prompt = self._build_metric_repair_prompt(
-            missing_columns=missing_columns,
-            available_columns=available_columns,
-            atom_id=atom_id
-        )
-        
-        # Execute metric operation via Agent_Metric
-        try:
-            # Call metric agent endpoint
-            metric_result = await self._execute_atom_endpoint(
-                atom_id="metric-operations",
-                parameters={
-                    "prompt": repair_prompt,
-                    "data_source": data_source,
-                    "client_name": client_name,
-                    "app_name": app_name,
-                    "project_name": project_name
-                },
-                session_id=sequence_id,
-                frontend_chat_id=None
-            )
-            
-            if metric_result.get("success"):
-                result_file = (
-                    metric_result.get("result_file")
-                    or metric_result.get("metrics_json", {}).get("result_file")
-                    or metric_result.get("operation_config", {}).get("result_file")
-                )
-                
-                logger.info(f"✅ Metric operations repair successful: {result_file}")
-                
-                # Send repair event to frontend
-                try:
-                    await self._send_event(
-                        websocket,
-                        WebSocketEvent(
-                            "metric_repair",
-                            {
-                                "sequence_id": sequence_id,
-                                "step_number": step_number,
-                                "atom_id": atom_id,
-                                "missing_columns": missing_columns,
-                                "result_file": result_file,
-                                "message": f"Created {len(missing_columns)} missing columns using metric-operations"
-                            }
-                        ),
-                        "metric_repair event"
-                    )
-                except Exception as e:
-                    logger.debug(f"⚠️ Could not send metric_repair event: {e}")
-                
-                return {
-                    "success": True,
-                    "result_file": result_file,
-                    "missing_columns": missing_columns,
-                    "message": f"Successfully created {len(missing_columns)} columns"
-                }
-            else:
-                error_msg = metric_result.get("error") or metric_result.get("message") or "Unknown error"
-                logger.error(f"❌ Metric operations repair failed: {error_msg}")
-                return {
-                    "success": False,
-                    "error": error_msg,
-                    "missing_columns": missing_columns
-                }
-                
-        except Exception as e:
-            logger.error(f"❌ Exception during metric operations repair: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e),
-                "missing_columns": missing_columns
-            }
-
-    def _build_metric_repair_prompt(
-        self,
-        missing_columns: List[str],
-        available_columns: List[str],
-        atom_id: str
-    ) -> str:
-        """
-        Build a prompt for metric operations to create missing columns.
-        
-        Args:
-            missing_columns: List of columns that need to be created
-            available_columns: List of columns currently in DataFrame
-            atom_id: The atom that requires these columns
-            
-        Returns:
-            Prompt string for metric operations
-        """
-        prompt_parts = [
-            f"Create the following missing columns in the DataFrame: {', '.join(missing_columns)}",
-            "",
-            f"Available columns in DataFrame: {', '.join(available_columns[:20])}",
-            "",
-            "For each missing column:",
-            "1. If it can be derived from existing columns (e.g., profit = revenue - cost), use arithmetic operations",
-            "2. If it requires conditional logic (e.g., category based on value ranges), use conditional operations",
-            "3. If it requires aggregation (e.g., average per group), use aggregation operations",
-            "4. If it's a simple transformation (e.g., percentage, ratio), use derived metrics operations",
-            "",
-            "Create all missing columns in a single metric operation.",
-            f"These columns are required for the {atom_id} atom to execute successfully."
-        ]
-        
-        return "\n".join(prompt_parts)
-    
     def _validate_file_names(
         self, 
         file_names: List[str], 
@@ -7749,66 +7396,9 @@ WORKFLOW PLANNING:
     ) -> Dict[str, Any]:
         """
         Execute atom endpoint with retry support when success=False or request fails.
-        Includes column validation and metric operations repair.
         """
         last_result: Dict[str, Any] = {}
         last_error: Optional[Exception] = None
-
-        # ================================================================
-        # PRE-EXECUTION: Validate required columns before executing step
-        # ================================================================
-        try:
-            logger.info(f"🔍 Pre-execution validation: Checking required columns for {atom_id}...")
-            
-            # Get current DataFrame schema from available files
-            current_files = self._sequence_available_files.get(sequence_id, [])
-            if current_files:
-                # Get the most recent file (output from previous step)
-                latest_file = current_files[-1] if current_files else None
-                if latest_file:
-                    # Validate required columns before execution
-                    try:
-                        missing_columns = await self._validate_required_columns(
-                            atom_id=atom_id,
-                            parameters=parameters,
-                            data_source=latest_file,
-                            sequence_id=sequence_id
-                        )
-                        
-                        # If columns are missing, repair using metric operations
-                        if missing_columns:
-                            logger.warning(f"⚠️ Missing columns detected: {missing_columns}")
-                            logger.info(f"🔧 Repairing missing columns using metric-operations...")
-                            
-                            try:
-                                repair_result = await self._repair_with_metric_operations(
-                                    missing_columns=missing_columns,
-                                    data_source=latest_file,
-                                    sequence_id=sequence_id,
-                                    websocket=websocket,
-                                    step_number=step_number,
-                                    atom_id=atom_id
-                                )
-                                
-                                if repair_result.get("success"):
-                                    logger.info(f"✅ Successfully repaired {len(missing_columns)} missing columns")
-                                    # Update available files with repaired file
-                                    if repair_result.get("result_file"):
-                                        updated_files = self._sequence_available_files.get(sequence_id, [])
-                                        updated_files.append(repair_result["result_file"])
-                                        self._sequence_available_files[sequence_id] = updated_files
-                                        logger.info(f"📁 Updated available files with repaired DataFrame")
-                                else:
-                                    logger.warning(f"⚠️ Could not repair all missing columns: {repair_result.get('error', 'Unknown error')}")
-                            except Exception as repair_error:
-                                logger.error(f"❌ Error during metric operations repair: {repair_error}", exc_info=True)
-                                # Continue execution even if repair fails - let the atom try to execute
-                    except Exception as validation_error:
-                        logger.warning(f"⚠️ Error during column validation: {validation_error}", exc_info=True)
-                        # Continue execution even if validation fails
-        except Exception as pre_exec_error:
-            logger.warning(f"⚠️ Error in pre-execution validation: {pre_exec_error}", exc_info=True)
-            # Continue execution even if pre-validation fails - don't block workflow
 
         for attempt in range(1, self.atom_retry_attempts + 1):
             try:
@@ -7820,68 +7410,6 @@ WORKFLOW PLANNING:
                 )
             except Exception as exec_error:
                 last_error = exec_error
-                error_str = str(exec_error).lower()
-                
-                # ================================================================
-                # FAILURE DETECTION: Check if failure is due to missing columns
-                # ================================================================
-                missing_column_indicators = [
-                    "column", "not found", "does not exist", "missing", 
-                    "unknown column", "invalid column", "column name"
-                ]
-                
-                is_missing_column_error = any(indicator in error_str for indicator in missing_column_indicators)
-                
-                if is_missing_column_error and attempt < self.atom_retry_attempts:
-                    logger.warning(
-                        "⚠️ Atom %s execution failed - detected missing column error: %s",
-                        atom_id,
-                        exec_error,
-                    )
-                    
-                    # Try to extract missing column from error message
-                    try:
-                        missing_cols = self._extract_missing_columns_from_error(str(exec_error))
-                        
-                        if missing_cols and current_files:
-                            latest_file = current_files[-1] if current_files else None
-                            if latest_file:
-                                logger.info(f"🔧 Attempting to repair missing columns: {missing_cols}")
-                                try:
-                                    repair_result = await self._repair_with_metric_operations(
-                                        missing_columns=missing_cols,
-                                        data_source=latest_file,
-                                        sequence_id=sequence_id,
-                                        websocket=websocket,
-                                        step_number=step_number,
-                                        atom_id=atom_id
-                                    )
-                                    
-                                    if repair_result.get("success"):
-                                        logger.info(f"✅ Repaired missing columns, retrying atom execution...")
-                                        # Update available files
-                                        if repair_result.get("result_file"):
-                                            updated_files = self._sequence_available_files.get(sequence_id, [])
-                                            updated_files.append(repair_result["result_file"])
-                                            self._sequence_available_files[sequence_id] = updated_files
-                                        # Continue to retry
-                                        await self._notify_atom_retry(
-                                            websocket,
-                                            atom_id=atom_id,
-                                            step_number=step_number,
-                                            sequence_id=sequence_id,
-                                            attempt=attempt,
-                                            reason=f"Repaired missing columns: {', '.join(missing_cols)}",
-                                        )
-                                        if self.atom_retry_delay:
-                                            await asyncio.sleep(self.atom_retry_delay)
-                                        continue
-                                except Exception as repair_error:
-                                    logger.error(f"❌ Error during repair attempt: {repair_error}", exc_info=True)
-                                    # Continue with normal retry logic
-                    except Exception as extract_error:
-                        logger.warning(f"⚠️ Error extracting missing columns: {extract_error}", exc_info=True)
-                        # Continue with normal retry logic
                 
                 logger.warning(
                     "⚠️ Atom %s execution attempt %s/%s failed with exception: %s",
@@ -7920,68 +7448,6 @@ WORKFLOW PLANNING:
                 or result.get("message")
                 or "Atom returned success=false"
             )
-            
-            # ================================================================
-            # FAILURE DETECTION: Check if failure is due to missing columns
-            # ================================================================
-            reason_lower = reason.lower() if reason else ""
-            missing_column_indicators = [
-                "column", "not found", "does not exist", "missing", 
-                "unknown column", "invalid column", "column name"
-            ]
-            
-            is_missing_column_error = any(indicator in reason_lower for indicator in missing_column_indicators)
-            
-            if is_missing_column_error and attempt < self.atom_retry_attempts:
-                logger.warning(
-                    "⚠️ Atom %s returned success=False - detected missing column error: %s",
-                    atom_id,
-                    reason,
-                )
-                
-                # Try to extract missing column from error message
-                try:
-                    missing_cols = self._extract_missing_columns_from_error(reason)
-                    
-                    if missing_cols and current_files:
-                        latest_file = current_files[-1] if current_files else None
-                        if latest_file:
-                            logger.info(f"🔧 Attempting to repair missing columns: {missing_cols}")
-                            try:
-                                repair_result = await self._repair_with_metric_operations(
-                                    missing_columns=missing_cols,
-                                    data_source=latest_file,
-                                    sequence_id=sequence_id,
-                                    websocket=websocket,
-                                    step_number=step_number,
-                                    atom_id=atom_id
-                                )
-                                
-                                if repair_result.get("success"):
-                                    logger.info(f"✅ Repaired missing columns, retrying atom execution...")
-                                    # Update available files
-                                    if repair_result.get("result_file"):
-                                        updated_files = self._sequence_available_files.get(sequence_id, [])
-                                        updated_files.append(repair_result["result_file"])
-                                        self._sequence_available_files[sequence_id] = updated_files
-                                    # Continue to retry
-                                    await self._notify_atom_retry(
-                                        websocket,
-                                        atom_id=atom_id,
-                                        step_number=step_number,
-                                        sequence_id=sequence_id,
-                                        attempt=attempt,
-                                        reason=f"Repaired missing columns: {', '.join(missing_cols)}",
-                                    )
-                                    if self.atom_retry_delay:
-                                        await asyncio.sleep(self.atom_retry_delay)
-                                    continue
-                            except Exception as repair_error:
-                                logger.error(f"❌ Error during repair attempt: {repair_error}", exc_info=True)
-                                # Continue with normal retry logic
-                except Exception as extract_error:
-                    logger.warning(f"⚠️ Error extracting missing columns: {extract_error}", exc_info=True)
-                    # Continue with normal retry logic
             
             logger.warning(
                 "⚠️ Atom %s returned success=False on attempt %s/%s: %s",
@@ -8083,10 +7549,7 @@ WORKFLOW PLANNING:
             "groupby",
             "create-column",
             "chart-maker",
-            "correlation",  # Added correlation for EDA workflows - needs file access
-            "metric",  # Metric operations engine - needs file access
-            "metric-operations",  # Metric operations engine - needs file access
-            "metrics"  # Support plural form
+            "correlation"  # Added correlation for EDA workflows - needs file access
         }
         
         if atom_id in atoms_needing_context:
