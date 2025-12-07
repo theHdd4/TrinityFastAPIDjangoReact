@@ -40,9 +40,9 @@ def main():
     # Since usecase IDs and registry.App IDs are the same, we can use either
     TENANT_ALLOWED_APPS = [
         # Add app slugs here, e.g.:
-        "marketing-mix",
-        "forecasting",
-        "churn-prediction"
+        # "marketing-mix",
+        # "forecasting",
+        # "churn-prediction"
         # Leave empty [] to grant all apps
     ]
 
