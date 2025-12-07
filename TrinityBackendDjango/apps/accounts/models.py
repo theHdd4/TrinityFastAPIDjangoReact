@@ -42,6 +42,23 @@ class User(AbstractUser):
     def __str__(self):
         return self.username
 
+    def get_tenants(self):
+        """Returns queryset of tenants for this user."""
+        from apps.tenants.models import Tenant
+        return Tenant.objects.filter(user_mappings__user=self).distinct()
+
+    def get_primary_tenant(self):
+        """Returns the primary tenant (is_primary=True) for this user, or None."""
+        try:
+            user_tenant = self.tenant_mappings.filter(is_primary=True).first()
+            return user_tenant.tenant if user_tenant else None
+        except Exception:
+            return None
+
+    def belongs_to_tenant(self, tenant):
+        """Check if user belongs to a specific tenant."""
+        return self.tenant_mappings.filter(tenant=tenant).exists()
+
 
 class UserProfile(models.Model):
     user = models.OneToOneField(
@@ -86,3 +103,41 @@ class UserEnvironmentVariable(models.Model):
 
     def __str__(self):
         return f"{self.user.username}: {self.key}"
+
+
+class UserTenant(models.Model):
+    """
+    Mapping table to establish explicit many-to-many relationships between users and tenants.
+    This replaces unreliable tenant determination methods (environment variables, Redis cache, etc.)
+    with a queryable database relationship.
+    """
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="tenant_mappings"
+    )
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.CASCADE,
+        related_name="user_mappings"
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        help_text="Marks the primary tenant for this user"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "accounts_usertenant"
+        unique_together = ("user", "tenant")
+        indexes = [
+            models.Index(fields=["user", "tenant"]),
+            models.Index(fields=["user", "is_primary"]),
+        ]
+        verbose_name = "User Tenant Mapping"
+        verbose_name_plural = "User Tenant Mappings"
+
+    def __str__(self):
+        primary_label = " (Primary)" if self.is_primary else ""
+        return f"{self.user.username} → {self.tenant.name}{primary_label}"

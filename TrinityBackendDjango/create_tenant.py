@@ -344,6 +344,36 @@ def main():
         allowed_apps=allowed_app_ids, users_in_use=len(role_users)
     )
 
+    # Create UserTenant mappings for all users
+    print(f"\n→ 4b) Creating UserTenant mappings for all users...")
+    from apps.accounts.models import UserTenant
+    
+    # Check if this is the "Quant Matrix AI" tenant (primary tenant)
+    is_primary_tenant = tenant_name == "Quant Matrix AI"
+    
+    for user in User.objects.all():
+        try:
+            # Check if mapping already exists
+            user_tenant, created = UserTenant.objects.get_or_create(
+                user=user,
+                tenant=tenant_obj,
+                defaults={
+                    "is_primary": is_primary_tenant and not UserTenant.objects.filter(user=user, is_primary=True).exists()
+                }
+            )
+            if created:
+                print(f"   ✅ Created UserTenant mapping: {user.username} → {tenant_obj.name}")
+            else:
+                # Update is_primary if this is the primary tenant and user doesn't have one
+                if is_primary_tenant and not user_tenant.is_primary and not UserTenant.objects.filter(user=user, is_primary=True).exists():
+                    user_tenant.is_primary = True
+                    user_tenant.save()
+                    print(f"   ♻️  Updated UserTenant mapping (set as primary): {user.username} → {tenant_obj.name}")
+                else:
+                    print(f"   ℹ️  UserTenant mapping already exists: {user.username} → {tenant_obj.name}")
+        except Exception as exc:
+            print(f"   ⚠️  Failed to create UserTenant mapping for {user.username}: {exc}")
+
     # Set default tenant environment for all users
     print(f"\n→ 5) Setting default tenant environment for all users...")
     from apps.accounts.utils import save_env_var
