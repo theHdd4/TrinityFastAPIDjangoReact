@@ -125,11 +125,12 @@ class TenantSerializer(serializers.ModelSerializer):
                 email=validated_data["admin_email"],
                 password=admin_password,
             )
-            UserRole.objects.filter(user=admin_user).update(
-                role=UserRole.ROLE_ADMIN,
-                allowed_apps=tenant.allowed_apps,
-                client_name=tenant.name,
-                email=validated_data["admin_email"],
+            UserRole.objects.update_or_create(
+                user=admin_user,
+                defaults={
+                    "role": UserRole.ROLE_ADMIN,
+                    "allowed_apps": tenant.allowed_apps,
+                }
             )
 
         print("Tenant creation complete")

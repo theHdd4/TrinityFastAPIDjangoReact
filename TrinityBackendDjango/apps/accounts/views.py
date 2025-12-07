@@ -1,5 +1,6 @@
 from django.contrib.auth import authenticate, login, logout
 import os
+import sys
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import viewsets, permissions, status
@@ -86,18 +87,21 @@ class LoginView(APIView):
             print(
                 f"✅ login: USER_ID={os.environ['USER_ID']} CLIENT_NAME={os.environ.get('CLIENT_NAME')}"
             )
+            sys.stdout.flush()
             save_env_var(user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
             save_env_var(user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
             save_env_var(user, "USER_NAME", os.environ.get("USER_NAME", ""))
             print("Current env vars after login", get_env_dict(user))
+            sys.stdout.flush()
             data = UserSerializer(user).data
-            # Include the first assigned role if available
+            # Include user role and allowed apps if available
             try:
                 from apps.roles.models import UserRole
 
                 role_obj = UserRole.objects.filter(user=user).first()
                 if role_obj:
                     data["role"] = role_obj.role
+                    data["allowed_apps"] = role_obj.allowed_apps
             except Exception:
                 # Roles app may not be migrated yet; ignore errors
                 pass

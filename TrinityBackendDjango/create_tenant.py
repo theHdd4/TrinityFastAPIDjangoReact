@@ -334,13 +334,9 @@ def main():
             user = User.objects.get(username=username)
             UserRole.objects.update_or_create(
                 user=user,
-                client_id=tenant_client_id,
-                app_id=uuid.uuid4(),
                 defaults={
                     "role": role,
                     "allowed_apps": allowed_app_ids,
-                    "client_name": tenant_obj.name,
-                    "email": user.email,
                 },
             )
 

@@ -3,7 +3,6 @@ from django.dispatch import receiver
 from django.conf import settings
 from django.db import connection, models
 from django_tenants.utils import get_tenant_model
-import uuid
 
 from apps.roles.models import UserRole
 
@@ -25,10 +24,6 @@ def create_userrole_and_increment(sender, instance, created, **kwargs):
         if not UserRole.objects.filter(user=instance).exists():
             UserRole.objects.create(
                 user=instance,
-                client_id=uuid.uuid4(),
-                client_name=tenant.name,
-                email=instance.email,
-                app_id=uuid.uuid4(),
                 role=UserRole.ROLE_VIEWER,
                 allowed_apps=getattr(instance, "_allowed_apps", tenant.allowed_apps),
             )

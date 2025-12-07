@@ -32,18 +32,16 @@ class RoleDefinition(models.Model):
 
 
 class UserRole(models.Model):
-    """Assign a role to a user for a specific client and app."""
+    """Assign a role to a user with allowed apps. Stored in tenant schema."""
 
     ROLE_ADMIN = "admin"
     ROLE_EDITOR = "editor"
     ROLE_VIEWER = "viewer"
-    ROLE_SUPER_ADMIN = "super_admin"
 
     ROLE_CHOICES = [
         (ROLE_ADMIN, "Admin"),
         (ROLE_EDITOR, "Editor"),
         (ROLE_VIEWER, "Viewer"),
-        (ROLE_SUPER_ADMIN, "Super Admin"),
     ]
 
     user = models.ForeignKey(
@@ -51,21 +49,17 @@ class UserRole(models.Model):
         on_delete=models.CASCADE,
         related_name="role_assignments",
     )
-    client_id = models.UUIDField()
-    client_name = models.CharField(max_length=255, blank=True)
-    email = models.EmailField(blank=True)
-    app_id = models.UUIDField()
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     allowed_apps = models.JSONField(
         default=list,
         blank=True,
-        help_text="Apps the user is permitted to access",
+        help_text="List of app IDs the user is permitted to access",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("user", "client_id", "app_id")
+        unique_together = ("user",)
         verbose_name = "User Role"
         verbose_name_plural = "User Roles"
 

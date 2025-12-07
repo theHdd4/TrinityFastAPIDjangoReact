@@ -10,6 +10,7 @@ class UserSerializer(serializers.ModelSerializer):
         child=serializers.IntegerField(), write_only=True, required=False, default=list
     )
     role = serializers.SerializerMethodField()
+    allowed_apps_read = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -25,8 +26,9 @@ class UserSerializer(serializers.ModelSerializer):
             "is_staff",
             "allowed_apps",
             "role",
+            "allowed_apps_read",
         ]
-        read_only_fields = ["id", "is_staff", "role"]
+        read_only_fields = ["id", "is_staff", "role", "allowed_apps_read"]
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
@@ -51,7 +53,7 @@ class UserSerializer(serializers.ModelSerializer):
         return instance
 
     def get_role(self, obj):
-        """Return the first assigned role for the user if available."""
+        """Return the user's role if available."""
         try:
             from apps.roles.models import UserRole
 
@@ -62,6 +64,19 @@ class UserSerializer(serializers.ModelSerializer):
             # Roles app may not be migrated yet; ignore errors
             pass
         return None
+
+    def get_allowed_apps_read(self, obj):
+        """Return the user's allowed apps if available."""
+        try:
+            from apps.roles.models import UserRole
+
+            role_obj = UserRole.objects.filter(user=obj).first()
+            if role_obj:
+                return role_obj.allowed_apps
+        except Exception:
+            # Roles app may not be migrated yet; ignore errors
+            pass
+        return []
 
 
 class UserProfileSerializer(serializers.ModelSerializer):

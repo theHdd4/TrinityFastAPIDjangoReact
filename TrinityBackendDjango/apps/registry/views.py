@@ -68,12 +68,9 @@ class AppViewSet(viewsets.ModelViewSet):
             try:
                 from apps.roles.models import UserRole
 
-                roles = UserRole.objects.filter(user=user)
-                allowed = set()
-                for role in roles:
-                    allowed.update(role.allowed_apps or [])
-                if allowed:
-                    qs = qs.filter(id__in=allowed)
+                role_obj = UserRole.objects.filter(user=user).first()
+                if role_obj and role_obj.allowed_apps:
+                    qs = qs.filter(id__in=role_obj.allowed_apps)
             except Exception:
                 # If roles don't exist or error, just show enabled apps
                 pass
@@ -228,12 +225,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 try:
                     from apps.roles.models import UserRole
 
-                    roles = UserRole.objects.filter(user=user)
-                    allowed = set()
-                    for role in roles:
-                        allowed.update(role.allowed_apps or [])
-                    if allowed:
-                        qs = qs.filter(app_id__in=allowed)
+                    role_obj = UserRole.objects.filter(user=user).first()
+                    if role_obj and role_obj.allowed_apps:
+                        qs = qs.filter(app_id__in=role_obj.allowed_apps)
                     else:
                         return Project.objects.none()
                 except Exception:
@@ -767,11 +761,11 @@ class TemplateViewSet(viewsets.ModelViewSet):
             try:
                 from apps.roles.models import UserRole
 
-                roles = UserRole.objects.filter(user=user)
-                allowed = set()
-                for role in roles:
-                    allowed.update(role.allowed_apps or [])
-                qs = qs.filter(app_id__in=allowed) if allowed else Template.objects.none()
+                role_obj = UserRole.objects.filter(user=user).first()
+                if role_obj and role_obj.allowed_apps:
+                    qs = qs.filter(app_id__in=role_obj.allowed_apps)
+                else:
+                    return Template.objects.none()
             except Exception:
                 return Template.objects.none()
         app_param = self.request.query_params.get("app")
