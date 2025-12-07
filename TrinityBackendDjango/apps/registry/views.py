@@ -524,17 +524,51 @@ class ProjectViewSet(viewsets.ModelViewSet):
             
             load_env_vars(request.user)
             project_obj = self.get_object()
-            os.environ["PROJECT_NAME"] = project_obj.name
-            os.environ["PROJECT_ID"] = f"{project_obj.name}_{project_obj.id}"
+
+            # Get app information from project object (not from os.environ)
+            app_obj = project_obj.app
+            app_name = app_obj.slug
+            app_id = f"{app_obj.slug}_{app_obj.id}"
+
+            # Get client info from environment or tenant
+            client_name = os.environ.get("CLIENT_NAME", "")
+            client_id = os.environ.get("CLIENT_ID", "")
+
+            # Set project info
+            project_name = project_obj.name
+            project_id = f"{project_obj.name}_{project_obj.id}"
+
+            # Set in os.environ for backward compatibility
+            os.environ["APP_NAME"] = app_name
+            os.environ["APP_ID"] = app_id
+            os.environ["PROJECT_NAME"] = project_name
+            os.environ["PROJECT_ID"] = project_id
+
             print(
-                f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
+                f"✅ project selected: PROJECT_ID={project_id} PROJECT_NAME={project_name} "
+                f"APP_NAME={app_name} APP_ID={app_id}"
             )
-            save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
-            save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
-            save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
-            save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
-            save_env_var(request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
-            save_env_var(request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
+
+            # Save all env vars
+            save_env_var(request.user, "CLIENT_NAME", client_name)
+            save_env_var(request.user, "CLIENT_ID", client_id)
+            save_env_var(request.user, "APP_NAME", app_name)
+            save_env_var(request.user, "APP_ID", app_id)
+            save_env_var(request.user, "PROJECT_NAME", project_name)
+            save_env_var(request.user, "PROJECT_ID", project_id)
+
+            # Explicitly update Redis currentenv to ensure all fields are stored
+            from redis_store.env_cache import set_current_env
+            set_current_env(
+                str(request.user.id),
+                client_id=client_id,
+                app_id=app_id,
+                project_id=project_id,
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            )
+
             print("Current env vars after project select", get_env_dict(request.user))
             serializer = self.get_serializer(project_obj)
             data = serializer.data

@@ -12,6 +12,7 @@ from .models import User, UserProfile, UserTenant
 from .serializers import UserSerializer, UserProfileSerializer
 # Commented out for now - will use UserTenant mapping instead
 # from .utils import save_env_var, get_env_dict, load_env_vars
+from redis_store.env_cache import set_env_var, set_current_env
 
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
@@ -128,6 +129,57 @@ class LoginView(APIView):
                     "CLIENT_ID": "",
                     "schema_name": "",
                 }
+            
+            # Save to Redis for backward compatibility with other features
+            # Using direct Redis functions to avoid os.environ (bad practice)
+            try:
+                client_id = environment.get("CLIENT_ID", "")
+                client_name = environment.get("CLIENT_NAME", "")
+                user_id = str(user.id)
+                
+                # Save CLIENT_NAME, CLIENT_ID, and USER_NAME to Redis and DB
+                set_env_var(
+                    user,
+                    client_id=client_id,
+                    app_id="",  # Empty for now
+                    project_id="",  # Empty for now
+                    key="CLIENT_NAME",
+                    value=client_name,
+                    client_name=client_name,
+                )
+                set_env_var(
+                    user,
+                    client_id=client_id,
+                    app_id="",
+                    project_id="",
+                    key="CLIENT_ID",
+                    value=client_id,
+                    client_name=client_name,
+                )
+                set_env_var(
+                    user,
+                    client_id=client_id,
+                    app_id="",
+                    project_id="",
+                    key="USER_NAME",
+                    value=user.username,
+                    client_name=client_name,
+                )
+                
+                # Set current environment in Redis
+                set_current_env(
+                    user_id,
+                    client_id=client_id,
+                    app_id="",
+                    project_id="",
+                    client_name=client_name,
+                )
+                
+                print(f"✅ Saved environment variables to Redis for user: {user.username}")
+                sys.stdout.flush()
+            except Exception as e:
+                print(f"⚠️  Failed to save environment variables to Redis: {e}")
+                sys.stdout.flush()
             
             data = UserSerializer(user).data
             # Include user role and allowed apps if available
