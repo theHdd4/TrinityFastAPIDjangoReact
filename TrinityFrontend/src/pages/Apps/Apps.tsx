@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, ChevronDown, GitBranch, FlaskConical, Presentation, Info, PanelLeft } from 'lucide-react';
+import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, ChevronDown, GitBranch, FlaskConical, Presentation, Info, PanelLeft, Lock } from 'lucide-react';
 import Header from '@/components/Header';
 import { REGISTRY_API, TENANTS_API, ACCOUNTS_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
@@ -30,6 +30,7 @@ interface UseCaseApp {
   molecules: string[];
   molecule_atoms: Record<string, any>;
   atoms_in_molecules: string[];
+  is_allowed?: boolean; // Optional flag indicating if app is allowed for current user
 }
 
 interface ModeStatus {
@@ -55,7 +56,9 @@ const Apps = () => {
   const navigate = useNavigate();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
   const [apps, setApps] = useState<UseCaseApp[]>([]);
+  const [restrictedApps, setRestrictedApps] = useState<UseCaseApp[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingRestricted, setLoadingRestricted] = useState(false);
   const [playIntro, setPlayIntro] = useState(false);
   const [introBaseDelay, setIntroBaseDelay] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
@@ -229,6 +232,39 @@ const Apps = () => {
         console.log('💥 Apps fetch error:', err);
       } finally {
         setLoading(false);
+      }
+
+      // Fetch restricted apps
+      console.log('🔍 Fetching restricted apps from registry API...');
+      setLoadingRestricted(true);
+      try {
+        const restrictedRes = await fetch(`${REGISTRY_API}/apps/?include_restricted=true`, { 
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+    
+        if (restrictedRes.ok) {
+          const allAppsData = await restrictedRes.json();
+          console.log('✅ Loaded all apps (allowed + restricted):', allAppsData);
+          
+          if (Array.isArray(allAppsData)) {
+            // Filter to only get restricted apps (is_allowed === false)
+            const restricted = allAppsData.filter((app: UseCaseApp) => app.is_allowed === false);
+            console.log('📱 Number of restricted apps:', restricted.length);
+            setRestrictedApps(restricted);
+          } else {
+            console.log('❌ Restricted apps response is not an array:', typeof allAppsData);
+          }
+        } else {
+          const text = await restrictedRes.text();
+          console.log('❌ Failed to load restricted apps:', text);
+        }
+      } catch (err) {
+        console.log('💥 Restricted apps fetch error:', err);
+      } finally {
+        setLoadingRestricted(false);
       }
     };
 
@@ -693,6 +729,30 @@ const Apps = () => {
 
   const customApps = displayApps.filter(app => app.custom);
 
+  // Transform restricted apps to display format
+  const displayRestrictedApps = restrictedApps
+    .filter(app => app.slug !== 'blank') // Exclude custom apps
+    .map(app => ({
+      id: app.slug,
+      title: app.name,
+      description: app.description,
+      icon: getAppIcon(app.slug),
+      color: getAppColor(app.slug),
+      category: getAppCategory(app.slug),
+      featured: false,
+      custom: false,
+      modules: app.modules || [],
+      molecules: app.molecules || [],
+      atoms_in_molecules: app.atoms_in_molecules || []
+    }));
+
+  const filteredRestrictedApps = displayRestrictedApps.filter(app => {
+    const matchesSearch = app.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         app.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || app.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
   // Filter recent projects based on search term and category
   const filteredRecentProjects = recentProjectsState.filter(project => {
     const matchesSearch = project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -995,6 +1055,72 @@ const Apps = () => {
                               >
                                 Get Started
                                 <ArrowRight className="w-3 h-3 ml-1 group-hover:translate-x-1 transition-transform" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Restricted Applications */}
+            {!loadingRestricted && filteredRestrictedApps.length > 0 && (
+              <div id="restricted-applications-section" className="mt-10 mb-12 animate-fade-in scroll-mt-8" style={animationStyle(1.6)}>
+                <div className="flex items-center gap-2 mb-6">
+                  <Lock className="w-5 h-5 text-muted-foreground" />
+                  <h3 className="text-lg font-bold text-foreground">Restricted Applications</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredRestrictedApps.map((app, index) => {
+                    const Icon = app.icon;
+                    return (
+                      <Card 
+                        key={app.id}
+                        className="group relative bg-card border border-border/50 opacity-60 cursor-not-allowed animate-scale-in"
+                        style={animationStyle(1.7 + index * 0.05)}
+                      >
+                        <div className="relative p-4">
+                          {/* Info Icon in top right */}
+                          <div className="absolute top-4 right-4 z-10">
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    className="w-6 h-6 rounded-full bg-muted/50 hover:bg-muted flex items-center justify-center transition-colors cursor-default"
+                                  >
+                                    <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent 
+                                  side="left" 
+                                  sideOffset={8}
+                                  className="max-w-xs text-xs z-[9999]"
+                                >
+                                  <p>{app.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+
+                          <div className="flex items-start gap-3">
+                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md transition-transform duration-300`}>
+                              <Icon className="w-5 h-5 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0 pr-8 flex flex-col gap-2">
+                              <h3 className="text-sm font-semibold text-foreground leading-tight">
+                                {app.title}
+                              </h3>
+                              <Button 
+                                variant="ghost"
+                                size="sm"
+                                className="w-fit h-7 px-2 text-xs -ml-2"
+                                disabled
+                              >
+                                Not Available
+                                <Lock className="w-3 h-3 ml-1" />
                               </Button>
                             </div>
                           </div>

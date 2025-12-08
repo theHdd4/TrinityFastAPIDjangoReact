@@ -83,13 +83,80 @@ class AppViewSet(viewsets.ModelViewSet):
             return [permissions.IsAdminUser()]
         return super().get_permissions()
 
+    def _enrich_app_data(self, app):
+        """
+        Helper method to enrich app data with modules, molecules, and atoms from public.usecase.
+        """
+        app_data = {
+            'id': app.id,
+            'name': app.name,
+            'slug': app.slug,
+            'description': app.description,
+            'modules': [],
+            'molecules': [],
+            'molecule_atoms': {},
+            'atoms_in_molecules': []
+        }
+        
+        # Fetch data from public.usecase if linked
+        if app.usecase_id:
+            try:
+                from django_tenants.utils import schema_context
+                from apps.trinity_v1_atoms.models import TrinityV1Atom
+                from apps.usecase.models import UseCase
+                
+                # Access UseCase from public schema
+                with schema_context('public'):
+                    usecase = UseCase.objects.prefetch_related('molecule_objects').get(id=app.usecase_id)
+                    app_data['modules'] = usecase.modules or []
+                    app_data['molecules'] = usecase.molecules or []
+                    
+                    # Build molecule_atoms and atoms_in_molecules from molecule_objects
+                    molecule_atoms = {}
+                    atoms_in_molecules = []
+                    
+                    for molecule in usecase.molecule_objects.all():
+                        atom_names = molecule.atoms or []
+                        matching_atoms = TrinityV1Atom.objects.filter(atom_id__in=atom_names)
+                        
+                        atoms_list = []
+                        for atom in matching_atoms:
+                            atom_data = {
+                                'id': atom.atom_id,
+                                'name': atom.name,
+                                'description': atom.description,
+                                'category': atom.category
+                            }
+                            atoms_list.append(atom_data)
+                            if atom.atom_id not in atoms_in_molecules:
+                                atoms_in_molecules.append(atom.atom_id)
+                        
+                        molecule_atoms[molecule.molecule_id] = {
+                            'id': molecule.molecule_id,
+                            'name': molecule.name,
+                            'atoms': atoms_list
+                        }
+                    
+                    app_data['molecule_atoms'] = molecule_atoms
+                    app_data['atoms_in_molecules'] = atoms_in_molecules
+            except UseCase.DoesNotExist:
+                logger.warning(f"UseCase {app.usecase_id} not found for app {app.slug}")
+            except Exception as e:
+                logger.error(f"Error enriching app {app.slug}: {e}")
+        
+        return app_data
+
     def list(self, request, *args, **kwargs):
         """
         List apps accessible to this tenant with full molecule/atom data from public.usecase
         Uses API-level tenant switching based on user's environment variables.
+        
+        Query Parameters:
+        - include_restricted: If 'true', returns both allowed and restricted apps with is_allowed flag.
+                             Restricted apps are apps in tenant registry but not accessible to user.
+                             Default: 'false' (only returns allowed apps for backward compatibility).
         """
         from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
-        from apps.usecase.models import UseCase
         
         # Get user's tenant schema
         schema_name = get_user_tenant_schema(request.user)
@@ -99,73 +166,54 @@ class AppViewSet(viewsets.ModelViewSet):
         
         logger.info(f"🔄 Switching to tenant schema: {schema_name} for user {request.user.username}")
         
+        # Check if we should include restricted apps
+        include_restricted = request.query_params.get('include_restricted', 'false').lower() == 'true'
+        
         # Switch to user's tenant schema
         with switch_to_user_tenant(request.user):
             logger.info(f"✅ Now in tenant schema: {schema_name}")
-            # Get apps from the user's tenant schema
-            queryset = self.filter_queryset(self.get_queryset())
-            logger.info(f"📊 Queryset count: {queryset.count()}")
             
-            enriched_apps = []
-            for app in queryset:
-                app_data = {
-                    'id': app.id,
-                    'name': app.name,
-                    'slug': app.slug,
-                    'description': app.description,
-                    'modules': [],
-                    'molecules': [],
-                    'molecule_atoms': {},
-                    'atoms_in_molecules': []
-                }
+            if include_restricted:
+                # Get all tenant apps (no permission filtering)
+                all_tenant_apps = App.objects.all().order_by('name')
                 
-                # Fetch data from public.usecase if linked
-                if app.usecase_id:
-                    try:
-                        from django_tenants.utils import schema_context
-                        from apps.trinity_v1_atoms.models import TrinityV1Atom
-                        
-                        # Access UseCase from public schema
-                        with schema_context('public'):
-                            usecase = UseCase.objects.prefetch_related('molecule_objects').get(id=app.usecase_id)
-                            app_data['modules'] = usecase.modules or []
-                            app_data['molecules'] = usecase.molecules or []
-                            
-                            # Build molecule_atoms and atoms_in_molecules from molecule_objects
-                            molecule_atoms = {}
-                            atoms_in_molecules = []
-                            
-                            for molecule in usecase.molecule_objects.all():
-                                atom_names = molecule.atoms or []
-                                matching_atoms = TrinityV1Atom.objects.filter(atom_id__in=atom_names)
-                                
-                                atoms_list = []
-                                for atom in matching_atoms:
-                                    atom_data = {
-                                        'id': atom.atom_id,
-                                        'name': atom.name,
-                                        'description': atom.description,
-                                        'category': atom.category
-                                    }
-                                    atoms_list.append(atom_data)
-                                    if atom.atom_id not in atoms_in_molecules:
-                                        atoms_in_molecules.append(atom.atom_id)
-                                
-                                molecule_atoms[molecule.molecule_id] = {
-                                    'id': molecule.molecule_id,
-                                    'name': molecule.name,
-                                    'atoms': atoms_list
-                                }
-                            
-                            app_data['molecule_atoms'] = molecule_atoms
-                            app_data['atoms_in_molecules'] = atoms_in_molecules
-                    except UseCase.DoesNotExist:
-                        logger.warning(f"UseCase {app.usecase_id} not found for app {app.slug}")
+                # Get allowed app IDs using current filtering logic
+                allowed_queryset = self.filter_queryset(self.get_queryset())
+                allowed_ids = set(allowed_queryset.values_list('id', flat=True))
                 
-                enriched_apps.append(app_data)
-            
-            logger.info(f"Found {len(enriched_apps)} apps for tenant {schema_name}")
-            return Response(enriched_apps)
+                # Get restricted apps (all apps not in allowed set, excluding custom apps)
+                restricted_apps = all_tenant_apps.exclude(id__in=allowed_ids).exclude(slug='blank')
+                
+                # Enrich allowed apps
+                enriched_allowed = []
+                for app in allowed_queryset:
+                    app_data = self._enrich_app_data(app)
+                    app_data['is_allowed'] = True
+                    enriched_allowed.append(app_data)
+                
+                # Enrich restricted apps
+                enriched_restricted = []
+                for app in restricted_apps:
+                    app_data = self._enrich_app_data(app)
+                    app_data['is_allowed'] = False
+                    enriched_restricted.append(app_data)
+                
+                # Combine and return
+                all_enriched = enriched_allowed + enriched_restricted
+                logger.info(f"Found {len(enriched_allowed)} allowed and {len(enriched_restricted)} restricted apps for tenant {schema_name}")
+                return Response(all_enriched)
+            else:
+                # Default behavior: return only allowed apps (backward compatible)
+                queryset = self.filter_queryset(self.get_queryset())
+                logger.info(f"📊 Queryset count: {queryset.count()}")
+                
+                enriched_apps = []
+                for app in queryset:
+                    app_data = self._enrich_app_data(app)
+                    enriched_apps.append(app_data)
+                
+                logger.info(f"Found {len(enriched_apps)} apps for tenant {schema_name}")
+                return Response(enriched_apps)
     
     def retrieve(self, request, *args, **kwargs):
         from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
