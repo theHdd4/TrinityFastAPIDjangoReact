@@ -10,6 +10,7 @@ class UserSerializer(serializers.ModelSerializer):
         child=serializers.IntegerField(), write_only=True, required=False, default=list
     )
     role = serializers.SerializerMethodField()
+    role_write = serializers.CharField(write_only=True, required=False)
     allowed_apps_read = serializers.SerializerMethodField()
 
     class Meta:
@@ -26,6 +27,7 @@ class UserSerializer(serializers.ModelSerializer):
             "is_staff",
             "allowed_apps",
             "role",
+            "role_write",
             "allowed_apps_read",
         ]
         read_only_fields = ["id", "is_staff", "role", "allowed_apps_read"]
@@ -33,15 +35,28 @@ class UserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         password = validated_data.pop("password", None)
         allowed_apps = validated_data.pop("allowed_apps", None)
+        role = validated_data.pop("role_write", None)
         user = User(**validated_data)
+        # Ensure new users have is_superuser=False and is_staff=False
+        user.is_superuser = False
+        user.is_staff = False
         if allowed_apps is not None:
             user._allowed_apps = allowed_apps
+        if role is not None:
+            user._role = role
         if password:
             user.set_password(password)
         else:
             user.set_unusable_password()
         user.save()
         return user
+    
+    def to_internal_value(self, data):
+        # Map 'role' from frontend to 'role_write' internally
+        if 'role' in data and 'role_write' not in data:
+            data = data.copy()
+            data['role_write'] = data.pop('role')
+        return super().to_internal_value(data)
 
     def update(self, instance, validated_data):
         password = validated_data.pop("password", None)

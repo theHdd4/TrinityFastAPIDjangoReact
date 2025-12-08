@@ -10,6 +10,7 @@ from apps.accounts.models import User, UserTenant
 from apps.roles.models import UserRole
 from apps.usecase.models import UseCase
 from apps.accounts.utils import save_env_var
+from apps.accounts.tenant_utils import get_user_tenant_schema, switch_to_user_tenant
 
 
 class TenantSerializer(serializers.ModelSerializer):
@@ -74,14 +75,86 @@ class TenantSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"schema_name": "Invalid schema name"})
         validated_data["schema_name"] = schema
 
-        # Validate that allowed_apps usecase IDs exist
+        # Step: Resolve App IDs to UseCase IDs via slug join
+        # Frontend sends App IDs from tenant schema, we need to:
+        # 1. Get current user's tenant schema
+        # 2. Query App objects from that tenant schema using received App IDs
+        # 3. Extract slugs and join with UseCase by slug to get UseCase IDs
+        resolved_usecase_ids = []
+        app_slugs_map = {}  # Map slug to App ID for later reference
+        
         if allowed_apps:
-            existing_usecases = UseCase.objects.filter(id__in=allowed_apps).values_list('id', flat=True)
-            missing_ids = set(allowed_apps) - set(existing_usecases)
-            if missing_ids:
+            # Get the current user from request context
+            request = self.context.get('request')
+            if not request or not request.user:
                 raise serializers.ValidationError({
-                    "allowed_apps": f"Invalid usecase IDs: {list(missing_ids)}"
+                    "allowed_apps": "Unable to determine user context for app resolution"
                 })
+            
+            current_user = request.user
+            user_schema = get_user_tenant_schema(current_user)
+            
+            if not user_schema:
+                raise serializers.ValidationError({
+                    "allowed_apps": f"Unable to determine tenant schema for user {current_user.username}. Cannot resolve App IDs."
+                })
+            
+            print(f"→ Resolving App IDs from user's tenant schema: {user_schema}")
+            
+            # Query App objects from current user's tenant schema
+            try:
+                with schema_context(user_schema):
+                    source_apps = App.objects.filter(id__in=allowed_apps).select_related()
+                    found_app_ids = set(source_apps.values_list('id', flat=True))
+                    missing_app_ids = set(allowed_apps) - found_app_ids
+                    
+                    if missing_app_ids:
+                        raise serializers.ValidationError({
+                            "allowed_apps": f"App IDs not found in source tenant schema: {list(missing_app_ids)}"
+                        })
+                    
+                    # Extract slugs and build mapping
+                    app_slugs = []
+                    for app in source_apps:
+                        if app.slug:
+                            app_slugs.append(app.slug)
+                            app_slugs_map[app.slug] = app.id
+                        else:
+                            print(f"   ⚠️  App ID {app.id} ({app.name}) has no slug, skipping")
+                    
+                    print(f"   📋 Found {len(app_slugs)} apps with slugs: {app_slugs}")
+                    
+            except Exception as e:
+                if isinstance(e, serializers.ValidationError):
+                    raise
+                raise serializers.ValidationError({
+                    "allowed_apps": f"Error querying apps from source tenant: {str(e)}"
+                })
+            
+            # Now join with UseCase table (public schema) by slug
+            try:
+                connection.set_schema_to_public()
+            except Exception:
+                pass
+            
+            if app_slugs:
+                usecases = UseCase.objects.filter(slug__in=app_slugs)
+                found_slugs = set(usecases.values_list('slug', flat=True))
+                missing_slugs = set(app_slugs) - found_slugs
+                
+                if missing_slugs:
+                    raise serializers.ValidationError({
+                        "allowed_apps": f"App slugs not found in UseCase table: {list(missing_slugs)}"
+                    })
+                
+                resolved_usecase_ids = list(usecases.values_list('id', flat=True))
+                print(f"   ✅ Resolved {len(resolved_usecase_ids)} UseCase IDs from {len(app_slugs)} app slugs")
+            else:
+                print("   ⚠️  No valid app slugs found to resolve")
+        
+        # Store resolved UseCase IDs for later use (replacing the original allowed_apps)
+        # We'll use resolved_usecase_ids to create App entries in the new tenant schema
+        usecase_ids_for_tenant = resolved_usecase_ids
 
         # Check for duplicate username/email in public schema
         if User.objects.filter(username=admin_name).exists():
@@ -91,10 +164,12 @@ class TenantSerializer(serializers.ModelSerializer):
 
         with transaction.atomic():
             # Step 1: Create Tenant in public schema
+            # Store resolved UseCase IDs in tenant.allowed_apps for reference
+            # (This is metadata, actual App entries will be created in tenant schema)
             tenant = Tenant.objects.create(
                 **validated_data,
                 primary_domain=domain,
-                allowed_apps=allowed_apps,
+                allowed_apps=usecase_ids_for_tenant,  # Store UseCase IDs as metadata
                 projects_allowed=projects_allowed,
                 admin_name=admin_name,
                 admin_email=admin_email,
@@ -139,19 +214,18 @@ class TenantSerializer(serializers.ModelSerializer):
             print(f"   ⚠️  Migration error (non-critical): {e}")
 
         # Step 4: Populate registry.App entries in tenant schema
-        # Resolve allowed_apps (usecase IDs) to UseCase objects and create App entries
+        # Use resolved UseCase IDs to create App entries in the new tenant schema
         allowed_app_ids = []
         
-        # First, get usecases from public schema (UseCase is in public schema)
-        if allowed_apps:
+        if usecase_ids_for_tenant:
             # Ensure we're in public schema to query UseCase
             try:
                 connection.set_schema_to_public()
             except Exception:
                 pass
             
-            usecases = UseCase.objects.filter(id__in=allowed_apps)
-            print(f"→ Granting app access from {len(usecases)} allowed usecases...")
+            usecases = UseCase.objects.filter(id__in=usecase_ids_for_tenant)
+            print(f"→ Granting app access from {len(usecases)} resolved usecases...")
             
             # Now switch to tenant schema to create App entries
             with schema_context(tenant.schema_name):
@@ -174,9 +248,9 @@ class TenantSerializer(serializers.ModelSerializer):
                         allowed_app_ids.append(obj.id)
                         
                         if created:
-                            print(f"   ✅ Granted access: {usecase.name} (UseCase ID: {usecase.id})")
+                            print(f"   ✅ Granted access: {usecase.name} (UseCase ID: {usecase.id}, App ID: {obj.id})")
                         else:
-                            print(f"   ♻️  Updated access: {usecase.name} (UseCase ID: {usecase.id})")
+                            print(f"   ♻️  Updated access: {usecase.name} (UseCase ID: {usecase.id}, App ID: {obj.id})")
                     except Exception as e:
                         print(f"   ⚠️  Error processing app '{usecase.slug}': {e}")
                         continue

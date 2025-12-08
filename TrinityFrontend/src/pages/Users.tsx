@@ -67,6 +67,7 @@ const Users = () => {
     username: '',
     password: '',
     email: '',
+    role: 'viewer',
     allowed_apps: [] as number[],
   });
   const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
@@ -160,7 +161,7 @@ const Users = () => {
         body: JSON.stringify(form),
       });
       if (res.ok) {
-        setForm({ username: '', password: '', email: '', allowed_apps: [] });
+        setForm({ username: '', password: '', email: '', role: 'viewer', allowed_apps: [] });
         setShowAddForm(false);
         await loadUsers();
       }
@@ -284,7 +285,7 @@ const Users = () => {
                   onChange={handleFormChange}
                   className="border-gray-200"
                 />
-              <Input
+                <Input
                   name="email"
                   type="email"
                   placeholder="Email"
@@ -292,6 +293,22 @@ const Users = () => {
                   onChange={handleFormChange}
                   className="border-gray-200"
                 />
+                <div className="md:col-span-3 space-y-2">
+                  <label htmlFor="role" className="text-sm font-medium text-gray-700">
+                    Role
+                  </label>
+                  <select
+                    id="role"
+                    name="role"
+                    value={form.role}
+                    onChange={handleFormChange}
+                    className="w-full border border-gray-200 rounded-md px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="editor">Editor</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
                 <div className="md:col-span-3 space-y-2">
                   <label htmlFor="allowed_apps" className="text-sm font-medium text-gray-700">
                     Allowed Apps
