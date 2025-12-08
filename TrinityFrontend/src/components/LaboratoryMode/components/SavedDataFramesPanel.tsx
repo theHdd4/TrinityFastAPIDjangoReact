@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API, CLASSIFIER_API, SHARE_LINKS_API } from '@/lib/api';
@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
-import { CheckboxTemplate } from '@/templates/checkbox';
 import { Plus } from 'lucide-react';
 import ColumnClassifierDimensionMapping from '@/components/AtomList/atoms/column-classifier/components/ColumnClassifierDimensionMapping';
 import { fetchDimensionMapping } from '@/lib/dimensions';
@@ -26,6 +25,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-upload-validate/components/guided-upload';
+import { getActiveProjectContext } from '@/utils/projectEnv';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface Props {
   isOpen: boolean;
@@ -122,6 +124,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
 
   const [files, setFiles] = useState<Frame[]>([]);
   const [prefix, setPrefix] = useState('');
+  const [filePrimingStatus, setFilePrimingStatus] = useState<Record<string, {
+    isPrimed: boolean;
+    isInProgress: boolean;
+    currentStage?: string;
+    completedSteps?: string[];
+    missingSteps?: string[];
+  }>>({});
   const [openDirs, setOpenDirs] = useState<Record<string, boolean>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -184,6 +193,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [processingLoading, setProcessingLoading] = useState(false);
   const [processingSaving, setProcessingSaving] = useState(false);
   const [processingError, setProcessingError] = useState('');
+  const [isGuidedUploadFlowOpen, setIsGuidedUploadFlowOpen] = useState(false);
+  const [guidedFlowInitialFile, setGuidedFlowInitialFile] = useState<{ name: string; path: string; size?: number } | undefined>(undefined);
+  const [guidedFlowInitialStage, setGuidedFlowInitialStage] = useState<'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7'>('U1');
 
   const getProcessingDtypeOptions = (currentDtype: string) => {
     const baseOptions = [
@@ -721,21 +733,116 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   };
 
   const openProcessingModal = async (frame: Frame) => {
-    setProcessingTarget(frame);
-    setProcessingColumns([]);
-    setProcessingError('');
-    setProcessingLoading(true);
+    // First check if file is primed (completed all 7 steps)
+    const projectContext = getActiveProjectContext();
+    if (!projectContext) {
+      toast({
+        title: 'Error',
+        description: 'Project context not available',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
+      // Check priming status
+      const queryParams = new URLSearchParams({
+        client_name: projectContext.client_name || '',
+        app_name: projectContext.app_name || '',
+        project_name: projectContext.project_name || '',
+        file_name: frame.object_name,
+      }).toString();
+
+      const primingCheckRes = await fetch(
+        `${VALIDATE_API}/check-priming-status?${queryParams}`,
+        { credentials: 'include' }
+      );
+
+      let isPrimed = false;
+      let currentStage: string | undefined;
+
+      if (primingCheckRes.ok) {
+        const primingData = await primingCheckRes.json();
+        isPrimed = primingData?.completed === true || primingData?.is_primed === true;
+        currentStage = primingData?.current_stage;
+      }
+
+      // Also check classifier config as additional verification
+      let hasClassifierConfig = false;
+      try {
+        const configQueryParams = new URLSearchParams({
+          client_name: projectContext.client_name || '',
+          app_name: projectContext.app_name || '',
+          project_name: projectContext.project_name || '',
+          file_name: frame.object_name,
+          bypass_cache: 'true',
+        }).toString();
+
+        const configRes = await fetch(
+          `${CLASSIFIER_API}/get_config?${configQueryParams}`,
+          { credentials: 'include' }
+        );
+
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          if (configData?.data) {
+            const hasIdentifiers = Array.isArray(configData.data.identifiers) && configData.data.identifiers.length > 0;
+            const hasMeasures = Array.isArray(configData.data.measures) && configData.data.measures.length > 0;
+            hasClassifierConfig = hasIdentifiers || hasMeasures;
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to check classifier config', err);
+      }
+
+      // File is primed ONLY if it has completed flow (U7) AND has classifier config
+      const fullyPrimed = isPrimed && hasClassifierConfig;
+
+      // If file is NOT fully primed, show message and open guided flow instead
+      if (!fullyPrimed) {
+        const message = currentStage && currentStage !== 'U7'
+          ? `Please complete the data priming process. You're currently at step ${currentStage}. Continue from where you left off?`
+          : `Please complete the 7-step data priming process for "${frame.arrow_name || frame.csv_name}" before accessing this feature.`;
+        
+        toast({
+          title: 'Data Priming Required',
+          description: message,
+          variant: 'default',
+        });
+        
+        // Open guided flow starting from U1 (skip U0 since file already exists)
+        // If there's a saved stage, use that; otherwise start from U1
+        const startStage = (currentStage && currentStage !== 'U7' && ['U1', 'U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) 
+          ? currentStage as 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6'
+          : 'U1';
+        setGuidedFlowInitialFile({
+          name: frame.arrow_name || frame.csv_name || frame.object_name,
+          path: frame.object_name,
+          size: frame.size,
+        });
+        setGuidedFlowInitialStage(startStage);
+        setIsGuidedUploadFlowOpen(true);
+        return;
+      }
+
+      // File is primed - proceed with opening the old modal
+      setProcessingTarget(frame);
+      setProcessingColumns([]);
+      setProcessingError('');
+      setProcessingLoading(true);
+      
       const res = await fetch(`${VALIDATE_API}/file-metadata`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
+        credentials: 'include',
         body: JSON.stringify({ file_path: frame.object_name })
-    });
+      });
+      
       if (!res.ok) {
-      const txt = await res.text().catch(() => '');
+        const txt = await res.text().catch(() => '');
         throw new Error(txt || 'Failed to load dataframe metadata');
       }
+      
       const data = await res.json();
       
       // Load saved config from mongo FIRST (exactly like ColumnClassifierAtom does)
@@ -1234,6 +1341,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
+    
+    // Listen for dataframe-saved events to trigger refresh
+    const handleDataframeSaved = () => {
+      if (!cancelled) {
+        setReloadToken(prev => prev + 1);
+      }
+    };
+    
+    window.addEventListener('dataframe-saved', handleDataframeSaved);
 
     const load = async () => {
       setLoading(true);
@@ -1394,11 +1510,19 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             setContextMenu(null);
             setRenameTarget(null);
             
-            // Check workbook metadata for files to determine if they have multiple sheets
-            const checkWorkbookMetadata = async () => {
+            // Check workbook metadata and priming status for files
+            const checkFileMetadata = async () => {
               const metadataChecks: Record<string, boolean> = {};
+              const primingStatusChecks: Record<string, {
+                isPrimed: boolean;
+                isInProgress: boolean;
+                currentStage?: string;
+                completedSteps?: string[];
+                missingSteps?: string[];
+              }> = {};
+              
               for (const f of filtered) {
-                // Check if workbook metadata exists (which means it was uploaded from a multi-sheet Excel file)
+                // Check workbook metadata
                 try {
                   const query = new URLSearchParams({ object_name: f.object_name }).toString();
                   const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
@@ -1407,7 +1531,6 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   if (res.ok) {
                     const metaData = await res.json();
                     const sheetNames = Array.isArray(metaData.sheet_names) ? metaData.sheet_names : [];
-                    // Check if has_multiple_sheets is true, or if sheet_names has more than 1 sheet
                     metadataChecks[f.object_name] = Boolean(
                       metaData.has_multiple_sheets === true || sheetNames.length > 1
                     );
@@ -1417,12 +1540,103 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 } catch {
                   metadataChecks[f.object_name] = false;
                 }
+                
+                // Check priming status
+                try {
+                  const projectContext = getActiveProjectContext();
+                  if (projectContext) {
+                    const queryParams = new URLSearchParams({
+                      client_name: projectContext.client_name || '',
+                      app_name: projectContext.app_name || '',
+                      project_name: projectContext.project_name || '',
+                      file_name: f.object_name,
+                    }).toString();
+
+                    const primingRes = await fetch(
+                      `${VALIDATE_API}/check-priming-status?${queryParams}`,
+                      { credentials: 'include' }
+                    );
+
+                    let isPrimed = false;
+                    let currentStage: string | undefined;
+                    let completedSteps: string[] = [];
+                    let missingSteps: string[] = [];
+
+                    if (primingRes.ok) {
+                      const primingData = await primingRes.json();
+                      isPrimed = primingData?.completed === true || primingData?.is_primed === true;
+                      currentStage = primingData?.current_stage;
+                      completedSteps = Array.isArray(primingData?.completed_steps) ? primingData.completed_steps : [];
+                      missingSteps = Array.isArray(primingData?.missing_steps) ? primingData.missing_steps : [];
+                    }
+
+                    // Also check classifier config
+                    let hasClassifierConfig = false;
+                    try {
+                      const configQueryParams = new URLSearchParams({
+                        client_name: projectContext.client_name || '',
+                        app_name: projectContext.app_name || '',
+                        project_name: projectContext.project_name || '',
+                        file_name: f.object_name,
+                        bypass_cache: 'true',
+                      }).toString();
+
+                      const configRes = await fetch(
+                        `${CLASSIFIER_API}/get_config?${configQueryParams}`,
+                        { credentials: 'include' }
+                      );
+
+                      if (configRes.ok) {
+                        const configData = await configRes.json();
+                        if (configData?.data) {
+                          const hasIdentifiers = Array.isArray(configData.data.identifiers) && configData.data.identifiers.length > 0;
+                          const hasMeasures = Array.isArray(configData.data.measures) && configData.data.measures.length > 0;
+                          hasClassifierConfig = hasIdentifiers || hasMeasures;
+                          // If classifier config exists, U4 (column names) and U5 (data types) are likely done
+                          if (hasClassifierConfig && !completedSteps.includes('U4')) {
+                            completedSteps.push('U4', 'U5');
+                          }
+                        }
+                      }
+                    } catch (err) {
+                      console.warn('Failed to check classifier config for priming status', err);
+                    }
+
+                    // File is primed only if all 7 steps completed AND has classifier config
+                    const allStepsCompleted = completedSteps.includes('U7') || (completedSteps.length >= 7 && currentStage === 'U7');
+                    isPrimed = allStepsCompleted && hasClassifierConfig;
+
+                    // Recalculate missing steps
+                    const allSteps = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+                    missingSteps = allSteps.filter(s => !completedSteps.includes(s));
+
+                    const isInProgress = currentStage && currentStage !== 'U7' && currentStage !== 'U0' && !isPrimed;
+
+                    primingStatusChecks[f.object_name] = {
+                      isPrimed,
+                      isInProgress: !!isInProgress,
+                      currentStage,
+                      completedSteps,
+                      missingSteps,
+                    };
+                  }
+                } catch (err) {
+                  console.warn('Failed to check priming status for', f.object_name, err);
+                  primingStatusChecks[f.object_name] = {
+                    isPrimed: false,
+                    isInProgress: false,
+                    completedSteps: [],
+                    missingSteps: ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'],
+                  };
+                }
               }
+              
               if (!cancelled) {
                 setHasMultipleSheetsByFile(metadataChecks);
+                setFilePrimingStatus(primingStatusChecks);
               }
             };
-            void checkWorkbookMetadata();
+            void checkFileMetadata();
           }
 
           console.log(
@@ -1447,6 +1661,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
 
     return () => {
       cancelled = true;
+      window.removeEventListener('dataframe-saved', handleDataframeSaved);
     };
   }, [isOpen, user, reloadToken]);
 
@@ -1879,9 +2094,58 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     setOpenDirs(prev => ({ ...prev, [path]: !prev[path] }));
   };
 
+  // Helper function to get step name
+  const getStepName = (step: string): string => {
+    const stepNames: Record<string, string> = {
+      'U0': 'Upload',
+      'U1': 'Scan',
+      'U2': 'Understand',
+      'U3': 'Headers',
+      'U4': 'Columns',
+      'U5': 'Types',
+      'U6': 'Missing',
+      'U7': 'Summary',
+    };
+    return stepNames[step] || step;
+  };
+
+  // Helper function to generate priming status tooltip content
+  const getPrimingStatusTooltip = (status: {
+    isPrimed?: boolean;
+    isInProgress?: boolean;
+    currentStage?: string;
+    completedSteps?: string[];
+    missingSteps?: string[];
+  }): string => {
+    if (status.isPrimed) {
+      return '✅ Fully primed - All 7 steps completed';
+    }
+    
+    const allSteps = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+    const completed = status.completedSteps || [];
+    const missing = status.missingSteps || allSteps.filter(s => !completed.includes(s));
+    
+    if (missing.length === 0) {
+      return '✅ All steps completed';
+    }
+    
+    const completedNames = completed.map(getStepName).join(', ');
+    const missingNames = missing.map(getStepName).join(', ');
+    
+    let tooltip = `📊 Data Priming Status:\n\n`;
+    tooltip += `✅ Completed: ${completedNames || 'None'}\n\n`;
+    tooltip += `❌ Missing: ${missingNames}\n\n`;
+    tooltip += `Click the wrench icon to complete missing steps.`;
+    
+    return tooltip;
+  };
+
   const renderNode = (node: TreeNode, level = 0): React.ReactNode => {
     if (node.frame) {
       const f = node.frame;
+      const status = filePrimingStatus[f.object_name];
+      const tooltipContent = status ? getPrimingStatusTooltip(status) : 'Status unknown';
+      
       return (
         <>
         <div
@@ -1903,16 +2167,52 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               className="h-5 text-xs flex-1 mr-2 min-w-0"
             />
           ) : (
-            <div className="flex-1 min-w-0 mr-2">
-              <button
-                onClick={() => handleOpen(f.object_name)}
-                onContextMenu={(e) => handleContextMenu(e, f)}
-                className="text-xs text-blue-600 hover:underline text-left w-full truncate overflow-hidden text-ellipsis whitespace-nowrap"
-                title={f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
-              >
-                {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
-              </button>
-            </div>
+            <TooltipProvider>
+              <div className="flex-1 min-w-0 mr-2 flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => handleOpen(f.object_name)}
+                      onContextMenu={(e) => handleContextMenu(e, f)}
+                      className={`text-xs hover:underline text-left flex-1 truncate overflow-hidden text-ellipsis whitespace-nowrap ${
+                        status?.isPrimed
+                          ? 'text-green-600 font-medium'
+                          : status?.isInProgress
+                          ? 'text-yellow-600 font-medium'
+                          : 'text-red-600 font-medium'
+                      }`}
+                    >
+                      {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs whitespace-pre-line text-xs">
+                    <div className="font-semibold mb-1">
+                      {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+                    </div>
+                    <div className="border-t pt-1 mt-1">
+                      {tooltipContent}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+                {/* Status indicator dot */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                        status?.isPrimed
+                          ? 'bg-green-500'
+                          : status?.isInProgress
+                          ? 'bg-yellow-500'
+                          : 'bg-red-500'
+                      }`}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs whitespace-pre-line text-xs">
+                    {tooltipContent}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
           )}
           <div className="flex items-center space-x-2 ml-2 flex-shrink-0">
             {/* COMMENTED OUT - 'for classification' button/icon */}
@@ -1936,6 +2236,49 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
               onClick={() => openProcessingModal(f)}
               title="Process columns"
+            />
+            <Wrench
+              className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-[#458EE2]"
+              onClick={async () => {
+                // Check priming status to determine initial stage
+                const projectContext = getActiveProjectContext();
+                let startStage: 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' = 'U1';
+                
+                if (projectContext) {
+                  try {
+                    const queryParams = new URLSearchParams({
+                      client_name: projectContext.client_name || '',
+                      app_name: projectContext.app_name || '',
+                      project_name: projectContext.project_name || '',
+                      file_name: f.object_name,
+                    }).toString();
+
+                    const primingCheckRes = await fetch(
+                      `${VALIDATE_API}/check-priming-status?${queryParams}`,
+                      { credentials: 'include' }
+                    );
+
+                    if (primingCheckRes.ok) {
+                      const primingData = await primingCheckRes.json();
+                      const currentStage = primingData?.current_stage;
+                      if (currentStage && ['U1', 'U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+                        startStage = currentStage as 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+                      }
+                    }
+                  } catch (err) {
+                    console.warn('Failed to check priming status for wrench icon', err);
+                  }
+                }
+                
+                setGuidedFlowInitialFile({
+                  name: f.arrow_name || f.csv_name || f.object_name,
+                  path: f.object_name,
+                  size: f.size,
+                });
+                setGuidedFlowInitialStage(startStage);
+                setIsGuidedUploadFlowOpen(true);
+              }}
+              title="Guided upload flow with rule-based checking"
             />
             {hasMultipleSheetsByFile[f.object_name] && (
               <Layers
@@ -2926,7 +3269,142 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         </div>,
         document.body
       )}
-      
+
+      {/* Guided Upload Flow - For rule-based checking workflow */}
+      {isGuidedUploadFlowOpen && guidedFlowInitialFile && (
+        <GuidedUploadFlow
+          open={isGuidedUploadFlowOpen}
+          onOpenChange={(open) => {
+            setIsGuidedUploadFlowOpen(open);
+            if (!open) {
+              setGuidedFlowInitialFile(undefined);
+              setGuidedFlowInitialStage('U1');
+            }
+          }}
+          existingDataframe={guidedFlowInitialFile}
+          initialStage={guidedFlowInitialStage}
+          onComplete={async (result) => {
+            try {
+              // Convert guided flow result to processing format
+              const fileName = guidedFlowInitialFile.name;
+              const columnNameEdits = result.columnNameEdits[fileName] || [];
+              const dataTypeSelections = result.dataTypeSelections[fileName] || [];
+              const missingValueStrategies = result.missingValueStrategies[fileName] || [];
+              const headerSelections = result.headerSelections[fileName];
+              
+              // Fetch current metadata to get original column info
+              const res = await fetch(`${VALIDATE_API}/file-metadata`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ file_path: guidedFlowInitialFile.path })
+              });
+              
+              if (!res.ok) {
+                throw new Error('Failed to load dataframe metadata');
+              }
+              
+              const metadata = await res.json();
+              const columns = metadata.columns || [];
+              
+              // Build processing instructions from flow results
+              const processingInstructions: any[] = [];
+              
+              columns.forEach((col: any) => {
+                const nameEdit = columnNameEdits.find(e => e.originalName === col.name);
+                const typeSelection = dataTypeSelections.find(t => t.columnName === (nameEdit?.editedName || col.name));
+                const missingStrategy = missingValueStrategies.find(s => s.columnName === (nameEdit?.editedName || col.name));
+                
+                const instruction: Record<string, any> = { column: col.name };
+                
+                if (nameEdit && nameEdit.editedName !== col.name) {
+                  instruction.new_name = nameEdit.editedName;
+                }
+                
+                if (typeSelection && typeSelection.selectedType !== col.dtype) {
+                  instruction.dtype = typeSelection.selectedType;
+                  if (typeSelection.format) {
+                    instruction.datetime_format = typeSelection.format;
+                  }
+                }
+                
+                if (missingStrategy && missingStrategy.strategy !== 'none') {
+                  instruction.missing_strategy = missingStrategy.strategy;
+                  if (missingStrategy.value) {
+                    instruction.custom_value = missingStrategy.value;
+                  }
+                }
+                
+                if (Object.keys(instruction).length > 1) {
+                  processingInstructions.push(instruction);
+                }
+              });
+              
+              // Process dataframe with instructions
+              if (processingInstructions.length > 0) {
+                const processRes = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'include',
+                  body: JSON.stringify({
+                    object_name: guidedFlowInitialFile.path,
+                    instructions: processingInstructions,
+                    header_row_index: headerSelections?.headerRowIndex,
+                    header_row_count: headerSelections?.headerRowCount || 1,
+                  }),
+                });
+                
+                if (!processRes.ok) {
+                  const errorData = await processRes.json().catch(() => ({}));
+                  throw new Error(errorData.detail || 'Failed to process dataframe');
+                }
+              }
+              
+              toast({
+                title: 'Success',
+                description: `${fileName} updated successfully through guided flow.`,
+              });
+              
+              setIsGuidedUploadFlowOpen(false);
+              setGuidedFlowInitialFile(undefined);
+              setGuidedFlowInitialStage('U1');
+              setReloadToken(prev => prev + 1);
+              // Refresh priming status after flow completes
+              setTimeout(() => {
+                const projectContext = getActiveProjectContext();
+                if (projectContext && guidedFlowInitialFile) {
+                  const queryParams = new URLSearchParams({
+                    client_name: projectContext.client_name || '',
+                    app_name: projectContext.app_name || '',
+                    project_name: projectContext.project_name || '',
+                    file_name: guidedFlowInitialFile.path,
+                  }).toString();
+
+                  fetch(`${VALIDATE_API}/check-priming-status?${queryParams}`, {
+                    credentials: 'include'
+                  }).then(res => res.json()).then(data => {
+                    setFilePrimingStatus(prev => ({
+                      ...prev,
+                      [guidedFlowInitialFile.path]: {
+                        isPrimed: data?.completed === true,
+                        isInProgress: false,
+                        currentStage: data?.current_stage,
+                      },
+                    }));
+                  }).catch(() => {});
+                }
+              }, 1000);
+            } catch (err: any) {
+              toast({
+                title: 'Error',
+                description: err.message || 'Failed to process dataframe',
+                variant: 'destructive',
+              });
+            }
+          }}
+        />
+      )}
+
       {/* Share Dialog */}
       <Dialog
         open={shareDialog?.open || false}

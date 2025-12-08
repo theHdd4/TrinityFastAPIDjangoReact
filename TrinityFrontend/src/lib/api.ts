@@ -180,6 +180,10 @@ export const VALIDATE_API =
   normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
 
+export const DATAFRAME_VALIDATION_API =
+  normalizeUrl(import.meta.env.VITE_DATAFRAME_VALIDATION_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/dataframe-validation`;
+
 export const EXHIBITION_API =
   normalizeUrl(import.meta.env.VITE_EXHIBITION_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition`;

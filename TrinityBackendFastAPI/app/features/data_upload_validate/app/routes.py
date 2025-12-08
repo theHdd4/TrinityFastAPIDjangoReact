@@ -3386,6 +3386,131 @@ async def get_file_metadata(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/file-preview")
+async def get_file_preview(
+    object_name: str = Query(..., description="MinIO object name/path"),
+    client_id: str = Query(""),
+    app_id: str = Query(""),
+    project_id: str = Query(""),
+):
+    """
+    Get preview of file (top 10 rows) and detect header row.
+    Returns preview data and suggested header row index.
+    """
+    try:
+        # Read file from MinIO
+        data = read_minio_object(object_name)
+        filename = Path(object_name).name
+        
+        # Parse based on file type
+        if filename.lower().endswith(".csv"):
+            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        df = df_pl.to_pandas()
+        
+        # Get top 10 rows as list of lists
+        preview_rows = df.head(10).values.tolist()
+        
+        # Detect header row (simple heuristic: first row with mostly text, no numbers)
+        suggested_header_row = 0
+        for i in range(min(5, len(df))):
+            row = df.iloc[i]
+            # Check if row has mostly text values (not numeric)
+            text_count = sum(1 for val in row if isinstance(val, str) and not str(val).replace('.', '').replace('-', '').isdigit())
+            if text_count > len(row) * 0.7:  # 70% text values
+                suggested_header_row = i
+                break
+        
+        return {
+            "rows": preview_rows,
+            "suggested_header_row": suggested_header_row,
+            "total_rows": len(df),
+            "total_columns": len(df.columns),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting file preview: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/file-columns")
+async def get_file_columns(
+    object_name: str = Query(..., description="MinIO object name/path"),
+    client_id: str = Query(""),
+    app_id: str = Query(""),
+    project_id: str = Query(""),
+):
+    """
+    Get column names and sample values from a file.
+    Returns column names, sample values, and AI/historical suggestions.
+    """
+    try:
+        # Read file from MinIO
+        data = read_minio_object(object_name)
+        filename = Path(object_name).name
+        
+        # Parse based on file type
+        if filename.lower().endswith(".csv"):
+            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        df = df_pl.to_pandas()
+        
+        # Get column names and sample values
+        columns = list(df.columns)
+        sample_values = []
+        rule_based_suggestions = []
+        historical_matches = []
+        
+        for col in columns:
+            # Get sample values (non-null, first 5)
+            samples = df[col].dropna().head(5).tolist()
+            sample_values.append([str(s) for s in samples])
+            
+            # Rule-based column name cleaning
+            cleaned = str(col).strip()
+            # Remove special characters (keep alphanumeric and underscores)
+            cleaned = re.sub(r'[^a-zA-Z0-9_]', '_', cleaned)
+            # Remove leading/trailing underscores
+            cleaned = cleaned.strip('_')
+            # Convert to snake_case if contains spaces or camelCase
+            if ' ' in str(col) or any(c.isupper() for c in str(col) if c.isalpha()):
+                cleaned = re.sub(r'([a-z])([A-Z])', r'\1_\2', cleaned).replace(' ', '_').lower()
+            # Ensure it starts with a letter
+            if cleaned and cleaned[0].isdigit():
+                cleaned = 'col_' + cleaned
+            # If empty after cleaning, use default
+            if not cleaned:
+                cleaned = 'unnamed_column'
+            
+            rule_based_suggestions.append(cleaned if cleaned != str(col) else None)
+            
+            # TODO: Query historical matches from memory service
+            historical_matches.append(None)
+        
+        return {
+            "columns": columns,
+            "sample_values": sample_values,
+            "rule_based_suggestions": rule_based_suggestions,
+            "historical_matches": historical_matches,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting file columns: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/detect-datetime-format")
 async def detect_datetime_format(request: Request):
     """
@@ -3722,4 +3847,132 @@ async def apply_data_transformations(request: Request):
         
     except Exception as e:
         logger.error(f"Error applying transformations: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/get-guided-flow-state")
+async def get_guided_flow_state(
+    client_name: str = Query(""),
+    app_name: str = Query(""),
+    project_name: str = Query(""),
+):
+    """Retrieve persisted guided flow state from Redis."""
+    try:
+        key_parts = ("guided_flow_state", client_name, app_name, project_name)
+        cached_state = redis_client.get_json(key_parts)
+        
+        if cached_state:
+            return {"state": cached_state}
+        
+        return {"state": None}
+    except Exception as e:
+        logger.error(f"Error retrieving guided flow state: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/save-guided-flow-state")
+async def save_guided_flow_state(request: Request):
+    """Save guided flow state to Redis."""
+    try:
+        body = await request.json()
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+        state = body.get("state", {})
+        
+        key_parts = ("guided_flow_state", client_name, app_name, project_name)
+        # Use SESSION_STATE namespace for longer TTL (900 seconds default)
+        redis_client.set_json(key_parts, state, ttl=86400)  # 24 hours TTL
+        
+        return {"status": "success", "message": "Flow state saved"}
+    except Exception as e:
+        logger.error(f"Error saving guided flow state: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/check-priming-status")
+async def check_priming_status(
+    client_name: str = Query(""),
+    app_name: str = Query(""),
+    project_name: str = Query(""),
+    file_name: str = Query(""),
+):
+    """Check if a file has completed priming (all 7 steps) and return step-by-step status."""
+    try:
+        # Check Redis for completion flag
+        primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+        is_primed = redis_client.get(primed_key_parts)
+        
+        # Check for flow state to get current stage and step completion
+        flow_key_parts = ("guided_flow_state", client_name, app_name, project_name)
+        flow_state = redis_client.get_json(flow_key_parts)
+        
+        current_stage = None
+        completed_steps: list[str] = []
+        all_steps = ["U0", "U1", "U2", "U3", "U4", "U5", "U6", "U7"]
+        
+        if flow_state and isinstance(flow_state, dict):
+            current_stage = flow_state.get("currentStage")
+            # Check if this file is in the uploaded files
+            uploaded_files = flow_state.get("uploadedFiles", [])
+            file_in_flow = any(
+                f.get("path") == file_name or f.get("name") == file_name
+                for f in uploaded_files
+            )
+            
+                if file_in_flow:
+                current_stage = flow_state.get("currentStage")
+                # Determine completed steps based on current stage
+                if current_stage:
+                    stage_index = all_steps.index(current_stage) if current_stage in all_steps else -1
+                    if stage_index >= 0:
+                        # All steps up to and including current stage are completed
+                        completed_steps = all_steps[:stage_index + 1]
+                    elif current_stage == "U7":
+                        # All steps completed
+                        completed_steps = all_steps
+                else:
+                    # If no current stage but file is in flow, assume U0 completed
+                    completed_steps = ["U0"]
+        
+        # If primed flag exists, all steps are completed
+        if is_primed:
+            completed_steps = all_steps
+            current_stage = "U7"
+        
+        # Determine completion status
+        completed = bool(is_primed) or (current_stage == "U7")
+        missing_steps = [s for s in all_steps if s not in completed_steps]
+        is_in_progress = bool(current_stage) and current_stage != "U7" and current_stage != "U0"
+        
+        return {
+            "completed": completed,
+            "current_stage": current_stage,
+            "is_primed": bool(is_primed),
+            "completed_steps": completed_steps,
+            "missing_steps": missing_steps,
+            "is_in_progress": is_in_progress,
+        }
+    except Exception as e:
+        logger.error(f"Error checking priming status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/mark-file-primed")
+async def mark_file_primed(request: Request):
+    """Mark a file as primed (completed all 7 steps)."""
+    try:
+        body = await request.json()
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+        file_name = body.get("file_name", "")
+        
+        # Set primed flag in Redis
+        primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+        redis_client.set(primed_key_parts, "true", ttl=86400 * 30)  # 30 days TTL
+        
+        return {"status": "success", "message": "File marked as primed"}
+    except Exception as e:
+        logger.error(f"Error marking file as primed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
