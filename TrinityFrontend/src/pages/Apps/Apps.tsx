@@ -143,21 +143,24 @@ const Apps = () => {
         }
       };
       
-      // Fetch tenant information
+      // Fetch tenant information for current user
       const fetchTenantInfo = async () => {
         try {
-          const res = await fetch(`${TENANTS_API}/tenants/`, {
+          // Use the new endpoint to get the current user's tenant
+          const res = await fetch(`${TENANTS_API}/tenants/current/`, {
             credentials: 'include',
           });
           if (res.ok) {
-            const tenantsData = await res.json();
-            if (Array.isArray(tenantsData) && tenantsData.length > 0) {
-              const name = tenantsData[0].name;
-              setTenantName(name);
-              console.log('🏢 Tenant Name:', name);
+            const tenantData = await res.json();
+            if (tenantData && tenantData.name) {
+              setTenantName(tenantData.name);
+              console.log('🏢 Tenant Name:', tenantData.name);
             } else {
-              console.log('⚠️ No tenant data found');
+              console.log('⚠️ No tenant data found in response');
             }
+          } else if (res.status === 404) {
+            console.log('⚠️ No tenant found for current user');
+            setTenantName(null);
           } else {
             console.log('⚠️ Failed to fetch tenant information:', res.status);
           }

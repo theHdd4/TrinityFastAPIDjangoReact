@@ -1,9 +1,11 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django_tenants.utils import schema_context
 from apps.accounts.views import CsrfExemptSessionAuthentication
+from apps.accounts.tenant_utils import get_tenant_for_user
 from .models import Tenant, Domain
 from .serializers import TenantSerializer, DomainSerializer
 
@@ -39,6 +41,29 @@ class TenantViewSet(viewsets.ModelViewSet):
         if self.action in ("create", "update", "partial_update", "destroy"):
             return [permissions.IsAdminUser()]
         return super().get_permissions()
+
+    @action(detail=False, methods=['get'])
+    def current(self, request):
+        """
+        Get the current user's tenant.
+        Returns the tenant object for the authenticated user based on UserTenant mapping.
+        """
+        user = request.user
+        if not user or not user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        tenant = get_tenant_for_user(user)
+        if not tenant:
+            return Response(
+                {"detail": "No tenant found for user."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        serializer = self.get_serializer(tenant)
+        return Response(serializer.data)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

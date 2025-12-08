@@ -168,20 +168,33 @@ class AppViewSet(viewsets.ModelViewSet):
             return Response(enriched_apps)
     
     def retrieve(self, request, *args, **kwargs):
-        load_env_vars(request.user)
-        app_obj = self.get_object()
-        os.environ["APP_NAME"] = app_obj.slug
-        os.environ["APP_ID"] = os.environ.get("APP_ID") or f"{app_obj.slug}_{app_obj.id}"
-        print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
-        save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
-        save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
-        save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
-        save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
-        print("Current env vars after app select", get_env_dict(request.user))
-        serializer = self.get_serializer(app_obj)
-        data = serializer.data
-        data["environment"] = get_env_dict(request.user)
-        return Response(data)
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response({"detail": "No tenant found for user"}, status=status.HTTP_404_NOT_FOUND)
+        
+        logger.info(f"🔄 Switching to tenant schema: {schema_name} for app retrieve (user: {request.user.username})")
+        
+        # Switch to user's tenant schema before getting app object
+        with switch_to_user_tenant(request.user):
+            logger.info(f"✅ Now in tenant schema: {schema_name}")
+            load_env_vars(request.user)
+            app_obj = self.get_object()
+            os.environ["APP_NAME"] = app_obj.slug
+            os.environ["APP_ID"] = os.environ.get("APP_ID") or f"{app_obj.slug}_{app_obj.id}"
+            print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
+            save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+            save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
+            save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+            save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
+            print("Current env vars after app select", get_env_dict(request.user))
+            serializer = self.get_serializer(app_obj)
+            data = serializer.data
+            data["environment"] = get_env_dict(request.user)
+            return Response(data)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -287,75 +300,86 @@ class ProjectViewSet(viewsets.ModelViewSet):
         - ordering: Sort order (e.g., "-updated_at", "name")
         - app: Filter by app ID or slug
         """
-        from apps.accounts.tenant_utils import get_user_tenant_schema
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
         
-        # Get the queryset
-        queryset = self.filter_queryset(self.get_queryset())
-        
-        # Get user and client info for logging
+        # Get user's tenant schema
         user = request.user
         schema_name = get_user_tenant_schema(user)
-        scope = request.query_params.get("scope", "tenant")
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {user.username}")
+            return Response([])
         
-        # Console logging for debugging
-        logger.info(
-            f"📋 Projects API Request - "
-            f"User: {user.username} | "
-            f"Client/Tenant: {schema_name} | "
-            f"Scope: {scope} | "
-            f"Total projects: {queryset.count()}"
-        )
+        logger.info(f"🔄 Switching to tenant schema: {schema_name} for projects list (user: {user.username})")
         
-        # Log project details for debugging
-        if queryset.exists():
-            projects_list = list(queryset.values('id', 'name', 'owner__username', 'app__slug', 'updated_at')[:10])
-            logger.info(f"📊 Sample projects (first 10): {projects_list}")
-        
-        # Handle limit and offset parameters (for pagination)
-        limit_param = request.query_params.get("limit")
-        offset_param = request.query_params.get("offset")
+        # Switch to user's tenant schema - wrap entire method logic inside context
+        # This ensures queryset evaluation happens in the correct schema
+        with switch_to_user_tenant(user):
+            logger.info(f"✅ Now in tenant schema: {schema_name}")
+            
+            # Get the queryset inside tenant context
+            queryset = self.filter_queryset(self.get_queryset())
+            
+            scope = request.query_params.get("scope", "tenant")
+            
+            # Console logging for debugging
+            logger.info(
+                f"📋 Projects API Request - "
+                f"User: {user.username} | "
+                f"Client/Tenant: {schema_name} | "
+                f"Scope: {scope} | "
+                f"Total projects: {queryset.count()}"
+            )
+            
+            # Log project details for debugging
+            if queryset.exists():
+                projects_list = list(queryset.values('id', 'name', 'owner__username', 'app__slug', 'updated_at')[:10])
+                logger.info(f"📊 Sample projects (first 10): {projects_list}")
+            
+            # Handle limit and offset parameters (for pagination)
+            limit_param = request.query_params.get("limit")
+            offset_param = request.query_params.get("offset")
 
-        if limit_param or offset_param:
-            try:
-                limit = int(limit_param) if limit_param else None
-                offset = int(offset_param) if offset_param else 0
-                
-                # Validate values
-                if limit is not None and limit <= 0:
-                    limit = None
-                if offset < 0:
-                    offset = 0
-                
-                # Apply pagination
-                if limit is not None:
-                    # Both limit and offset provided
-                    paginated_queryset = list(queryset[offset:offset+limit])
-                    logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, limit={limit})")
-                elif offset > 0:
-                    # Only offset provided (no limit)
-                    paginated_queryset = list(queryset[offset:])
-                    logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, no limit)")
-                else:
-                    # Only limit provided (no offset)
-                    paginated_queryset = list(queryset[:limit])
-                    logger.info(f"✅ Returning {len(paginated_queryset)} projects (limit={limit})")
-                
-                serializer = self.get_serializer(paginated_queryset, many=True)
-                return Response(serializer.data)
-            except (ValueError, TypeError):
-                # Invalid parameter, ignore it and continue with normal pagination
-                pass
-        
-        # Normal pagination flow when no limit is provided
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            logger.info(f"✅ Returning paginated projects (page size: {len(page)})")
-            return self.get_paginated_response(serializer.data)
-        
-        serializer = self.get_serializer(queryset, many=True)
-        logger.info(f"✅ Returning {len(serializer.data)} projects (all)")
-        return Response(serializer.data)
+            if limit_param or offset_param:
+                try:
+                    limit = int(limit_param) if limit_param else None
+                    offset = int(offset_param) if offset_param else 0
+                    
+                    # Validate values
+                    if limit is not None and limit <= 0:
+                        limit = None
+                    if offset < 0:
+                        offset = 0
+                    
+                    # Apply pagination
+                    if limit is not None:
+                        # Both limit and offset provided
+                        paginated_queryset = list(queryset[offset:offset+limit])
+                        logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, limit={limit})")
+                    elif offset > 0:
+                        # Only offset provided (no limit)
+                        paginated_queryset = list(queryset[offset:])
+                        logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, no limit)")
+                    else:
+                        # Only limit provided (no offset)
+                        paginated_queryset = list(queryset[:limit])
+                        logger.info(f"✅ Returning {len(paginated_queryset)} projects (limit={limit})")
+                    
+                    serializer = self.get_serializer(paginated_queryset, many=True)
+                    return Response(serializer.data)
+                except (ValueError, TypeError):
+                    # Invalid parameter, ignore it and continue with normal pagination
+                    pass
+            
+            # Normal pagination flow when no limit is provided
+            page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                logger.info(f"✅ Returning paginated projects (page size: {len(page)})")
+                return self.get_paginated_response(serializer.data)
+            
+            serializer = self.get_serializer(queryset, many=True)
+            logger.info(f"✅ Returning {len(serializer.data)} projects (all)")
+            return Response(serializer.data)
 
     def _can_edit(self, user):
         # Temporarily allow all authenticated users to edit for debugging

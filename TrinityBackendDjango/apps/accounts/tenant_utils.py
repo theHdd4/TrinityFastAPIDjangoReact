@@ -32,6 +32,7 @@ def get_user_tenant_schema(user):
             user_tenant = UserTenant.objects.filter(user=user).first()
         
         if user_tenant:
+            print(f"🔑 User tenant schema: {user_tenant.tenant.schema_name}")
             return user_tenant.tenant.schema_name
     except Exception as e:
         print(f"⚠️  Error retrieving tenant from UserTenant mapping: {e}")
@@ -43,12 +44,33 @@ def get_user_tenant_schema(user):
         env_dict = get_env_dict(user)
         client_id = env_dict.get('CLIENT_ID', '')
         if client_id:
-            return client_id
+            # CLIENT_ID is stored as {schema_name}_{user_id} format
+            # Try to extract schema_name by removing the _{user.id} suffix
+            # First, try using CLIENT_ID directly as schema name (in case it's already just schema name)
+            try:
+                # Check if CLIENT_ID matches a tenant schema name directly
+                tenant = Tenant.objects.get(schema_name=client_id)
+                return client_id
+            except Tenant.DoesNotExist:
+                # If not found, try to extract schema_name by removing _{user.id}
+                # Format: {schema_name}_{user_id}
+                user_id_suffix = f"_{user.id}"
+                if client_id.endswith(user_id_suffix):
+                    schema_name = client_id[:-len(user_id_suffix)]
+                    # Verify the extracted schema_name exists
+                    try:
+                        tenant = Tenant.objects.get(schema_name=schema_name)
+                        return schema_name
+                    except Tenant.DoesNotExist:
+                        # If extracted schema_name doesn't exist, return None
+                        pass
+                # If CLIENT_ID doesn't match expected format, return None
     except Exception:
         pass
     
-    # Final fallback
-    return 'Quant_Matrix_AI_Schema'
+    # No fallback - return None to ensure proper error handling
+    # This prevents defaulting to wrong tenant when UserTenant mapping is missing
+    return None
 
 
 def switch_to_user_tenant(user):
