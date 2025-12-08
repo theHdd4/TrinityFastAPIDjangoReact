@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, ChevronDown, GitBranch, FlaskConical, Presentation, Info, PanelLeft, Lock } from 'lucide-react';
+import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, ChevronDown, GitBranch, FlaskConical, Presentation, Info, PanelLeft, Lock, PackageX } from 'lucide-react';
 import Header from '@/components/Header';
 import { REGISTRY_API, TENANTS_API, ACCOUNTS_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
@@ -33,6 +33,17 @@ interface UseCaseApp {
   is_allowed?: boolean; // Optional flag indicating if app is allowed for current user
 }
 
+interface UnavailableApp {
+  usecase_id: number;
+  name: string;
+  slug: string;
+  description: string;
+  modules: string[];
+  molecules: string[];
+  molecule_atoms: Record<string, any>;
+  atoms_in_molecules: string[];
+}
+
 interface ModeStatus {
   workflow: boolean;
   laboratory: boolean;
@@ -57,8 +68,10 @@ const Apps = () => {
   const [appMap, setAppMap] = useState<Record<string, number>>({});
   const [apps, setApps] = useState<UseCaseApp[]>([]);
   const [restrictedApps, setRestrictedApps] = useState<UseCaseApp[]>([]);
+  const [unavailableApps, setUnavailableApps] = useState<UnavailableApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingRestricted, setLoadingRestricted] = useState(false);
+  const [loadingUnavailable, setLoadingUnavailable] = useState(false);
   const [playIntro, setPlayIntro] = useState(false);
   const [introBaseDelay, setIntroBaseDelay] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
@@ -251,20 +264,59 @@ const Apps = () => {
           
           if (Array.isArray(allAppsData)) {
             // Filter to only get restricted apps (is_allowed === false)
-            const restricted = allAppsData.filter((app: UseCaseApp) => app.is_allowed === false);
+            const restricted = allAppsData.filter((app: UseCaseApp) => app && app.is_allowed === false);
             console.log('📱 Number of restricted apps:', restricted.length);
-            setRestrictedApps(restricted);
+            setRestrictedApps(restricted.length > 0 ? restricted : []);
           } else {
-            console.log('❌ Restricted apps response is not an array:', typeof allAppsData);
+            console.log('❌ Restricted apps response is not an array:', typeof allAppsData, allAppsData);
+            setRestrictedApps([]);
           }
         } else {
           const text = await restrictedRes.text();
-          console.log('❌ Failed to load restricted apps:', text);
+          console.log('❌ Failed to load restricted apps:', restrictedRes.status, text);
+          setRestrictedApps([]);
         }
       } catch (err) {
-        console.log('💥 Restricted apps fetch error:', err);
+        console.error('💥 Restricted apps fetch error:', err);
+        setRestrictedApps([]);
       } finally {
         setLoadingRestricted(false);
+      }
+
+      // Fetch unavailable apps
+      console.log('🔍 Fetching unavailable apps from registry API...');
+      setLoadingUnavailable(true);
+      try {
+        const unavailableRes = await fetch(`${REGISTRY_API}/apps/unavailable/`, { 
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+    
+        if (unavailableRes.ok) {
+          const unavailableData = await unavailableRes.json();
+          console.log('✅ Loaded unavailable apps:', unavailableData);
+          
+          if (Array.isArray(unavailableData)) {
+            console.log('📱 Number of unavailable apps:', unavailableData.length);
+            // Filter out any invalid entries
+            const validUnavailable = unavailableData.filter((app: UnavailableApp) => app && app.usecase_id && app.slug);
+            setUnavailableApps(validUnavailable.length > 0 ? validUnavailable : []);
+          } else {
+            console.log('❌ Unavailable apps response is not an array:', typeof unavailableData, unavailableData);
+            setUnavailableApps([]);
+          }
+        } else {
+          const text = await unavailableRes.text();
+          console.log('❌ Failed to load unavailable apps:', unavailableRes.status, text);
+          setUnavailableApps([]);
+        }
+      } catch (err) {
+        console.error('💥 Unavailable apps fetch error:', err);
+        setUnavailableApps([]);
+      } finally {
+        setLoadingUnavailable(false);
       }
     };
 
@@ -730,23 +782,52 @@ const Apps = () => {
   const customApps = displayApps.filter(app => app.custom);
 
   // Transform restricted apps to display format
-  const displayRestrictedApps = restrictedApps
-    .filter(app => app.slug !== 'blank') // Exclude custom apps
+  const displayRestrictedApps = (Array.isArray(restrictedApps) ? restrictedApps : [])
+    .filter(app => app && app.slug && app.slug !== 'blank') // Exclude custom apps and invalid apps
     .map(app => ({
-      id: app.slug,
-      title: app.name,
-      description: app.description,
-      icon: getAppIcon(app.slug),
-      color: getAppColor(app.slug),
-      category: getAppCategory(app.slug),
+      id: app.slug || `restricted-${app.id || 'unknown'}`,
+      title: app.name || 'Unknown App',
+      description: app.description || '',
+      icon: getAppIcon(app.slug || ''),
+      color: getAppColor(app.slug || ''),
+      category: getAppCategory(app.slug || ''),
       featured: false,
       custom: false,
       modules: app.modules || [],
       molecules: app.molecules || [],
       atoms_in_molecules: app.atoms_in_molecules || []
-    }));
+    }))
+    .filter(app => app.id); // Remove any that failed transformation
 
   const filteredRestrictedApps = displayRestrictedApps.filter(app => {
+    if (!app.title || !app.description) return false;
+    const matchesSearch = app.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         app.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || app.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  // Transform unavailable apps to display format
+  const displayUnavailableApps = (Array.isArray(unavailableApps) ? unavailableApps : [])
+    .filter(app => app && app.slug && app.slug !== 'blank' && app.usecase_id) // Exclude custom apps and invalid apps
+    .map(app => ({
+      id: `usecase-${app.usecase_id}`, // Use usecase_id with prefix to avoid clashing
+      usecase_id: app.usecase_id, // Store usecase_id for future reference
+      title: app.name || 'Unknown App',
+      description: app.description || '',
+      icon: getAppIcon(app.slug || ''),
+      color: getAppColor(app.slug || ''),
+      category: getAppCategory(app.slug || ''),
+      featured: false,
+      custom: false,
+      modules: app.modules || [],
+      molecules: app.molecules || [],
+      atoms_in_molecules: app.atoms_in_molecules || []
+    }))
+    .filter(app => app.id && app.usecase_id); // Remove any that failed transformation
+
+  const filteredUnavailableApps = displayUnavailableApps.filter(app => {
+    if (!app.title || !app.description) return false;
     const matchesSearch = app.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          app.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'all' || app.category === selectedCategory;
@@ -1081,6 +1162,72 @@ const Apps = () => {
                         key={app.id}
                         className="group relative bg-card border border-border/50 opacity-60 cursor-not-allowed animate-scale-in"
                         style={animationStyle(1.7 + index * 0.05)}
+                      >
+                        <div className="relative p-4">
+                          {/* Info Icon in top right */}
+                          <div className="absolute top-4 right-4 z-10">
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    className="w-6 h-6 rounded-full bg-muted/50 hover:bg-muted flex items-center justify-center transition-colors cursor-default"
+                                  >
+                                    <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent 
+                                  side="left" 
+                                  sideOffset={8}
+                                  className="max-w-xs text-xs z-[9999]"
+                                >
+                                  <p>{app.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+
+                          <div className="flex items-start gap-3">
+                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md transition-transform duration-300`}>
+                              <Icon className="w-5 h-5 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0 pr-8 flex flex-col gap-2">
+                              <h3 className="text-sm font-semibold text-foreground leading-tight">
+                                {app.title}
+                              </h3>
+                              <Button 
+                                variant="ghost"
+                                size="sm"
+                                className="w-fit h-7 px-2 text-xs -ml-2"
+                                disabled
+                              >
+                                Not Available
+                                <Lock className="w-3 h-3 ml-1" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Unavailable Applications */}
+            {!loadingUnavailable && filteredUnavailableApps.length > 0 && (
+              <div id="unavailable-applications-section" className="mt-10 mb-12 animate-fade-in scroll-mt-8" style={animationStyle(1.8)}>
+                <div className="flex items-center gap-2 mb-6">
+                  <PackageX className="w-5 h-5 text-muted-foreground" />
+                  <h3 className="text-lg font-bold text-foreground">Unavailable Apps</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredUnavailableApps.map((app, index) => {
+                    const Icon = app.icon;
+                    return (
+                      <Card 
+                        key={app.id}
+                        className="group relative bg-card border border-border/50 opacity-60 cursor-not-allowed animate-scale-in"
+                        style={animationStyle(1.9 + index * 0.05)}
                       >
                         <div className="relative p-4">
                           {/* Info Icon in top right */}

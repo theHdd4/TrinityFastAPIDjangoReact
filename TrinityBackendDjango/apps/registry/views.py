@@ -146,6 +146,80 @@ class AppViewSet(viewsets.ModelViewSet):
         
         return app_data
 
+    def _enrich_usecase_data(self, usecase):
+        """
+        Helper method to enrich UseCase data with modules, molecules, and atoms.
+        Similar to _enrich_app_data but works directly with UseCase objects from public schema.
+        This method should be called within a public schema context.
+        """
+        try:
+            usecase_data = {
+                'usecase_id': usecase.id,  # Use usecase_id instead of id to avoid clashing
+                'name': usecase.name or '',
+                'slug': usecase.slug or '',
+                'description': usecase.description or '',
+                'modules': usecase.modules or [],
+                'molecules': usecase.molecules or [],
+                'molecule_atoms': {},
+                'atoms_in_molecules': []
+            }
+        except Exception as e:
+            logger.error(f"Error extracting basic UseCase data: {e}")
+            return {
+                'usecase_id': getattr(usecase, 'id', 0),
+                'name': getattr(usecase, 'name', 'Unknown'),
+                'slug': getattr(usecase, 'slug', 'unknown'),
+                'description': getattr(usecase, 'description', ''),
+                'modules': [],
+                'molecules': [],
+                'molecule_atoms': {},
+                'atoms_in_molecules': []
+            }
+        
+        try:
+            from apps.trinity_v1_atoms.models import TrinityV1Atom
+            from django_tenants.utils import schema_context
+            
+            # Ensure we're in public schema context for accessing TrinityV1Atom
+            with schema_context('public'):
+                # Build molecule_atoms and atoms_in_molecules from molecule_objects
+                molecule_atoms = {}
+                atoms_in_molecules = []
+                
+                # UseCase already has prefetch_related('molecule_objects') if called correctly
+                try:
+                    for molecule in usecase.molecule_objects.all():
+                        atom_names = molecule.atoms or []
+                        if atom_names:
+                            matching_atoms = TrinityV1Atom.objects.filter(atom_id__in=atom_names)
+                            
+                            atoms_list = []
+                            for atom in matching_atoms:
+                                atom_data = {
+                                    'id': atom.atom_id,
+                                    'name': atom.name,
+                                    'description': atom.description,
+                                    'category': atom.category
+                                }
+                                atoms_list.append(atom_data)
+                                if atom.atom_id not in atoms_in_molecules:
+                                    atoms_in_molecules.append(atom.atom_id)
+                            
+                            molecule_atoms[molecule.molecule_id] = {
+                                'id': molecule.molecule_id,
+                                'name': molecule.name,
+                                'atoms': atoms_list
+                            }
+                except Exception as e:
+                    logger.warning(f"Error processing molecules for UseCase {usecase.slug}: {e}")
+                
+                usecase_data['molecule_atoms'] = molecule_atoms
+                usecase_data['atoms_in_molecules'] = atoms_in_molecules
+        except Exception as e:
+            logger.error(f"Error enriching UseCase {getattr(usecase, 'slug', 'unknown')}: {e}")
+        
+        return usecase_data
+
     def list(self, request, *args, **kwargs):
         """
         List apps accessible to this tenant with full molecule/atom data from public.usecase
@@ -243,6 +317,54 @@ class AppViewSet(viewsets.ModelViewSet):
             data = serializer.data
             data["environment"] = get_env_dict(request.user)
             return Response(data)
+
+    @action(detail=False, methods=['get'])
+    def unavailable(self, request):
+        """
+        Get apps from public.trinity_v1_apps (UseCase) that are not in tenant registry.
+        Returns apps with usecase_id (not id) to avoid clashing with registry app IDs.
+        """
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        from django_tenants.utils import schema_context
+        from apps.usecase.models import UseCase
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response([])
+        
+        logger.info(f"🔄 Fetching unavailable apps for tenant {schema_name} (user: {request.user.username})")
+        
+        # Step 1: Get all registry app usecase_ids from tenant schema
+        with switch_to_user_tenant(request.user):
+            # Get all registry apps (including disabled ones) to see what usecase_ids are already in registry
+            registry_apps = App.objects.exclude(usecase_id__isnull=True).exclude(usecase_id=0)
+            registry_usecase_ids = set(registry_apps.values_list('usecase_id', flat=True))
+            logger.info(f"📊 Found {len(registry_usecase_ids)} usecase_ids in tenant registry")
+        
+        # Step 2: Query all UseCase objects from public schema and filter out ones in registry
+        enriched_unavailable = []
+        try:
+            with schema_context('public'):
+                # Get all UseCase objects, excluding those already in tenant registry
+                unavailable_usecases = UseCase.objects.exclude(id__in=registry_usecase_ids).prefetch_related('molecule_objects').order_by('name')
+                logger.info(f"📊 Found {unavailable_usecases.count()} unavailable UseCases")
+                
+                # Step 3: Enrich each UseCase with modules, molecules, and atoms
+                for usecase in unavailable_usecases:
+                    try:
+                        usecase_data = self._enrich_usecase_data(usecase)
+                        if usecase_data and usecase_data.get('usecase_id'):
+                            enriched_unavailable.append(usecase_data)
+                    except Exception as e:
+                        logger.error(f"Error enriching UseCase {getattr(usecase, 'id', 'unknown')}: {e}")
+                        continue
+        except Exception as e:
+            logger.error(f"Error fetching unavailable apps from public schema: {e}")
+        
+        logger.info(f"✅ Returning {len(enriched_unavailable)} unavailable apps for tenant {schema_name}")
+        return Response(enriched_unavailable)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
