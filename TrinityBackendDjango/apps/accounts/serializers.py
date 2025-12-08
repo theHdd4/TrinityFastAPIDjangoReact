@@ -53,26 +53,48 @@ class UserSerializer(serializers.ModelSerializer):
         return instance
 
     def get_role(self, obj):
-        """Return the user's role if available."""
+        """Return the user's role if available, queried within tenant schema context."""
         try:
             from apps.roles.models import UserRole
+            from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
 
-            role_obj = UserRole.objects.filter(user=obj).first()
-            if role_obj:
-                return role_obj.role
+            # Get user's tenant schema
+            schema_name = get_user_tenant_schema(obj)
+            if schema_name:
+                # Query UserRole within tenant schema context
+                with switch_to_user_tenant(obj):
+                    role_obj = UserRole.objects.filter(user=obj).first()
+                    if role_obj:
+                        return role_obj.role
+            else:
+                # Fallback: query without tenant context (for backward compatibility)
+                role_obj = UserRole.objects.filter(user=obj).first()
+                if role_obj:
+                    return role_obj.role
         except Exception:
             # Roles app may not be migrated yet; ignore errors
             pass
         return None
 
     def get_allowed_apps_read(self, obj):
-        """Return the user's allowed apps if available."""
+        """Return the user's allowed apps if available, queried within tenant schema context."""
         try:
             from apps.roles.models import UserRole
+            from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
 
-            role_obj = UserRole.objects.filter(user=obj).first()
-            if role_obj:
-                return role_obj.allowed_apps
+            # Get user's tenant schema
+            schema_name = get_user_tenant_schema(obj)
+            if schema_name:
+                # Query UserRole within tenant schema context
+                with switch_to_user_tenant(obj):
+                    role_obj = UserRole.objects.filter(user=obj).first()
+                    if role_obj:
+                        return role_obj.allowed_apps
+            else:
+                # Fallback: query without tenant context (for backward compatibility)
+                role_obj = UserRole.objects.filter(user=obj).first()
+                if role_obj:
+                    return role_obj.allowed_apps
         except Exception:
             # Roles app may not be migrated yet; ignore errors
             pass

@@ -55,12 +55,8 @@ interface App {
 
 const Clients = () => {
   const { user } = useAuth();
-  const role = user?.role?.toLowerCase();
-  const hasAccess =
-    role === 'admin' ||
-    role === 'super_admin' ||
-    user?.is_staff ||
-    user?.is_superuser;
+  // Client Management: Available ONLY to is_staff or is_superuser (no UserRole check)
+  const hasAccess = user?.is_staff || user?.is_superuser;
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [apps, setApps] = useState<App[]>([]);
   const [searchTerm, setSearchTerm] = useState('');

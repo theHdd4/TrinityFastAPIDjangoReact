@@ -182,17 +182,8 @@ class LoginView(APIView):
                 sys.stdout.flush()
             
             data = UserSerializer(user).data
-            # Include user role and allowed apps if available
-            try:
-                from apps.roles.models import UserRole
-
-                role_obj = UserRole.objects.filter(user=user).first()
-                if role_obj:
-                    data["role"] = role_obj.role
-                    data["allowed_apps"] = role_obj.allowed_apps
-            except Exception:
-                # Roles app may not be migrated yet; ignore errors
-                pass
+            # UserSerializer now handles role and allowed_apps in tenant context
+            # The role and allowed_apps_read fields are already populated by the serializer
 
             data["environment"] = environment
             

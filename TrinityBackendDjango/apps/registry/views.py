@@ -382,10 +382,34 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
 
     def _can_edit(self, user):
-        # Temporarily allow all authenticated users to edit for debugging
-        if user.is_authenticated:
-            return True
+        """
+        Check if user can edit projects.
+        First checks UserRole table (within tenant schema), then falls back to is_staff.
+        """
+        if not user.is_authenticated:
+            return False
         
+        # Check UserRole table first (tenant-specific)
+        try:
+            from apps.roles.models import UserRole
+            from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+            
+            schema_name = get_user_tenant_schema(user)
+            if schema_name:
+                # Query UserRole within tenant schema context
+                with switch_to_user_tenant(user):
+                    role_obj = UserRole.objects.filter(user=user).first()
+                    if role_obj:
+                        # Admin and editor roles can edit
+                        if role_obj.role in [UserRole.ROLE_ADMIN, UserRole.ROLE_EDITOR]:
+                            return True
+                        # Viewer role cannot edit
+                        return False
+        except Exception:
+            # If UserRole query fails, fall back to is_staff check
+            pass
+        
+        # Fallback to is_staff for backward compatibility
         perms = [
             "permissions.workflow_edit",
             "permissions.laboratory_edit",
@@ -844,6 +868,34 @@ class TemplateViewSet(viewsets.ModelViewSet):
             instance.save(update_fields=["template_projects"])
 
     def _can_edit(self, user):
+        """
+        Check if user can edit templates.
+        First checks UserRole table (within tenant schema), then falls back to is_staff.
+        """
+        if not user.is_authenticated:
+            return False
+        
+        # Check UserRole table first (tenant-specific)
+        try:
+            from apps.roles.models import UserRole
+            from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+            
+            schema_name = get_user_tenant_schema(user)
+            if schema_name:
+                # Query UserRole within tenant schema context
+                with switch_to_user_tenant(user):
+                    role_obj = UserRole.objects.filter(user=user).first()
+                    if role_obj:
+                        # Admin and editor roles can edit
+                        if role_obj.role in [UserRole.ROLE_ADMIN, UserRole.ROLE_EDITOR]:
+                            return True
+                        # Viewer role cannot edit
+                        return False
+        except Exception:
+            # If UserRole query fails, fall back to is_staff check
+            pass
+        
+        # Fallback to is_staff for backward compatibility
         perms = [
             "permissions.workflow_edit",
             "permissions.laboratory_edit",
