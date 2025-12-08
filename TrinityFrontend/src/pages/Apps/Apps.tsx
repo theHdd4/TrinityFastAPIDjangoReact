@@ -782,8 +782,9 @@ const Apps = () => {
   const customApps = displayApps.filter(app => app.custom);
 
   // Transform restricted apps to display format
-  const displayRestrictedApps = (Array.isArray(restrictedApps) ? restrictedApps : [])
-    .filter(app => app && app.slug && app.slug !== 'blank') // Exclude custom apps and invalid apps
+  // Separate custom apps (blank) from non-custom apps
+  const allRestrictedApps = (Array.isArray(restrictedApps) ? restrictedApps : [])
+    .filter(app => app && app.slug) // Filter out invalid apps
     .map(app => ({
       id: app.slug || `restricted-${app.id || 'unknown'}`,
       title: app.name || 'Unknown App',
@@ -792,12 +793,16 @@ const Apps = () => {
       color: getAppColor(app.slug || ''),
       category: getAppCategory(app.slug || ''),
       featured: false,
-      custom: false,
+      custom: app.slug === 'blank',
       modules: app.modules || [],
       molecules: app.molecules || [],
       atoms_in_molecules: app.atoms_in_molecules || []
     }))
     .filter(app => app.id); // Remove any that failed transformation
+
+  // Separate custom restricted apps (for Tenant section) from non-custom (for QM section)
+  const customRestrictedApps = allRestrictedApps.filter(app => app.custom);
+  const displayRestrictedApps = allRestrictedApps.filter(app => !app.custom);
 
   const filteredRestrictedApps = displayRestrictedApps.filter(app => {
     if (!app.title || !app.description) return false;
@@ -807,9 +812,18 @@ const Apps = () => {
     return matchesSearch && matchesCategory;
   });
 
+  const filteredCustomRestrictedApps = customRestrictedApps.filter(app => {
+    if (!app.title || !app.description) return false;
+    const matchesSearch = app.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         app.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || app.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
   // Transform unavailable apps to display format
-  const displayUnavailableApps = (Array.isArray(unavailableApps) ? unavailableApps : [])
-    .filter(app => app && app.slug && app.slug !== 'blank' && app.usecase_id) // Exclude custom apps and invalid apps
+  // Separate custom apps (blank) from non-custom apps
+  const allUnavailableApps = (Array.isArray(unavailableApps) ? unavailableApps : [])
+    .filter(app => app && app.slug && app.usecase_id) // Filter out invalid apps
     .map(app => ({
       id: `usecase-${app.usecase_id}`, // Use usecase_id with prefix to avoid clashing
       usecase_id: app.usecase_id, // Store usecase_id for future reference
@@ -819,14 +833,26 @@ const Apps = () => {
       color: getAppColor(app.slug || ''),
       category: getAppCategory(app.slug || ''),
       featured: false,
-      custom: false,
+      custom: app.slug === 'blank',
       modules: app.modules || [],
       molecules: app.molecules || [],
       atoms_in_molecules: app.atoms_in_molecules || []
     }))
     .filter(app => app.id && app.usecase_id); // Remove any that failed transformation
 
+  // Separate custom unavailable apps (for Tenant section) from non-custom (for QM section)
+  const customUnavailableApps = allUnavailableApps.filter(app => app.custom);
+  const displayUnavailableApps = allUnavailableApps.filter(app => !app.custom);
+
   const filteredUnavailableApps = displayUnavailableApps.filter(app => {
+    if (!app.title || !app.description) return false;
+    const matchesSearch = app.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         app.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || app.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  const filteredCustomUnavailableApps = customUnavailableApps.filter(app => {
     if (!app.title || !app.description) return false;
     const matchesSearch = app.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          app.description.toLowerCase().includes(searchTerm.toLowerCase());
@@ -962,13 +988,14 @@ const Apps = () => {
           {/* Background section starting from Custom Applications */}
           <div className="bg-gradient-to-br from-muted/40 via-muted/30 to-muted/40 -mx-6 px-6 py-8 mt-8 pb-20">
             {/* Custom Applications */}
-            {!loading && customApps.length > 0 && (
+            {!loading && (customApps.length > 0 || filteredCustomRestrictedApps.length > 0 || filteredCustomUnavailableApps.length > 0) && (
               <div id="custom-applications-section" className="animate-fade-in scroll-mt-8" style={animationStyle(1.0)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Plus className="w-5 h-5 text-primary" />
                   <h3 className="text-lg font-bold text-foreground">{tenantName || 'Custom'} Applications</h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {/* Regular custom apps */}
                   {customApps.map((app, index) => {
                     const Icon = app.icon;
                     return (
@@ -1032,6 +1059,116 @@ const Apps = () => {
                       </Card>
                     );
                   })}
+                  {/* Custom restricted apps */}
+                  {filteredCustomRestrictedApps.map((app, index) => {
+                    const Icon = app.icon;
+                    return (
+                      <Card 
+                        key={app.id}
+                        className="group relative bg-card border border-dashed border-border/50 opacity-40 cursor-not-allowed animate-scale-in"
+                        style={animationStyle(1.1 + (customApps.length + index) * 0.05)}
+                      >
+                        <div className="relative p-4">
+                          {/* Info Icon in top right */}
+                          <div className="absolute top-4 right-4 z-10">
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    className="w-6 h-6 rounded-full bg-muted/50 hover:bg-muted flex items-center justify-center transition-colors cursor-default"
+                                  >
+                                    <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent 
+                                  side="left" 
+                                  sideOffset={8}
+                                  className="max-w-xs text-xs z-[9999]"
+                                >
+                                  <p>{app.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+
+                          <div className="flex items-start gap-3">
+                            <div className="bg-gray-500 w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md transition-transform duration-300">
+                              <Icon className="w-5 h-5 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0 pr-8 flex flex-col gap-2">
+                              <h3 className="text-sm font-semibold text-muted-foreground leading-tight">
+                                {app.title}
+                              </h3>
+                              <Button 
+                                variant="ghost"
+                                size="sm"
+                                className="w-fit h-7 px-2 text-xs text-muted-foreground -ml-2"
+                                disabled
+                              >
+                                Restricted
+                                <Lock className="w-3 h-3 ml-1" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                  {/* Custom unavailable apps */}
+                  {filteredCustomUnavailableApps.map((app, index) => {
+                    const Icon = app.icon;
+                    return (
+                      <Card 
+                        key={app.id}
+                        className="group relative bg-card border border-dashed border-border/50 opacity-60 cursor-not-allowed animate-scale-in"
+                        style={animationStyle(1.1 + (customApps.length + filteredCustomRestrictedApps.length + index) * 0.05)}
+                      >
+                        <div className="relative p-4">
+                          {/* Info Icon in top right */}
+                          <div className="absolute top-4 right-4 z-10">
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    className="w-6 h-6 rounded-full bg-muted/50 hover:bg-muted flex items-center justify-center transition-colors cursor-default"
+                                  >
+                                    <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent 
+                                  side="left" 
+                                  sideOffset={8}
+                                  className="max-w-xs text-xs z-[9999]"
+                                >
+                                  <p>{app.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+
+                          <div className="flex items-start gap-3">
+                            <div className="bg-gray-400 w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md transition-transform duration-300">
+                              <Icon className="w-5 h-5 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0 pr-8 flex flex-col gap-2">
+                              <h3 className="text-sm font-semibold text-muted-foreground leading-tight">
+                                {app.title}
+                              </h3>
+                              <Button 
+                                variant="ghost"
+                                size="sm"
+                                className="w-fit h-7 px-2 text-xs text-muted-foreground -ml-2"
+                                disabled
+                              >
+                                Not Available
+                                <Lock className="w-3 h-3 ml-1" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
                   {/* Placeholder Cards */}
                   {[
                     { id: 'placeholder-1', title: 'Data Analytics Pro', color: 'bg-indigo-600', icon: Database },
@@ -1042,7 +1179,7 @@ const Apps = () => {
                       <Card 
                         key={placeholder.id}
                         className="group relative bg-card border border-dashed border-border/50 hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in opacity-60"
-                        style={animationStyle(1.1 + (customApps.length + index) * 0.05)}
+                        style={animationStyle(1.1 + (customApps.length + filteredCustomRestrictedApps.length + filteredCustomUnavailableApps.length + index) * 0.05)}
                       >
                         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                         
@@ -1074,14 +1211,15 @@ const Apps = () => {
               </div>
             )}
 
-            {/* QM Applications */}
-            {!loading && filteredApps.length > 0 && (
+            {/* QM Applications - Merged section with QM, Restricted, and Unavailable apps */}
+            {(!loading && filteredApps.length > 0) || (!loadingRestricted && filteredRestrictedApps.length > 0) || (!loadingUnavailable && filteredUnavailableApps.length > 0) ? (
               <div id="all-applications-section" className="mt-10 mb-12 animate-fade-in scroll-mt-8" style={animationStyle(1.4)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Sparkles className="w-5 h-5 text-primary" />
                   <h3 className="text-lg font-bold text-foreground">QM Applications</h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {/* QM Applications */}
                   {filteredApps.map((app, index) => {
                     const Icon = app.icon;
                     return (
@@ -1143,25 +1281,14 @@ const Apps = () => {
                       </Card>
                     );
                   })}
-                </div>
-              </div>
-            )}
-
-            {/* Restricted Applications */}
-            {!loadingRestricted && filteredRestrictedApps.length > 0 && (
-              <div id="restricted-applications-section" className="mt-10 mb-12 animate-fade-in scroll-mt-8" style={animationStyle(1.6)}>
-                <div className="flex items-center gap-2 mb-6">
-                  <Lock className="w-5 h-5 text-muted-foreground" />
-                  <h3 className="text-lg font-bold text-foreground">Restricted Applications</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {/* Restricted Applications */}
                   {filteredRestrictedApps.map((app, index) => {
                     const Icon = app.icon;
                     return (
                       <Card 
                         key={app.id}
-                        className="group relative bg-card border border-border/50 opacity-60 cursor-not-allowed animate-scale-in"
-                        style={animationStyle(1.7 + index * 0.05)}
+                        className="group relative bg-card border border-border/50 opacity-40 cursor-not-allowed animate-scale-in"
+                        style={animationStyle(1.5 + (filteredApps.length + index) * 0.05)}
                       >
                         <div className="relative p-4">
                           {/* Info Icon in top right */}
@@ -1187,20 +1314,20 @@ const Apps = () => {
                           </div>
 
                           <div className="flex items-start gap-3">
-                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md transition-transform duration-300`}>
+                            <div className="bg-gray-500 w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md transition-transform duration-300">
                               <Icon className="w-5 h-5 text-white" />
                             </div>
                             <div className="flex-1 min-w-0 pr-8 flex flex-col gap-2">
-                              <h3 className="text-sm font-semibold text-foreground leading-tight">
+                              <h3 className="text-sm font-semibold text-muted-foreground leading-tight">
                                 {app.title}
                               </h3>
                               <Button 
                                 variant="ghost"
                                 size="sm"
-                                className="w-fit h-7 px-2 text-xs -ml-2"
+                                className="w-fit h-7 px-2 text-xs text-muted-foreground -ml-2"
                                 disabled
                               >
-                                Not Available
+                                Restricted
                                 <Lock className="w-3 h-3 ml-1" />
                               </Button>
                             </div>
@@ -1209,25 +1336,14 @@ const Apps = () => {
                       </Card>
                     );
                   })}
-                </div>
-              </div>
-            )}
-
-            {/* Unavailable Applications */}
-            {!loadingUnavailable && filteredUnavailableApps.length > 0 && (
-              <div id="unavailable-applications-section" className="mt-10 mb-12 animate-fade-in scroll-mt-8" style={animationStyle(1.8)}>
-                <div className="flex items-center gap-2 mb-6">
-                  <PackageX className="w-5 h-5 text-muted-foreground" />
-                  <h3 className="text-lg font-bold text-foreground">Unavailable Apps</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {/* Unavailable Applications */}
                   {filteredUnavailableApps.map((app, index) => {
                     const Icon = app.icon;
                     return (
                       <Card 
                         key={app.id}
                         className="group relative bg-card border border-border/50 opacity-60 cursor-not-allowed animate-scale-in"
-                        style={animationStyle(1.9 + index * 0.05)}
+                        style={animationStyle(1.5 + (filteredApps.length + filteredRestrictedApps.length + index) * 0.05)}
                       >
                         <div className="relative p-4">
                           {/* Info Icon in top right */}
@@ -1253,17 +1369,17 @@ const Apps = () => {
                           </div>
 
                           <div className="flex items-start gap-3">
-                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md transition-transform duration-300`}>
+                            <div className="bg-gray-400 w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md transition-transform duration-300">
                               <Icon className="w-5 h-5 text-white" />
                             </div>
                             <div className="flex-1 min-w-0 pr-8 flex flex-col gap-2">
-                              <h3 className="text-sm font-semibold text-foreground leading-tight">
+                              <h3 className="text-sm font-semibold text-muted-foreground leading-tight">
                                 {app.title}
                               </h3>
                               <Button 
                                 variant="ghost"
                                 size="sm"
-                                className="w-fit h-7 px-2 text-xs -ml-2"
+                                className="w-fit h-7 px-2 text-xs text-muted-foreground -ml-2"
                                 disabled
                               >
                                 Not Available
@@ -1277,11 +1393,11 @@ const Apps = () => {
                   })}
                 </div>
               </div>
-            )}
+            ) : null}
 
 
             {/* No Results */}
-            {!loading && filteredApps.length === 0 && (
+            {!loading && !loadingRestricted && !loadingUnavailable && filteredApps.length === 0 && filteredRestrictedApps.length === 0 && filteredUnavailableApps.length === 0 && (
               <div className="text-center py-20 animate-fade-in">
                 <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-secondary/50 flex items-center justify-center">
                   <Search className="w-10 h-10 text-muted-foreground" />
