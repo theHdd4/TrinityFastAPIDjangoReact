@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { EvaluateModelsFeatureComponentProps } from './types';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 const DEFAULT_CHART_HEIGHT = {
   full: 400,
@@ -12,6 +13,7 @@ const EvaluateModelsFeatureChart: React.FC<EvaluateModelsFeatureComponentProps> 
   variant = 'full' 
 }) => {
   const { graphState, graphContext } = metadata;
+  const isMobile = useIsMobile();
 
   // Extract chart data and configuration from the metadata
   const chartData = useMemo(() => {
@@ -91,8 +93,9 @@ const EvaluateModelsFeatureChart: React.FC<EvaluateModelsFeatureComponentProps> 
       showDataLabels: chartConfig?.showDataLabels !== undefined ? chartConfig.showDataLabels : false,
       theme: chartConfig?.theme || 'default',
       sortOrder: chartConfig?.sortOrder || null,
+      isMobile: isMobile,
     };
-  }, [chartType, chartData, metadata.graphTitle, variant, graphState?.graphType, graphContext?.chartConfig]);
+  }, [chartType, chartData, metadata.graphTitle, variant, graphState?.graphType, graphContext?.chartConfig, isMobile]);
 
   return (
     <div 

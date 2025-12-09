@@ -98,10 +98,10 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
           setInteractionDone(true);
         }
       }
-    } catch {
+    } catch (error) {
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: 'Sorry, I could not reach the AI service.',
+        content: `Sorry, I could not process your request: ${(error as Error).message || 'Unknown error'}`,
         sender: 'ai',
         timestamp: new Date()
       };

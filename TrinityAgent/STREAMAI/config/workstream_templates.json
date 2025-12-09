@@ -1,0 +1,31 @@
+{
+  "workstream_lab": {
+    "version": "v1",
+    "atoms": [
+      {
+        "atom_id": "analyze_request",
+        "endpoint": "/api/stream/analyze",
+        "purpose": "Analyze incoming request and extract entities",
+        "idempotency": "pure",
+        "version": "v1",
+        "depends_on": []
+      },
+      {
+        "atom_id": "plan_dag",
+        "endpoint": "/api/stream/plan",
+        "purpose": "Plan downstream atoms based on extracted entities",
+        "idempotency": "pure",
+        "version": "v1",
+        "depends_on": ["analyze_request"]
+      },
+      {
+        "atom_id": "execute_plan",
+        "endpoint": "/api/stream/execute",
+        "purpose": "Execute planned atoms in laboratory mode",
+        "idempotency": "effectful",
+        "version": "v1",
+        "depends_on": ["plan_dag"]
+      }
+    ]
+  }
+}

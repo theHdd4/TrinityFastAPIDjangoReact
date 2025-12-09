@@ -19,6 +19,61 @@ router = APIRouter(prefix="/insights", tags=["AI Insights"])
 
 # 🔧 ENHANCED: Temporary storage for insights when cards aren't available yet (React loops)
 _pending_insights: Dict[str, Dict[str, Any]] = {}  # atom_id -> {insight, client_name, app_name, project_name, timestamp}
+_pending_retry_worker_started = False
+
+
+def _ensure_pending_retry_worker(interval_seconds: float = 30.0) -> None:
+    """Start a background worker that replays pending insights when cards appear."""
+
+    global _pending_retry_worker_started
+
+    if _pending_retry_worker_started:
+        return
+
+    _pending_retry_worker_started = True
+
+    import threading
+
+    def worker() -> None:
+        logger.info("🧠 Starting pending insight retry worker")
+
+        while True:
+            try:
+                time.sleep(interval_seconds)
+
+                if not _pending_insights:
+                    continue
+
+                # Copy keys to avoid runtime mutation while iterating
+                pending_items = list(_pending_insights.items())
+
+                for atom_id, pending in pending_items:
+                    try:
+                        logger.info(
+                            "🔁 Retrying pending insight for atomId: %s (age: %.1fs)",
+                            atom_id,
+                            time.time() - pending.get("timestamp", time.time()),
+                        )
+
+                        update_card_textbox_background(
+                            atom_id=atom_id,
+                            insight=pending.get("insight", ""),
+                            client_name=pending.get("client_name"),
+                            app_name=pending.get("app_name"),
+                            project_name=pending.get("project_name"),
+                            max_retries=3,
+                            retry_delay=2.0,
+                        )
+                    except Exception as retry_error:  # noqa: BLE001
+                        logger.warning(
+                            "⚠️ Retry worker failed for atomId %s: %s",
+                            atom_id,
+                            retry_error,
+                        )
+            except Exception as e:  # noqa: BLE001
+                logger.error("❌ Pending insight retry worker encountered an error: %s", e, exc_info=True)
+
+    threading.Thread(target=worker, daemon=True).start()
 
 # Import enhanced insight analysis module
 try:
@@ -1029,6 +1084,7 @@ def update_card_textbox_background(
                         logger.error(f"   Client: {client_name}, App: {app_name}, Project: {project_name}")
                         # 🔧 FINAL FALLBACK: Store insight for later retrieval when cards become available
                         logger.warning(f"⚠️ Insight generated but cards array is empty - storing for later - atomId: {atom_id}")
+                        _ensure_pending_retry_worker()
                         _pending_insights[atom_id] = {
                             "insight": insight,
                             "client_name": client_name,
@@ -1103,6 +1159,7 @@ def update_card_textbox_background(
             logger.error(f"❌ Could not find card for atomId: {atom_id} after all retry attempts")
             # 🔧 ENHANCED: Store insight for delayed retry if card not found
             logger.warning(f"💾 Storing insight for delayed retry - atomId: {atom_id}")
+            _ensure_pending_retry_worker()
             _pending_insights[atom_id] = {
                 "insight": insight,
                 "client_name": client_name,

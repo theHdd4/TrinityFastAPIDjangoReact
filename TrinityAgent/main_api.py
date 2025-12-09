@@ -526,7 +526,7 @@ try:
         # Import like other agents: from main_app import ...
         # We're now IN TrinityAgent, so we can import directly
         print("Attempting import: from main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, get_dataframe_operations_router...")
-        from main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, get_dataframe_operations_router, get_data_upload_validate_router, get_fetch_atom_router, initialize_trinity_agent
+        from main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, get_dataframe_operations_router, get_data_upload_validate_router, get_fetch_atom_router, get_metric_router, initialize_trinity_agent
         print("✅ Successfully imported TrinityAgent.main_app")
         
         # Initialize TrinityAgent (this registers all agents)
@@ -660,6 +660,9 @@ try:
         print("Getting fetch_atom router from TrinityAgent...")
         fetch_atom_router = get_fetch_atom_router()
         
+        print("Getting metric router from TrinityAgent...")
+        metric_router = get_metric_router()
+        
         if chartmaker_router:
             print("✅✅✅ CHARTMAKER ROUTER RETRIEVED FROM TRINITY AGENT ✅✅✅")
             print(f"✅ ChartMaker router type: {type(chartmaker_router)}")
@@ -687,7 +690,7 @@ try:
             if str(TRINITY_AGENT_PATH) not in sys.path:
                 sys.path.insert(0, str(TRINITY_AGENT_PATH))
                 print(f"✅ Added TrinityAgent to sys.path for fallback: {TRINITY_AGENT_PATH}")
-            from main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, get_dataframe_operations_router, get_data_upload_validate_router, get_fetch_atom_router, initialize_trinity_agent
+            from main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, get_dataframe_operations_router, get_data_upload_validate_router, get_fetch_atom_router, get_metric_router, initialize_trinity_agent
             print("✅ Fallback import successful")
             init_results = initialize_trinity_agent()
             concat_router = get_concat_router()
@@ -698,6 +701,7 @@ try:
             dataframe_operations_router = get_dataframe_operations_router()
             data_upload_validate_router = get_data_upload_validate_router()
             fetch_atom_router = get_fetch_atom_router()
+            metric_router = get_metric_router()
             if concat_router:
                 print("✅✅✅ CONCAT ROUTER RETRIEVED VIA FALLBACK ✅✅✅")
             if merge_router:
@@ -743,6 +747,7 @@ except ImportError as e:
     dataframe_operations_router = None
     data_upload_validate_router = None
     fetch_atom_router = None
+    metric_router = None
 except Exception as e:
     error_msg = f"❌❌❌ ERROR LOADING CONCAT/MERGE/CREATETRANSFORM AGENTS VIA REGISTRY ❌❌❌\nException: {e}"
     print("=" * 80)
@@ -1703,6 +1708,67 @@ else:
             logger.error("❌ FetchAtom router still None after final retry")
     except Exception as e:
         logger.error(f"❌ Final retry to get fetch_atom router failed: {e}")
+
+# Include standardized metric router (from TrinityAgent via agent registry)
+# Ensure metric_router is defined (it should be initialized above, but handle case where it's not)
+if 'metric_router' not in globals():
+    metric_router = None
+
+# Router should already be initialized above, but ensure it's set if not
+if metric_router is None:
+    logger.info("=" * 80)
+    logger.info("GETTING METRIC ROUTER FROM TRINITY AGENT")
+    logger.info("=" * 80)
+    try:
+        metric_router = get_metric_router()
+    except NameError:
+        logger.warning("⚠️ get_metric_router not available")
+        metric_router = None
+    except Exception as e:
+        logger.error(f"❌ Failed to get metric router: {e}", exc_info=True)
+        metric_router = None
+
+if metric_router is not None:
+    try:
+        route_count = len(metric_router.routes) if metric_router else 0
+        logger.info(f"Metric router has {route_count} routes before inclusion")
+
+        if route_count == 0:
+            logger.error("❌❌❌ METRIC ROUTER HAS NO ROUTES - NOT INCLUDING ❌❌❌")
+            logger.error("The route decorators may not have executed during import")
+        else:
+            api_router.include_router(metric_router, tags=["metric"])
+            logger.info("✅ Metric router included in API")
+            try:
+                route_count_after = len(metric_router.routes)
+                logger.info(f"✅ Metric router has {route_count_after} routes after inclusion")
+                for route in metric_router.routes:
+                    if hasattr(route, 'path') and hasattr(route.path, 'methods'):
+                        logger.info(f"  - {list(route.methods)} {route.path}")
+                    elif hasattr(route, 'path'):
+                        logger.info(f"  - {route.path}")
+            except Exception as e:
+                logger.warning(f"Could not log metric routes: {e}")
+    except Exception as e:
+        logger.error(f"❌ Failed to include metric router: {e}", exc_info=True)
+else:
+    logger.error("❌ Metric router is None - metric endpoint will not work")
+    logger.error("This means the import from TrinityAgent.main_app failed or get_metric_router returned None")
+    # Try one more time to get the router
+    try:
+        logger.info("Attempting final retry to get metric router...")
+        metric_router = get_metric_router()
+        if metric_router is not None:
+            route_count = len(metric_router.routes) if metric_router else 0
+            if route_count > 0:
+                api_router.include_router(metric_router, tags=["metric"])
+                logger.info("✅ Metric router retrieved and included on final retry")
+            else:
+                logger.warning("⚠️ Metric router has no routes, not including")
+        else:
+            logger.error("❌ Metric router still None after final retry")
+    except Exception as e:
+        logger.error(f"❌ Final retry to get metric router failed: {e}")
 
 # Use standardized data_upload_validate_router as df_validate_router (for backward compatibility)
 if df_validate_router is None and 'data_upload_validate_router' in globals() and data_upload_validate_router is not None:

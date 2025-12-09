@@ -8,6 +8,7 @@ import { chartMakerHandler } from './chartMakerHandler';
 import { exploreHandler } from './exploreHandler';
 import { correlationHandler } from './correlationHandler';
 import { dfValidateHandler } from './dfValidateHandler';
+import { metricHandler } from './metricHandler';
 
 // Registry of all atom handlers
 export const atomHandlers: Record<string, AtomHandler> = {
@@ -21,6 +22,8 @@ export const atomHandlers: Record<string, AtomHandler> = {
   'explore': exploreHandler,
   'correlation': correlationHandler,
   'data-upload-validate': dfValidateHandler,
+  'metric': metricHandler,
+  'metrics': metricHandler, // Support both singular and plural
 };
 
 // Helper function to check if an atom type has a specific handler
@@ -30,7 +33,16 @@ export const hasAtomHandler = (atomType: string): boolean => {
 
 // Helper function to get handler for an atom type
 export const getAtomHandler = (atomType: string): AtomHandler | null => {
-  return atomHandlers[atomType] || null;
+  console.log('🔍 getAtomHandler called with atomType:', atomType);
+  console.log('🔍 Available handlers:', Object.keys(atomHandlers));
+  console.log('🔍 Looking up:', atomType, 'in atomHandlers');
+  const handler = atomHandlers[atomType] || null;
+  console.log('🔍 Handler found:', !!handler);
+  if (handler) {
+    console.log('🔍 Handler has handleSuccess:', typeof handler.handleSuccess === 'function');
+    console.log('🔍 Handler has handleFailure:', typeof handler.handleFailure === 'function');
+  }
+  return handler;
 };
 
 // Helper function to check if response has data for specific atom type
@@ -57,6 +69,21 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
         return !!(data.dataframe_config);
       case 'data-upload-validate':
         return !!(data.validate_json);
+      case 'metric':
+      case 'metrics':
+        const hasMetricData = !!(data.operation_type || data.operation_config || data.metrics_json || 
+                                 data.data?.operation_type || data.data?.operation_config || data.data?.metrics_json ||
+                                 data.data?.data?.operation_type || data.data?.data?.operation_config);
+        console.log('🔍 hasAtomData check for metric:', {
+          'data.operation_type': !!data.operation_type,
+          'data.operation_config': !!data.operation_config,
+          'data.metrics_json': !!data.metrics_json,
+          'data.data?.operation_type': !!data.data?.operation_type,
+          'data.data?.operation_config': !!data.data?.operation_config,
+          'data.data?.data?.operation_type': !!data.data?.data?.operation_type,
+          result: hasMetricData
+        });
+        return hasMetricData;
       default:
         return false;
     }
@@ -83,6 +110,9 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
       return !!(data.dataframe_config);
     case 'data-upload-validate':
       return !!(data.validate_json);
+    case 'metric':
+    case 'metrics':
+      return !!(data.operation_type || data.operation_config || data.metrics_json);
     default:
       return false;
   }
@@ -98,5 +128,7 @@ export {
   chartMakerHandler, 
   exploreHandler,
   correlationHandler,
-  dfValidateHandler 
+  dfValidateHandler,
+  metricHandler 
 };
+export { detectCommand, getAvailableCommands, type CommandResult, type CommandContext } from './commandHandler';

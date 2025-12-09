@@ -52,6 +52,7 @@ class FetchAtomPromptBuilder:
             "Data Upload & Validate - Upload and validate data files",
             "Merge - Join datasets together",
             "Explore - Browse and analyze data",
+            "Metric - Perform metric operations (variables, column operations, data source selection)",
             "Please clarify what you'd like to do",
             "Or say 'show me all atoms' to see complete list"
         ],
@@ -61,6 +62,11 @@ class FetchAtomPromptBuilder:
                 "atom_name": "ChartMaker",
                 "description": "Create charts and visualizations",
                 "keywords": ["chart", "graph", "visualization", "plot"]
+            },
+            {
+                "atom_name": "Metric",
+                "description": "Perform metric operations including variable creation, column operations, and data source selection",
+                "keywords": ["metric", "variable", "create column", "compute variable", "assign variable", "column operation", "filter rows", "create new column", "transform column", "data source", "select file"]
             }
         ],
         "next_steps": [
@@ -79,12 +85,13 @@ class FetchAtomPromptBuilder:
         "MEMORY UTILIZATION: Suggest atoms user has successfully used before",
         "PATTERN RECOGNITION: Identify user's preferred atoms and workflows",
         "ATOM MATCHING: Match user queries to appropriate atoms based on keywords, descriptions, and context",
+        "METRIC ATOM ROUTING: When user mentions 'metric', 'variable', 'create column', 'compute variable', 'assign variable', 'column operation', 'filter rows', 'create new column', 'transform column', 'data source', or 'select file', route to Metric atom (atom_id: 'metric')",
         "CONFIDENCE SCORING: Provide confidence scores for atom recommendations",
         "MULTIPLE SUGGESTIONS: When query is ambiguous, suggest multiple relevant atoms with confidence scores",
         "VALIDATION: Always ensure suggested atoms exist in the AVAILABLE ATOMS section",
         "REQUIRED JSON KEYS: success, atom_name (when success true), atom_id (when success true), and reasoning must ALL be present so the UI always has a friendly response",
-        "ATOM ID FORMAT: Use snake_case for atom_id (e.g., 'chart_maker', 'data_upload_validate', 'merge')",
-        "ATOM NAME FORMAT: Use proper case for atom_name (e.g., 'ChartMaker', 'Data Upload & Validate', 'Merge')"
+        "ATOM ID FORMAT: Use snake_case for atom_id (e.g., 'chart_maker', 'data_upload_validate', 'merge', 'metric')",
+        "ATOM NAME FORMAT: Use proper case for atom_name (e.g., 'ChartMaker', 'Data Upload & Validate', 'Merge', 'Metric')"
     ]
     
     @staticmethod

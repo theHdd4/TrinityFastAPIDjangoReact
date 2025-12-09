@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon, ArrowUp, ArrowDown, FilterIcon, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -23,6 +24,7 @@ import Table from '@/templates/tables/table';
 import { MultiSelectDropdown } from '@/templates/dropdown';
 import { CHART_MAKER_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { Input } from '@/components/ui/input';
 
 // FilterMenu component moved outside to prevent recreation on every render
 const FilterMenu = ({ 
@@ -91,6 +93,7 @@ interface ChartMakerCanvasProps {
 
 const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, data, onChartTypeChange, onChartFilterChange, onTraceFilterChange, isFullWidthMode = false }) => {
   const typedData = data as ChartDataWithUniqueValues | null;
+  const isMobile = useIsMobile();
   
   // Get dataSource and settings from store
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
@@ -142,6 +145,26 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   
   // Container ref for responsive layout
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Handle note input change - save directly to chart config
+  const handleNoteChange = (chartId: string, value: string) => {
+    const chart = charts.find(c => c.id === chartId);
+    if (chart) {
+      const updatedCharts = charts.map(c =>
+        c.id === chartId ? { ...c, note: value } : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    }
+  };
+
+  // Handle note input keydown - save and blur on Enter
+  const handleNoteKeyDown = (chartId: string, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Blur the input to trigger save and remove focus
+      e.currentTarget.blur();
+    }
+  };
 
   // Fetch cardinality data when data is available
   useEffect(() => {
@@ -325,6 +348,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     };
   }, []);
 
+
   // Debounce utility
   const debounce = (fn: () => void, delay: number, chartId: string) => {
     if (debounceTimers.current[chartId]) clearTimeout(debounceTimers.current[chartId] as number);
@@ -433,6 +457,65 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     return colorSchemes[index % colorSchemes.length];
   };
 
+  // Calculate optimal chart height based on visible elements for better space utilization
+  const calculateOptimalChartHeight = (
+    chart: ChartMakerConfig | undefined,
+    isCompact: boolean,
+    hasFilters: boolean,
+    hasNote: boolean
+  ): number => {
+    // Safety check
+    if (!chart) return isCompact ? 384 : 512;
+    
+    // Base height for graph visualization (optimized for content)
+    let baseHeight = isCompact ? 300 : 420;
+    
+    // Adjustments based on visible elements to maintain optimal graph-to-content ratio
+    
+    // 1. Filter section: Reduce graph height to accommodate filter UI
+    if (hasFilters) {
+      const filterCount = Object.keys(chart.filters || {}).length;
+      // Don't reduce too much - maintain minimum graph visibility
+      const reduction = Math.min(40, filterCount * 8);
+      baseHeight = Math.max(280, baseHeight - reduction);
+    }
+    
+    // 2. Note section: Minor reduction for note display
+    if (hasNote && chart.showNote && chart.note) {
+      baseHeight = Math.max(280, baseHeight - 25);
+    }
+    
+    // 3. Legend: Reclaim space if hidden
+    const legendShown = chart.chartConfig?.showLegend !== false;
+    if (!legendShown) {
+      baseHeight += 20;  // No legend = more graph space
+    }
+    
+    // 4. Axis labels: Reclaim space if hidden
+    const xAxisShown = chart.chartConfig?.showXAxisLabels !== false;
+    const yAxisShown = chart.chartConfig?.showYAxisLabels !== false;
+    
+    if (!xAxisShown) {
+      baseHeight += 30;  // No X-axis label = significant space reclaimed
+    }
+    if (!yAxisShown) {
+      baseHeight += 20;  // No Y-axis label = space reclaimed
+    }
+    
+    // 5. Data labels: Need extra vertical space
+    if (chart.chartConfig?.showDataLabels === true) {
+      baseHeight += 20;  // Extra space for labels above elements
+    }
+    
+    // 6. Chart type optimization
+    if (chart.type === 'pie') {
+      baseHeight = Math.min(baseHeight, 380);  // Pie charts are more compact
+    }
+    
+    // Clamp to reasonable bounds (prevent extreme sizes)
+    return Math.max(280, Math.min(550, baseHeight));
+  };
+
   const chartConfig = {
     data: {
       label: "Data",
@@ -445,15 +528,41 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     e.preventDefault();
     e.stopPropagation();
 
-    const position = {
-      x: e.clientX,
-      y: e.clientY
-    };
+    // Viewport bounds checking to keep ChatBubble on screen
+    const padding = 8;
+    const bubbleWidth = isMobile ? 180 : 200;   // Approximate ChatBubble width
+    const bubbleHeight = isMobile ? 280 : 320;  // Approximate ChatBubble height
+    
+    let x = e.clientX;
+    let y = e.clientY;
+    
+    // The ChatBubble uses transform: translate(-50%, 0) to center horizontally
+    // So we need to check if half the bubble extends beyond viewport edges
+    
+    // Check right edge (accounting for center transform)
+    if (x + bubbleWidth / 2 > window.innerWidth - padding) {
+      x = window.innerWidth - bubbleWidth / 2 - padding;
+    }
+    
+    // Check left edge (accounting for center transform)
+    if (x - bubbleWidth / 2 < padding) {
+      x = bubbleWidth / 2 + padding;
+    }
+    
+    // Check bottom edge
+    if (y + bubbleHeight > window.innerHeight - padding) {
+      y = Math.max(padding, window.innerHeight - bubbleHeight - padding);
+    }
+    
+    // Check top edge
+    if (y < padding) {
+      y = padding;
+    }
 
     setChatBubble({
       visible: true,
       chartId,
-      anchor: position
+      anchor: { x, y }
     });
     setChatBubbleShouldRender(true);
     setOverlayActive(false);
@@ -553,6 +662,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
           legendField: chart.legendField,
           isAdvancedMode: chart.isAdvancedMode,
           traces: chart.traces ? cloneDeep(chart.traces) : undefined,
+          note: chart.note, // Include note in exhibition metadata (for future use)
         };
 
         const chartContextSnapshot: ChartMakerExhibitionSelectionContext = {
@@ -685,10 +795,19 @@ const renderChart = (
       }
     : { dataKey: chart.yAxis };
   const key = chartKey || chart.lastUpdateTime || chart.id;
-  // Ensure charts occupy ample space within their cards
-  // Use responsive defaults when no explicit height is provided
-  const chartHeightClass = heightClass || (isCompact ? 'h-96' : 'h-[32rem]');
-  const chartHeightValue = heightClass ? undefined : (isCompact ? 384 : 512); // px fallback for reliability
+  
+  // Calculate optimal height based on chart content for better space utilization
+  const hasFilters = Object.keys(chart.filters || {}).length > 0 || 
+                     (chart.traces && chart.traces.some(t => t.filters && Object.keys(t.filters).length > 0));
+  const hasNote = chart.showNote && chart.note;
+  
+  // Use dynamic height calculation for better adaptive behavior
+  const chartHeightValue = heightClass 
+    ? undefined 
+    : calculateOptimalChartHeight(chart, isCompact, hasFilters, hasNote);
+  
+  // Use inline style for dynamic heights (more precise than Tailwind classes)
+  const chartHeightClass = heightClass;
 
   if (
     !chart.chartRendered ||
@@ -698,8 +817,8 @@ const renderChart = (
   ) {
     return (
       <div
-        className={`flex items-center justify-center ${chartHeightClass} text-muted-foreground`}
-        style={{ minHeight: chartHeightValue }}
+        className={`flex items-center justify-center ${chartHeightClass || ''} text-muted-foreground`}
+        style={{ minHeight: chartHeightValue, height: chartHeightValue }}
       >
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
@@ -850,7 +969,11 @@ const renderChart = (
   } as const;
 
   return (
-    <div className={`w-full ${chartHeightClass}`} style={{ minHeight: chartHeightValue }}>
+    <div 
+      className={`w-full ${chartHeightClass || ''}`} 
+      style={{ minHeight: chartHeightValue, height: chartHeightValue, cursor: 'context-menu' }}
+      onContextMenu={(e) => handleContextMenu(e, chart.id)}
+    >
       <RechartsChartRenderer {...rendererProps} />
     </div>
   );
@@ -1128,7 +1251,7 @@ const renderChart = (
         <div
           className={`grid gap-6 mt-8 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out`}
           style={{
-            gridTemplateRows: layoutConfig.rows > 1 ? `repeat(${layoutConfig.rows}, 1fr)` : '1fr'
+            gridTemplateRows: layoutConfig.layout === 'horizontal' ? '1fr' : 'auto'
           }}
         >
           {charts.map((chart, index) => {
@@ -1523,12 +1646,22 @@ const renderChart = (
                       })()}
                      
                     <CardContent 
-                      className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-1'}`}
+                      className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-1'} flex flex-col`}
                       onClick={(e) => e.stopPropagation()}
                     >
-                       <div className="overflow-hidden">
+                       <div className="overflow-hidden flex-shrink-0">
                          {renderChart(chart, index)}
                        </div>
+                       {chart.showNote && (
+                         <Input
+                           placeholder="Add note"
+                           value={chart.note || ''}
+                           onChange={(e) => handleNoteChange(chart.id, e.target.value)}
+                           onKeyDown={(e) => handleNoteKeyDown(chart.id, e)}
+                           className="mt-2 w-full text-sm flex-shrink-0"
+                           onClick={(e) => e.stopPropagation()}
+                         />
+                       )}
                      </CardContent>
                    </Card>
             );
