@@ -1505,6 +1505,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     setSheetChangeLoading(true);
     try {
       const query = new URLSearchParams({ object_name: frame.object_name }).toString();
+      // Skip workbook_metadata for Arrow files - they don't have workbook metadata
+      if (frame.object_name.toLowerCase().endsWith('.arrow')) {
+        throw new Error('Arrow files do not have workbook metadata');
+      }
+      
       const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
         credentials: 'include',
       });
@@ -1770,17 +1775,22 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 // Check workbook metadata
                 try {
                   const query = new URLSearchParams({ object_name: f.object_name }).toString();
-                  const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
-                    credentials: 'include',
-                  });
-                  if (res.ok) {
-                    const metaData = await res.json();
-                    const sheetNames = Array.isArray(metaData.sheet_names) ? metaData.sheet_names : [];
-                    metadataChecks[f.object_name] = Boolean(
-                      metaData.has_multiple_sheets === true || sheetNames.length > 1
-                    );
+                  // Skip workbook_metadata for Arrow files - they don't have workbook metadata
+                  if (!f.object_name.toLowerCase().endsWith('.arrow')) {
+                    const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
+                      credentials: 'include',
+                    });
+                    if (res.ok) {
+                      const metaData = await res.json();
+                      const sheetNames = Array.isArray(metaData.sheet_names) ? metaData.sheet_names : [];
+                      metadataChecks[f.object_name] = Boolean(
+                        metaData.has_multiple_sheets === true || sheetNames.length > 1
+                      );
+                    } else {
+                      metadataChecks[f.object_name] = false;
+                    }
                   } else {
-                    metadataChecks[f.object_name] = false;
+                    metadataChecks[f.object_name] = false; // Arrow files don't have multiple sheets
                   }
                 } catch {
                   metadataChecks[f.object_name] = false;

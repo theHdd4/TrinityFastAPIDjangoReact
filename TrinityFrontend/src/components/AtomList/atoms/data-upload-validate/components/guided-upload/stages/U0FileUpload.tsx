@@ -34,6 +34,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
     file_name: string; 
     workbook_path?: string | null;
     upload_session_id?: string;
+    sheetNameMap?: Record<string, string>;
   } | null>(null);
   const { toast } = useToast();
   const { addUploadedFiles } = flow;
@@ -79,96 +80,31 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
   const finalizeSave = async (meta: { file_path: string; file_name: string }) => {
     setIsUploading(true);
     try {
-      const form = new FormData();
-      form.append('validator_atom_id', 'panel-upload');
-      form.append('file_paths', JSON.stringify([meta.file_path]));
+      // CRITICAL CHANGE: Do NOT call /save_dataframes here!
+      // Files are uploaded to tmp/ and will be processed and saved in U2 stage
+      // We only store the temp path here for use in U1 and U2 stages
+      
       const fileKey = deriveFileKey(meta.file_name);
-      form.append('file_keys', JSON.stringify([fileKey]));
-      form.append('overwrite', 'false');
-      const workbookPathsPayload =
-        tempUploadMeta?.workbook_path ? [tempUploadMeta.workbook_path] : [];
-      const sheetMetadataPayload =
-        tempUploadMeta?.workbook_path
-          ? [
-              {
-                sheet_names: sheetOptions.length ? sheetOptions : selectedSheets.length > 0 ? selectedSheets : [],
-                selected_sheet: selectedSheets.length > 0 ? selectedSheets[0] : sheetOptions[0] || '',
-                original_filename: pendingFile?.name || tempUploadMeta.file_name || '',
-              },
-            ]
-          : [];
-      if (workbookPathsPayload.length) {
-        form.append('workbook_paths', JSON.stringify(workbookPathsPayload));
-      }
-      if (sheetMetadataPayload.length) {
-        form.append('sheet_metadata', JSON.stringify(sheetMetadataPayload));
-      }
-      appendEnvFields(form);
-      const res = await fetch(`${VALIDATE_API}/save_dataframes`, {
-        method: 'POST',
-        body: form,
-        credentials: 'include'
-      });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        throw new Error(txt || 'Failed to save dataframe');
-      }
-      const data = await res.json();
+      const tempPath = meta.file_path; // This is the tmp/ path from /upload-file
       
-      // Construct the actual object_name using prefix + fileKey + .arrow extension (same as SavedDataFramesPanel)
-      // First, get the prefix from the API
-      const projectContext = getActiveProjectContext();
-      let prefix = '';
+      console.log('[U0FileUpload] Storing temp file path (will be processed in U2):', tempPath);
       
-      if (projectContext) {
-        try {
-          const queryParams = new URLSearchParams({
-            client_name: projectContext.client_name || '',
-            app_name: projectContext.app_name || '',
-            project_name: projectContext.project_name || '',
-          }).toString();
-          
-          const prefixRes = await fetch(
-            `${VALIDATE_API}/get_object_prefix?${queryParams}`,
-            { credentials: 'include' }
-          );
-          
-          if (prefixRes.ok) {
-            const prefixData = await prefixRes.json();
-            prefix = prefixData.prefix || '';
-          }
-        } catch (err) {
-          console.warn('Failed to get prefix', err);
-        }
+      // Validate temp path exists
+      if (!tempPath || !tempPath.includes('tmp/')) {
+        console.warn('[U0FileUpload] Warning: File path does not contain tmp/. Path:', tempPath);
       }
       
-      // Construct object_name: prefix + fileKey + .arrow
-      const expectedObjectName = prefix ? `${prefix}${fileKey}.arrow` : `${fileKey}.arrow`;
-      
-      // Show success toast
+      // Show success toast (file uploaded, but not yet processed)
       toast({ 
-        title: 'File uploaded successfully', 
-        description: `${meta.file_name} has been saved. You can continue with priming steps or cancel - the file is already saved.`,
+        title: 'File uploaded', 
+        description: `${meta.file_name} is ready for processing. Continue to next steps to process the file.`,
       });
       
-      // Trigger a refresh of SavedDataFramesPanel by dispatching a custom event
-      // This ensures the file appears immediately in the panel, even if user cancels
-      window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-        detail: { filePath: expectedObjectName, fileName: meta.file_name } 
-      }));
-      
-      // Track this saved file
-      const savedFileInfo = {
-        name: meta.file_name,
-        path: expectedObjectName,
-        size: pendingFile?.size || 0,
-      };
-      setSavedFiles(prev => [...prev, savedFileInfo]);
-      
-      // Add to guided flow state
+      // Add to guided flow state with temp path
+      // The file will be processed and saved in U2 stage
       const uploadedFileInfo = {
         name: meta.file_name,
-        path: expectedObjectName,
+        path: tempPath, // Temp path - will be updated in U2 after processing
         size: pendingFile?.size || 0,
         fileKey: fileKey,
         sheetNames: sheetOptions.length > 0 ? sheetOptions : (selectedSheets.length > 0 ? selectedSheets : undefined),
@@ -177,6 +113,8 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       };
       
       addUploadedFiles([uploadedFileInfo]);
+      
+      // Reset state AFTER all async operations complete
       setIsUploading(false);
       resetUploadState();
       
@@ -184,6 +122,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       if (pendingFilesQueue.length > 0) {
         const nextFile = pendingFilesQueue[0];
         setPendingFilesQueue(prev => prev.slice(1));
+        // Use setTimeout to ensure state is reset before processing next file
         setTimeout(() => {
           setPendingFile(nextFile);
           setUploadError('');
@@ -195,13 +134,17 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
           void uploadSelectedFile(nextFile);
         }, 100);
       } else {
-        // All files processed, proceed to next stage
-        // Note: Files are already saved, so even if user cancels later, files will be in SavedDataFramesPanel
+        // All files uploaded (to tmp/), proceed to next stage
+        // Files will be processed and saved in U2 stage
         onNext();
       }
     } catch (err: any) {
-      setUploadError(err.message || 'Failed to save dataframe');
+      // Comprehensive error handling with user-friendly messages
+      const errorMessage = err.message || 'Failed to upload file';
+      console.error('[U0FileUpload] Error in finalizeSave:', err);
+      setUploadError(errorMessage);
       setIsUploading(false);
+      // Don't reset state on error - allow user to retry
     }
   };
 
@@ -249,6 +192,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
         }
         
         // Create a map of original sheet names to normalized names
+        // Use normalized_name from backend sheet_details instead of re-normalizing
         const sheetNameMap = new Map<string, string>();
         sheetDetails.forEach((detail: any) => {
           if (detail.original_name && detail.normalized_name) {
@@ -256,7 +200,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
           }
         });
         
-        // If no details, normalize names ourselves
+        // If no details, normalize names ourselves as fallback
         if (sheetNameMap.size === 0) {
           sheetNames.forEach((name: string) => {
             const normalized = name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
@@ -276,13 +220,62 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
         setSelectedSheets(sheets || sheetNames); // Default to all sheets
         setHasMultipleSheets(sheetNames.length > 1);
         
-        // Auto-save all sheets immediately (like when uploading through icon)
-        // This ensures files appear in SavedDataFramesPanel right away
-        console.log(`[U0FileUpload] Auto-saving ${sheetNames.length} sheet(s) from ${fileName}`);
-        await finalizeSaveMultiSheet(fileName, uploadSessionId, sheets || sheetNames);
+        // CRITICAL CHANGE: Do NOT save files immediately!
+        // Store temp paths for Excel files (same as CSV files)
+        // Files will be processed and saved in U2 stage
+        const tempPath = data.original_file_path || ''; // This is the tmp/ path from /upload-excel-multi-sheet
         
-        // Note: We no longer show the modal and wait - files are saved immediately
-        // Users can delete unwanted sheets later from SavedDataFramesPanel if needed
+        console.log('[U0FileUpload] Storing temp Excel file path (will be processed in U2):', tempPath);
+        
+        // Validate temp path exists
+        if (!tempPath || !tempPath.includes('tmp/')) {
+          console.warn('[U0FileUpload] Warning: Excel file path does not contain tmp/. Path:', tempPath);
+        }
+        
+        // Show success toast (file uploaded, but not yet processed)
+        toast({ 
+          title: 'File uploaded', 
+          description: `${fileName} with ${sheetNames.length} sheet${sheetNames.length > 1 ? 's' : ''} is ready for processing. Continue to next steps to process the file.`,
+        });
+        
+        // Add to guided flow state with temp path
+        // The file will be processed and saved in U2 stage
+        const fileKey = deriveFileKey(fileName);
+        const uploadedFileInfo = {
+          name: fileName,
+          path: tempPath, // Temp path - will be updated in U2 after processing
+          size: pendingFile?.size || 0,
+          fileKey: fileKey,
+          sheetNames: sheetNames.length > 0 ? sheetNames : undefined,
+          selectedSheet: sheetNames.length > 0 ? sheetNames[0] : undefined,
+          totalSheets: sheetNames.length,
+        };
+        
+        addUploadedFiles([uploadedFileInfo]);
+        
+        // Reset state AFTER all async operations complete
+        setIsUploading(false);
+        resetUploadState();
+        
+        // Process next file in queue if any
+        if (pendingFilesQueue.length > 0) {
+          const nextFile = pendingFilesQueue[0];
+          setPendingFilesQueue(prev => prev.slice(1));
+          setTimeout(() => {
+            setPendingFile(nextFile);
+            setUploadError('');
+            setSheetOptions([]);
+            setSelectedSheets([]);
+            setHasMultipleSheets(false);
+            setTempUploadMeta(null);
+            setIsUploadModalOpen(true);
+            void uploadSelectedFile(nextFile);
+          }, 100);
+        } else {
+          // All files uploaded (to tmp/), proceed to next stage
+          // Files will be processed and saved in U2 stage
+          onNext();
+        }
       } else {
         // CSV or other file - use regular upload endpoint (simplified)
         const form = new FormData();
@@ -309,6 +302,15 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
 
   const finalizeSaveMultiSheet = async (fileName: string, uploadSessionId: string, sheetsToSave: string[]) => {
     console.log(`[U0FileUpload] finalizeSaveMultiSheet called for ${sheetsToSave.length} sheet(s)`);
+    
+    // Validate upload_session_id before proceeding
+    if (!uploadSessionId || uploadSessionId.trim() === '') {
+      const errorMsg = 'Invalid upload session ID. Please try uploading again.';
+      setUploadError(errorMsg);
+      setIsUploading(false);
+      throw new Error(errorMsg);
+    }
+    
     setIsUploading(true);
     try {
       const projectContext = getActiveProjectContext();
@@ -334,7 +336,13 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       
       for (const sheetName of sheetsToSave) {
         try {
-          // Get normalized sheet name from mapping or normalize it
+          // Validate sheet name
+          if (!sheetName || sheetName.trim() === '') {
+            console.warn(`[U0FileUpload] Skipping empty sheet name`);
+            continue;
+          }
+          
+          // Get normalized sheet name from mapping (use normalized_name from backend sheet_details)
           const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || 
             sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
           
@@ -343,7 +351,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
           // Use the convert endpoint to save sheet directly
           const convertForm = new FormData();
           convertForm.append('upload_session_id', uploadSessionId);
-          convertForm.append('sheet_name', normalizedSheetName); // Use normalized name
+          convertForm.append('sheet_name', normalizedSheetName); // Use normalized name from backend
           convertForm.append('original_filename', fileName);
           convertForm.append('use_folder_structure', useFolderStructure ? 'true' : 'false');
           appendEnvFields(convertForm);
@@ -364,6 +372,8 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
           
           const convertData = await convertRes.json();
           console.log(`[U0FileUpload] Convert response for ${sheetName}:`, convertData);
+          
+          // Use backend file_path directly instead of reconstructing
           const sheetPath = convertData.file_path || '';
           
           if (!sheetPath) {
@@ -372,10 +382,10 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
             continue;
           }
           
-          // For single sheet, use original filename; for multiple sheets, use sheet name in display
-          const sheetDisplayName = useFolderStructure 
-            ? (convertData.file_name || `${fileName} (${sheetName})`)
-            : (convertData.file_name || fileName);
+          // Use backend file_name and file_key directly
+          const sheetDisplayName = convertData.file_name || (useFolderStructure 
+            ? `${fileName} (${sheetName})`
+            : fileName);
           const fileKey = convertData.file_key || (useFolderStructure 
             ? `${excelFolderName}_${normalizedSheetName}`
             : excelFolderName);
@@ -404,8 +414,11 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
             detail: { filePath: sheetPath, fileName: sheetDisplayName } 
           }));
         } catch (err: any) {
+          // Comprehensive error handling with user-friendly messages
+          const errorMessage = err.message || 'Unknown error';
           console.error(`[U0FileUpload] Error saving sheet ${sheetName}:`, err);
-          setUploadError(`Error saving sheet "${sheetName}": ${err.message || 'Unknown error'}`);
+          setUploadError(`Error saving sheet "${sheetName}": ${errorMessage}`);
+          // Continue processing other sheets even if one fails
         }
       }
       
@@ -423,17 +436,19 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       setSavedFiles(prev => [...prev, ...savedFiles]);
       addUploadedFiles(uploadedFileInfos);
       
-      // Force multiple refreshes to ensure SavedDataFramesPanel picks up the files
-      // The panel uses polling, so we trigger events at intervals to catch the next poll cycle
-      [500, 1000, 2000].forEach((delay) => {
+      // Debounce event dispatching - only dispatch once per file to avoid rapid events
+      // Dispatch immediately for first file, then debounce subsequent dispatches
+      savedFiles.forEach((file, index) => {
+        const delay = index * 100; // Stagger events by 100ms
         setTimeout(() => {
-          console.log(`[U0FileUpload] Triggering refresh ${delay}ms after save`);
+          console.log(`[U0FileUpload] Dispatching dataframe-saved event for ${file.path} (delay: ${delay}ms)`);
           window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-            detail: { filePath: savedFiles[0]?.path || '', fileName: savedFiles[0]?.name || '' } 
+            detail: { filePath: file.path, fileName: file.name } 
           }));
         }, delay);
       });
       
+      // Reset state AFTER all async operations complete
       setIsUploading(false);
       resetUploadState();
       
@@ -456,9 +471,12 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
         onNext();
       }
     } catch (err: any) {
+      // Comprehensive error handling with user-friendly messages
+      const errorMessage = err.message || 'Failed to save sheets';
       console.error(`[U0FileUpload] Error in finalizeSaveMultiSheet:`, err);
-      setUploadError(err.message || 'Failed to save sheets');
+      setUploadError(errorMessage);
       setIsUploading(false);
+      // Don't reset state on error - allow user to retry
     }
   };
 
@@ -473,13 +491,38 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       await uploadSelectedFile(pendingFile, [selectedSheets[0]]);
       return;
     }
-    console.log(`[U0FileUpload] handleSheetConfirm: Saving ${selectedSheets.length} sheet(s)`);
-    setIsUploadModalOpen(false); // Close modal immediately
-    await finalizeSaveMultiSheet(
-      tempUploadMeta.file_name,
-      tempUploadMeta.upload_session_id,
-      selectedSheets
-    );
+    
+    // CRITICAL CHANGE: Do NOT save files immediately!
+    // Store temp paths and proceed to next stage (files will be processed in U2)
+    console.log(`[U0FileUpload] handleSheetConfirm: Storing temp paths for ${selectedSheets.length} sheet(s)`);
+    setIsUploadModalOpen(false); // Close modal
+    
+    const tempPath = tempUploadMeta.file_path || '';
+    const fileKey = deriveFileKey(tempUploadMeta.file_name);
+    
+    // Add to guided flow state with temp path
+    const uploadedFileInfo = {
+      name: tempUploadMeta.file_name,
+      path: tempPath, // Temp path - will be updated in U2 after processing
+      size: pendingFile?.size || 0,
+      fileKey: fileKey,
+      sheetNames: selectedSheets.length > 0 ? selectedSheets : undefined,
+      selectedSheet: selectedSheets.length > 0 ? selectedSheets[0] : undefined,
+      totalSheets: selectedSheets.length,
+    };
+    
+    addUploadedFiles([uploadedFileInfo]);
+    
+    // Show success toast
+    toast({ 
+      title: 'File uploaded', 
+      description: `${tempUploadMeta.file_name} with ${selectedSheets.length} sheet${selectedSheets.length > 1 ? 's' : ''} is ready for processing. Continue to next steps.`,
+    });
+    
+    // Reset state and proceed to next stage
+    setIsUploading(false);
+    resetUploadState();
+    onNext();
   };
 
   const handleFileSelect = async (files: FileList | null) => {

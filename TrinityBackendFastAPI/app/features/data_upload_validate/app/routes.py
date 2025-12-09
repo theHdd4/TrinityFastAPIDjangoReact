@@ -104,6 +104,9 @@ logger = logging.getLogger(__name__)
 
 from app.features.data_upload_validate.app.validators.custom_validator import perform_enhanced_validation
 from app.features.data_upload_validate import service as data_upload_service
+from app.features.data_upload_validate.file_ingestion import RobustFileReader
+from app.features.data_upload_validate.file_ingestion.processors.description_separator import DescriptionSeparator
+from app.features.data_upload_validate.file_ingestion.processors.header_detector import HeaderDetector
 
 # Config directory
 CUSTOM_CONFIG_DIR = data_upload_service.CUSTOM_CONFIG_DIR
@@ -878,6 +881,16 @@ async def convert_session_sheet_to_arrow_endpoint(
             "file_key": "file_key"
         }
     """
+    # Validate inputs
+    if not upload_session_id or not upload_session_id.strip():
+        raise HTTPException(status_code=400, detail="upload_session_id is required and cannot be empty")
+    
+    if not sheet_name or not sheet_name.strip():
+        raise HTTPException(status_code=400, detail="sheet_name is required and cannot be empty")
+    
+    if not original_filename or not original_filename.strip():
+        raise HTTPException(status_code=400, detail="original_filename is required and cannot be empty")
+    
     # Set environment variables
     if client_name:
         os.environ["CLIENT_NAME"] = client_name
@@ -3646,50 +3659,228 @@ async def get_file_preview(
     client_id: str = Query(""),
     app_id: str = Query(""),
     project_id: str = Query(""),
+    sheet_name: Optional[str] = Query(None, description="Sheet name for Excel files"),
 ):
     """
-    Get preview of file (top 10 rows) and detect header row.
-    Returns preview data and suggested header row index.
+    Get preview of file with raw rows (no headers applied).
+    Separates description rows from data rows and suggests header row.
+    Returns all rows as data rows for user to select header.
     """
     try:
         # Read file from MinIO
         data = read_minio_object(object_name)
         filename = Path(object_name).name
         
-        # Parse based on file type
-        if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-        elif filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
-        elif filename.lower().endswith(".arrow"):
-            df_pl = pl.read_ipc(io.BytesIO(data))
+        # Use robust file reader in raw mode (no header detection)
+        try:
+            df_result, file_metadata = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                sheet_name=sheet_name,
+                return_raw=True,  # Return raw rows without header detection
+            )
+            
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
+        except Exception as e:
+            logger.warning(f"Robust reader failed, using legacy parser: {e}")
+            # Fallback to legacy parser - read without headers
+            if filename.lower().endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(data), header=None, low_memory=False)
+            elif filename.lower().endswith((".xls", ".xlsx")):
+                df = pd.read_excel(io.BytesIO(data), sheet_name=sheet_name or 0, header=None)
+            elif filename.lower().endswith(".arrow"):
+                # For arrow files, convert to raw format: columns become first row
+                df_pl = pl.read_ipc(io.BytesIO(data))
+                df = df_pl.to_pandas()
+                # Extract column names as first row
+                column_names = df.columns.tolist()
+                # Reset columns to numeric indices
+                df.columns = range(len(df.columns))
+                # Prepend column names as first row
+                first_row_df = pd.DataFrame([column_names], columns=df.columns)
+                df = pd.concat([first_row_df, df], ignore_index=True)
+            else:
+                raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        # Separate description rows from data rows
+        description_rows, df_data = DescriptionSeparator.separate_description_rows(df)
+        
+        # Calculate data_rows_start (index where data rows begin, after description rows)
+        data_rows_start = len(description_rows)
+        
+        # Get preview rows (first 15 rows of data)
+        preview_rows = df_data.head(15).values.tolist()
+        preview_row_count = len(preview_rows)
+        
+        # Detect suggested header row in the data rows (relative to data rows, 0-indexed)
+        suggested_header_row_relative = HeaderDetector.find_header_row(df_data.head(20))
+        
+        # Calculate absolute row index (including description rows)
+        suggested_header_row_absolute = data_rows_start + suggested_header_row_relative
+        
+        # Calculate confidence based on header detection score
+        # We'll use a simple heuristic: if header row is at index 0, high confidence
+        # Otherwise, medium confidence
+        if suggested_header_row_relative == 0:
+            suggested_header_confidence = "high"
+        elif suggested_header_row_relative < 3:
+            suggested_header_confidence = "medium"
         else:
-            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+            suggested_header_confidence = "low"
         
-        df = df_pl.to_pandas()
+        # Convert description rows to structured format
+        description_rows_structured = []
+        for idx, row in enumerate(description_rows):
+            description_rows_structured.append({
+                "row_index": idx + 1,  # 1-indexed for display
+                "cells": [str(val) if pd.notna(val) else "" for val in row]
+            })
         
-        # Get top 10 rows as list of lists
-        preview_rows = df.head(10).values.tolist()
+        # Convert data rows to structured format with row_index and relative_index
+        data_rows_structured = []
+        for idx, row in enumerate(preview_rows):
+            data_rows_structured.append({
+                "row_index": data_rows_start + idx + 1,  # 1-indexed absolute row number
+                "relative_index": idx,  # 0-indexed relative to data rows
+                "cells": [str(val) if pd.notna(val) else "" for val in row]
+            })
         
-        # Detect header row (simple heuristic: first row with mostly text, no numbers)
-        suggested_header_row = 0
-        for i in range(min(5, len(df))):
-            row = df.iloc[i]
-            # Check if row has mostly text values (not numeric)
-            text_count = sum(1 for val in row if isinstance(val, str) and not str(val).replace('.', '').replace('-', '').isdigit())
-            if text_count > len(row) * 0.7:  # 70% text values
-                suggested_header_row = i
-                break
+        # Get column count
+        column_count = len(df_data.columns) if not df_data.empty else 0
         
         return {
-            "rows": preview_rows,
-            "suggested_header_row": suggested_header_row,
-            "total_rows": len(df),
-            "total_columns": len(df.columns),
+            "data_rows": data_rows_structured,  # Changed from "rows" to "data_rows"
+            "description_rows": description_rows_structured,
+            "data_rows_count": len(df_data),
+            "description_rows_count": len(description_rows),
+            "data_rows_start": data_rows_start,
+            "preview_row_count": preview_row_count,
+            "column_count": column_count,
+            "total_rows": len(df_data),
+            "suggested_header_row": suggested_header_row_relative,  # Relative to data rows (0-indexed)
+            "suggested_header_row_absolute": suggested_header_row_absolute,  # Absolute including description rows
+            "suggested_header_confidence": suggested_header_confidence,
+            "has_description_rows": len(description_rows) > 0,
         }
         
     except Exception as e:
         logger.error(f"Error getting file preview: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/apply-header-selection")
+async def apply_header_selection(
+    object_name: str = Form(..., description="MinIO object name/path"),
+    header_row: int = Form(..., description="Row index to use as header (0-based)"),
+    sheet_name: Optional[str] = Form(None, description="Sheet name for Excel files"),
+    client_id: str = Form(""),
+    app_id: str = Form(""),
+    project_id: str = Form(""),
+):
+    """
+    Apply header row selection to file and save processed version.
+    Reads file in raw mode, applies selected header row, and saves as Arrow file.
+    """
+    try:
+        # Read file from MinIO
+        data = read_minio_object(object_name)
+        filename = Path(object_name).name
+        
+        # Use robust file reader in raw mode
+        try:
+            df_result, file_metadata = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                sheet_name=sheet_name,
+                return_raw=True,
+            )
+            
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df_raw = list(df_result.values())[0]  # Use first sheet
+            else:
+                df_raw = df_result
+        except Exception as e:
+            logger.warning(f"Robust reader failed, using legacy parser: {e}")
+            # Fallback to legacy parser - read without headers
+            if filename.lower().endswith(".csv"):
+                df_raw = pd.read_csv(io.BytesIO(data), header=None, low_memory=False)
+            elif filename.lower().endswith((".xls", ".xlsx")):
+                df_raw = pd.read_excel(io.BytesIO(data), sheet_name=sheet_name or 0, header=None)
+            elif filename.lower().endswith(".arrow"):
+                # For arrow files, convert to raw format: columns become first row
+                df_pl = pl.read_ipc(io.BytesIO(data))
+                df_raw = df_pl.to_pandas()
+                # Extract column names as first row
+                column_names = df_raw.columns.tolist()
+                # Reset columns to numeric indices
+                df_raw.columns = range(len(df_raw.columns))
+                # Prepend column names as first row
+                first_row_df = pd.DataFrame([column_names], columns=df_raw.columns)
+                df_raw = pd.concat([first_row_df, df_raw], ignore_index=True)
+            else:
+                raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        # Separate description rows if any
+        description_rows, df_data = DescriptionSeparator.separate_description_rows(df_raw)
+        
+        # Validate header row index (header_row is relative to df_data after description separation)
+        if header_row < 0 or header_row >= len(df_data):
+            raise HTTPException(status_code=400, detail=f"Header row index {header_row} is out of range (0-{len(df_data)-1})")
+        
+        # Apply header row (header_row is already relative to data rows from preview)
+        headers = df_data.iloc[header_row].fillna("").astype(str).tolist()
+        df_processed = df_data.iloc[header_row + 1:].copy()
+        df_processed.columns = headers
+        
+        # Normalize column names
+        from app.features.data_upload_validate.file_ingestion.processors.cleaning import DataCleaner
+        df_processed = DataCleaner.normalize_column_names(df_processed)
+        df_processed = DataCleaner.standardize_headers(df_processed)
+        
+        # Remove empty rows/columns
+        df_processed = DataCleaner.remove_empty_rows(df_processed)
+        df_processed = DataCleaner.remove_empty_columns(df_processed)
+        df_processed = df_processed.reset_index(drop=True)
+        
+        # Convert to Polars and save as Arrow
+        df_pl = pl.from_pandas(df_processed)
+        
+        # Save to MinIO
+        arrow_buf = io.BytesIO()
+        df_pl.write_ipc(arrow_buf)
+        arrow_name = Path(filename).stem + ".arrow"
+        
+        # Determine upload path (use same prefix as original if possible)
+        tmp_prefix = "temp_uploads/"
+        if "/" in object_name:
+            parts = object_name.split("/")
+            if len(parts) > 1:
+                tmp_prefix = "/".join(parts[:-1]) + "/"
+        
+        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, tmp_prefix)
+        
+        if result.get("status") != "success":
+            raise HTTPException(status_code=500, detail=result.get("error_message", "Failed to save processed file"))
+        
+        return {
+            "status": "success",
+            "file_path": result["object_name"],
+            "file_name": arrow_name,
+            "total_rows": len(df_processed),
+            "total_columns": len(df_processed.columns),
+            "header_row_applied": header_row,
+            "description_rows_count": len(description_rows),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error applying header selection: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

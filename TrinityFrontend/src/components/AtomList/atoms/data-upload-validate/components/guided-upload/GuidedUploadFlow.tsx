@@ -190,53 +190,65 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
 
         {/* Stage Content */}
         <div className="min-h-[400px] py-4">
-          <CurrentStageComponent flow={flow} onNext={handleNext} onBack={handleBack} />
+          {state.currentStage === 'U1' || state.currentStage === 'U2' ? (
+            <CurrentStageComponent 
+              flow={flow} 
+              onNext={handleNext} 
+              onBack={handleBack}
+              onRestart={handleRestart}
+              onCancel={handleCancel}
+            />
+          ) : (
+            <CurrentStageComponent flow={flow} onNext={handleNext} onBack={handleBack} />
+          )}
         </div>
 
-        {/* Navigation Footer - Consistent across all stages */}
-        <div className="flex items-center justify-between pt-4 border-t">
-          <div className="flex gap-2">
-            {canGoBack && (
+        {/* Navigation Footer - Consistent across all stages (hidden for U1 and U2 as they have their own controls) */}
+        {state.currentStage !== 'U1' && state.currentStage !== 'U2' && (
+          <div className="flex items-center justify-between pt-4 border-t">
+            <div className="flex gap-2">
+              {canGoBack && (
+                <Button
+                  variant="outline"
+                  onClick={handleBack}
+                  className="flex items-center gap-2"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Back
+                </Button>
+              )}
               <Button
-                variant="outline"
-                onClick={handleBack}
-                className="flex items-center gap-2"
+                variant="ghost"
+                onClick={handleRestart}
+                className="flex items-center gap-2 text-gray-600"
               >
-                <ArrowLeft className="w-4 h-4" />
-                Back
+                <RotateCcw className="w-4 h-4" />
+                Restart Upload
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              onClick={handleRestart}
-              className="flex items-center gap-2 text-gray-600"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Restart Upload
-            </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={handleCancel}>
+                Cancel
+              </Button>
+              {!isLastStage && (
+                <Button
+                  onClick={handleNext}
+                  className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white"
+                >
+                  Continue
+                </Button>
+              )}
+              {isLastStage && (
+                <Button
+                  onClick={handleNext}
+                  className="bg-[#41C185] hover:bg-[#36a870] text-white"
+                >
+                  Proceed to Next Steps
+                </Button>
+              )}
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={handleCancel}>
-              Cancel
-            </Button>
-            {!isLastStage && (
-              <Button
-                onClick={handleNext}
-                className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white"
-              >
-                Continue
-              </Button>
-            )}
-            {isLastStage && (
-              <Button
-                onClick={handleNext}
-                className="bg-[#41C185] hover:bg-[#36a870] text-white"
-              >
-                Proceed to Next Steps
-              </Button>
-            )}
-          </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );

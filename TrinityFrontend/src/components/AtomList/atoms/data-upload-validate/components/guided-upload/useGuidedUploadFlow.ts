@@ -181,6 +181,15 @@ export function useGuidedUploadFlow(initialState?: Partial<GuidedUploadFlowState
     }));
   }, []);
 
+  const updateUploadedFilePath = useCallback((fileName: string, newPath: string) => {
+    setState(prev => ({
+      ...prev,
+      uploadedFiles: prev.uploadedFiles.map(file =>
+        file.name === fileName ? { ...file, path: newPath, processed: true } : file
+      ),
+    }));
+  }, []);
+
   return {
     state,
     goToStage,
@@ -194,6 +203,7 @@ export function useGuidedUploadFlow(initialState?: Partial<GuidedUploadFlowState
     setDataTypeSelections,
     setMissingValueStrategies,
     updateFileSheetSelection,
+    updateUploadedFilePath,
   };
 }
 

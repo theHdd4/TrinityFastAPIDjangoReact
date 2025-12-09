@@ -466,12 +466,15 @@ def convert_session_sheet_to_arrow(upload_session_id: str, sheet_name: str, orig
                 sheet_name,
                 arrow_object_name,
             )
-            return {
+            # excel_folder_name is only defined when use_folder_structure is True
+            result = {
                 "file_path": arrow_object_name,
-                "file_name": f"{original_filename} ({sheet_name})",
+                "file_name": f"{original_filename} ({sheet_name})" if use_folder_structure else original_filename,
                 "file_key": arrow_file_key,
-                "excel_folder_name": excel_folder_name if use_folder_structure else None,
             }
+            if use_folder_structure:
+                result["excel_folder_name"] = excel_folder_name
+            return result
         else:
             error_msg = upload_result.get("error_message", "Failed to upload Arrow file")
             logger.error("Failed to upload converted Arrow file: %s", error_msg)

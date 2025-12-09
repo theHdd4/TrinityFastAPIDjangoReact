@@ -1505,6 +1505,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     setSheetChangeLoading(true);
     try {
       const query = new URLSearchParams({ object_name: frame.object_name }).toString();
+      // Skip workbook_metadata for Arrow files - they don't have workbook metadata
+      if (frame.object_name.toLowerCase().endsWith('.arrow')) {
+        throw new Error('Arrow files do not have workbook metadata');
+      }
+      
       const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
         credentials: 'include',
       });
@@ -1770,17 +1775,22 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 // Check workbook metadata
                 try {
                   const query = new URLSearchParams({ object_name: f.object_name }).toString();
-                  const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
-                    credentials: 'include',
-                  });
-                  if (res.ok) {
-                    const metaData = await res.json();
-                    const sheetNames = Array.isArray(metaData.sheet_names) ? metaData.sheet_names : [];
-                    metadataChecks[f.object_name] = Boolean(
-                      metaData.has_multiple_sheets === true || sheetNames.length > 1
-                    );
+                  // Skip workbook_metadata for Arrow files - they don't have workbook metadata
+                  if (!f.object_name.toLowerCase().endsWith('.arrow')) {
+                    const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
+                      credentials: 'include',
+                    });
+                    if (res.ok) {
+                      const metaData = await res.json();
+                      const sheetNames = Array.isArray(metaData.sheet_names) ? metaData.sheet_names : [];
+                      metadataChecks[f.object_name] = Boolean(
+                        metaData.has_multiple_sheets === true || sheetNames.length > 1
+                      );
+                    } else {
+                      metadataChecks[f.object_name] = false;
+                    }
                   } else {
-                    metadataChecks[f.object_name] = false;
+                    metadataChecks[f.object_name] = false; // Arrow files don't have multiple sheets
                   }
                 } catch {
                   metadataChecks[f.object_name] = false;
@@ -2097,24 +2107,78 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     if (confirmDelete.type === 'all') {
       await fetch(`${VALIDATE_API}/delete_all_dataframes`, { method: 'DELETE' });
       setFiles([]);
+      setExcelFolders([]);
     } else if (confirmDelete.type === 'folder') {
       const folderPath = confirmDelete.target;
       // Ensure folder path ends with / for proper matching
       const normalizedPath = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+      
+      // Check if this is an Excel folder
+      const excelFolder = excelFolders.find(folder => {
+        const folderPathNormalized = folder.path.endsWith('/') ? folder.path : folder.path + '/';
+        return folderPathNormalized === normalizedPath || folder.path === folderPath;
+      });
+      
       // Find all files that belong to this folder (files that start with the folder path)
       const filesToDelete = files.filter(f => 
         f.object_name.startsWith(normalizedPath)
       );
+      
+      // If it's an Excel folder, also get all sheets to delete
+      const sheetsToDelete = excelFolder?.sheets || [];
+      
       // Delete all files in the folder
       await Promise.all(
         filesToDelete.map(f =>
           fetch(
             `${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(f.object_name)}`,
-            { method: 'DELETE' }
+            { method: 'DELETE', credentials: 'include' }
           )
         )
       );
+      
+      // Delete all sheets in the Excel folder
+      await Promise.all(
+        sheetsToDelete.map(sheet =>
+          fetch(
+            `${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(sheet.object_name)}`,
+            { method: 'DELETE', credentials: 'include' }
+          )
+        )
+      );
+      
+      // Update files state immediately
       setFiles(prev => prev.filter(f => !f.object_name.startsWith(normalizedPath)));
+      
+      // Remove Excel folder from excelFolders state if it matches
+      setExcelFolders(prev => prev.filter(folder => {
+        // Check if folder path matches (with or without trailing slash)
+        const folderPathNormalized = folder.path.endsWith('/') ? folder.path : folder.path + '/';
+        const targetPathNormalized = normalizedPath;
+        // Remove if exact match or if folder is inside the deleted path
+        return folderPathNormalized !== targetPathNormalized && 
+               folder.path !== folderPath &&
+               !folder.path.startsWith(normalizedPath);
+      }));
+      
+      // Close any open directories for this folder
+      setOpenDirs(prev => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach(key => {
+          if (key.startsWith(normalizedPath) || key === folderPath) {
+            delete updated[key];
+          }
+        });
+        return updated;
+      });
+      
+      // Trigger immediate reload to sync with backend
+      setReloadToken(prev => prev + 1);
+      
+      toast({
+        title: 'Folder deleted',
+        description: `Folder and all its contents have been deleted.`,
+      });
     } else {
       const obj = confirmDelete.target;
       await fetch(
@@ -2122,6 +2186,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         { method: 'DELETE' }
       );
       setFiles(prev => prev.filter(f => f.object_name !== obj));
+      // Also check if this file was part of an Excel folder and update accordingly
+      setExcelFolders(prev => prev.map(folder => ({
+        ...folder,
+        sheets: folder.sheets.filter(sheet => sheet.object_name !== obj)
+      })).filter(folder => folder.sheets.length > 0)); // Remove empty folders
+      // Trigger immediate reload to sync with backend
+      setReloadToken(prev => prev + 1);
     }
     setConfirmDelete(null);
   };

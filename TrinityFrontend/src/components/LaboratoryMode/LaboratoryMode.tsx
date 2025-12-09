@@ -1119,6 +1119,9 @@ const LaboratoryMode = () => {
               onShare={handleShareClick}
               showFloatingNavigationList={showFloatingNavigationList}
               setShowFloatingNavigationList={setShowFloatingNavigationList}
+              onOpenPriming={() => {
+                setScenarioDismissed(false);
+              }}
             />
             <FloatingNavigationList
               isVisible={showFloatingNavigationList}
