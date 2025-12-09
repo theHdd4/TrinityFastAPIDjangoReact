@@ -248,6 +248,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const websocketWarmupCompleteRef = useRef(false);
+  const websocketInitialRetryRef = useRef(false);
+  const workflowActiveRef = useRef(false);
+  const workflowFinishedRef = useRef(false);
+  const pendingPayloadRef = useRef<any | null>(null);
+  const pendingRetryRef = useRef(false);
   const backgroundStatusRef = useRef<TrinityAIBackgroundStatus | null>(null);
   const hasLoadedChatsRef = useRef(false);
 
@@ -302,6 +308,27 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     },
     [clearSessionTimeout, closeSocketSafely]
   );
+
+  const warmUpWebsocketTarget = useCallback(async () => {
+    if (websocketWarmupCompleteRef.current) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const healthUrl = `${(MEMORY_API_BASE || '').replace(/\/$/, '')}/streamai/health`;
+      const response = await fetch(healthUrl, { signal: controller.signal });
+      if (response.ok) {
+        websocketWarmupCompleteRef.current = true;
+      }
+    } catch (err) {
+      console.warn('⚠️ WebSocket warmup failed (will retry on next attempt)', err);
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }, []);
   const [availableFiles, setAvailableFiles] = useState<any[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -1762,6 +1789,25 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           project_name: project.project_name || 'default'
         };
       }
+
+      const preparedPayload = appendSessionMetadata(
+        {
+          message: userMessage.content,
+          available_files: fileNames,  // Use freshly loaded files
+          project_context: projectContext,
+          user_id: 'current_user',
+        },
+        {
+          sessionId: ensuredSessionId,
+          websocketSessionId: ensuredWebsocketSessionId,
+          chatId: currentChatId,
+        }
+      );
+
+      pendingPayloadRef.current = preparedPayload;
+      workflowActiveRef.current = true;
+      workflowFinishedRef.current = false;
+      pendingRetryRef.current = false;
       
       // Create WebSocket connection
       const buildWebSocketUrl = () => {
@@ -1793,67 +1839,61 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       };
 
       const wsUrl = buildWebSocketUrl();
-      
+
       console.log('🔗 Connecting to Trinity AI WebSocket:', wsUrl);
-      const ws = new WebSocket(wsUrl);
-      
-      setWsConnection(ws);
-      
+
       let progressContent = progressMessage.content;
       let createdCards: string[] = [];
-      
+
       // Update progress helper
       const updateProgress = (content: string) => {
         progressContent += content;
-        setMessages(prev => prev.map(msg => 
+        setMessages(prev => prev.map(msg =>
           msg.id === progressMessageId ? { ...msg, content: progressContent } : msg
         ));
       };
-      
-      ws.onopen = () => {
-        console.log('✅ WebSocket connected');
-        scheduleSessionTimeout(ws);
-        updateProgress('\n\n✅ Connected! Generating plan...');
-        
-        // Store original prompt for ADD functionality
-        setOriginalPrompt(userMessage.content);
 
-        try {
-          // Send initial message with available files
-          const initialPayload = appendSessionMetadata(
-            {
-              message: userMessage.content,
-              available_files: fileNames,  // Use freshly loaded files
-              project_context: projectContext,
-              user_id: 'current_user',
-            },
-            {
-              sessionId: ensuredSessionId,
-              websocketSessionId: ensuredWebsocketSessionId,
-              chatId: currentChatId,
-            }
-          );
+      websocketInitialRetryRef.current = false;
 
-          ws.send(JSON.stringify(initialPayload));
-          console.log('✅ Message sent to WebSocket');
-        } catch (sendError) {
-          console.error('❌ Failed to send message to WebSocket:', sendError);
-          // Message is already in state and persisted, so user won't lose it
-          const sendErrorMsg: Message = {
-            id: `send-error-${Date.now()}`,
-            content: '❌ Failed to send message. Your message has been saved. Please try again.',
-            sender: 'ai',
-            timestamp: new Date()
-          };
-          setMessages(prev => [...prev, sendErrorMsg]);
-          setIsLoading(false);
-        }
-      };
-      
-      ws.onmessage = async (event) => {
-        const data = JSON.parse(event.data);
-        console.log('📨 WebSocket event:', data.type, data);
-        scheduleSessionTimeout(ws);
+      const establishWebSocket = async (isRetry = false) => {
+        await warmUpWebsocketTarget();
+
+        const ws = new WebSocket(wsUrl);
+        let isOpen = false;
+
+        ws.onopen = () => {
+          isOpen = true;
+          websocketInitialRetryRef.current = false;
+          pendingRetryRef.current = false;
+          setWsConnection(ws);
+          scheduleSessionTimeout(ws);
+          updateProgress(isRetry ? '\n\n🔄 Reconnecting... resending prompt.' : '\n\n✅ Connected! Generating plan...');
+
+          // Store original prompt for ADD functionality
+          setOriginalPrompt(userMessage.content);
+
+          try {
+            const payloadToSend = pendingPayloadRef.current || preparedPayload;
+            ws.send(JSON.stringify(payloadToSend));
+            console.log('✅ Message sent to WebSocket');
+          } catch (sendError) {
+            console.error('❌ Failed to send message to WebSocket:', sendError);
+            // Message is already in state and persisted, so user won't lose it
+            const sendErrorMsg: Message = {
+              id: `send-error-${Date.now()}`,
+              content: '❌ Failed to send message. Your message has been saved. Please try again.',
+              sender: 'ai',
+              timestamp: new Date()
+            };
+            setMessages(prev => [...prev, sendErrorMsg]);
+            setIsLoading(false);
+          }
+        };
+
+        ws.onmessage = async (event) => {
+          const data = JSON.parse(event.data);
+          console.log('📨 WebSocket event:', data.type, data);
+          scheduleSessionTimeout(ws);
 
         if (data.type === CLARIFICATION_REQUEST) {
           handleIncomingClarification(data as ClarificationRequestMessage);
@@ -1987,12 +2027,11 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           }
 
           case 'policy_shift': {
-            console.warn('⚠️ Policy shift detected, awaiting confirmation', data);
-            stopAutoRun();
+            console.warn('⚠️ Policy shift detected, auto-continuing', data);
 
             const policyShiftMessage: Message = {
               id: `policy-shift-${Date.now()}`,
-              content: data.message || 'Execution path changed; please confirm before proceeding.',
+              content: data.message || 'Detected a change in execution path; proceeding with the updated plan.',
               sender: 'ai',
               timestamp: new Date(),
               type: 'text'
@@ -2020,7 +2059,6 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               console.error('Failed to persist chat after policy shift:', persistError);
             }
 
-            setIsLoading(false);
             break;
           }
 
@@ -2369,6 +2407,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
             
           case 'workflow_completed':
+            workflowFinishedRef.current = true;
             updateProgress('\n\n🎉 Workflow complete!');
             // 🔧 CRITICAL FIX: Don't close connection yet - wait for workflow insight
             // Set loading state to show "Generating insights..."
@@ -2382,6 +2421,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
             
           case 'workflow_insight':
+            workflowFinishedRef.current = true;
+            pendingPayloadRef.current = null;
             console.log('✅ Workflow insight received:', data);
             const insightContent = data.insight || 'No insight generated';
             const insightText = `📊 **Workflow Insights**\n\n${insightContent}`;
@@ -2451,6 +2492,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
             
           case 'workflow_insight_failed':
+            workflowFinishedRef.current = true;
+            pendingPayloadRef.current = null;
             console.warn('⚠️ Workflow insight failed:', data.error);
             updateProgress(`\n\n⚠️ Insight generation failed: ${data.error || 'Unknown error'}`);
             // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
@@ -2869,10 +2912,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           case 'complete':
             // Handle completion event
             console.log('✅ Workflow/request completed:', data.status, data.intent);
-            
+
             // If it's a text_reply completion, we've already handled it above
             // If it's a workflow completion, the workflow_completed case handles it
             if (data.intent === 'text_reply') {
+              workflowFinishedRef.current = true;
+              pendingPayloadRef.current = null;
               setIsLoading(false);
               stopAutoRun();
             }
@@ -2884,60 +2929,33 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             console.log('⚠️ Unhandled WebSocket event type:', data.type, data);
             break;
         }
-      };
-      
-      ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
-        clearSessionTimeout();
-        updateProgress('\n\n❌ Connection error');
-        
-        // CRITICAL: Add error message to chat so user knows what happened
-        const errorMsg: Message = {
-          id: `error-${Date.now()}`,
-          content: '❌ Connection error occurred. Your message has been saved. Please try again.',
-          sender: 'ai',
-          timestamp: new Date()
         };
-        setMessages(prev => [...prev, errorMsg]);
-        
-        // CRITICAL: Ensure user message is persisted even on error
-        try {
-          const currentChat = chats.find(c => c.id === currentChatId);
-          if (currentChat) {
-            const updatedChat: Chat = {
-              ...currentChat,
-              messages: currentChat.messages.some(m => m.id === userMessage.id) 
-                ? currentChat.messages 
-                : [...currentChat.messages, userMessage],
-            };
-            memoryPersistSkipRef.current = false;
-            persistChatToMemory(updatedChat).catch(err => 
-              console.error('Failed to persist on error:', err)
-            );
+
+        ws.onerror = (error) => {
+          console.error('❌ WebSocket error:', error);
+          clearSessionTimeout();
+
+          if (!isOpen && !websocketInitialRetryRef.current) {
+            websocketInitialRetryRef.current = true;
+            closeSocketSafely(ws, 1000, 'retry_initial_connect');
+            setTimeout(() => {
+              establishWebSocket();
+            }, 350);
+            return;
           }
-        } catch (persistError) {
-          console.error('Failed to persist message on WebSocket error:', persistError);
-        }
-        
-        // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
-        // The loading icon will be hidden when ws.onclose fires
-        stopAutoRun();
-      };
-      
-      ws.onclose = (event) => {
-        console.log('🔌 WebSocket closed', { code: event.code, reason: event.reason, wasClean: event.wasClean });
-        clearSessionTimeout();
-        stopAutoRun();
-        setWsConnection(null);
 
-        // Treat missing close code (1005) as a clean shutdown and inform the user
-        if (event.code === 1005 && event.wasClean) {
-          updateProgress('\n\nℹ️ Connection finished without a close code. Ready for the next prompt.');
-        }
+          updateProgress('\n\n❌ Connection error');
 
-        // CRITICAL: If connection closed unexpectedly (not clean), ensure message is saved
-        if (!event.wasClean && event.code !== 1000) {
-          console.warn('⚠️ WebSocket closed unexpectedly, ensuring message is persisted');
+          // CRITICAL: Add error message to chat so user knows what happened
+          const errorMsg: Message = {
+            id: `error-${Date.now()}`,
+            content: '❌ Connection error occurred. Your message has been saved. Please try again.',
+            sender: 'ai',
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, errorMsg]);
+
+          // CRITICAL: Ensure user message is persisted even on error
           try {
             const currentChat = chats.find(c => c.id === currentChatId);
             if (currentChat) {
@@ -2949,20 +2967,81 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               };
               memoryPersistSkipRef.current = false;
               persistChatToMemory(updatedChat).catch(err =>
-                console.error('Failed to persist on close:', err)
+                console.error('Failed to persist on error:', err)
               );
             }
           } catch (persistError) {
-            console.error('Failed to persist message on WebSocket close:', persistError);
+            console.error('Failed to persist message on WebSocket error:', persistError);
           }
-        }
 
-        // 🔧 CRITICAL FIX: Set loading to false ONLY when WebSocket connection closes
-        // This ensures the loading icon tracks the complete process until the connection is fully closed
-        setIsLoading(false);
-        console.log('✅ Loading stopped - WebSocket connection closed');
+          // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+          // The loading icon will be hidden when ws.onclose fires
+          stopAutoRun();
+        };
+
+        ws.onclose = (event) => {
+          console.log('🔌 WebSocket closed', { code: event.code, reason: event.reason, wasClean: event.wasClean });
+          clearSessionTimeout();
+          stopAutoRun();
+          setWsConnection(prev => (prev === ws ? null : prev));
+
+          // Treat missing close code (1005) as a clean shutdown and inform the user
+          if (event.code === 1005 && event.wasClean) {
+            updateProgress('\n\nℹ️ Connection finished without a close code. Ready for the next prompt.');
+          }
+
+          const workflowCompletedCleanly = workflowFinishedRef.current;
+
+          // CRITICAL: If connection closed unexpectedly (not clean), ensure message is saved
+          if (!event.wasClean && event.code !== 1000) {
+            console.warn('⚠️ WebSocket closed unexpectedly, ensuring message is persisted');
+            try {
+              const currentChat = chats.find(c => c.id === currentChatId);
+              if (currentChat) {
+                const updatedChat: Chat = {
+                  ...currentChat,
+                  messages: currentChat.messages.some(m => m.id === userMessage.id)
+                    ? currentChat.messages
+                    : [...currentChat.messages, userMessage],
+                };
+                memoryPersistSkipRef.current = false;
+                persistChatToMemory(updatedChat).catch(err =>
+                  console.error('Failed to persist on close:', err)
+                );
+              }
+            } catch (persistError) {
+              console.error('Failed to persist message on WebSocket close:', persistError);
+            }
+          }
+
+          const shouldRetryEarlyClose =
+            workflowActiveRef.current &&
+            !workflowCompletedCleanly &&
+            !pendingRetryRef.current &&
+            pendingPayloadRef.current;
+
+          workflowActiveRef.current = false;
+
+          if (shouldRetryEarlyClose) {
+            console.warn('🔁 WebSocket closed before workflow finished; retrying connection');
+            pendingRetryRef.current = true;
+            setIsLoading(true);
+            setTimeout(() => {
+              establishWebSocket(true);
+            }, 300);
+          }
+
+          // 🔧 CRITICAL FIX: Set loading to false ONLY when WebSocket connection closes
+          // This ensures the loading icon tracks the complete process until the connection is fully closed
+          if (!shouldRetryEarlyClose) {
+            setIsLoading(false);
+          }
+          console.log('✅ Loading stopped - WebSocket connection closed');
+        };
       };
-      
+
+      await establishWebSocket();
+
     } catch (error) {
       console.error('❌ Error in handleSendMessage:', error);
       

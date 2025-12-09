@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import copy
 import hashlib
+import difflib
 import json
 import logging
 import os
@@ -50,6 +51,9 @@ from .graphrag import GraphRAGWorkspaceConfig
 from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
 from .laboratory_retriever import LaboratoryRetrievalPipeline
+from STREAMAI.lab_context_builder import LabContextBuilder
+from STREAMAI.lab_memory_models import WorkflowStepRecord
+from STREAMAI.lab_memory_store import LabMemoryStore
 # Import workflow_insight_agent - try both paths for Docker and local development
 try:
     from Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
@@ -218,6 +222,8 @@ class ReActState:
     current_step_number: int = 0
     paused: bool = False  # Indicates whether the loop was paused mid-generation
     paused_at_step: int = 0  # The step where generation paused
+    awaiting_clarification: bool = False  # True when user input is required to proceed
+    clarification_context: Optional[str] = None
     execution_history: List[Dict[str, Any]] = None  # Previous steps and results
     thoughts: List[str] = None  # Reasoning history
     observations: List[str] = None  # Observation history
@@ -288,6 +294,17 @@ class StreamWebSocketOrchestrator:
             logger.warning("⚠️ Laboratory retrieval pipeline unavailable: %s", lab_exc)
             self.laboratory_retriever = None
 
+        self.lab_memory_store: Optional[LabMemoryStore] = None
+        self.lab_context_builder: Optional[LabContextBuilder] = None
+        try:
+            self.lab_memory_store = LabMemoryStore()
+            self.lab_context_builder = LabContextBuilder(self.lab_memory_store)
+            logger.info("✅ Laboratory deterministic memory store initialized")
+        except Exception as lab_memory_exc:
+            logger.warning("⚠️ Laboratory memory store unavailable: %s", lab_memory_exc)
+            self.lab_memory_store = None
+            self.lab_context_builder = None
+
         # GraphRAG integration
         self.graph_workspace_config = GraphRAGWorkspaceConfig()
         self.graph_rag_client = GraphRAGQueryClient(self.graph_workspace_config)
@@ -308,6 +325,7 @@ class StreamWebSocketOrchestrator:
         self._paused_sequences: Set[str] = set()
         self._react_step_guards: Dict[str, Dict[str, Any]] = {}  # Prevent overlapping ReAct steps
         self._react_stall_watchdogs: Dict[str, Dict[str, Any]] = {}  # Detect stalled ReAct loops without progress
+        self._lab_atom_snapshot_cache: Dict[str, List[Dict[str, Any]]] = {}  # Realtime lab-mode atoms per sequence
 
         # Safety guards
         self.max_initial_plan_steps: int = 8  # Abort overly long upfront plans
@@ -406,6 +424,94 @@ class StreamWebSocketOrchestrator:
         if guard_entry and guard_entry.get("token") == guard_token:
             guard_entry["status"] = status
             guard_entry["updated_at"] = datetime.utcnow().isoformat()
+
+    @staticmethod
+    def _description_similarity(text_a: Optional[str], text_b: Optional[str]) -> float:
+        """Return similarity score between two descriptions (0-1)."""
+
+        if not text_a or not text_b:
+            return 0.0
+        return difflib.SequenceMatcher(None, text_a.lower(), text_b.lower()).ratio()
+
+    def _find_repeated_lab_atom(
+        self,
+        sequence_id: str,
+        request_id: Optional[str],
+        atom_id: str,
+        description: str,
+        execution_history: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Check recent history and persisted lab snapshots for repeated atoms with similar intent."""
+
+        similarity_threshold = 0.78
+        for hist in reversed(execution_history):
+            if hist.get("atom_id") != atom_id:
+                continue
+            if self._description_similarity(description, hist.get("description")) >= similarity_threshold:
+                return {"source": "memory", "record": hist}
+
+        cached_snapshots = self._lab_atom_snapshot_cache.get(sequence_id)
+        if cached_snapshots is None and self.lab_memory_store and request_id:
+            project_context = self._sequence_project_context.get(sequence_id, {})
+            cached_snapshots = self.lab_memory_store.load_atom_snapshots(
+                session_id=sequence_id,
+                request_id=request_id,
+                limit=25,
+                project_context=project_context,
+            )
+            self._lab_atom_snapshot_cache[sequence_id] = cached_snapshots
+
+        for snapshot in cached_snapshots or []:
+            step = (snapshot.get("step") or {}) if isinstance(snapshot, dict) else {}
+            if step.get("atom_id") != atom_id:
+                continue
+            if self._description_similarity(description, step.get("description")) >= similarity_threshold:
+                return {"source": "snapshot", "record": step}
+
+        return None
+
+    async def _pause_for_lab_clarification(
+        self,
+        websocket,
+        sequence_id: str,
+        react_state: ReActState,
+        guard_token: str,
+        current_step_number: int,
+        repeated_atom: str,
+        repeated_context: Dict[str, Any],
+    ) -> None:
+        """Pause workflow and prompt for clarification when repeat intent detected in lab mode."""
+
+        self._update_react_step_guard(sequence_id, guard_token, "paused_clarification")
+        react_state.paused = True
+        react_state.awaiting_clarification = True
+        react_state.paused_at_step = current_step_number
+        react_state.clarification_context = (
+            f"Atom '{repeated_atom}' appears to repeat a prior action. Provide clarification or choose a different atom."
+        )
+        self._paused_sequences.add(sequence_id)
+
+        message = (
+            f"Lab-mode guard: Atom '{repeated_atom}' looks similar to a previous step. "
+            "Please confirm an alternative approach or provide more detail to proceed."
+        )
+        try:
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "react_clarification_needed",
+                    {
+                        "sequence_id": sequence_id,
+                        "step_number": current_step_number,
+                        "repeated_atom": repeated_atom,
+                        "message": message,
+                        "previous_context": repeated_context,
+                    },
+                ),
+                "react_clarification_needed event",
+            )
+        except (WebSocketDisconnect, Exception):
+            logger.debug("⚠️ Unable to send clarification request event", exc_info=True)
     
     async def execute_react_workflow(
         self,
@@ -2729,6 +2835,10 @@ WORKFLOW PLANNING:
             frontend_chat_id,
             websocket_session_id,
         )
+        request_id = uuid.uuid4().hex
+        laboratory_mode = (project_context.get("mode") or "laboratory").lower() == "laboratory"
+        lab_envelope = None
+        lab_bundle: List[Dict[str, Any]] = []
         available_files = list(available_files or [])
         existing_files = self._sequence_available_files.get(sequence_id)
         if existing_files:
@@ -2736,6 +2846,11 @@ WORKFLOW PLANNING:
         self._sequence_available_files[sequence_id] = available_files
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
+        if self.lab_memory_store:
+            try:
+                self.lab_memory_store.apply_context(project_context)
+            except Exception as ctx_exc:
+                logger.warning("⚠️ Failed to apply project context to lab memory store: %s", ctx_exc)
         if intent_route:
             self._sequence_intent_routing[sequence_id] = intent_route
         logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
@@ -2750,6 +2865,13 @@ WORKFLOW PLANNING:
                 sequence_id,
                 react_state.paused_at_step or react_state.current_step_number,
             )
+            if react_state.awaiting_clarification:
+                logger.info(
+                    "🧭 Resuming after clarification for %s; clearing clarification guard",
+                    sequence_id,
+                )
+                react_state.awaiting_clarification = False
+                react_state.clarification_context = None
 
         persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
         if persisted_history:
@@ -2778,6 +2900,38 @@ WORKFLOW PLANNING:
             self._chat_file_mentions[sequence_id] = file_focus
             effective_user_prompt = self._append_file_focus_note(effective_user_prompt, file_focus)
             logger.info("📁 Tracking %d file references from chat context", len(file_focus))
+
+        if laboratory_mode and self.lab_context_builder:
+            lab_envelope = self.lab_context_builder.build_envelope(
+                request_id=request_id,
+                session_id=sequence_id,
+                user_id=user_id,
+                model_version=self.llm_model,
+                feature_flags=project_context.get("feature_flags"),
+                prompt_template=self.lab_context_builder.prompt_template,
+                prompt_template_version=self.lab_context_builder.prompt_template_version,
+                raw_inputs={
+                    "user_prompt": user_prompt,
+                    "project_context": project_context,
+                    "history_summary": history_summary,
+                },
+            )
+            lab_bundle = self.lab_context_builder.load_context_bundle(
+                lab_envelope,
+                project_context=project_context,
+            )
+            effective_user_prompt = self.lab_context_builder.merge_context_into_prompt(
+                effective_user_prompt,
+                lab_bundle,
+            )
+            regression_hash = self.lab_context_builder.regression_hash(effective_user_prompt, lab_bundle)
+            logger.info(
+                "🧪 Laboratory context prepared | template_hash=%s input_hash=%s bundle_docs=%s regression_hash=%s",
+                lab_envelope.prompt_template_hash,
+                lab_envelope.input_hash,
+                len(lab_bundle),
+                regression_hash,
+            )
 
         try:
             # Send connected event
@@ -3214,7 +3368,32 @@ WORKFLOW PLANNING:
                             if atom_count >= 2:
                                 logger.warning(f"⚠️ ReAct: Atom '{current_atom}' used {atom_count} times in last 3 steps - potential loop risk")
                                 # Don't stop, but log warning for evaluation to catch
-                    
+
+                    if laboratory_mode and lab_envelope:
+                        repeated_context = self._find_repeated_lab_atom(
+                            sequence_id=sequence_id,
+                            request_id=lab_envelope.request_id,
+                            atom_id=next_step.atom_id,
+                            description=next_step.description,
+                            execution_history=execution_history,
+                        )
+                        if repeated_context:
+                            logger.warning(
+                                "⚠️ Lab-mode guard: Atom %s appears to repeat previous intent (%s)",
+                                next_step.atom_id,
+                                repeated_context.get("source"),
+                            )
+                            await self._pause_for_lab_clarification(
+                                websocket=websocket,
+                                sequence_id=sequence_id,
+                                react_state=react_state,
+                                guard_token=guard_token,
+                                current_step_number=current_step_number,
+                                repeated_atom=next_step.atom_id,
+                                repeated_context=repeated_context.get("record", {}),
+                            )
+                            break
+
                     # ============================================================
                     # ACTION: Execute the step
                     # ============================================================
@@ -3447,6 +3626,32 @@ WORKFLOW PLANNING:
                         "result": execution_result,
                         "evaluation": evaluation.__dict__
                     })
+                    if laboratory_mode and self.lab_memory_store and lab_envelope:
+                        try:
+                            step_record = WorkflowStepRecord(
+                                step_number=current_step_number,
+                                atom_id=next_step.atom_id,
+                                inputs={"files": next_step.files_used or [], "raw_inputs": next_step.inputs},
+                                outputs=execution_result,
+                                tool_calls=execution_result.get("tool_calls") or [],
+                                decision_rationale=next_step.description,
+                                edge_cases=evaluation.issues or [],
+                            )
+                            available_snapshot_files = self._sequence_available_files.get(sequence_id, [])
+                            self.lab_memory_store.save_atom_snapshot(
+                                envelope=lab_envelope,
+                                step_record=step_record,
+                                project_context=project_context,
+                                available_files=available_snapshot_files,
+                            )
+                            self._lab_atom_snapshot_cache.setdefault(sequence_id, []).append(
+                                {
+                                    "step": step_record.model_dump(mode="python", exclude_none=True),
+                                    "available_files": available_snapshot_files,
+                                }
+                            )
+                        except Exception as lab_snapshot_exc:
+                            logger.warning("⚠️ Failed to persist real-time lab atom snapshot: %s", lab_snapshot_exc)
                     # Reset stall watchdog now that we have material progress
                     stall_guard = self._react_stall_watchdogs.get(sequence_id)
                     if stall_guard is not None:
@@ -3674,9 +3879,18 @@ WORKFLOW PLANNING:
             except Exception as insight_error:
                 logger.warning(f"⚠️ Failed to emit workflow insight (connection may be closed): {insight_error}")
                 # Don't fail the entire workflow if insight emission fails
-            
+
+            if laboratory_mode and self.lab_context_builder and lab_envelope:
+                self.lab_context_builder.persist_run(
+                    envelope=lab_envelope,
+                    user_prompt=user_prompt,
+                    project_context=project_context,
+                    execution_history=execution_history,
+                    history_summary=history_summary,
+                )
+
             # ReAct loop handles all execution - old loop code removed
-            
+
         except WebSocketDisconnect:
             logger.info(f"🔌 WebSocket disconnected during workflow {sequence_id}")
         except Exception as e:

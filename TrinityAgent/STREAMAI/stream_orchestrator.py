@@ -173,6 +173,9 @@ class StreamOrchestrator:
         # In-memory clarification tracking for human-in-the-loop pauses
         self._clarification_waiters: Dict[str, asyncio.Future] = {}
         self._clarification_metadata: Dict[str, Dict[str, Any]] = {}
+        self._clarification_responses: Dict[str, Dict[str, Any]] = {}
+        # Finite state tracking for per-user clarification and action readiness
+        self._user_fsm_state: Dict[str, Dict[str, Any]] = {}
 
         # Shared file context utilities
         self.file_loader: Optional[FileLoader] = None
@@ -378,7 +381,11 @@ class StreamOrchestrator:
             "start_time": datetime.now().isoformat(),
             "end_time": None
         }
-        
+        fsm_state = self._user_fsm_state.setdefault(
+            session_id,
+            {"pending_action_resolved": True, "last_user_response": {}, "pending_request_id": None},
+        )
+
         # Execute each atom
         last_stable_index = -1
         atom_index = 0
@@ -389,6 +396,13 @@ class StreamOrchestrator:
             logger.info(f"\n{'='*80}")
             logger.info(f"📍 Executing Atom {i}/{total_atoms}: {atom_id}")
             logger.info(f"{'='*80}")
+
+            # Bind the latest clarification response into the atom before running validations
+            recent_response = fsm_state.get("last_user_response") or {}
+            if recent_response.get("pending_action_resolved") and recent_response.get("values"):
+                atom = self._apply_clarification_response(atom, recent_response)
+                atom.setdefault("metadata", {})["pending_action_resolved"] = True
+                fsm_state["last_user_response"] = {}
 
             control_action = await self._apply_operator_controls(
                 operator_controls=operator_controls,
@@ -583,6 +597,11 @@ class StreamOrchestrator:
                             "atom_id": atom_id,
                         })
 
+                        fsm_state["pending_action_resolved"] = False
+                        fsm_state["pending_request_id"] = request_id
+                        fsm_state["pending_question"] = clarification
+                        fsm_state["last_user_response"] = {}
+
                         await self._emit_progress(progress_callback, {
                             "type": "clarification_request",
                             "status": "paused_for_clarification",
@@ -598,6 +617,9 @@ class StreamOrchestrator:
                         )
 
                         if response_payload:
+                            fsm_state["pending_action_resolved"] = True
+                            fsm_state["pending_request_id"] = None
+                            fsm_state["last_user_response"] = response_payload
                             await self._emit_progress(progress_callback, {
                                 "type": "clarification_update",
                                 "status": "resumed",
@@ -1221,9 +1243,20 @@ class StreamOrchestrator:
             "total_steps": 3,
             "description": "Executing atom"
         })
-        
+
         # Inject previous results into prompt
         prompt = atom.get("prompt", "")
+        clarification_history = atom.get("clarification_history") or []
+        if clarification_history:
+            last_clarification = clarification_history[-1]
+            prompt = (
+                f"{prompt}\n\n"
+                "# Human-in-the-loop clarification\n"
+                f"- Pending action resolved: {atom.get('metadata', {}).get('pending_action_resolved', False)}\n"
+                f"- Expected fields: {atom.get('metadata', {}).get('expected_fields', [])}\n"
+                f"- User response: {last_clarification.get('values', {})}\n"
+                f"- User message: {last_clarification.get('message', '')}"
+            )
         if self.storage and "{{" in prompt:
             prompt = self.storage.inject_results_into_prompt(session_id, prompt)
             logger.info(f"  📝 Injected results into prompt")
@@ -1375,6 +1408,7 @@ class StreamOrchestrator:
             "atom_id": atom.get("atom_id"),
             "resume_event": resume_event,
             "progress_callback": progress_callback,
+            "pending_action_resolved": False,
         }
 
         if self.storage:
@@ -1422,6 +1456,23 @@ class StreamOrchestrator:
                 params.update(values)
                 atom["parameters"] = params
 
+        metadata = atom.setdefault("metadata", {})
+        if response.get("pending_action_resolved"):
+            metadata["pending_action_resolved"] = True
+        if response.get("expected_fields") is not None:
+            metadata["expected_fields"] = response.get("expected_fields")
+
+        clarification_history = atom.get("clarification_history") or []
+        clarification_history.append(
+            {
+                "request_id": response.get("requestId"),
+                "answered_at": datetime.utcnow().isoformat(),
+                "message": response.get("message"),
+                "values": values,
+            }
+        )
+        atom["clarification_history"] = clarification_history
+
         return atom
 
     async def resume_clarification(self, session_id: str, request_id: str, message: str, values: Optional[Dict[str, Any]] = None) -> bool:
@@ -1434,12 +1485,24 @@ class StreamOrchestrator:
         if resume_event and resume_event.is_set():
             return True
 
+        clarification_meta = metadata.get("clarification") or {}
+        expected_fields = clarification_meta.get("expected_fields") or []
+        normalized_values = values or {}
+        if expected_fields:
+            normalized_values = {field: (values or {}).get(field) for field in expected_fields}
+            # Preserve any additional keys provided by the user for flexibility
+            for extra_key, extra_val in (values or {}).items():
+                if extra_key not in normalized_values:
+                    normalized_values[extra_key] = extra_val
+
         payload = {
             "type": "clarification_response",
             "requestId": request_id,
             "session_id": session_id,
             "message": message,
-            "values": values or {},
+            "values": normalized_values,
+            "expected_fields": expected_fields,
+            "pending_action_resolved": True,
         }
 
         if resume_event:
@@ -1450,6 +1513,20 @@ class StreamOrchestrator:
         elif not waiter:
             return False
 
+        # Persist the most recent clarification response for stateful FSM tracking
+        self._clarification_responses[key] = payload
+        session_state = self._user_fsm_state.setdefault(
+            session_id, {"pending_action_resolved": False, "last_user_response": {}, "pending_request_id": request_id}
+        )
+        session_state.update(
+            {
+                "pending_action_resolved": True,
+                "last_user_response": payload,
+                "pending_request_id": None,
+                "pending_question": clarification_meta,
+            }
+        )
+
         progress_callback = metadata.get("progress_callback")
         if progress_callback:
             try:
@@ -1459,6 +1536,7 @@ class StreamOrchestrator:
                     "requestId": request_id,
                     "session_id": session_id,
                     "atom_id": metadata.get("atom_id"),
+                    "pending_action_resolved": True,
                 })
             except Exception as exc:
                 logger.debug("Could not emit resumed status: %s", exc)
