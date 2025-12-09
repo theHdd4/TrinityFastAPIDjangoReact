@@ -2,11 +2,14 @@ from rest_framework import serializers
 from django_tenants.utils import schema_context
 from django.core.management import call_command
 from django.db import transaction, connection
+from django.utils import timezone
+from datetime import timedelta
 import os
 import re
+import sys
 from .models import Tenant, Domain
 from apps.registry.models import App
-from apps.accounts.models import User, UserTenant
+from apps.accounts.models import User, UserTenant, OnboardToken
 from apps.roles.models import UserRole
 from apps.usecase.models import UseCase
 from apps.accounts.utils import save_env_var
@@ -25,6 +28,9 @@ class TenantSerializer(serializers.ModelSerializer):
     admin_name = serializers.CharField()
     admin_email = serializers.EmailField()
     admin_password = serializers.CharField(write_only=True)
+    onboard_token = serializers.SerializerMethodField()
+    onboard_token_expires_at = serializers.SerializerMethodField()
+    admin_username = serializers.SerializerMethodField()
 
     class Meta:
         model = Tenant
@@ -43,8 +49,23 @@ class TenantSerializer(serializers.ModelSerializer):
             "admin_email",
             "admin_password",
             "is_active",
+            "onboard_token",
+            "onboard_token_expires_at",
+            "admin_username",
         ]
-        read_only_fields = ["id", "created_on", "users_in_use", "is_active"]
+        read_only_fields = ["id", "created_on", "users_in_use", "is_active", "onboard_token", "onboard_token_expires_at", "admin_username"]
+
+    def get_onboard_token(self, obj):
+        """Return onboard token if available (only after creation)."""
+        return getattr(obj, '_onboard_token', None)
+
+    def get_onboard_token_expires_at(self, obj):
+        """Return onboard token expiration if available."""
+        return getattr(obj, '_onboard_token_expires_at', None)
+
+    def get_admin_username(self, obj):
+        """Return admin username if available."""
+        return getattr(obj, '_admin_username', None)
 
     def create(self, validated_data):
         """Create a new tenant using the same steps as create_tenant.py."""
@@ -230,8 +251,36 @@ class TenantSerializer(serializers.ModelSerializer):
             password=admin_password,
             is_superuser=False,
             is_staff=False,
+            is_active=False,  # Set inactive for onboarding
         )
-        print(f"   ✅ Created user '{admin_name}' in public schema")
+        print(f"   ✅ Created user '{admin_name}' in public schema (inactive)")
+        
+        # Get the user who created the tenant (if available)
+        created_by_user = None
+        request = self.context.get('request')
+        if request and hasattr(request, 'user') and request.user.is_authenticated:
+            created_by_user = request.user
+        
+        # Create OnboardToken for the admin user
+        expires_at = timezone.now() + timedelta(hours=48)
+        onboard_token = OnboardToken.objects.create(
+            user=admin_user,
+            purpose="onboard",
+            expires_at=expires_at,
+            created_by=created_by_user
+        )
+        
+        # Console log the token
+        print("=" * 50)
+        print(f"Onboarding Token Created for Tenant Admin:")
+        print(f"  Tenant: {tenant.name} ({tenant.schema_name})")
+        print(f"  User: {admin_user.username} ({admin_user.email})")
+        print(f"  Token: {onboard_token.token}")
+        print(f"  Expires at: {expires_at}")
+        if created_by_user:
+            print(f"  Created by: {created_by_user.username}")
+        print("=" * 50)
+        sys.stdout.flush()
 
         # Step 6: Create UserTenant mapping in public schema
         print(f"→ Creating UserTenant mapping...")
@@ -279,6 +328,12 @@ class TenantSerializer(serializers.ModelSerializer):
 
         # Update tenant users_in_use count
         Tenant.objects.filter(id=tenant.id).update(users_in_use=1)
+
+        # Store token in tenant instance for serializer response
+        tenant._onboard_token = str(onboard_token.token)
+        tenant._onboard_token_expires_at = expires_at.isoformat()
+        tenant._admin_username = admin_user.username
+        tenant._admin_email = admin_user.email
 
         print("✅ Tenant creation complete")
         return tenant

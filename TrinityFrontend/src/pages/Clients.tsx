@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '@/components/Header';
 import { Card } from '@/components/ui/card';
@@ -22,6 +22,16 @@ import {
   MapPin,
   X,
   Save,
+  FileText,
+  DollarSign,
+  Clock,
+  Folder,
+  Database,
+  RefreshCw,
+  Lock,
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -32,6 +42,7 @@ import {
 import { TENANTS_API, USECASES_API } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 import NotFound from './NotFound';
 console.log('TENANTS_API', TENANTS_API);
 console.log('USECASES_API', USECASES_API);
@@ -67,6 +78,11 @@ const Clients = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingTenantId, setEditingTenantId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'general' | 'bills' | 'quota'>('general');
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
+  const tabButtonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+  const tabsContainerRef = useRef<HTMLDivElement>(null);
+  const [pillStyle, setPillStyle] = useState({ width: 0, left: 0 });
   const [form, setForm] = useState({
     name: '',
     schema_name: '',
@@ -120,6 +136,42 @@ const Clients = () => {
     loadTenants();
     loadApps();
   }, [hasAccess]);
+
+  // Update pill dimensions based on active tab
+  const updatePillDimensions = useCallback(() => {
+    const activeButton = tabButtonRefs.current[activeTab];
+    const container = tabsContainerRef.current;
+    
+    if (activeButton && container) {
+      const buttonRect = activeButton.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      
+      setPillStyle({
+        width: buttonRect.width,
+        left: buttonRect.left - containerRect.left,
+      });
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!showAddForm) return;
+    
+    // Use requestAnimationFrame to ensure DOM is ready
+    const rafId = requestAnimationFrame(() => {
+      updatePillDimensions();
+      setTimeout(updatePillDimensions, 0);
+      setTimeout(updatePillDimensions, 10);
+      setTimeout(updatePillDimensions, 50);
+    });
+
+    // Recalculate on window resize
+    window.addEventListener('resize', updatePillDimensions);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', updatePillDimensions);
+    };
+  }, [updatePillDimensions, showAddForm, activeTab]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, options } = e.target as HTMLSelectElement;
@@ -232,6 +284,7 @@ const Clients = () => {
         admin_password: form.admin_password,
       };
       console.log('Submitting tenant payload', payload);
+      setIsCreatingClient(true);
       try {
         const res = await fetch(`${TENANTS_API}/tenants/`, {
           method: 'POST',
@@ -243,25 +296,68 @@ const Clients = () => {
         const body = await res.text();
         console.log('Create tenant body', body);
         if (res.ok) {
-          toast({
-            title: 'Success',
-            description: 'Client has been created successfully.',
-          });
-          setForm({
-            name: '',
-            schema_name: '',
-            primary_domain: '',
-            seats_allowed: '',
-            project_cap: '',
-            apps_allowed: [],
-            projects_allowed: '',
-            admin_name: '',
-            admin_email: '',
-            admin_password: '',
-          });
-          setShowAddForm(false);
-          loadTenants();
+          // Parse response to get onboarding token
+          let tenantData;
+          try {
+            tenantData = JSON.parse(body);
+          } catch {
+            tenantData = {};
+          }
+          
+          // Wait a moment to show the success state, then close
+          setTimeout(() => {
+            // Show onboarding token link if available
+            if (tenantData.onboard_token) {
+              const loginUrl = `${window.location.origin}/login?token=${tenantData.onboard_token}`;
+              toast({
+                title: 'Client Created Successfully',
+                description: (
+                  <div className="space-y-2">
+                    <p>Client <strong>{tenantData.name}</strong> has been created.</p>
+                    <p className="text-sm">Admin: <strong>{tenantData.admin_username || form.admin_name}</strong></p>
+                    <a 
+                      href={loginUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 underline text-sm font-medium block"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(loginUrl, '_blank');
+                      }}
+                    >
+                      Open Admin Onboarding Link
+                    </a>
+                    <p className="text-xs text-gray-500">Or copy this link: <code className="text-xs bg-gray-100 px-1 py-0.5 rounded break-all">{loginUrl}</code></p>
+                  </div>
+                ),
+                duration: 15000,
+              });
+            } else {
+              toast({
+                title: 'Success',
+                description: 'Client has been created successfully.',
+              });
+            }
+            
+            setForm({
+              name: '',
+              schema_name: '',
+              primary_domain: '',
+              seats_allowed: '',
+              project_cap: '',
+              apps_allowed: [],
+              projects_allowed: '',
+              admin_name: '',
+              admin_email: '',
+              admin_password: '',
+            });
+            setIsCreatingClient(false);
+            setShowAddForm(false);
+            setActiveTab('general');
+            loadTenants();
+          }, 1000);
         } else {
+          setIsCreatingClient(false);
           let errorMessage = 'Failed to create client. Please try again.';
           try {
             const errorData = await JSON.parse(body);
@@ -276,6 +372,7 @@ const Clients = () => {
           });
         }
       } catch (err) {
+        setIsCreatingClient(false);
         toast({
           title: 'Error',
           description: 'An unexpected error occurred while creating the client.',
@@ -371,6 +468,26 @@ const Clients = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
       <Header />
 
+      {/* Loading Overlay for Client Creation */}
+      {isCreatingClient && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+          <Card className="p-8 bg-white border-0 shadow-2xl max-w-md w-full mx-4">
+            <div className="flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center mb-4 animate-pulse">
+                <Building2 className="w-8 h-8 text-white" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                Creating client environment…
+              </h3>
+              <p className="text-gray-600 mb-4">Almost there.</p>
+              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-full animate-pulse" style={{ width: '60%' }}></div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Header Section */}
         <div className="mb-8">
@@ -420,15 +537,95 @@ const Clients = () => {
             </Button>
           </div>
 
-          {showAddForm && (
+          {showAddForm && !isCreatingClient && (
             <Card className="mb-8 p-6 bg-white border-0 shadow-lg">
               <div className="mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">
                   {editingTenantId !== null ? 'Edit Client' : 'Add New Client'}
                 </h2>
+                
+                {/* Pill-style Tabs */}
+                <div ref={tabsContainerRef} className="relative inline-flex items-center gap-2 p-1 bg-gray-100 rounded-full">
+                  {/* Sliding Pill Background */}
+                  {pillStyle.width > 0 && (
+                    <div
+                      className="absolute top-1 bottom-1 rounded-full bg-white shadow-sm transition-all duration-300 ease-out"
+                      style={{
+                        left: `${pillStyle.left}px`,
+                        width: `${pillStyle.width}px`,
+                      }}
+                    />
+                  )}
+                  
+                  <button
+                    type="button"
+                    ref={(el) => {
+                      tabButtonRefs.current['general'] = el;
+                      if (activeTab === 'general' && el) {
+                        requestAnimationFrame(() => {
+                          updatePillDimensions();
+                        });
+                      }
+                    }}
+                    onClick={() => setActiveTab('general')}
+                    className={cn(
+                      "relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200",
+                      activeTab === 'general'
+                        ? "text-gray-900"
+                        : "text-gray-600 hover:text-gray-900"
+                    )}
+                  >
+                    <span>General Settings</span>
+                  </button>
+                  
+                  <button
+                    type="button"
+                    ref={(el) => {
+                      tabButtonRefs.current['bills'] = el;
+                      if (activeTab === 'bills' && el) {
+                        requestAnimationFrame(() => {
+                          updatePillDimensions();
+                        });
+                      }
+                    }}
+                    onClick={() => setActiveTab('bills')}
+                    className={cn(
+                      "relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200",
+                      activeTab === 'bills'
+                        ? "text-gray-900"
+                        : "text-gray-600 hover:text-gray-900"
+                    )}
+                  >
+                    <span>Bills and Plans</span>
+                  </button>
+                  
+                  <button
+                    type="button"
+                    ref={(el) => {
+                      tabButtonRefs.current['quota'] = el;
+                      if (activeTab === 'quota' && el) {
+                        requestAnimationFrame(() => {
+                          updatePillDimensions();
+                        });
+                      }
+                    }}
+                    onClick={() => setActiveTab('quota')}
+                    className={cn(
+                      "relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200",
+                      activeTab === 'quota'
+                        ? "text-gray-900"
+                        : "text-gray-600 hover:text-gray-900"
+                    )}
+                  >
+                    <span>Client's Quota</span>
+                  </button>
+                </div>
               </div>
 
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* General Settings Tab Content */}
+                {activeTab === 'general' && (
+                  <>
                 <div className="space-y-2">
                   <Label htmlFor="name" className="text-sm font-medium text-gray-700">Client Name *</Label>
                   <Input
@@ -579,6 +776,349 @@ const Clients = () => {
                     {editingTenantId !== null ? 'Update Client' : 'Save Client'}
                   </Button>
                 </div>
+                  </>
+                )}
+
+                {/* Bills and Plans Tab Content */}
+                {activeTab === 'bills' && (
+                  <div className="md:col-span-2 lg:col-span-3 space-y-6">
+                    {/* Current Plan Section */}
+                    <Card className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200">
+                      <div className="flex items-start gap-4 mb-6">
+                        <div className="w-12 h-12 rounded-lg bg-green-500 flex items-center justify-center">
+                          <FileText className="w-6 h-6 text-white" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-gray-900 mb-1">Current Plan</h3>
+                          <p className="text-sm text-gray-600">Enterprise Plan - Active</p>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <Card className="p-4 bg-white border-0 shadow-sm">
+                          <p className="text-2xl font-bold text-gray-900">$999</p>
+                          <p className="text-xs text-gray-500 mt-1">Monthly Cost</p>
+                        </Card>
+                        <Card className="p-4 bg-white border-0 shadow-sm">
+                          <p className="text-2xl font-bold text-gray-900">Dec 15</p>
+                          <p className="text-xs text-gray-500 mt-1">Next Billing</p>
+                        </Card>
+                        <Card className="p-4 bg-white border-0 shadow-sm">
+                          <p className="text-2xl font-bold text-gray-900">12</p>
+                          <p className="text-xs text-gray-500 mt-1">Months Active</p>
+                        </Card>
+                        <Card className="p-4 bg-white border-0 shadow-sm">
+                          <p className="text-2xl font-bold text-green-600">98%</p>
+                          <p className="text-xs text-gray-500 mt-1">Uptime</p>
+                        </Card>
+                      </div>
+                    </Card>
+
+                    {/* Plan Type and Billing Cycle */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="plan_type" className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                          <DollarSign className="w-4 h-4" />
+                          Plan Type
+                        </Label>
+                        <select
+                          id="plan_type"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-md focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+                        >
+                          <option>Enterprise - $999/mo</option>
+                          <option>Professional - $499/mo</option>
+                          <option>Starter - $99/mo</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="billing_cycle" className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                          <Calendar className="w-4 h-4" />
+                          Billing Cycle
+                        </Label>
+                        <select
+                          id="billing_cycle"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-md focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+                        >
+                          <option>Monthly</option>
+                          <option>Quarterly</option>
+                          <option>Yearly</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Payment History */}
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-5 h-5 text-gray-600" />
+                        <h3 className="text-lg font-semibold text-gray-900">Payment History</h3>
+                      </div>
+                      <Card className="p-4 border-0 shadow-sm">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                            <span className="text-sm text-gray-600">Nov 15, 2024</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-medium text-gray-900">$999.00</span>
+                              <Badge className="bg-green-100 text-green-800 border-green-200">Paid</Badge>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                            <span className="text-sm text-gray-600">Oct 15, 2024</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-medium text-gray-900">$999.00</span>
+                              <Badge className="bg-green-100 text-green-800 border-green-200">Paid</Badge>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <span className="text-sm text-gray-600">Sep 15, 2024</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-medium text-gray-900">$999.00</span>
+                              <Badge className="bg-green-100 text-green-800 border-green-200">Paid</Badge>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    </div>
+
+                    {/* Custom Price and Discount */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="custom_price" className="text-sm font-medium text-gray-700">
+                          Custom Monthly Price
+                        </Label>
+                        <Input
+                          id="custom_price"
+                          type="number"
+                          step="0.01"
+                          defaultValue="0.00"
+                          className="border-gray-200 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="discount_code" className="text-sm font-medium text-gray-700">
+                          Discount Code
+                        </Label>
+                        <Input
+                          id="discount_code"
+                          placeholder="Enter discount code"
+                          className="border-gray-200 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Save Button */}
+                    <div className="flex justify-end pt-4">
+                      <Button type="button" className="bg-gradient-to-r from-green-500 to-emerald-600 hover:opacity-90 shadow-md">
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Client
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Client's Quota Tab Content */}
+                {activeTab === 'quota' && (
+                  <div className="md:col-span-2 lg:col-span-3 space-y-6">
+                    {/* Usage Metrics Section */}
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold text-gray-900">Usage Metrics</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {/* Active Users */}
+                        <Card className="p-4 border-0 shadow-sm">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
+                              <Users className="w-5 h-5 text-orange-600" />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900">Active Users</p>
+                              <p className="text-xs text-gray-500">45 / 100 used</p>
+                            </div>
+                            <span className="text-sm font-semibold text-orange-600">45%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div className="bg-orange-500 h-2 rounded-full" style={{ width: '45%' }}></div>
+                          </div>
+                        </Card>
+
+                        {/* Projects */}
+                        <Card className="p-4 border-0 shadow-sm">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                              <Folder className="w-5 h-5 text-green-600" />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900">Projects</p>
+                              <p className="text-xs text-gray-500">8 / 25 used</p>
+                            </div>
+                            <span className="text-sm font-semibold text-green-600">32%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div className="bg-green-500 h-2 rounded-full" style={{ width: '32%' }}></div>
+                          </div>
+                        </Card>
+
+                        {/* Storage */}
+                        <Card className="p-4 border-0 shadow-sm">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                              <Database className="w-5 h-5 text-purple-600" />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900">Storage</p>
+                              <p className="text-xs text-gray-500">234GB / 500GB used</p>
+                            </div>
+                            <span className="text-sm font-semibold text-purple-600">47%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div className="bg-purple-500 h-2 rounded-full" style={{ width: '47%' }}></div>
+                          </div>
+                        </Card>
+
+                        {/* API Calls */}
+                        <Card className="p-4 border-0 shadow-sm">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                              <RefreshCw className="w-5 h-5 text-gray-600" />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900">API Calls</p>
+                              <p className="text-xs text-gray-500">15420 / 50000 used</p>
+                            </div>
+                            <span className="text-sm font-semibold text-red-600">31%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div className="bg-red-500 h-2 rounded-full" style={{ width: '31%' }}></div>
+                          </div>
+                        </Card>
+
+                        {/* Data Processing */}
+                        <Card className="p-4 border-0 shadow-sm">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
+                              <Lock className="w-5 h-5 text-orange-600" />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900">Data Processing</p>
+                              <p className="text-xs text-gray-500">78GB/day / 100GB/day used</p>
+                            </div>
+                            <span className="text-sm font-semibold text-orange-600">78%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div className="bg-orange-500 h-2 rounded-full" style={{ width: '78%' }}></div>
+                          </div>
+                        </Card>
+
+                        {/* Compute Hours */}
+                        <Card className="p-4 border-0 shadow-sm">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                              <Activity className="w-5 h-5 text-green-600" />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900">Compute Hours</p>
+                              <p className="text-xs text-gray-500">156hrs / 500hrs used</p>
+                            </div>
+                            <span className="text-sm font-semibold text-green-600">31%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div className="bg-green-500 h-2 rounded-full" style={{ width: '31%' }}></div>
+                          </div>
+                        </Card>
+                      </div>
+                    </div>
+
+                    {/* Custom Quota Limits Section */}
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold text-gray-900">Custom Quota Limits</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <Label htmlFor="max_users" className="text-sm font-medium text-gray-700">
+                            Maximum Users
+                          </Label>
+                          <Input
+                            id="max_users"
+                            type="number"
+                            defaultValue="100"
+                            className="border-gray-200 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="max_projects" className="text-sm font-medium text-gray-700">
+                            Maximum Projects
+                          </Label>
+                          <Input
+                            id="max_projects"
+                            type="number"
+                            defaultValue="25"
+                            className="border-gray-200 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="storage_limit" className="text-sm font-medium text-gray-700">
+                            Storage Limit (GB)
+                          </Label>
+                          <Input
+                            id="storage_limit"
+                            type="number"
+                            defaultValue="500"
+                            className="border-gray-200 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="monthly_api_calls" className="text-sm font-medium text-gray-700">
+                            Monthly API Calls
+                          </Label>
+                          <Input
+                            id="monthly_api_calls"
+                            type="number"
+                            defaultValue="50000"
+                            className="border-gray-200 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Usage Alerts Section */}
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold text-gray-900">Usage Alerts</h3>
+                      <Card className="p-4 border-0 shadow-sm">
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-yellow-100 flex items-center justify-center">
+                                <AlertTriangle className="w-5 h-5 text-yellow-600" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-900">Alert at 80% usage</p>
+                                <p className="text-xs text-gray-500">Get notified when usage reaches 80%</p>
+                              </div>
+                            </div>
+                            <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Active</Badge>
+                          </div>
+                          <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center">
+                                <AlertTriangle className="w-5 h-5 text-red-600" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-900">Critical alert at 95% usage</p>
+                                <p className="text-xs text-gray-500">Get notified when usage reaches 95%</p>
+                              </div>
+                            </div>
+                            <Badge className="bg-red-100 text-red-800 border-red-200">Active</Badge>
+                          </div>
+                        </div>
+                      </Card>
+                    </div>
+
+                    {/* Save Button */}
+                    <div className="flex justify-end pt-4">
+                      <Button type="button" className="bg-gradient-to-r from-green-500 to-emerald-600 hover:opacity-90 shadow-md">
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Client
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </form>
             </Card>
           )}

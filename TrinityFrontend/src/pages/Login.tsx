@@ -1,6 +1,6 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,13 +11,23 @@ import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
 import { BackToAppsIcon } from '@/components/PrimaryMenu/TrinityAssets';
 import LoginAnimation from '@/components/LoginAnimation';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
+import { ACCOUNTS_API } from '@/lib/api';
 
 const Login = () => {
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token');
+  
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isValidatingToken, setIsValidatingToken] = useState(false);
+  const [isOnboardingMode, setIsOnboardingMode] = useState(false);
+  const [onboardUsername, setOnboardUsername] = useState('');
+  const [onboardSuccess, setOnboardSuccess] = useState(false);
   const [showAnimation, setShowAnimation] = useState(false);
   const [loginSuccessful, setLoginSuccessful] = useState(false);
   const [animationCompleted, setAnimationCompleted] = useState(false);
@@ -102,6 +112,110 @@ const Login = () => {
       finalizeNavigation();
     }
   }, [finalizeNavigation, loginSuccessful, showAnimation]);
+
+  // Validate token on mount if present, reset state if no token
+  useEffect(() => {
+    if (token) {
+      setIsValidatingToken(true);
+      setError('');
+      
+      fetch(`${ACCOUNTS_API}/login/?token=${encodeURIComponent(token)}`, {
+        method: 'GET',
+        credentials: 'include',
+      })
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setIsOnboardingMode(true);
+            setOnboardUsername(data.username || '');
+            setError('');
+          } else {
+            const errorData = await res.json();
+            setError(errorData.detail || 'Invalid or expired token');
+            setIsOnboardingMode(false);
+          }
+        })
+        .catch((err) => {
+          console.error('Token validation error:', err);
+          setError('Failed to validate token. Please try again.');
+          setIsOnboardingMode(false);
+        })
+        .finally(() => {
+          setIsValidatingToken(false);
+        });
+    } else {
+      // Reset onboarding state when no token is present
+      setIsOnboardingMode(false);
+      setIsValidatingToken(false);
+      setOnboardUsername('');
+      setPassword('');
+      setConfirmPassword('');
+      setError('');
+    }
+  }, [token]);
+
+  const handleOnboardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const response = await fetch(`${ACCOUNTS_API}/onboard/complete/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          token: token,
+          password: password,
+          confirm_password: confirmPassword,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Show success message briefly before redirecting
+        setOnboardSuccess(true);
+        setError('');
+        setIsLoading(false);
+        
+        // Clear onboarding state and redirect after a short delay
+        setTimeout(() => {
+          // Clear all onboarding-related state
+          setIsOnboardingMode(false);
+          setOnboardUsername('');
+          setPassword('');
+          setConfirmPassword('');
+          setOnboardSuccess(false);
+          setIsValidatingToken(false);
+          
+          // Navigate to clean login URL without query params
+          // Using window.location to ensure a full page reload and clean state
+          window.location.href = '/login';
+        }, 1500);
+      } else {
+        setError(data.detail || 'Failed to set password. Please try again.');
+        setIsLoading(false);
+      }
+    } catch (err) {
+      console.error('Onboarding error:', err);
+      setError('Failed to complete onboarding. Please try again.');
+      setIsLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,77 +321,187 @@ const Login = () => {
           </CardHeader>
 
           <CardContent className="space-y-6">
-            <form onSubmit={handleLogin} className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="username" className="text-xs font-mono font-bold text-white">
-                  Username
-                </Label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 text-trinity-green w-4 h-4" />
-                  <Input
-                    id="username"
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
-                    placeholder="Enter Username"
-                    required
-                  />
-                </div>
+            {isValidatingToken ? (
+              <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                <div className="w-8 h-8 border-2 border-[#fec107]/30 border-t-[#fec107] rounded-full animate-spin"></div>
+                <p className="text-white/70 font-mono text-sm">Validating token...</p>
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-xs font-mono font-bold text-white">
-                  Password
-                </Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-trinity-green w-4 h-4" />
-                  <Input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 pr-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
-                    placeholder="Enter Password"
-                    required
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-trinity-green hover:text-trinity-blue hover:bg-white/10"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </Button>
-                </div>
-              </div>
-
-              {error && (
-                <div className="text-red-400 text-sm font-mono text-center bg-red-500/10 border border-red-500/20 rounded p-2">
-                  {error}
-                </div>
-              )}
-
-              <Button
-                type="submit"
-                disabled={isLoading}
-                className="w-full bg-[#fec107] text-black font-mono font-light transition-all duration-300 hover:bg-[#e0ad06] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoading ? (
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
-                    <span>Accessing...</span>
+            ) : isOnboardingMode ? (
+              <form onSubmit={handleOnboardSubmit} className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="onboard-username" className="text-xs font-mono font-bold text-white">
+                    Username
+                  </Label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-trinity-green w-4 h-4" />
+                    <Input
+                      id="onboard-username"
+                      type="text"
+                      value={onboardUsername}
+                      readOnly
+                      className="pl-10 bg-white/5 border-white/20 text-white/70 placeholder:text-white/50 focus:border-trinity-green focus:ring-trinity-green/20 font-mono cursor-not-allowed"
+                    />
                   </div>
-                ) : (
-                  'Access Trinity'
-                )}
-              </Button>
-            </form>
+                </div>
 
-            <div className="text-center">
-              <p className="text-xs text-white/70 font-mono">Credentials: Your Official Email / Your Employee ID</p>
-            </div>
+                <div className="space-y-2">
+                  <Label htmlFor="onboard-password" className="text-xs font-mono font-bold text-white">
+                    Set Password
+                  </Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-trinity-green w-4 h-4" />
+                    <Input
+                      id="onboard-password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pl-10 pr-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                      placeholder="Enter Password"
+                      required
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-trinity-green hover:text-trinity-blue hover:bg-white/10"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="onboard-confirm-password" className="text-xs font-mono font-bold text-white">
+                    Confirm Password
+                  </Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-trinity-green w-4 h-4" />
+                    <Input
+                      id="onboard-confirm-password"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="pl-10 pr-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                      placeholder="Confirm Password"
+                      required
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-trinity-green hover:text-trinity-blue hover:bg-white/10"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                </div>
+
+                {onboardSuccess && (
+                  <div className="text-green-400 text-sm font-mono text-center bg-green-500/10 border border-green-500/20 rounded p-2">
+                    Password set successfully! Redirecting to login...
+                  </div>
+                )}
+
+                {error && (
+                  <div className="text-red-400 text-sm font-mono text-center bg-red-500/10 border border-red-500/20 rounded p-2">
+                    {error}
+                  </div>
+                )}
+
+                <Button
+                  type="submit"
+                  disabled={isLoading || onboardSuccess}
+                  className="w-full bg-[#fec107] text-black font-mono font-light transition-all duration-300 hover:bg-[#e0ad06] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+                      <span>Setting Password...</span>
+                    </div>
+                  ) : onboardSuccess ? (
+                    'Redirecting...'
+                  ) : (
+                    'Set Password'
+                  )}
+                </Button>
+              </form>
+            ) : (
+              <form onSubmit={handleLogin} className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="username" className="text-xs font-mono font-bold text-white">
+                    Username
+                  </Label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-trinity-green w-4 h-4" />
+                    <Input
+                      id="username"
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                      placeholder="Enter Username"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="password" className="text-xs font-mono font-bold text-white">
+                    Password
+                  </Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-trinity-green w-4 h-4" />
+                    <Input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pl-10 pr-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                      placeholder="Enter Password"
+                      required
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-trinity-green hover:text-trinity-blue hover:bg-white/10"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="text-red-400 text-sm font-mono text-center bg-red-500/10 border border-red-500/20 rounded p-2">
+                    {error}
+                  </div>
+                )}
+
+                <Button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full bg-[#fec107] text-black font-mono font-light transition-all duration-300 hover:bg-[#e0ad06] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+                      <span>Accessing...</span>
+                    </div>
+                  ) : (
+                    'Access Trinity'
+                  )}
+                </Button>
+              </form>
+            )}
+
+            {!isOnboardingMode && (
+              <div className="text-center">
+                <p className="text-xs text-white/70 font-mono">Credentials: Your Official Email / Your Employee ID</p>
+              </div>
+            )}
           </CardContent>
         </Card>
 

@@ -18,7 +18,8 @@ import {
   RotateCcw,
   Building,
   X,
-  Save
+  Save,
+  Key
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -217,12 +218,42 @@ const Users = () => {
       });
       
       if (res.ok) {
-        toast({
-          title: 'Success',
-          description: editingUserId !== null 
-            ? 'User has been updated successfully.'
-            : 'User has been created successfully.',
-        });
+        const data = await res.json();
+        
+        // Show onboarding token link if it's a new user creation
+        if (editingUserId === null && data.onboard_token) {
+          const loginUrl = `${window.location.origin}/login?token=${data.onboard_token}`;
+          toast({
+            title: 'User Created Successfully',
+            description: (
+              <div className="space-y-2">
+                <p>User <strong>{data.username}</strong> has been created.</p>
+                <a 
+                  href={loginUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-800 underline text-sm font-medium block"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(loginUrl, '_blank');
+                  }}
+                >
+                  Open Onboarding Link
+                </a>
+                <p className="text-xs text-gray-500">Or copy this link: <code className="text-xs bg-gray-100 px-1 py-0.5 rounded break-all">{loginUrl}</code></p>
+              </div>
+            ),
+            duration: 15000,
+          });
+        } else {
+          toast({
+            title: 'Success',
+            description: editingUserId !== null 
+              ? 'User has been updated successfully.'
+              : 'User has been created successfully.',
+          });
+        }
+        
         setForm({ username: '', password: '', email: '', role: 'viewer', allowed_apps: [] });
         setEditingUserId(null);
         setShowAddForm(false);
@@ -324,6 +355,63 @@ const Users = () => {
       toast({
         title: 'Error',
         description: 'An unexpected error occurred while reactivating the user.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleGeneratePasswordResetToken = async (id: number, username: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/users/${id}/generate_password_reset_token/`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        // Construct the login URL with token
+        const loginUrl = `${window.location.origin}/login?token=${data.token}`;
+        
+        toast({
+          title: 'Password Reset Token Generated',
+          description: (
+            <div className="space-y-2">
+              <p>Token for {username}: <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">{data.token}</code></p>
+              <a 
+                href={loginUrl} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:text-blue-800 underline text-sm font-medium"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(loginUrl, '_blank');
+                }}
+              >
+                Open Password Reset Link
+              </a>
+              <p className="text-xs text-gray-500">Or copy this link: <code className="text-xs bg-gray-100 px-1 py-0.5 rounded break-all">{loginUrl}</code></p>
+            </div>
+          ),
+          duration: 15000, // Show for 15 seconds to allow copying
+        });
+      } else {
+        let errorMessage = 'Failed to generate password reset token. Please try again.';
+        try {
+          const errorData = await res.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          // If response is not JSON, use default message
+        }
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred while generating the password reset token.',
         variant: 'destructive',
       });
     }
@@ -581,6 +669,13 @@ const Users = () => {
                     <DropdownMenuContent align="end" className="bg-white border border-gray-200 shadow-lg">
                       <DropdownMenuItem className="cursor-pointer" onSelect={() => handleEditUser(user.id)}>
                         <Edit className="w-4 h-4 mr-2" /> Edit User
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        className={isInactive ? "cursor-not-allowed opacity-50" : "cursor-pointer"} 
+                        disabled={isInactive}
+                        onSelect={() => !isInactive && handleGeneratePasswordResetToken(user.id, user.username)}
+                      >
+                        <Key className="w-4 h-4 mr-2" /> Generate Password Reset Token
                       </DropdownMenuItem>
                       {isInactive ? (
                         <DropdownMenuItem className="cursor-pointer text-green-600 focus:text-green-700" onSelect={() => handleReactivate(user.id)}>

@@ -1,5 +1,6 @@
 # apps/accounts/models.py
 
+import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.utils.translation import gettext_lazy as _
@@ -141,3 +142,48 @@ class UserTenant(models.Model):
     def __str__(self):
         primary_label = " (Primary)" if self.is_primary else ""
         return f"{self.user.username} → {self.tenant.name}{primary_label}"
+
+
+class OnboardToken(models.Model):
+    """
+    Token model for user onboarding and password reset functionality.
+    Stored in the public schema for onboarding new users.
+    """
+    
+    TOKEN_PURPOSES = [
+        ("onboard", "Onboard"),
+        ("password_reset", "Password Reset"),
+    ]
+    
+    token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="onboard_tokens"
+    )
+    purpose = models.CharField(
+        max_length=32,
+        choices=TOKEN_PURPOSES,
+        default="onboard"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey( 
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+"
+    )
+    
+    class Meta:
+        verbose_name = "Onboard Token"
+        verbose_name_plural = "Onboard Tokens"
+        indexes = [
+            models.Index(fields=["token"]),
+            models.Index(fields=["user", "purpose"]),
+        ]
+    
+    def __str__(self):
+        return f"{self.get_purpose_display()} token for {self.user.username} ({self.token})"
