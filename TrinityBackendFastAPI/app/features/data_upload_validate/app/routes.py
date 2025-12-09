@@ -19,6 +19,7 @@ from urllib.parse import unquote
 # Add this line with your other imports
 from datetime import datetime, timezone
 import logging
+import uuid
 
 
 # app/routes.py - Add this import
@@ -149,6 +150,14 @@ from app.DataStorageRetrieval.minio_utils import (
     get_client,
     ARROW_DIR,
     get_arrow_dir,
+)
+from app.features.data_upload_validate.app.minio_sheet_utils import (
+    extract_all_sheets_from_excel,
+    get_sheet_data,
+    list_upload_session_sheets,
+    normalize_sheet_name,
+    convert_session_sheet_to_arrow,
+    list_upload_folders,
 )
 from pathlib import Path
 import asyncio
@@ -516,6 +525,119 @@ async def upload_file(
     return format_task_response(submission, embed_result=True)
 
 
+@router.post("/upload-excel-multi-sheet")
+async def upload_excel_multi_sheet(
+    file: UploadFile = File(...),
+    client_id: str = Form(""),
+    app_id: str = Form(""),
+    project_id: str = Form(""),
+    client_name: str = Form(""),
+    app_name: str = Form(""),
+    project_name: str = Form(""),
+):
+    """
+    Upload an Excel file and extract all sheets automatically.
+    Each sheet is stored separately in MinIO as a Parquet file.
+    
+    Returns:
+        {
+            "upload_session_id": "uuid",
+            "sheets": ["Sheet1", "Sheet2", ...],
+            "sheet_details": [...],
+            "original_file_path": "..."
+        }
+    """
+    start_time = perf_counter()
+    
+    # Validate file type
+    if not file.filename.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=400,
+            detail="Only Excel files (.xlsx, .xls) are supported for multi-sheet upload"
+        )
+    
+    # Set environment variables
+    if client_id:
+        os.environ["CLIENT_ID"] = client_id
+    if app_id:
+        os.environ["APP_ID"] = app_id
+    if project_id:
+        os.environ["PROJECT_ID"] = project_id
+    if client_name:
+        os.environ["CLIENT_NAME"] = client_name
+    if app_name:
+        os.environ["APP_NAME"] = app_name
+    if project_name:
+        os.environ["PROJECT_NAME"] = project_name
+    
+    # Get MinIO prefix
+    prefix = await get_object_prefix()
+    
+    # Generate unique upload session ID
+    upload_session_id = str(uuid.uuid4())
+    
+    # Read file content
+    content = await file.read()
+    logger.info(
+        "data_upload.multi_sheet.start file=%s size=%s session_id=%s",
+        file.filename,
+        len(content),
+        upload_session_id,
+    )
+    
+    try:
+        # Extract all sheets and store in MinIO
+        result = extract_all_sheets_from_excel(
+            excel_content=content,
+            upload_session_id=upload_session_id,
+            prefix=prefix
+        )
+        
+        duration_ms = (perf_counter() - start_time) * 1000
+        logger.info(
+            "data_upload.multi_sheet.completed session_id=%s sheets=%s duration_ms=%.2f",
+            upload_session_id,
+            len(result["sheets"]),
+            duration_ms,
+        )
+        
+        # Return UI-friendly response format
+        response_data = {
+            "status": "success",
+            "upload_session_id": result["upload_session_id"],
+            "session_id": result["upload_session_id"],  # Alias for compatibility
+            "file_name": file.filename,
+            "sheet_count": len(result["sheets"]),
+            "sheets": result["sheets"],
+            "sheet_details": result.get("sheet_details", []),
+            "original_file_path": result.get("original_file_path", ""),
+        }
+        logger.info(
+            "data_upload.multi_sheet.response session_id=%s sheets=%s sheet_details_count=%s",
+            result["upload_session_id"],
+            result["sheets"],
+            len(result.get("sheet_details", [])),
+        )
+        return response_data
+        
+    except ValueError as e:
+        logger.error(
+            "data_upload.multi_sheet.failed session_id=%s error=%s",
+            upload_session_id,
+            str(e),
+        )
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception(
+            "data_upload.multi_sheet.error session_id=%s",
+            upload_session_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process Excel file: {str(e)}"
+        )
+
+
 @router.delete("/temp-uploads")
 async def clear_temp_uploads(
     client_name: str = "",
@@ -727,9 +849,74 @@ async def create_new(
         "validator_atom_id": validator_atom_id,
         "config_saved": True
     }
+
+
+@router.post("/convert-session-sheet-to-arrow")
+async def convert_session_sheet_to_arrow_endpoint(
+    upload_session_id: str = Form(...),
+    sheet_name: str = Form(...),
+    original_filename: str = Form(...),
+    use_folder_structure: str = Form("true"),
+    client_name: str = Form(""),
+    app_name: str = Form(""),
+    project_name: str = Form(""),
+):
+    """
+    Convert a sheet from an upload session to Arrow format and save it.
     
+    Args:
+        upload_session_id: The upload session ID
+        sheet_name: The normalized sheet name
+        original_filename: Original Excel filename
+        use_folder_structure: "true" or "false" - whether to use folder structure
+        client_name, app_name, project_name: Environment context
+        
+    Returns:
+        {
+            "file_path": "path/to/file.arrow",
+            "file_name": "filename (sheet_name)",
+            "file_key": "file_key"
+        }
+    """
+    # Set environment variables
+    if client_name:
+        os.environ["CLIENT_NAME"] = client_name
+    if app_name:
+        os.environ["APP_NAME"] = app_name
+    if project_name:
+        os.environ["PROJECT_NAME"] = project_name
     
+    prefix = await get_object_prefix()
+    use_folder = use_folder_structure.lower() == "true"
     
+    try:
+        logger.info(
+            "convert_session_sheet_to_arrow_endpoint called: session_id=%s sheet_name=%s original_filename=%s use_folder=%s",
+            upload_session_id,
+            sheet_name,
+            original_filename,
+            use_folder
+        )
+        result = convert_session_sheet_to_arrow(
+            upload_session_id=upload_session_id,
+            sheet_name=sheet_name,
+            original_filename=original_filename,
+            prefix=prefix,
+            use_folder_structure=use_folder
+        )
+        logger.info(
+            "convert_session_sheet_to_arrow_endpoint success: file_path=%s file_name=%s",
+            result.get("file_path"),
+            result.get("file_name")
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Error converting sheet {sheet_name} from session {upload_session_id}")
+        raise HTTPException(status_code=500, detail=f"Failed to convert sheet: {str(e)}")
+
+
 # POST: UPDATE_COLUMN_TYPES - Allow user to change column data types
 @router.post("/update_column_types", response_model=UpdateColumnTypesResponse)
 async def update_column_types(
@@ -1904,10 +2091,28 @@ async def save_dataframes(
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
+        # Check if this is a multi-sheet Excel file and should be saved in folder structure
+        use_folder_structure = False
+        excel_folder_name = None
+        if workbook_path and sheet_meta:
+            sheet_names_meta = sheet_meta.get("sheet_names", [])
+            has_multiple = len(sheet_names_meta) > 1 if isinstance(sheet_names_meta, list) else False
+            if has_multiple:
+                # Extract Excel filename without extension for folder name
+                original_filename_meta = sheet_meta.get("original_filename") or filename
+                excel_folder_name = Path(original_filename_meta).stem.replace(' ', '_').replace('.', '_')
+                use_folder_structure = True
+                # Modify arrow_name to use folder structure: {excel_folder_name}/sheets/{sheet_name}.arrow
+                selected_sheet_meta = sheet_meta.get("selected_sheet") or (sheet_names_meta[0] if sheet_names_meta else "")
+                if selected_sheet_meta:
+                    # Normalize sheet name for path
+                    normalized_sheet_name = normalize_sheet_name(selected_sheet_meta)
+                    arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet_name}.arrow"
+        
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
-        logger.info("Uploaded %s as %s", filename, result.get("object_name", ""))
+        logger.info("Uploaded %s as %s (folder_structure=%s)", filename, result.get("object_name", ""), use_folder_structure)
 
         # If df_pl is None (chunked csv), upload via polars scan
         if filename.lower().endswith(".csv"):
@@ -2577,12 +2782,18 @@ async def list_saved_dataframes(
             )
         )
         tmp_prefix = prefix + "tmp/"
+        uploads_prefix = prefix + "uploads/"
         files = []
+        excel_folders: Dict[str, Dict[str, Any]] = {}
+        
         for obj in sorted(objects, key=lambda o: o.object_name):
             if not obj.object_name.endswith(".arrow"):
                 continue
             if obj.object_name.startswith(tmp_prefix):
                 continue
+            if obj.object_name.startswith(uploads_prefix):
+                continue  # Skip temporary upload folders
+            
             last_modified = getattr(obj, "last_modified", None)
             if last_modified is not None:
                 try:
@@ -2591,17 +2802,50 @@ async def list_saved_dataframes(
                     modified_iso = None
             else:
                 modified_iso = None
-            entry = {
-                "object_name": obj.object_name,
-                "arrow_name": Path(obj.object_name).name,
-                "csv_name": Path(obj.object_name).name,
-            }
-            if modified_iso:
-                entry["last_modified"] = modified_iso
-            size = getattr(obj, "size", None)
-            if isinstance(size, int):
-                entry["size"] = size
-            files.append(entry)
+            
+            # Check if this is part of an Excel folder structure: {prefix}{excel_name}/sheets/{sheet_name}.arrow
+            rel_path = obj.object_name[len(prefix):] if obj.object_name.startswith(prefix) else obj.object_name
+            path_parts = rel_path.split("/")
+            
+            if len(path_parts) >= 3 and path_parts[1] == "sheets":
+                # This is a sheet inside an Excel folder
+                excel_folder_name = path_parts[0]
+                sheet_name = Path(path_parts[-1]).stem  # Remove .arrow extension
+                
+                if excel_folder_name not in excel_folders:
+                    excel_folders[excel_folder_name] = {
+                        "name": excel_folder_name,
+                        "path": f"{prefix}{excel_folder_name}/",
+                        "type": "excel_folder",
+                        "sheets": []
+                    }
+                
+                sheet_entry = {
+                    "object_name": obj.object_name,
+                    "sheet_name": sheet_name,
+                    "arrow_name": Path(obj.object_name).name,
+                    "csv_name": Path(obj.object_name).name,
+                }
+                if modified_iso:
+                    sheet_entry["last_modified"] = modified_iso
+                size = getattr(obj, "size", None)
+                if isinstance(size, int):
+                    sheet_entry["size"] = size
+                
+                excel_folders[excel_folder_name]["sheets"].append(sheet_entry)
+            else:
+                # Regular file (not in Excel folder structure)
+                entry = {
+                    "object_name": obj.object_name,
+                    "arrow_name": Path(obj.object_name).name,
+                    "csv_name": Path(obj.object_name).name,
+                }
+                if modified_iso:
+                    entry["last_modified"] = modified_iso
+                size = getattr(obj, "size", None)
+                if isinstance(size, int):
+                    entry["size"] = size
+                files.append(entry)
         
         # Trigger background auto-classification for files
         asyncio.create_task(
@@ -2614,25 +2858,34 @@ async def list_saved_dataframes(
             )
         )
         
-        return {
+        result = {
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
             "files": files,
+            "excel_folders": list(excel_folders.values()),
             "environment": env,
             "env_source": env_source,
         }
+        logger.info(
+            "list_saved_dataframes result: files=%s excel_folders=%s",
+            len(files),
+            len(excel_folders)
+        )
+        return result
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
             return {
                 "bucket": MINIO_BUCKET,
                 "prefix": prefix,
                 "files": [],
+                "excel_folders": [],
                 "environment": env,
             }
         return {
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
             "files": [],
+            "excel_folders": [],
             "error": str(e),
             "environment": env,
         }
@@ -2641,6 +2894,7 @@ async def list_saved_dataframes(
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
             "files": [],
+            "excel_folders": [],
             "error": str(e),
             "environment": env,
         }
@@ -3859,10 +4113,15 @@ async def get_guided_flow_state(
     """Retrieve persisted guided flow state from Redis."""
     try:
         key_parts = ("guided_flow_state", client_name, app_name, project_name)
-        cached_state = redis_client.get_json(key_parts)
+        cached_state_str = redis_client.get(key_parts)
         
-        if cached_state:
-            return {"state": cached_state}
+        if cached_state_str:
+            try:
+                cached_state = json.loads(cached_state_str)
+                return {"state": cached_state}
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON in cached state for {key_parts}")
+                return {"state": None}
         
         return {"state": None}
     except Exception as e:
@@ -3881,8 +4140,9 @@ async def save_guided_flow_state(request: Request):
         state = body.get("state", {})
         
         key_parts = ("guided_flow_state", client_name, app_name, project_name)
-        # Use SESSION_STATE namespace for longer TTL (900 seconds default)
-        redis_client.set_json(key_parts, state, ttl=86400)  # 24 hours TTL
+        # Store JSON as string with 24 hours TTL
+        state_json = json.dumps(state)
+        redis_client.set(key_parts, state_json, ex=86400)  # 24 hours TTL
         
         return {"status": "success", "message": "Flow state saved"}
     except Exception as e:
@@ -3905,7 +4165,13 @@ async def check_priming_status(
         
         # Check for flow state to get current stage and step completion
         flow_key_parts = ("guided_flow_state", client_name, app_name, project_name)
-        flow_state = redis_client.get_json(flow_key_parts)
+        flow_state_str = redis_client.get(flow_key_parts)
+        flow_state = None
+        if flow_state_str:
+            try:
+                flow_state = json.loads(flow_state_str)
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON in flow state for {flow_key_parts}")
         
         current_stage = None
         completed_steps: list[str] = []
@@ -3920,7 +4186,7 @@ async def check_priming_status(
                 for f in uploaded_files
             )
             
-                if file_in_flow:
+            if file_in_flow:
                 current_stage = flow_state.get("currentStage")
                 # Determine completed steps based on current stage
                 if current_stage:
