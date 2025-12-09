@@ -63,32 +63,63 @@ class UserViewSet(viewsets.ModelViewSet):
     authentication_classes = [CsrfExemptSessionAuthentication]
 
     def get_permissions(self):
-        if self.action in ("list", "create", "destroy"):
+        if self.action in ("list", "create", "update", "destroy"):
             return [IsTenantAdminOrStaff()]
         return super().get_permissions()
 
     def get_queryset(self):
         """
         Filter queryset based on user permissions:
-        - Staff/superuser: see all users
-        - Tenant admin: see only users from their tenant
+        - Superuser: see all users
+        - Tenant admin (even if is_staff=True): see only users from their tenant
+        
+        This method implements defense-in-depth by explicitly verifying tenant admin role
+        and filtering by tenant, even if the permission check allows access.
         """
         user = self.request.user
         
-        # Staff/superuser can see all users
-        if user.is_staff or user.is_superuser:
+        # Only superusers can see all users (not regular staff or tenant admins)
+        # Include both active and inactive users
+        if user.is_superuser:
             return User.objects.all().distinct()
         
-        # Tenant admin: filter by their tenant
+        # For tenant admins (including those with is_staff=True), always filter by tenant
+        # The permission check (IsTenantAdminOrStaff) ensures only authorized users reach here,
+        # but we add explicit verification as a defensive measure
         try:
+            # Explicitly verify user is a tenant admin by checking their role in tenant schema
+            is_tenant_admin = False
+            try:
+                with switch_to_user_tenant(user):
+                    user_role = UserRole.objects.filter(user=user, is_deleted=False).first()
+                    if user_role and user_role.role == UserRole.ROLE_ADMIN:
+                        is_tenant_admin = True
+            except Exception as e:
+                # If we can't verify tenant admin role, deny access (fail-safe)
+                print(f"Warning: Could not verify tenant admin role for {user.username}: {e}", file=sys.stderr)
+                sys.stderr.flush()
+                return User.objects.none()
+            
+            # If user is staff but not a tenant admin, deny access (defensive check)
+            # This prevents staff users who aren't tenant admins from seeing any users
+            if user.is_staff and not is_tenant_admin:
+                # Staff users who aren't tenant admins shouldn't access this endpoint
+                # but if they do, return empty queryset
+                print(f"Warning: Staff user {user.username} is not a tenant admin, denying access", file=sys.stderr)
+                sys.stderr.flush()
+                return User.objects.none()
+            
             # Get admin's tenant
             admin_tenant = get_tenant_for_user(user)
             if not admin_tenant:
-                # No tenant assigned, return empty queryset
+                # No tenant assigned, return empty queryset for safety
+                print(f"Warning: User {user.username} has no tenant assigned but passed permission check", file=sys.stderr)
+                sys.stderr.flush()
                 return User.objects.none()
             
             # Get all users that belong to the same tenant
             # Using UserTenant mapping in public schema
+            # Include both active and inactive users
             tenant_user_ids = UserTenant.objects.filter(
                 tenant=admin_tenant
             ).values_list('user_id', flat=True).distinct()
@@ -96,7 +127,7 @@ class UserViewSet(viewsets.ModelViewSet):
             return User.objects.filter(id__in=tenant_user_ids).distinct()
             
         except Exception as e:
-            # Log error and return empty queryset for safety
+            # Log error and return empty queryset for safety (fail-safe approach)
             print(f"Error filtering users by tenant: {e}", file=sys.stderr)
             sys.stderr.flush()
             return User.objects.none()
@@ -193,26 +224,243 @@ class UserViewSet(viewsets.ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
-    def destroy(self, request, *args, **kwargs):
+    def update(self, request, *args, **kwargs):
         """
-        Delete a user and decrement tenant's users_in_use counter.
+        Update user's role and allowed_apps. Only updates UserRole in tenant schema.
+        Does not modify username, email, password, or is_active.
         """
         instance = self.get_object()
         
-        # Get user's tenant from UserTenant mapping
-        user_tenant = instance.tenant_mappings.first()
+        # Get the user's tenant
+        user_tenant = instance.tenant_mappings.filter(is_primary=True).first()
+        if not user_tenant:
+            user_tenant = instance.tenant_mappings.first()
         
-        # Delete the user (this will cascade delete UserTenant and UserRole)
-        self.perform_destroy(instance)
+        if not user_tenant:
+            return Response(
+                {"detail": "User has no tenant mapping. Cannot update user."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
-        # Decrement tenant's users_in_use counter if tenant exists
-        if user_tenant:
-            from apps.tenants.models import Tenant
-            Tenant.objects.filter(id=user_tenant.tenant.id).update(
-                users_in_use=models.F("users_in_use") - 1
+        tenant = user_tenant.tenant
+        
+        # For tenant admins, verify they can only edit users from their tenant
+        requesting_user = request.user
+        if not (requesting_user.is_staff or requesting_user.is_superuser):
+            # Check if requesting user is admin of the same tenant
+            admin_tenant = get_tenant_for_user(requesting_user)
+            if not admin_tenant or admin_tenant.id != tenant.id:
+                return Response(
+                    {"detail": "You can only edit users from your own tenant."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        # Validate role if provided
+        role = request.data.get("role")
+        if role and role not in [UserRole.ROLE_ADMIN, UserRole.ROLE_EDITOR, UserRole.ROLE_VIEWER]:
+            return Response(
+                {"detail": f"Invalid role. Must be one of: {UserRole.ROLE_ADMIN}, {UserRole.ROLE_EDITOR}, {UserRole.ROLE_VIEWER}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate allowed_apps if provided
+        allowed_apps = request.data.get("allowed_apps")
+        if allowed_apps is not None:
+            if not isinstance(allowed_apps, list):
+                return Response(
+                    {"detail": "allowed_apps must be a list of integers"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if allowed_apps and not all(isinstance(app_id, int) for app_id in allowed_apps):
+                return Response(
+                    {"detail": "All items in allowed_apps must be integers"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        try:
+            with transaction.atomic():
+                # Switch to tenant schema and update UserRole
+                with schema_context(tenant.schema_name):
+                    user_role = UserRole.objects.filter(user=instance, is_deleted=False).first()
+                    
+                    if not user_role:
+                        # If UserRole doesn't exist, create one
+                        role_value = role or UserRole.ROLE_VIEWER
+                        allowed_apps_value = allowed_apps if allowed_apps is not None else []
+                        user_role = UserRole.objects.create(
+                            user=instance,
+                            role=role_value,
+                            allowed_apps=allowed_apps_value
+                        )
+                    else:
+                        # Update existing UserRole
+                        if role is not None:
+                            user_role.role = role
+                        if allowed_apps is not None:
+                            user_role.allowed_apps = allowed_apps
+                        user_role.save()
+                
+        except Exception as e:
+            import traceback
+            print(f"Error updating user {instance.username}: {e}")
+            print(traceback.format_exc())
+            sys.stdout.flush()
+            return Response(
+                {"detail": f"Failed to update user: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        # Return updated user data
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Soft delete a user: set is_active=False, decrement tenant's users_in_use counter,
+        and set is_deleted=True in UserRole within tenant schema.
+        UserTenant mappings are preserved.
+        
+        Restrictions:
+        - Staff/superusers can delete any user
+        - Tenant admins cannot delete other admins (can only delete editors/viewers)
+        """
+        instance = self.get_object()
+        
+        # Get primary tenant mapping for the user being deleted
+        user_tenant = instance.tenant_mappings.filter(is_primary=True).first()
+        if not user_tenant:
+            # Fallback to first tenant if no primary tenant exists
+            user_tenant = instance.tenant_mappings.first()
+        
+        if not user_tenant:
+            return Response(
+                {"detail": "User has no tenant mapping. Cannot perform soft delete."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        tenant = user_tenant.tenant
+        
+        # Check if requesting user is staff/superuser - they can delete anyone
+        requesting_user = request.user
+        if not (requesting_user.is_staff or requesting_user.is_superuser):
+            # Requesting user is a tenant admin - check if they're trying to delete another admin
+            try:
+                # Get the role of the user being deleted from tenant schema
+                with schema_context(tenant.schema_name):
+                    target_user_role = UserRole.objects.filter(user=instance, is_deleted=False).first()
+                    if target_user_role and target_user_role.role == UserRole.ROLE_ADMIN:
+                        # Tenant admin is trying to delete another admin - prevent this
+                        return Response(
+                            {"detail": "Tenant admins cannot delete other admins. Only editors and viewers can be deleted."},
+                            status=status.HTTP_403_FORBIDDEN
+                        )
+            except Exception as e:
+                # If we can't check the role, deny deletion for safety
+                print(f"Error checking user role for deletion: {e}", file=sys.stderr)
+                sys.stderr.flush()
+                return Response(
+                    {"detail": "Unable to verify user role. Deletion denied for safety."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        
+        try:
+            with transaction.atomic():
+                # Public schema operations
+                # Set user as inactive (soft delete)
+                instance.is_active = False
+                instance.save(update_fields=['is_active'])
+                
+                # Decrement tenant's users_in_use counter
+                from apps.tenants.models import Tenant
+                Tenant.objects.filter(id=tenant.id).update(
+                    users_in_use=models.F("users_in_use") - 1
+                )
+                
+                # Tenant schema operations
+                # Switch to tenant schema and mark UserRole as deleted
+                with schema_context(tenant.schema_name):
+                    user_role = UserRole.objects.filter(user=instance).first()
+                    if user_role:
+                        user_role.is_deleted = True
+                        user_role.save(update_fields=['is_deleted'])
+                    # If UserRole doesn't exist, that's okay - user might not have been fully set up
+                
+        except Exception as e:
+            import traceback
+            print(f"Error performing soft delete for user {instance.username}: {e}")
+            print(traceback.format_exc())
+            sys.stdout.flush()
+            return Response(
+                {"detail": f"Failed to soft delete user: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsTenantAdminOrStaff])
+    def reactivate(self, request, *args, **kwargs):
+        """
+        Reactivate a soft-deleted user: set is_active=True, increment tenant's users_in_use counter,
+        and set is_deleted=False in UserRole within tenant schema.
+        """
+        instance = self.get_object()
+        
+        # Get primary tenant mapping for the user
+        user_tenant = instance.tenant_mappings.filter(is_primary=True).first()
+        if not user_tenant:
+            # Fallback to first tenant if no primary tenant exists
+            user_tenant = instance.tenant_mappings.first()
+        
+        if not user_tenant:
+            return Response(
+                {"detail": "User has no tenant mapping. Cannot reactivate user."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        tenant = user_tenant.tenant
+        
+        try:
+            with transaction.atomic():
+                # Public schema operations
+                # Set user as active (reactivate)
+                instance.is_active = True
+                instance.save(update_fields=['is_active'])
+                
+                # Increment tenant's users_in_use counter
+                from apps.tenants.models import Tenant
+                Tenant.objects.filter(id=tenant.id).update(
+                    users_in_use=models.F("users_in_use") + 1
+                )
+                
+                # Tenant schema operations
+                # Switch to tenant schema and mark UserRole as not deleted
+                with schema_context(tenant.schema_name):
+                    user_role = UserRole.objects.filter(user=instance).first()
+                    if user_role:
+                        user_role.is_deleted = False
+                        user_role.save(update_fields=['is_deleted'])
+                    # If UserRole doesn't exist, create one with default viewer role
+                    else:
+                        user_role = UserRole.objects.create(
+                            user=instance,
+                            role=UserRole.ROLE_VIEWER,
+                            allowed_apps=[],
+                            is_deleted=False
+                        )
+                
+        except Exception as e:
+            import traceback
+            print(f"Error reactivating user {instance.username}: {e}")
+            print(traceback.format_exc())
+            sys.stdout.flush()
+            return Response(
+                {"detail": f"Failed to reactivate user: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        # Return updated user data
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def me(self, request):

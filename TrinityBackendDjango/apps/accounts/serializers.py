@@ -12,6 +12,7 @@ class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     role_write = serializers.CharField(write_only=True, required=False)
     allowed_apps_read = serializers.SerializerMethodField()
+    tenant_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -25,12 +26,14 @@ class UserSerializer(serializers.ModelSerializer):
             "mfa_enabled",
             "preferences",
             "is_staff",
+            "is_active",
             "allowed_apps",
             "role",
             "role_write",
             "allowed_apps_read",
+            "tenant_name",
         ]
-        read_only_fields = ["id", "is_staff", "role", "allowed_apps_read"]
+        read_only_fields = ["id", "is_staff", "is_active", "role", "allowed_apps_read", "tenant_name"]
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
@@ -114,6 +117,23 @@ class UserSerializer(serializers.ModelSerializer):
             # Roles app may not be migrated yet; ignore errors
             pass
         return []
+
+    def get_tenant_name(self, obj):
+        """Return the user's primary tenant name, or first tenant if no primary."""
+        try:
+            # Get primary tenant first
+            primary_tenant = obj.tenant_mappings.filter(is_primary=True).first()
+            if primary_tenant:
+                return primary_tenant.tenant.name
+            
+            # Fallback to first tenant if no primary
+            first_tenant = obj.tenant_mappings.first()
+            if first_tenant:
+                return first_tenant.tenant.name
+        except Exception:
+            # Tenant mappings may not exist; ignore errors
+            pass
+        return None
 
 
 class UserProfileSerializer(serializers.ModelSerializer):

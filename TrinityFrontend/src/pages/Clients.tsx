@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import {
   Plus,
   Search,
@@ -14,6 +15,7 @@ import {
   MoreVertical,
   Edit,
   Trash2,
+  RotateCcw,
   Eye,
   ArrowUpRight,
   Mail,
@@ -27,11 +29,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { TENANTS_API, REGISTRY_API } from '@/lib/api';
+import { TENANTS_API, USECASES_API } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 import NotFound from './NotFound';
 console.log('TENANTS_API', TENANTS_API);
-console.log('REGISTRY_API', REGISTRY_API);
+console.log('USECASES_API', USECASES_API);
 
 interface Tenant {
   id: number;
@@ -46,6 +49,7 @@ interface Tenant {
   users_in_use: number;
   admin_name?: string;
   admin_email?: string;
+  is_active?: boolean;
 }
 
 interface App {
@@ -55,12 +59,14 @@ interface App {
 
 const Clients = () => {
   const { user } = useAuth();
+  const { toast } = useToast();
   // Client Management: Available ONLY to is_staff or is_superuser (no UserRole check)
   const hasAccess = user?.is_staff || user?.is_superuser;
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [apps, setApps] = useState<App[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingTenantId, setEditingTenantId] = useState<number | null>(null);
   const [form, setForm] = useState({
     name: '',
     schema_name: '',
@@ -94,12 +100,14 @@ const Clients = () => {
 
   const loadApps = async () => {
     try {
-      const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
+      const res = await fetch(`${USECASES_API}/usecases/`, { credentials: 'include' });
       console.log('Load apps status', res.status);
       if (res.ok) {
         const appsData = await res.json();
         console.log('Apps data', appsData);
-        setApps(appsData);
+        // UseCase API returns a list directly, extract it if needed
+        const appsList = Array.isArray(appsData) ? appsData : appsData.results || [];
+        setApps(appsList);
       }
     } catch {
       console.log('Load apps error');
@@ -125,35 +133,51 @@ const Clients = () => {
     }
   };
 
+  const handleEditClient = (tenantId: number) => {
+    const client = tenants.find((t) => t.id === tenantId);
+    if (!client) return;
+
+    setEditingTenantId(tenantId);
+    setForm({
+      name: client.name,
+      schema_name: client.schema_name,
+      primary_domain: client.primary_domain || '',
+      seats_allowed: String(client.seats_allowed),
+      project_cap: String(client.project_cap),
+      apps_allowed: client.allowed_apps || [],
+      projects_allowed: Array.isArray(client.projects_allowed) 
+        ? client.projects_allowed.join(', ') 
+        : client.projects_allowed || '',
+      admin_name: client.admin_name || '',
+      admin_email: client.admin_email || '',
+      admin_password: '',
+    });
+    setShowAddForm(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = {
-      name: form.name,
-      schema_name: form.schema_name,
-      primary_domain: form.primary_domain,
-      seats_allowed: Number(form.seats_allowed),
-      project_cap: Number(form.project_cap),
-      allowed_apps: form.apps_allowed,
-      projects_allowed: form.projects_allowed
-        .split(',')
-        .map((p) => p.trim())
-        .filter((p) => p.length > 0),
-      admin_name: form.admin_name,
-      admin_email: form.admin_email,
-      admin_password: form.admin_password,
-    };
-    console.log('Submitting tenant payload', payload);
-    try {
-      const res = await fetch(`${TENANTS_API}/tenants/`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      console.log('Create tenant status', res.status);
-      const body = await res.text();
-      console.log('Create tenant body', body);
+    
+    if (editingTenantId !== null) {
+      // Update existing tenant - only send seats_allowed and allowed_apps
+      const payload = {
+        seats_allowed: Number(form.seats_allowed),
+        allowed_apps: form.apps_allowed,
+      };
+      console.log('Updating tenant payload', payload);
+      try {
+        const res = await fetch(`${TENANTS_API}/tenants/${editingTenantId}/`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        console.log('Update tenant status', res.status);
         if (res.ok) {
+          toast({
+            title: 'Success',
+            description: 'Client has been updated successfully.',
+          });
           setForm({
             name: '',
             schema_name: '',
@@ -166,15 +190,103 @@ const Clients = () => {
             admin_email: '',
             admin_password: '',
           });
+          setEditingTenantId(null);
+          setShowAddForm(false);
           loadTenants();
+        } else {
+          let errorMessage = 'Failed to update client. Please try again.';
+          try {
+            const errorData = await res.json();
+            errorMessage = errorData.detail || errorMessage;
+          } catch {
+            // If response is not JSON, use default message
+          }
+          toast({
+            title: 'Error',
+            description: errorMessage,
+            variant: 'destructive',
+          });
         }
-    } catch (err) {
-      console.log('Tenant creation error', err);
+      } catch (err) {
+        toast({
+          title: 'Error',
+          description: 'An unexpected error occurred while updating the client.',
+          variant: 'destructive',
+        });
+      }
+    } else {
+      // Create new tenant
+      const payload = {
+        name: form.name,
+        schema_name: form.schema_name,
+        primary_domain: form.primary_domain,
+        seats_allowed: Number(form.seats_allowed),
+        project_cap: Number(form.project_cap),
+        allowed_apps: form.apps_allowed,
+        projects_allowed: form.projects_allowed
+          .split(',')
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0),
+        admin_name: form.admin_name,
+        admin_email: form.admin_email,
+        admin_password: form.admin_password,
+      };
+      console.log('Submitting tenant payload', payload);
+      try {
+        const res = await fetch(`${TENANTS_API}/tenants/`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        console.log('Create tenant status', res.status);
+        const body = await res.text();
+        console.log('Create tenant body', body);
+        if (res.ok) {
+          toast({
+            title: 'Success',
+            description: 'Client has been created successfully.',
+          });
+          setForm({
+            name: '',
+            schema_name: '',
+            primary_domain: '',
+            seats_allowed: '',
+            project_cap: '',
+            apps_allowed: [],
+            projects_allowed: '',
+            admin_name: '',
+            admin_email: '',
+            admin_password: '',
+          });
+          setShowAddForm(false);
+          loadTenants();
+        } else {
+          let errorMessage = 'Failed to create client. Please try again.';
+          try {
+            const errorData = await JSON.parse(body);
+            errorMessage = errorData.detail || errorMessage;
+          } catch {
+            // If response is not JSON, use default message
+          }
+          toast({
+            title: 'Error',
+            description: errorMessage,
+            variant: 'destructive',
+          });
+        }
+      } catch (err) {
+        toast({
+          title: 'Error',
+          description: 'An unexpected error occurred while creating the client.',
+          variant: 'destructive',
+        });
+      }
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete tenant?')) return;
+    if (!confirm('Delete tenant? This will deactivate the tenant and all its users.')) return;
     try {
       const res = await fetch(`${TENANTS_API}/tenants/${id}/`, {
         method: 'DELETE',
@@ -182,10 +294,67 @@ const Clients = () => {
       });
       console.log('Delete tenant status', res.status);
       if (res.ok) {
+        toast({
+          title: 'Success',
+          description: 'Tenant has been deactivated successfully.',
+        });
         await loadTenants();
+      } else {
+        let errorMessage = 'Failed to delete tenant. Please try again.';
+        try {
+          const errorData = await res.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          // If response is not JSON, use default message
+        }
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
       }
-    } catch {
-      /* ignore */
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred while deleting the tenant.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleReactivate = async (id: number) => {
+    if (!confirm('Reactivate tenant? This will reactivate the tenant and all its users.')) return;
+    try {
+      const res = await fetch(`${TENANTS_API}/tenants/${id}/reactivate/`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (res.ok) {
+        toast({
+          title: 'Success',
+          description: 'Tenant has been reactivated successfully.',
+        });
+        await loadTenants();
+      } else {
+        let errorMessage = 'Failed to reactivate tenant. Please try again.';
+        try {
+          const errorData = await res.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          // If response is not JSON, use default message
+        }
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred while reactivating the tenant.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -217,7 +386,24 @@ const Clients = () => {
             </div>
 
             <Button
-              onClick={() => setShowAddForm(!showAddForm)}
+              onClick={() => {
+                if (showAddForm) {
+                  setEditingTenantId(null);
+                  setForm({
+                    name: '',
+                    schema_name: '',
+                    primary_domain: '',
+                    seats_allowed: '',
+                    project_cap: '',
+                    apps_allowed: [],
+                    projects_allowed: '',
+                    admin_name: '',
+                    admin_email: '',
+                    admin_password: '',
+                  });
+                }
+                setShowAddForm(!showAddForm);
+              }}
               className="bg-gradient-to-r from-blue-500 to-purple-600 hover:opacity-90 shadow-lg hover:shadow-xl transition-all duration-300 px-6 py-3"
             >
               {showAddForm ? (
@@ -237,7 +423,9 @@ const Clients = () => {
           {showAddForm && (
             <Card className="mb-8 p-6 bg-white border-0 shadow-lg">
               <div className="mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">Add New Client</h2>
+                <h2 className="text-xl font-semibold text-gray-900">
+                  {editingTenantId !== null ? 'Edit Client' : 'Add New Client'}
+                </h2>
               </div>
 
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -249,7 +437,9 @@ const Clients = () => {
                     value={form.name}
                     onChange={handleChange}
                     placeholder="Client Name"
-                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={editingTenantId !== null}
+                    readOnly={editingTenantId !== null}
+                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                   />
                 </div>
                 <div className="space-y-2">
@@ -260,7 +450,9 @@ const Clients = () => {
                     value={form.schema_name}
                     onChange={handleChange}
                     placeholder="schema"
-                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={editingTenantId !== null}
+                    readOnly={editingTenantId !== null}
+                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                   />
                 </div>
                 <div className="space-y-2">
@@ -271,7 +463,9 @@ const Clients = () => {
                     value={form.primary_domain}
                     onChange={handleChange}
                     placeholder="client.example.com"
-                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={editingTenantId !== null}
+                    readOnly={editingTenantId !== null}
+                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                   />
                 </div>
                 <div className="space-y-2">
@@ -295,7 +489,9 @@ const Clients = () => {
                     value={form.project_cap}
                     onChange={handleChange}
                     placeholder="0"
-                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={editingTenantId !== null}
+                    readOnly={editingTenantId !== null}
+                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                   />
                 </div>
                 <div className="space-y-2 md:col-span-2 lg:col-span-3">
@@ -323,7 +519,9 @@ const Clients = () => {
                     value={form.projects_allowed}
                     onChange={handleChange}
                     placeholder="project1, project2"
-                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={editingTenantId !== null}
+                    readOnly={editingTenantId !== null}
+                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                   />
                 </div>
 
@@ -338,8 +536,10 @@ const Clients = () => {
                     value={form.admin_name}
                     onChange={handleChange}
                     placeholder="admin"
-                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
+                    disabled={editingTenantId !== null}
+                    readOnly={editingTenantId !== null}
+                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                    required={editingTenantId === null}
                   />
                 </div>
                 <div className="space-y-2">
@@ -351,8 +551,10 @@ const Clients = () => {
                     value={form.admin_email}
                     onChange={handleChange}
                     placeholder="admin@example.com"
-                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
+                    disabled={editingTenantId !== null}
+                    readOnly={editingTenantId !== null}
+                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                    required={editingTenantId === null}
                   />
                 </div>
                 <div className="space-y-2">
@@ -364,15 +566,17 @@ const Clients = () => {
                     value={form.admin_password}
                     onChange={handleChange}
                     placeholder="********"
-                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
+                    disabled={editingTenantId !== null}
+                    readOnly={editingTenantId !== null}
+                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                    required={editingTenantId === null}
                   />
                 </div>
 
                 <div className="md:col-span-2 lg:col-span-3 flex justify-end">
                   <Button type="submit" className="bg-gradient-to-r from-green-500 to-emerald-600 hover:opacity-90 shadow-md">
                     <Save className="w-4 h-4 mr-2" />
-                    Save Client
+                    {editingTenantId !== null ? 'Update Client' : 'Save Client'}
                   </Button>
                 </div>
               </form>
@@ -397,7 +601,7 @@ const Clients = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Active Clients</p>
-                  <p className="text-2xl font-bold text-green-600">{tenants.length}</p>
+                  <p className="text-2xl font-bold text-green-600">{tenants.filter(t => t.is_active !== false).length}</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
                   <Users className="w-5 h-5 text-green-600" />
@@ -447,8 +651,10 @@ const Clients = () => {
 
         {/* Clients Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredTenants.map((client) => (
-            <Card key={client.id} className="bg-white border-0 shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden group">
+          {filteredTenants.map((client) => {
+            const isInactive = client.is_active === false;
+            return (
+            <Card key={client.id} className={`border-0 shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden group ${isInactive ? 'opacity-60 bg-gray-100/80' : 'bg-white'}`}>
               <div className="p-6">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center space-x-3">
@@ -475,14 +681,20 @@ const Clients = () => {
                           <Eye className="w-4 h-4 mr-2" />
                           View Details
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="cursor-pointer" onSelect={() => navigate(`/clients/${client.id}/edit`)}>
+                        <DropdownMenuItem className="cursor-pointer" onSelect={() => handleEditClient(client.id)}>
                           <Edit className="w-4 h-4 mr-2" />
                           Edit Client
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="cursor-pointer text-red-600" onSelect={() => handleDelete(client.id)}>
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete Client
-                        </DropdownMenuItem>
+                        {isInactive ? (
+                          <DropdownMenuItem className="cursor-pointer text-green-600 focus:text-green-700" onSelect={() => handleReactivate(client.id)}>
+                            <RotateCcw className="w-4 h-4 mr-2" /> Reactivate Client
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem className="cursor-pointer text-red-600" onSelect={() => handleDelete(client.id)}>
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete Client
+                          </DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -509,10 +721,16 @@ const Clients = () => {
                   </div>
                 </div>
 
-                <div className="mt-3 text-xs text-gray-400">Created on: {new Date(client.created_on).toLocaleDateString()}</div>
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+                  <div className="text-xs text-gray-400">Created on: {new Date(client.created_on).toLocaleDateString()}</div>
+                  <Badge className={`text-xs border ${isInactive ? 'bg-gray-100 text-gray-800 border-gray-200' : 'bg-green-100 text-green-800 border-green-200'}`}>
+                    {isInactive ? 'Inactive' : 'Active'}
+                  </Badge>
+                </div>
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
 
         {filteredTenants.length === 0 && (

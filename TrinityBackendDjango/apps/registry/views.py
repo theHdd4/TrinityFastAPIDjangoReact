@@ -404,17 +404,26 @@ class ProjectViewSet(viewsets.ModelViewSet):
         with switch_to_user_tenant(user):
             qs = self.queryset
 
+            # Handle scope parameter for filtering projects
+            # scope=tenant: Returns all tenant projects (not filtered by allowed_apps for non-staff)
+            # scope=user: Returns projects where owner=user OR user appears in ProjectModificationHistory (filtered by allowed_apps)
+            scope = self.request.query_params.get("scope", "tenant")  # default to tenant
+            
             if not user.is_staff:
-                try:
-                    from apps.roles.models import UserRole
+                # For user scope, filter by allowed_apps (existing behavior)
+                # For tenant scope, don't filter by allowed_apps (show all tenant projects)
+                if scope == "user":
+                    try:
+                        from apps.roles.models import UserRole
 
-                    role_obj = UserRole.objects.filter(user=user).first()
-                    if role_obj and role_obj.allowed_apps:
-                        qs = qs.filter(app_id__in=role_obj.allowed_apps)
-                    else:
+                        role_obj = UserRole.objects.filter(user=user).first()
+                        if role_obj and role_obj.allowed_apps:
+                            qs = qs.filter(app_id__in=role_obj.allowed_apps)
+                        else:
+                            return Project.objects.none()
+                    except Exception:
                         return Project.objects.none()
-                except Exception:
-                    return Project.objects.none()
+                # For tenant scope, skip allowed_apps filtering - show all tenant projects
 
             app_param = self.request.query_params.get("app")
             if app_param:
@@ -423,10 +432,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 else:
                     qs = qs.filter(app__slug=app_param)
 
-            # Handle scope parameter for filtering projects
-            # scope=tenant: Returns all tenant projects (default, existing behavior)
-            # scope=user: Returns projects where owner=user OR user appears in ProjectModificationHistory
-            scope = self.request.query_params.get("scope", "tenant")  # default to tenant
             if scope == "user":
                 # Get project IDs from modification history where user has modified
                 modified_project_ids = list(

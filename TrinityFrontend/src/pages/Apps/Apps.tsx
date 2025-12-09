@@ -366,7 +366,7 @@ const Apps = () => {
           console.log('📁 Number of projects:', Array.isArray(projectsData) ? projectsData.length : 'N/A');
           
           if (Array.isArray(projectsData)) {
-            // Backend now provides app_slug, app_name, modes, and last_modified
+            // Backend now provides app_slug, app_name, modes, last_modified, and is_allowed
             // Directly map backend response to frontend format
             const transformedProjects = projectsData
               .map((project: any) => {
@@ -385,6 +385,7 @@ const Apps = () => {
                   relativeTime: project.relative_time,
                   icon: getAppIcon(project.app_slug),
                   modes: project.modes || { workflow: false, laboratory: false, exhibition: false },
+                  is_allowed: project.is_allowed !== undefined ? project.is_allowed : true,
                 };
               })
               .filter((p: any) => p !== null); // Remove projects with missing app info
@@ -494,6 +495,7 @@ const Apps = () => {
                   relativeTime: project.relative_time,
                   icon: getAppIcon(project.app_slug),
                   modes: project.modes || { workflow: false, laboratory: false, exhibition: false },
+                  is_allowed: project.is_allowed !== undefined ? project.is_allowed : true,
                 };
               })
               .filter((p: any) => p !== null); // Remove projects with missing app info

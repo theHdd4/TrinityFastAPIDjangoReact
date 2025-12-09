@@ -10,10 +10,9 @@ class UseCaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = UseCase
         fields = [
-            'id', 'name', 'slug', 'description', 'modules', 'molecules',
-            'created_at', 'updated_at'
+            'id', 'name', 'slug', 'description', 'modules', 'molecules'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id']
     
     def validate_slug(self, value):
         """Ensure slug is unique."""

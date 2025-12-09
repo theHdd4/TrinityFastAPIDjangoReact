@@ -55,6 +55,7 @@ class UserRole(models.Model):
         blank=True,
         help_text="List of app IDs the user is permitted to access",
     )
+    is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

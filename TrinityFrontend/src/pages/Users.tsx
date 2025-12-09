@@ -15,6 +15,8 @@ import {
   MoreVertical,
   Edit,
   Trash2,
+  RotateCcw,
+  Building,
   X,
   Save
 } from 'lucide-react';
@@ -26,6 +28,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ACCOUNTS_API, TENANTS_API, REGISTRY_API } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 import NotFound from './NotFound';
 
 interface User {
@@ -35,6 +38,8 @@ interface User {
   first_name?: string;
   last_name?: string;
   is_staff: boolean;
+  is_active?: boolean;
+  tenant_name?: string;
   last_login?: string | null;
   // optional custom fields
   phone?: string;
@@ -51,6 +56,7 @@ interface App {
 
 const Users = () => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const role = user?.role?.toLowerCase();
   const hasAccess =
     role === 'admin' ||
@@ -61,8 +67,11 @@ const Users = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRole, setSelectedRole] = useState<string>('All');
   const [selectedStatus, setSelectedStatus] = useState<string>('All');
+  const [selectedTenant, setSelectedTenant] = useState<string>('All');
+  const [tenants, setTenants] = useState<Array<{id: number, name: string}>>([]);
 
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [form, setForm] = useState({
     username: '',
     password: '',
@@ -124,12 +133,28 @@ const Users = () => {
     }
   };
 
+  const loadTenants = async () => {
+    try {
+      const res = await fetch(`${TENANTS_API}/tenants/`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setTenants(data.map((t: any) => ({ id: t.id, name: t.name })));
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
   useEffect(() => {
     if (!hasAccess) return;
     loadUsers();
     loadDomains();
     loadApps();
     loadTenantApps();
+    // Only load tenants for staff/superusers
+    if (user?.is_staff || user?.is_superuser) {
+      loadTenants();
+    }
   }, [hasAccess]);
 
   const handleFormChange = (
@@ -146,27 +171,87 @@ const Users = () => {
     }
   };
 
+  const handleEditUser = (userId: number) => {
+    const user = users.find((u) => u.id === userId);
+    if (user) {
+      setEditingUserId(userId);
+      setForm({
+        username: user.username,
+        email: user.email,
+        password: '', // Empty for editing
+        role: user.role || 'viewer',
+        allowed_apps: user.allowed_apps_read || [],
+      });
+      setShowAddForm(true);
+    }
+  };
+
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    const domain = form.email.split('@')[1]?.toLowerCase();
-    if (domain && allowedDomains.length && !allowedDomains.includes(domain)) {
-      alert('Email domain not allowed');
-      return;
+    
+    // Only validate email domain for new users
+    if (editingUserId === null) {
+      const domain = form.email.split('@')[1]?.toLowerCase();
+      if (domain && allowedDomains.length && !allowedDomains.includes(domain)) {
+        alert('Email domain not allowed');
+        return;
+      }
     }
+    
     try {
-      const res = await fetch(`${API_BASE}/users/`, {
-        method: 'POST',
+      const url = editingUserId !== null 
+        ? `${API_BASE}/users/${editingUserId}/`
+        : `${API_BASE}/users/`;
+      const method = editingUserId !== null ? 'PATCH' : 'POST';
+      
+      // For update, only send role and allowed_apps
+      const body = editingUserId !== null
+        ? { role: form.role, allowed_apps: form.allowed_apps }
+        : form;
+      
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(form),
+        body: JSON.stringify(body),
       });
+      
       if (res.ok) {
+        toast({
+          title: 'Success',
+          description: editingUserId !== null 
+            ? 'User has been updated successfully.'
+            : 'User has been created successfully.',
+        });
         setForm({ username: '', password: '', email: '', role: 'viewer', allowed_apps: [] });
+        setEditingUserId(null);
         setShowAddForm(false);
         await loadUsers();
+      } else {
+        // Try to parse error message from response
+        let errorMessage = editingUserId !== null 
+          ? 'Failed to update user. Please try again.'
+          : 'Failed to create user. Please try again.';
+        try {
+          const errorData = await res.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          // If response is not JSON, use default message
+        }
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
       }
-    } catch {
-      /* ignore */
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: editingUserId !== null
+          ? 'An unexpected error occurred while updating the user.'
+          : 'An unexpected error occurred while creating the user.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -178,10 +263,69 @@ const Users = () => {
         credentials: 'include',
       });
       if (res.ok) {
+        toast({
+          title: 'Success',
+          description: 'User has been deleted successfully.',
+        });
         await loadUsers();
+      } else {
+        // Try to parse error message from response
+        let errorMessage = 'Failed to delete user. Please try again.';
+        try {
+          const errorData = await res.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          // If response is not JSON, use default message
+        }
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
       }
-    } catch {
-      /* ignore */
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred while deleting the user.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleReactivate = async (id: number) => {
+    if (!confirm('Reactivate user?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/users/${id}/reactivate/`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (res.ok) {
+        toast({
+          title: 'Success',
+          description: 'User has been reactivated successfully.',
+        });
+        await loadUsers();
+      } else {
+        // Try to parse error message from response
+        let errorMessage = 'Failed to reactivate user. Please try again.';
+        try {
+          const errorData = await res.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          // If response is not JSON, use default message
+        }
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred while reactivating the user.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -200,7 +344,9 @@ const Users = () => {
         return u.is_staff ? 'Admin' : 'Viewer';
     }
   };
-  const getStatus = (_u: User) => 'Active';
+  const getStatus = (u: User) => {
+    return u.is_active === false ? 'Inactive' : 'Active';
+  };
 
   const getRoleColor = (role: string) => {
     switch (role) {
@@ -229,7 +375,8 @@ const Users = () => {
     const status = getStatus(u);
     const matchesRole = selectedRole === 'All' || role === selectedRole;
     const matchesStatus = selectedStatus === 'All' || status === selectedStatus;
-    return matchesSearch && matchesRole && matchesStatus;
+    const matchesTenant = selectedTenant === 'All' || u.tenant_name === selectedTenant;
+    return matchesSearch && matchesRole && matchesStatus && matchesTenant;
   });
 
   if (!hasAccess) {
@@ -253,7 +400,13 @@ const Users = () => {
             </div>
             <Button
               className="bg-gradient-to-r from-purple-500 to-indigo-600 hover:opacity-90 shadow-lg hover:shadow-xl transition-all duration-300"
-              onClick={() => setShowAddForm((v) => !v)}
+              onClick={() => {
+                setShowAddForm((v) => !v);
+                if (showAddForm) {
+                  setEditingUserId(null);
+                  setForm({ username: '', password: '', email: '', role: 'viewer', allowed_apps: [] });
+                }
+              }}
             >
               {showAddForm ? (
                 <>
@@ -275,7 +428,9 @@ const Users = () => {
                   placeholder="Username"
                   value={form.username}
                   onChange={handleFormChange}
-                  className="border-gray-200"
+                  disabled={editingUserId !== null}
+                  readOnly={editingUserId !== null}
+                  className={`border-gray-200 ${editingUserId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                 />
                 <Input
                   name="password"
@@ -283,7 +438,9 @@ const Users = () => {
                   placeholder="Password"
                   value={form.password}
                   onChange={handleFormChange}
-                  className="border-gray-200"
+                  disabled={editingUserId !== null}
+                  readOnly={editingUserId !== null}
+                  className={`border-gray-200 ${editingUserId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                 />
                 <Input
                   name="email"
@@ -291,7 +448,9 @@ const Users = () => {
                   placeholder="Email"
                   value={form.email}
                   onChange={handleFormChange}
-                  className="border-gray-200"
+                  disabled={editingUserId !== null}
+                  readOnly={editingUserId !== null}
+                  className={`border-gray-200 ${editingUserId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                 />
                 <div className="md:col-span-3 space-y-2">
                   <label htmlFor="role" className="text-sm font-medium text-gray-700">
@@ -332,7 +491,7 @@ const Users = () => {
                 </div>
                 <div className="md:col-span-3 flex justify-end">
                   <Button type="submit" className="bg-gradient-to-r from-green-500 to-emerald-600">
-                    <Save className="w-4 h-4 mr-2" /> Save User
+                    <Save className="w-4 h-4 mr-2" /> {editingUserId !== null ? 'Update User' : 'Save User'}
                   </Button>
                 </div>
               </form>
@@ -371,6 +530,21 @@ const Users = () => {
                 <option value="Active">Active</option>
                 <option value="Inactive">Inactive</option>
               </select>
+
+              {(user?.is_staff || user?.is_superuser) && (
+                <select
+                  value={selectedTenant}
+                  onChange={(e) => setSelectedTenant(e.target.value)}
+                  className="px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                >
+                  <option value="All">All Tenants</option>
+                  {tenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.name}>
+                      {tenant.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
         </div>
@@ -382,8 +556,9 @@ const Users = () => {
             const initials = (
               user.first_name?.[0] || user.username[0]
             ) + (user.last_name?.[0] || '');
+            const isInactive = user.is_active === false;
             return (
-              <Card key={user.id} className="p-6 hover:shadow-xl transition-all duration-300 border-0 bg-white/80 backdrop-blur-sm">
+              <Card key={user.id} className={`p-6 hover:shadow-xl transition-all duration-300 border-0 backdrop-blur-sm ${isInactive ? 'opacity-60 bg-gray-100/80' : 'bg-white/80'}`}>
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center space-x-3">
                     <div className="w-12 h-12 rounded-full bg-gradient-to-r from-gray-200 to-gray-300 flex items-center justify-center">
@@ -404,12 +579,18 @@ const Users = () => {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="bg-white border border-gray-200 shadow-lg">
-                      <DropdownMenuItem className="cursor-pointer" disabled>
+                      <DropdownMenuItem className="cursor-pointer" onSelect={() => handleEditUser(user.id)}>
                         <Edit className="w-4 h-4 mr-2" /> Edit User
                       </DropdownMenuItem>
-                      <DropdownMenuItem className="cursor-pointer text-red-600 focus:text-red-700" onSelect={() => handleDelete(user.id)}>
-                        <Trash2 className="w-4 h-4 mr-2" /> Delete User
-                      </DropdownMenuItem>
+                      {isInactive ? (
+                        <DropdownMenuItem className="cursor-pointer text-green-600 focus:text-green-700" onSelect={() => handleReactivate(user.id)}>
+                          <RotateCcw className="w-4 h-4 mr-2" /> Reactivate User
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem className="cursor-pointer text-red-600 focus:text-red-700" onSelect={() => handleDelete(user.id)}>
+                          <Trash2 className="w-4 h-4 mr-2" /> Delete User
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -419,6 +600,12 @@ const Users = () => {
                     <Mail className="w-4 h-4" />
                     <span>{user.email}</span>
                   </div>
+                  {user.tenant_name && (
+                    <div className="flex items-center space-x-2 text-sm text-gray-600">
+                      <Building className="w-4 h-4" />
+                      <span>{user.tenant_name}</span>
+                    </div>
+                  )}
                   {user.phone && (
                     <div className="flex items-center space-x-2 text-sm text-gray-600">
                       <Phone className="w-4 h-4" />

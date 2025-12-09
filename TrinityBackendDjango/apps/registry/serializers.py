@@ -41,6 +41,7 @@ class ProjectSerializer(serializers.ModelSerializer):
     last_modified = serializers.DateTimeField(source='updated_at', read_only=True)
     relative_time = serializers.SerializerMethodField()
     modes = serializers.SerializerMethodField()
+    is_allowed = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
@@ -61,8 +62,9 @@ class ProjectSerializer(serializers.ModelSerializer):
             "updated_at",
             "last_modified",
             "relative_time",
+            "is_allowed",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "app_slug", "app_name", "last_modified", "modes", "relative_time"]
+        read_only_fields = ["id", "created_at", "updated_at", "app_slug", "app_name", "last_modified", "modes", "relative_time", "is_allowed"]
 
     def get_base_template(self, obj):
         return obj.base_template.name if obj.base_template else None
@@ -117,6 +119,34 @@ class ProjectSerializer(serializers.ModelSerializer):
         else:
             # Return formatted date for older items
             return obj.updated_at.strftime("%b %d, %Y")
+
+    def get_is_allowed(self, obj):
+        """Check if the project's app is in the user's allowed_apps"""
+        request = self.context.get('request')
+        if not request or not request.user:
+            return True  # Default to allowed if no user context
+        
+        user = request.user
+        
+        # Staff and superusers always have access
+        if user.is_staff or user.is_superuser:
+            return True
+        
+        try:
+            from apps.roles.models import UserRole
+            from apps.accounts.tenant_utils import switch_to_user_tenant
+            
+            # Query UserRole within tenant schema context
+            with switch_to_user_tenant(user):
+                role_obj = UserRole.objects.filter(user=user).first()
+                if role_obj and role_obj.allowed_apps:
+                    # Check if project's app_id is in allowed_apps
+                    return obj.app_id in role_obj.allowed_apps
+                # If no allowed_apps specified, default to False (restricted)
+                return False
+        except Exception:
+            # If roles don't exist or error, default to False (restricted)
+            return False
 
 
 class SessionSerializer(serializers.ModelSerializer):
