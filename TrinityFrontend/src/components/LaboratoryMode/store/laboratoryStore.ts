@@ -1974,7 +1974,8 @@ export type LaboratorySubMode = 'analytics' | 'dashboard';
 export const DASHBOARD_ALLOWED_ATOMS = [
   'dataframe-operations',
   'chart-maker',
-  'correlation'
+  'correlation',
+  'table'  // ✅ Enable table atom in dashboard mode
 ] as const;
 
 // Helper function to get allowed atoms based on mode

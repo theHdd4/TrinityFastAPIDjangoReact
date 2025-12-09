@@ -164,7 +164,6 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
         
         onBlur?.();
       } catch (error) {
-        console.error('[RichTextCellEditor] Error in handleBlur:', error);
         isCommittingRef.current = false;
       }
     }, 150); // Slightly longer delay to allow toolbar interactions
@@ -184,7 +183,6 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
           onCommit(plainText, currentHtml);
           // Note: isCommittingRef will be reset after commit completes
         } catch (error) {
-          console.error('[RichTextCellEditor] Error in handleKeyDown (Enter):', error);
           isCommittingRef.current = false;
         }
       }
@@ -197,7 +195,7 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
       try {
         onCancel();
       } catch (error) {
-        console.error('[RichTextCellEditor] Error in handleKeyDown (Escape):', error);
+        // Error handling
       }
       return;
     }
@@ -213,7 +211,6 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
           onCommit(plainText, currentHtml);
           // Note: isCommittingRef will be reset after commit completes
         } catch (error) {
-          console.error('[RichTextCellEditor] Error in handleKeyDown (Tab):', error);
           isCommittingRef.current = false;
         }
       }

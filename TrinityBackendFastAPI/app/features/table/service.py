@@ -42,16 +42,17 @@ MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
 _draft_save_queue: Dict[str, asyncio.Task] = {}
 
 
-def load_table_from_minio(object_name: str) -> Tuple[pl.DataFrame, Optional[Dict[str, Dict[str, Dict[str, str]]]]]:
+def load_table_from_minio(object_name: str) -> Tuple[pl.DataFrame, Optional[Dict[str, Dict[str, Dict[str, str]]]], Optional[Dict[str, Any]]]:
     """
-    Load a DataFrame from MinIO using Arrow format and extract conditional formatting styles from metadata.
+    Load a DataFrame from MinIO using Arrow format and extract conditional formatting styles and table metadata.
     
     Args:
         object_name: Full path to the object in MinIO
         
     Returns:
-        Tuple of (Polars DataFrame, conditional_format_styles)
+        Tuple of (Polars DataFrame, conditional_format_styles, table_metadata)
         - conditional_format_styles: Style map or None if not present
+        - table_metadata: Table metadata (formatting, design, layout) or None if not present
         
     Raises:
         Exception: If file cannot be loaded
@@ -73,21 +74,33 @@ def load_table_from_minio(object_name: str) -> Tuple[pl.DataFrame, Optional[Dict
         
         # Extract conditional formatting styles from metadata
         conditional_format_styles = None
+        table_metadata = None
         metadata = table.schema.metadata
-        if metadata and b'conditional_formatting' in metadata:
-            try:
-                styles_json = metadata[b'conditional_formatting'].decode('utf-8')
-                conditional_format_styles = json.loads(styles_json)
-                logger.info(f"🎨 [TABLE] Loaded conditional formatting styles for {len(conditional_format_styles)} rows")
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                logger.warning(f"⚠️ [TABLE] Failed to parse conditional formatting metadata: {e}")
+        if metadata:
+            # Extract conditional formatting styles
+            if b'conditional_formatting' in metadata:
+                try:
+                    styles_json = metadata[b'conditional_formatting'].decode('utf-8')
+                    conditional_format_styles = json.loads(styles_json)
+                    logger.info(f"🎨 [TABLE] Loaded conditional formatting styles for {len(conditional_format_styles)} rows")
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.warning(f"⚠️ [TABLE] Failed to parse conditional formatting metadata: {e}")
+            
+            # Extract table metadata (formatting, design, layout)
+            if b'table_metadata' in metadata:
+                try:
+                    metadata_json = metadata[b'table_metadata'].decode('utf-8')
+                    table_metadata = json.loads(metadata_json)
+                    logger.info(f"📋 [TABLE] Loaded table metadata (formatting, design, layout)")
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.warning(f"⚠️ [TABLE] Failed to parse table metadata: {e}")
         
         # Convert to Polars DataFrame
         df = pl.from_arrow(table)
         logger.info(f"✅ [TABLE] Loaded DataFrame: {df.shape[0]} rows, {df.shape[1]} columns")
         logger.info(f"📋 [TABLE] Columns: {df.columns}")
         
-        return df, conditional_format_styles
+        return df, conditional_format_styles, table_metadata
         
     except Exception as e:
         logger.error(f"❌ [TABLE] Failed to load table: {e}")
@@ -198,15 +211,17 @@ def apply_table_settings(df: pl.DataFrame, settings: Dict[str, Any]) -> pl.DataF
 def save_table_to_minio(
     df: pl.DataFrame, 
     object_name: str,
-    conditional_format_styles: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None
+    conditional_format_styles: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
+    table_metadata: Optional[Dict[str, Any]] = None
 ) -> str:
     """
-    Save a DataFrame to MinIO in Arrow format with optional conditional formatting styles in metadata.
+    Save a DataFrame to MinIO in Arrow format with optional conditional formatting styles and table metadata.
     
     Args:
         df: DataFrame to save
         object_name: Full path where to save in MinIO
         conditional_format_styles: Optional style map to store in Arrow metadata
+        table_metadata: Optional table metadata (formatting, design, layout) to store in Arrow metadata
         
     Returns:
         Object name of saved file
@@ -225,26 +240,33 @@ def save_table_to_minio(
         # Convert Polars DataFrame to PyArrow Table
         table = df.to_arrow()
         
-        # If styles provided, add to Arrow schema metadata
+        # Get existing metadata (if any)
+        metadata = table.schema.metadata or {}
+        
+        # Add conditional formatting styles to metadata if provided
         if conditional_format_styles:
             try:
                 # Convert styles dict to JSON string
                 styles_json = json.dumps(conditional_format_styles)
-                
-                # Get existing metadata (if any)
-                metadata = table.schema.metadata or {}
-                
-                # Add conditional formatting styles to metadata
                 metadata[b'conditional_formatting'] = styles_json.encode('utf-8')
-                
-                # Recreate table with new metadata
-                table = table.replace_schema_metadata(metadata)
-                
                 logger.info(f"🎨 [TABLE] Added conditional formatting styles to metadata ({len(styles_json)} bytes)")
                 logger.info(f"🎨 [TABLE] Formatting applied to {len(conditional_format_styles)} rows")
             except Exception as e:
                 logger.warning(f"⚠️ [TABLE] Failed to add conditional formatting metadata: {e}")
-                # Continue without metadata if there's an error
+        
+        # Add table metadata (formatting, design, layout) if provided
+        if table_metadata:
+            try:
+                # Convert metadata dict to JSON string
+                metadata_json = json.dumps(table_metadata)
+                metadata[b'table_metadata'] = metadata_json.encode('utf-8')
+                logger.info(f"📋 [TABLE] Added table metadata to Arrow file ({len(metadata_json)} bytes)")
+            except Exception as e:
+                logger.warning(f"⚠️ [TABLE] Failed to add table metadata: {e}")
+        
+        # Recreate table with updated metadata
+        if metadata:
+            table = table.replace_schema_metadata(metadata)
         
         # Write Arrow file with metadata
         buffer = pa.BufferOutputStream()
@@ -688,7 +710,8 @@ async def save_session_metadata(
     object_name: str,
     has_unsaved_changes: bool = False,
     draft_object_name: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    table_metadata: Optional[Dict[str, Any]] = None
 ) -> bool:
     """
     Save session metadata to MongoDB.
@@ -701,6 +724,7 @@ async def save_session_metadata(
         has_unsaved_changes: Whether there are unsaved changes
         draft_object_name: Path to draft file in MinIO (if exists)
         metadata: Additional metadata (row_count, column_count, size_bytes)
+        table_metadata: Table metadata (formatting, design, layout settings)
         
     Returns:
         True if successful, False otherwise
@@ -725,6 +749,9 @@ async def save_session_metadata(
         if metadata:
             update_doc["metadata"] = metadata
         
+        if table_metadata:
+            update_doc["table_metadata"] = table_metadata
+        
         await coll.update_one(
             {"_id": table_id},
             {
@@ -737,6 +764,8 @@ async def save_session_metadata(
         )
         
         logger.info(f"💾 [SESSION] Saved metadata for session {table_id}")
+        if table_metadata:
+            logger.info(f"📋 [SESSION] Saved table metadata (formatting, design, layout)")
         await client.close()
         return True
     except Exception as e:
@@ -753,6 +782,7 @@ async def get_session_metadata(table_id: str) -> Optional[Dict[str, Any]]:
         
     Returns:
         Session metadata dict or None if not found
+        Includes table_metadata field if present
     """
     try:
         client = AsyncIOMotorClient(MONGO_URI)
@@ -775,6 +805,7 @@ async def get_session_metadata(table_id: str) -> Optional[Dict[str, Any]]:
                 "last_modified": doc.get("last_modified").isoformat() if doc.get("last_modified") else None,
                 "last_accessed": doc.get("last_accessed").isoformat() if doc.get("last_accessed") else None,
                 "metadata": doc.get("metadata", {}),
+                "table_metadata": doc.get("table_metadata"),  # Table metadata (formatting, design, layout)
             }
             return result
         return None

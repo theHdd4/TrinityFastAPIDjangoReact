@@ -32,3 +32,5 @@ const ColumnResizeHandle: React.FC<ColumnResizeHandleProps> = ({
 
 export default ColumnResizeHandle;
 
+
+
