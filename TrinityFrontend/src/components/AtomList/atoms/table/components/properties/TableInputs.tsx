@@ -126,22 +126,28 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
     setError(null);
     
     try {
-      console.log(`🌐 [TABLE-INPUTS] Calling createBlankTable API...`);
-      const data = await createBlankTable(rows, cols);
+      // Get current settings to check if header row is enabled
+      const currentSettings = atom?.settings || {};
+      const useHeaderRow = currentSettings.layout?.headerRow || false;
+      
+      console.log(`🌐 [TABLE-INPUTS] Calling createBlankTable API with use_header_row=${useHeaderRow}...`);
+      const data = await createBlankTable(rows, cols, useHeaderRow);
       console.log('✅ [TABLE-INPUTS] Blank table created from backend:', data);
       console.log('📊 [TABLE-INPUTS] Backend response:', {
         table_id: data.table_id,
         column_names: data.column_names,
+        use_header_row: data.use_header_row,
         columns_count: data.columns || data.column_names?.length,
         row_count: data.rows || rows,
         has_column_types: !!data.column_types
       });
 
       // ✅ Create tableData structure and store in settings
+      // Note: column_names are internal identifiers (col_0, col_1, etc.), not displayed
       const blankTableData = {
         table_id: data.table_id,
-        columns: data.column_names || [],
-        rows: [], // Blank table starts empty
+        columns: data.column_names || [], // Internal identifiers only
+        rows: [], // Blank table starts empty - will be populated as cells are edited
         row_count: rows,
         column_types: data.column_types || {},
       };
@@ -161,11 +167,17 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
         blankTableConfig: {
           rows,
           columns: cols,
-          columnNames: data.column_names,
+          columnNames: data.column_names, // Internal identifiers
+          useHeaderRow: data.use_header_row || false,
           created: true
         },
-        visibleColumns: data.column_names || [],
-        columnOrder: data.column_names || []
+        visibleColumns: data.column_names || [], // For internal use
+        columnOrder: data.column_names || [],
+        // Ensure header row is OFF by default for blank tables
+        layout: {
+          ...(currentSettings.layout || {}),
+          headerRow: data.use_header_row || false,
+        }
       };
 
       console.log('💾 [TABLE-INPUTS] Updating settings with:', {
@@ -174,6 +186,7 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
         hasTableData: !!newSettings.tableData,
         tableDataColumns: newSettings.tableData?.columns,
         blankTableConfigCreated: newSettings.blankTableConfig?.created,
+        useHeaderRow: newSettings.layout?.headerRow,
         visibleColumnsCount: newSettings.visibleColumns?.length
       });
 

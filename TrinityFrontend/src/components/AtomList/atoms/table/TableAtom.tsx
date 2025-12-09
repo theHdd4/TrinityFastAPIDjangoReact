@@ -3,8 +3,8 @@ import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratory
 import TableCanvas from './components/TableCanvas';
 import TableToolbar from './components/TableToolbar';
 import TablePagination from './components/TablePagination';
-import { loadTable, updateTable, saveTable } from './services/tableApi';
-import { Loader2, Save, AlertCircle } from 'lucide-react';
+import { loadTable, updateTable, saveTable, evaluateConditionalFormats, getTableInfo, createBlankTable, editTableCell, restoreSession } from './services/tableApi';
+import { Loader2, Save, AlertCircle, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,6 +24,39 @@ export interface TableData {
   object_name?: string;
 }
 
+// Conditional Formatting Types
+export interface ConditionalFormatRule {
+  id: string;
+  enabled: boolean;
+  column: string;
+  priority: number;
+  rule: {
+    type: 'greater_than' | 'less_than' | 'between' | 'equals' | 
+          'contains' | 'starts_with' | 'ends_with' |
+          'top_n' | 'bottom_n' | 'above_average' | 'below_average' |
+          'color_scale_2' | 'color_scale_3' | 'data_bars' | 'icon_set';
+    value1?: any;
+    value2?: any;
+    minColor?: string;
+    midColor?: string;
+    maxColor?: string;
+    barColor?: string;
+    showValue?: boolean;
+    iconSet?: 'arrows' | 'traffic_lights' | 'stars' | 'checkmarks';
+    thresholds?: {
+      high: number;
+      medium: number;
+    };
+  };
+  format: {
+    backgroundColor?: string;
+    textColor?: string;
+    fontWeight?: 'bold' | 'normal';
+    fontSize?: number;
+    icon?: string;
+  };
+}
+
 export interface TableSettings {
   mode?: 'load' | 'blank';
   sourceFile?: string;
@@ -32,7 +65,8 @@ export interface TableSettings {
   visibleColumns: string[];
   columnOrder: string[];
   columnWidths: Record<string, number>;
-  rowHeight: number;
+  rowHeight: number;  // Global default (keep for backward compatibility)
+  rowHeights?: Record<number, number>;  // NEW: Per-row heights (like Excel)
   showRowNumbers: boolean;
   showSummaryRow: boolean;
   frozenColumns: number;
@@ -40,11 +74,69 @@ export interface TableSettings {
   sortConfig: Array<{column: string; direction: 'asc' | 'desc'}>;
   currentPage: number;
   pageSize: number;
+  enableRichText?: boolean;  // NEW: Toggle rich text feature (default: false)
   blankTableConfig?: {
     rows: number;
     columns: number;
     columnNames?: string[];
     created: boolean;
+  };
+  // Phase 1: Layout Options
+  layout?: {
+    headerRow: boolean;
+    totalRow: boolean;
+    bandedRows: boolean;
+    bandedColumns: boolean;
+    firstColumn: boolean;
+    lastColumn: boolean;
+  };
+  // Total row configuration
+  totalRowConfig?: {
+    [columnName: string]: 'sum' | 'average' | 'count' | 'min' | 'max' | 'none';
+  };
+  // Phase 2: Design
+  design?: {
+    theme: string;
+    borderStyle: 'all' | 'none' | 'outside' | 'horizontal' | 'vertical' | 'header';
+    customColors?: {
+      header?: string;
+      oddRow?: string;
+      evenRow?: string;
+      border?: string;
+    };
+    columnAlignment?: {
+      [columnName: string]: {
+        horizontal: 'left' | 'center' | 'right';
+        vertical: 'top' | 'middle' | 'bottom';
+      };
+    };
+    columnFontStyles?: {
+      [columnName: string]: {
+        fontSize?: number;
+        bold?: boolean;
+        italic?: boolean;
+        color?: string;
+      };
+    };
+  };
+  // Phase 3: Conditional Formatting
+  conditionalFormats?: ConditionalFormatRule[];
+  // Cell Formatting (Rich Text Support)
+  cellFormatting?: {
+    [rowIndex: string]: {
+      [column: string]: {
+        html?: string;  // Rich text HTML content
+        fontFamily?: string;
+        fontSize?: number;
+        bold?: boolean;
+        italic?: boolean;
+        underline?: boolean;
+        strikethrough?: boolean;
+        textColor?: string;
+        backgroundColor?: string;
+        textAlign?: 'left' | 'center' | 'right';
+      };
+    };
   };
 }
 
@@ -52,14 +144,33 @@ const DEFAULT_SETTINGS: TableSettings = {
   visibleColumns: [],
   columnOrder: [],
   columnWidths: {},
-  rowHeight: 32,
+  rowHeight: 24,  // Reduced by 25%: 32px → 24px
+  rowHeights: {},  // NEW: Empty by default, populated as rows are resized
   showRowNumbers: true,
   showSummaryRow: false,
   frozenColumns: 0,
   filters: {},
   sortConfig: [],
   currentPage: 1,
-  pageSize: 15  // ✅ 15 rows per page
+  pageSize: 15,  // ✅ 15 rows per page
+  enableRichText: false,  // NEW: Rich text disabled by default (use simple cells)
+  // Phase 1: Layout defaults
+  layout: {
+    headerRow: true,
+    totalRow: false,
+    bandedRows: false,
+    bandedColumns: false,
+    firstColumn: false,
+    lastColumn: false,
+  },
+  totalRowConfig: {},
+  // Phase 2: Design defaults
+  design: {
+    theme: 'plain',
+    borderStyle: 'all',
+  },
+  // Phase 3: Conditional Formatting defaults
+  conditionalFormats: [],
 };
 
 const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
@@ -76,7 +187,21 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
   const baseSettings = (atom?.settings as Partial<TableSettings> | undefined) || {};
   const settings: TableSettings = {
     ...DEFAULT_SETTINGS,
-    ...baseSettings
+    ...baseSettings,
+    // Deep merge nested objects
+    layout: {
+      ...DEFAULT_SETTINGS.layout,
+      ...(baseSettings.layout || {}),
+    },
+    design: {
+      ...DEFAULT_SETTINGS.design,
+      ...(baseSettings.design || {}),
+    },
+    totalRowConfig: {
+      ...DEFAULT_SETTINGS.totalRowConfig,
+      ...(baseSettings.totalRowConfig || {}),
+    },
+    conditionalFormats: baseSettings.conditionalFormats || DEFAULT_SETTINGS.conditionalFormats,
   };
   
   // ✅ Read data from settings, not local state (like dataframe-operations)
@@ -109,6 +234,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
   const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
   const [showOverwriteDialog, setShowOverwriteDialog] = useState(false);
   const [saveFileName, setSaveFileName] = useState('');
+  const [cellStyles, setCellStyles] = useState<Record<string, Record<string, Record<string, string>>>>({});
   const { toast } = useToast();
 
   // Auto-load data ONLY if sourceFile exists but tableData doesn't (like dataframe-operations)
@@ -122,10 +248,11 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           const data = await loadTable(settings.sourceFile);
           console.log('✅ [TABLE-ATOM] Data loaded:', data);
           
-          // ✅ Store data in Zustand settings
+          // ✅ Store data in Zustand settings (like DataFrame Operations)
           updateSettings(atomId, {
             tableData: data,
             tableId: data.table_id,
+            sourceFile: settings.sourceFile || data.object_name,  // Store source file for recovery
             visibleColumns: data.columns,
             columnOrder: data.columns,
           });
@@ -140,6 +267,211 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
     
     autoLoadData();
   }, [settings.mode, settings.sourceFile, settings.tableData, loading, atomId, updateSettings]);
+
+  // Restore session from MongoDB/MinIO on mount (for loaded tables)
+  useEffect(() => {
+    const restoreLoadedTableSession = async () => {
+      if (
+        settings.mode === 'load' && 
+        settings.tableId && 
+        settings.tableData &&
+        !loading
+      ) {
+        console.log('🔄 [TABLE-ATOM] Checking loaded table session:', settings.tableId);
+        
+        try {
+          // Check if session exists in backend
+          await getTableInfo(settings.tableId);
+          console.log('✅ [TABLE-ATOM] Session exists, no restoration needed');
+        } catch (error: any) {
+          // Session doesn't exist, try to restore from MongoDB/MinIO
+          console.log('⚠️ [TABLE-ATOM] Session missing, attempting restoration from MongoDB/MinIO...');
+          setLoading(true);
+          
+          try {
+            // Try to restore session from draft/original
+            const restored = await restoreSession(settings.tableId, atomId);
+            
+            if (restored.restored && restored.data) {
+              console.log('✅ [TABLE-ATOM] Session restored:', restored);
+              
+              // Update settings with restored data
+              updateSettings(atomId, {
+                tableData: restored.data,
+                tableId: restored.data.table_id,
+                sourceFile: restored.data.object_name || settings.sourceFile,
+                visibleColumns: restored.data.columns,
+                columnOrder: restored.data.columns,
+              });
+              
+              if (restored.has_unsaved_changes) {
+                toast({
+                  title: 'Session Restored',
+                  description: `Restored ${restored.change_count} unsaved changes`,
+                });
+              }
+            } else {
+              // Fallback: reload from source file
+              if (settings.sourceFile) {
+                console.log('🔄 [TABLE-ATOM] Restoring from source file:', settings.sourceFile);
+                const data = await loadTable(settings.sourceFile);
+                updateSettings(atomId, {
+                  tableData: data,
+                  tableId: data.table_id,
+                  sourceFile: settings.sourceFile || data.object_name,
+                  visibleColumns: data.columns,
+                  columnOrder: data.columns,
+                });
+              } else {
+                throw new Error('No source file available for restoration');
+              }
+            }
+          } catch (err: any) {
+            console.error('❌ [TABLE-ATOM] Failed to restore session:', err);
+            // Try fallback to source file
+            if (settings.sourceFile) {
+              try {
+                const data = await loadTable(settings.sourceFile);
+                updateSettings(atomId, {
+                  tableData: data,
+                  tableId: data.table_id,
+                  sourceFile: settings.sourceFile || data.object_name,
+                  visibleColumns: data.columns,
+                  columnOrder: data.columns,
+                });
+              } catch (loadErr: any) {
+                setError(loadErr.message || 'Failed to restore table session');
+              }
+            } else {
+              setError(err.message || 'Failed to restore table session');
+            }
+          } finally {
+            setLoading(false);
+          }
+        }
+      }
+    };
+    
+    restoreLoadedTableSession();
+  }, [settings.mode, settings.tableId, settings.tableData, settings.sourceFile, loading, atomId, updateSettings, toast]);
+
+  // Restore blank table session on mount (like DataFrame Operations)
+  useEffect(() => {
+    const restoreBlankTableSession = async () => {
+      if (
+        settings.mode === 'blank' && 
+        settings.tableId && 
+        settings.blankTableConfig?.created &&
+        settings.tableData &&
+        !loading
+      ) {
+        console.log('🔄 [TABLE-ATOM] Checking blank table session:', settings.tableId);
+        
+        try {
+          // Check if session exists in backend
+          const info = await getTableInfo(settings.tableId);
+          console.log('✅ [TABLE-ATOM] Session exists, no restoration needed');
+        } catch (error: any) {
+          // Session doesn't exist, need to recreate
+          console.log('⚠️ [TABLE-ATOM] Session missing, recreating blank table...');
+          setLoading(true);
+          
+          try {
+            // Recreate blank table in backend
+            const useHeaderRow = settings.layout?.headerRow || false;
+            const restoredData = await createBlankTable(
+              settings.blankTableConfig.rows,
+              settings.blankTableConfig.columns,
+              useHeaderRow
+            );
+            
+            console.log('✅ [TABLE-ATOM] Blank table recreated:', restoredData.table_id);
+            
+            // Restore cell values from settings.tableData
+            if (settings.tableData.rows && Array.isArray(settings.tableData.rows) && settings.tableData.rows.length > 0) {
+              console.log('🔄 [TABLE-ATOM] Restoring cell values...');
+              
+              // Restore each cell value
+              for (let rowIdx = 0; rowIdx < settings.tableData.rows.length; rowIdx++) {
+                const row = settings.tableData.rows[rowIdx];
+                if (row && typeof row === 'object') {
+                  for (const [colKey, value] of Object.entries(row)) {
+                    if (value !== null && value !== undefined && value !== '') {
+                      try {
+                        await editTableCell(restoredData.table_id, rowIdx, colKey, value);
+                      } catch (err) {
+                        console.warn(`⚠️ [TABLE-ATOM] Failed to restore cell [${rowIdx}, ${colKey}]:`, err);
+                      }
+                    }
+                  }
+                }
+              }
+              
+              console.log('✅ [TABLE-ATOM] Cell values restored');
+            }
+            
+            // Update settings with new table_id
+            updateSettings(atomId, {
+              tableId: restoredData.table_id,
+              tableData: {
+                ...settings.tableData,
+                table_id: restoredData.table_id
+              }
+            });
+            
+            console.log('✅ [TABLE-ATOM] Blank table session restored');
+          } catch (err: any) {
+            console.error('❌ [TABLE-ATOM] Failed to restore blank table session:', err);
+            setError(err.message || 'Failed to restore blank table session');
+          } finally {
+            setLoading(false);
+          }
+        }
+      }
+    };
+    
+    restoreBlankTableSession();
+  }, [settings.mode, settings.tableId, settings.blankTableConfig, settings.tableData, loading, atomId, updateSettings]);
+
+  // Fetch conditional formatting styles when rules change or table loads
+  useEffect(() => {
+    const fetchFormattingStyles = async () => {
+      // Check if we have saved styles from loaded table (highest priority)
+      if (tableData?.conditional_format_styles) {
+        console.log('🎨 [CF] Using saved styles from loaded table:', tableData.conditional_format_styles);
+        setCellStyles(tableData.conditional_format_styles);
+        return;
+      }
+
+      // If no saved styles, evaluate rules if they exist
+      if (!settings.conditionalFormats || settings.conditionalFormats.length === 0) {
+        console.log('🎨 [CF] No rules and no saved styles, clearing styles');
+        setCellStyles({});
+        return;
+      }
+
+      if (!settings.tableId) {
+        console.log('🎨 [CF] No tableId, skipping evaluation');
+        return;
+      }
+
+      console.log('🎨 [CF] Evaluating formatting with rules:', settings.conditionalFormats);
+      console.log('🎨 [CF] Table ID:', settings.tableId);
+
+      try {
+        const response = await evaluateConditionalFormats(settings.tableId, settings.conditionalFormats);
+        console.log('✅ [CF] Styles received:', response.styles);
+        console.log('📊 [CF] Formatted rows count:', Object.keys(response.styles || {}).length);
+        setCellStyles(response.styles || {});
+      } catch (err: any) {
+        console.error('❌ [CF] Failed to evaluate conditional formatting:', err);
+        console.error('❌ [CF] Error details:', err.message, err.stack);
+        // Don't clear existing styles on error (graceful degradation)
+      }
+    };
+
+    fetchFormattingStyles();
+  }, [settings.conditionalFormats, settings.tableId, tableData?.conditional_format_styles]);
 
   const handleLoadData = async () => {
     if (!settings.sourceFile) {
@@ -156,10 +488,11 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
       
       console.log('✅ [TABLE-ATOM] Data loaded:', data);
       
-      // ✅ Store data in Zustand settings
+      // ✅ Store data in Zustand settings (like DataFrame Operations)
       updateSettings(atomId, {
         tableData: data,
         tableId: data.table_id,
+        sourceFile: settings.sourceFile || data.object_name,  // Store source file for recovery
         visibleColumns: data.columns,
         columnOrder: data.columns
       });
@@ -203,7 +536,21 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
     setSaving(true);
     
     try {
-      const response = await saveTable(settings.tableId, settings.sourceFile, true);
+      // Check if header row should be used (blank table with header row ON)
+      const useHeaderRow = settings.mode === 'blank' && settings.layout?.headerRow === true;
+      const response = await saveTable(
+        settings.tableId, 
+        settings.sourceFile, 
+        true, 
+        useHeaderRow,
+        settings.conditionalFormats || []
+      );
+      
+      // Update savedFile to sourceFile so filename display updates
+      updateSettings(atomId, {
+        savedFile: settings.sourceFile
+      });
+      
       toast({
         title: 'Success',
         description: 'Table saved successfully',
@@ -244,8 +591,16 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
     
     setSaving(true);
     try {
+      // Check if header row should be used (blank table with header row ON)
+      const useHeaderRow = settings.mode === 'blank' && settings.layout?.headerRow === true;
       const filename = saveFileName.trim() || `table_${Date.now()}`;
-      const response = await saveTable(settings.tableId, filename, false);
+      const response = await saveTable(
+        settings.tableId, 
+        filename, 
+        false, 
+        useHeaderRow,
+        settings.conditionalFormats || []
+      );
       
       toast({
         title: 'Success',
@@ -372,43 +727,86 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           )}
 
           {/* Save Buttons Bar */}
-          <div className="px-4 py-2 border-b border-gray-200 bg-white flex items-center justify-end gap-2">
-            <Button
-              onClick={handleSave}
-              disabled={saving || !settings.tableId || !settings.sourceFile}
-              className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2 px-4"
-              size="sm"
-            >
-              {saving ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" />
-                  <span>Save</span>
-                </>
-              )}
-            </Button>
-            <Button
-              onClick={handleSaveAs}
-              disabled={saving || !settings.tableId}
-              className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4"
-              size="sm"
-            >
-              {saving ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" />
-                  <span>Save As</span>
-                </>
-              )}
-            </Button>
+          <div className="px-4 py-2 border-b border-gray-200 bg-white flex items-center justify-between gap-2">
+            {/* Filename Display */}
+            <div className="flex items-center space-x-2 flex-1 min-w-0">
+              {(() => {
+                // Determine filename to display
+                let displayName = '';
+                if (settings.savedFile) {
+                  // User saved with a new name
+                  displayName = settings.savedFile.includes('/') 
+                    ? settings.savedFile.split('/').pop() || settings.savedFile
+                    : settings.savedFile;
+                } else if (settings.sourceFile) {
+                  // Loaded from file or saved to original
+                  displayName = settings.sourceFile.includes('/')
+                    ? settings.sourceFile.split('/').pop() || settings.sourceFile
+                    : settings.sourceFile;
+                } else if (settings.mode === 'blank' && (tableData?.table_id || settings.tableId)) {
+                  // Blank table - show table ID
+                  displayName = tableData?.table_id || settings.tableId || 'Untitled Table';
+                } else if (tableData?.object_name) {
+                  // Fallback to object_name from backend
+                  displayName = tableData.object_name.includes('/')
+                    ? tableData.object_name.split('/').pop() || tableData.object_name
+                    : tableData.object_name;
+                } else if (tableData?.table_id) {
+                  // Last resort: use table_id
+                  displayName = tableData.table_id;
+                }
+                
+                if (displayName) {
+                  return (
+                    <div className="flex items-center space-x-2 px-3 py-1.5 rounded-md bg-blue-50 border border-blue-200">
+                      <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                      <span className="text-sm font-medium text-gray-700 truncate">{displayName}</span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+            </div>
+            
+            {/* Save Buttons */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Button
+                onClick={handleSave}
+                disabled={saving || !settings.tableId || !settings.sourceFile}
+                className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2 px-4"
+                size="sm"
+              >
+                {saving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save</span>
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={handleSaveAs}
+                disabled={saving || !settings.tableId}
+                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4"
+                size="sm"
+              >
+                {saving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save As</span>
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
 
           {/* Table Canvas */}
@@ -416,6 +814,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
             <TableCanvas
               data={tableData}
               settings={{...settings, atomId}}
+              cellStyles={cellStyles}
               onSettingsChange={handleSettingsChange}
             />
           </div>

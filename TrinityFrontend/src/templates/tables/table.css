@@ -46,14 +46,16 @@
 }
 
 .table-header-cell {
-  @apply px-5 py-2 text-left font-bold text-black bg-white text-sm;
+  @apply text-left font-bold text-black bg-white text-sm;
+  padding: 2px 4px !important; /* NEW: Minimal Excel-like padding */
   width: 150px; /* Default column width - removed !important to allow dynamic changes */
   min-width: 50px;
-  max-width: 500px;
+  max-width: 500px; /* Allow resizing */
   font-weight: 700 !important; /* Ensure bold text */
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
+  position: relative; /* NEW: For absolute positioning of resize handle */
 }
 
 .table-row {
@@ -61,10 +63,11 @@
 }
 
 .table-cell {
-  @apply px-5 py-2 text-slate-700 text-left;
+  @apply text-slate-700 text-left;
+  padding: 2px 4px !important; /* NEW: Minimal Excel-like padding */
   width: 150px; /* Default column width - removed !important to allow dynamic changes */
   min-width: 50px;
-  max-width: 500px;
+  max-width: 500px; /* Allow resizing */
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
@@ -245,7 +248,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
-  padding: 4px 8px;
+  padding: 0; /* NEW: No padding (handled by parent) */
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -274,7 +277,7 @@
 .table-base td,
 .table-base th {
   margin: 0 !important;
-  padding: 8px 20px !important; /* Consistent padding */
+  padding: 2px 4px !important; /* NEW: Minimal Excel-like padding */
   border-spacing: 0 !important;
 }
 

@@ -25,10 +25,14 @@ export interface TableUpdateRequest {
   settings: TableSettings;
 }
 
+import { ConditionalFormatRule } from '../components/conditional-formatting/types';
+
 export interface TableSaveRequest {
   table_id: string;
   filename?: string;
   overwrite_original?: boolean;
+  use_header_row?: boolean;
+  conditional_format_rules?: ConditionalFormatRule[];
 }
 
 export interface TableResponse {
@@ -39,6 +43,7 @@ export interface TableResponse {
   column_types: Record<string, string>;
   object_name?: string;
   settings?: TableSettings;
+  conditional_format_styles?: Record<string, Record<string, Record<string, string>>>;
 }
 
 export interface TableSaveResponse {
@@ -87,15 +92,27 @@ export const updateTable = async (tableId: string, settings: TableSettings): Pro
 
 /**
  * Save table to MinIO
+ * @param tableId Table session ID
+ * @param filename Optional filename (without .arrow extension)
+ * @param overwriteOriginal If true, overwrite original file
+ * @param useHeaderRow If true, first row values become column names (for blank tables with header row ON)
  */
-export const saveTable = async (tableId: string, filename?: string, overwriteOriginal?: boolean): Promise<TableSaveResponse> => {
+export const saveTable = async (
+  tableId: string, 
+  filename?: string, 
+  overwriteOriginal?: boolean,
+  useHeaderRow?: boolean,
+  conditionalFormatRules?: ConditionalFormatRule[]
+): Promise<TableSaveResponse> => {
   const response = await fetch(`${TABLE_API}/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ 
       table_id: tableId, 
       filename,
-      overwrite_original: overwriteOriginal || false
+      overwrite_original: overwriteOriginal || false,
+      use_header_row: useHeaderRow || false,
+      conditional_format_rules: conditionalFormatRules || []
     })
   });
   
@@ -187,12 +204,15 @@ export const checkTableService = async () => {
 
 /**
  * Create blank table with m×n dimensions
+ * @param rows Number of rows
+ * @param columns Number of columns
+ * @param useHeaderRow If true, first row will be treated as headers (default: false)
  */
-export const createBlankTable = async (rows: number, columns: number) => {
+export const createBlankTable = async (rows: number, columns: number, useHeaderRow: boolean = false) => {
   const response = await fetch(`${TABLE_API}/create-blank`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rows, columns })
+    body: JSON.stringify({ rows, columns, use_header_row: useHeaderRow })
   });
 
   if (!response.ok) {
@@ -216,6 +236,301 @@ export const editTableCell = async (tableId: string, row: number, column: string
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Failed to edit cell' }));
     throw new Error(error.detail || 'Failed to edit cell');
+  }
+
+  return response.json();
+};
+
+/**
+ * Delete a column from the table
+ */
+export const deleteColumn = async (tableId: string, column: string): Promise<TableResponse> => {
+  const response = await fetch(`${TABLE_API}/delete-column`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table_id: tableId, column })
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to delete column' }));
+    throw new Error(error.detail || 'Failed to delete column');
+  }
+
+  return response.json();
+};
+
+/**
+ * Insert a new column into the table
+ */
+export const insertColumn = async (
+  tableId: string,
+  index: number,
+  name: string,
+  defaultValue?: any
+): Promise<TableResponse> => {
+  const response = await fetch(`${TABLE_API}/insert-column`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      table_id: tableId,
+      index,
+      name,
+      default_value: defaultValue
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to insert column' }));
+    throw new Error(error.detail || 'Failed to insert column');
+  }
+
+  return response.json();
+};
+
+/**
+ * Rename a column
+ */
+export const renameColumn = async (
+  tableId: string,
+  oldName: string,
+  newName: string
+): Promise<TableResponse> => {
+  const response = await fetch(`${TABLE_API}/rename-column`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      table_id: tableId,
+      old_name: oldName,
+      new_name: newName
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to rename column' }));
+    throw new Error(error.detail || 'Failed to rename column');
+  }
+
+  return response.json();
+};
+
+/**
+ * Round numeric values in a column
+ */
+export const roundColumn = async (
+  tableId: string,
+  column: string,
+  decimalPlaces: number
+): Promise<TableResponse> => {
+  const response = await fetch(`${TABLE_API}/round-column`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      table_id: tableId,
+      column,
+      decimal_places: decimalPlaces
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to round column' }));
+    throw new Error(error.detail || 'Failed to round column');
+  }
+
+  return response.json();
+};
+
+/**
+ * Change column data type
+ */
+export const retypeColumn = async (
+  tableId: string,
+  column: string,
+  newType: string
+): Promise<TableResponse> => {
+  const response = await fetch(`${TABLE_API}/retype-column`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      table_id: tableId,
+      column,
+      new_type: newType
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to retype column' }));
+    throw new Error(error.detail || 'Failed to retype column');
+  }
+
+  return response.json();
+};
+
+/**
+ * Transform text case in a column
+ */
+export const transformCase = async (
+  tableId: string,
+  column: string,
+  caseType: string
+): Promise<TableResponse> => {
+  const response = await fetch(`${TABLE_API}/transform-case`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      table_id: tableId,
+      column,
+      case_type: caseType
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to transform case' }));
+    throw new Error(error.detail || 'Failed to transform case');
+  }
+
+  return response.json();
+};
+
+/**
+ * Duplicate a column
+ */
+export const duplicateColumn = async (
+  tableId: string,
+  column: string,
+  newName: string
+): Promise<TableResponse> => {
+  const response = await fetch(`${TABLE_API}/duplicate-column`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      table_id: tableId,
+      column,
+      new_name: newName
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to duplicate column' }));
+    throw new Error(error.detail || 'Failed to duplicate column');
+  }
+
+  return response.json();
+};
+
+/**
+ * Conditional Formatting Types
+ */
+export interface ConditionalFormatRule {
+  type: 'highlight' | 'color_scale' | 'data_bar' | 'icon_set';
+  id: string;
+  enabled: boolean;
+  priority: number;
+  column: string;
+  operator?: 'gt' | 'lt' | 'eq' | 'ne' | 'contains' | 'starts_with' | 'ends_with' | 'between' | 'top_n' | 'bottom_n' | 'above_average' | 'below_average';
+  value1?: any;
+  value2?: any;
+  style?: {
+    backgroundColor?: string;
+    textColor?: string;
+    fontWeight?: 'bold' | 'normal';
+    fontSize?: number;
+  };
+  min_color?: string;
+  max_color?: string;
+  mid_color?: string;
+  color?: string;
+  show_value?: boolean;
+  icon_set?: 'arrows' | 'traffic_lights' | 'stars' | 'checkmarks';
+  thresholds?: Record<string, number>;
+}
+
+export interface FormatRequest {
+  table_id: string;
+  rules: ConditionalFormatRule[];
+}
+
+export interface FormatResponse {
+  table_id: string;
+  styles: Record<string, Record<string, Record<string, string>>>;
+  evaluated_at?: string;
+}
+
+/**
+ * Evaluate conditional formatting rules
+ */
+export const evaluateConditionalFormats = async (
+  tableId: string,
+  rules: ConditionalFormatRule[]
+): Promise<FormatResponse> => {
+  const response = await fetch(`${TABLE_API}/formatting/evaluate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      table_id: tableId,
+      rules
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to evaluate conditional formatting' }));
+    throw new Error(error.detail || 'Failed to evaluate conditional formatting');
+  }
+
+  return response.json();
+};
+
+/**
+ * Clear conditional formatting cache
+ */
+export const clearFormattingCache = async (tableId: string): Promise<{ status: string; cleared_keys: number }> => {
+  const response = await fetch(`${TABLE_API}/formatting/cache/${tableId}`, {
+    method: 'DELETE'
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to clear cache' }));
+    throw new Error(error.detail || 'Failed to clear cache');
+  }
+
+  return response.json();
+};
+
+/**
+ * Restore a session from MongoDB/MinIO draft
+ */
+export interface RestoreSessionRequest {
+  table_id: string;
+  atom_id?: string;
+  project_id?: string;
+}
+
+export interface RestoreSessionResponse {
+  table_id: string;
+  restored: boolean;
+  has_unsaved_changes: boolean;
+  change_count: number;
+  data?: TableResponse;
+  message?: string;
+}
+
+export const restoreSession = async (
+  tableId: string,
+  atomId?: string,
+  projectId?: string
+): Promise<RestoreSessionResponse> => {
+  const response = await fetch(`${TABLE_API}/restore-session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      table_id: tableId,
+      atom_id: atomId,
+      project_id: projectId
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to restore session' }));
+    throw new Error(error.detail || 'Failed to restore session');
   }
 
   return response.json();
