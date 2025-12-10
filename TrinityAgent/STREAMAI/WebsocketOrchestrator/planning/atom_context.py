@@ -389,7 +389,7 @@ class WorkflowAtomContextMixin:
                 lookup.setdefault(key, []).append(file_path)
             return display_names, lookup
 
-    def _display_file_name(path: str) -> str:
+    def _display_file_name(self, path: str) -> str:
             """Return a user-friendly file name from a stored path."""
             if not path:
                 return ""
@@ -399,7 +399,7 @@ class WorkflowAtomContextMixin:
                 path = path.split("\\")[-1]
             return path
 
-    def _ensure_list_of_strings(candidate: Any) -> List[str]:
+    def _ensure_list_of_strings(self, candidate: Any) -> List[str]:
             """Coerce planner-provided values (string/dict/list) into a list of strings."""
             if candidate is None:
                 return []
