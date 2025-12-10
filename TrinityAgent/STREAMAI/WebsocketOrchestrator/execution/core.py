@@ -46,6 +46,9 @@ class WorkflowCoreMixin:
         lab_envelope: Optional[LaboratoryEnvelope],
         lab_bundle: List[Dict[str, Any]],
         laboratory_mode: bool,
+        validated_scope: Optional[Dict[str, Any]] = None,
+        scope_dataset_alias: Optional[str] = None,
+        scope_dataset_path: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Assemble the full laboratory execution plan pipeline.
 
@@ -64,6 +67,13 @@ class WorkflowCoreMixin:
             "effective_prompt": effective_user_prompt,
             "project_context": project_context,
         }
+
+        if validated_scope is not None:
+            plan["scope_finalization"] = {
+                "scope": validated_scope,
+                "dataset_alias": scope_dataset_alias,
+                "dataset_path": scope_dataset_path,
+            }
 
         # 1) Hybrid retrieval with BM25 + TF-IDF + embeddings, followed by LLM rerank
         hybrid_context: List[Dict[str, Any]] = []
@@ -149,6 +159,143 @@ class WorkflowCoreMixin:
         self._sequence_lab_execution_plan[sequence_id] = plan
         logger.info("🧭 Laboratory execution plan prepared for %s", sequence_id)
         return plan
+
+    def _extract_scope_entities(self, user_prompt: str, project_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Lightweight scope extraction to anchor the laboratory pipeline."""
+
+        scope = {}
+        incoming_scope = project_context.get("scope") if isinstance(project_context, dict) else None
+        if isinstance(incoming_scope, dict):
+            scope.update({k: v for k, v in incoming_scope.items() if v})
+
+        normalized_prompt = (user_prompt or "").strip()
+
+        brand_match = re.search(r"brand\s+([\w\s]+)", normalized_prompt, re.IGNORECASE)
+        channel_match = re.search(r"channel\s+([\w\s]+)", normalized_prompt, re.IGNORECASE)
+        region_match = re.search(r"region\s+([\w\s]+)", normalized_prompt, re.IGNORECASE)
+        year_match = re.search(r"(20\d{2})", normalized_prompt)
+
+        if brand_match and "brand" not in scope:
+            scope["brand"] = brand_match.group(1).strip()
+        if channel_match and "channel" not in scope:
+            scope["channel"] = channel_match.group(1).strip()
+        if region_match and "region" not in scope:
+            scope["region"] = region_match.group(1).strip()
+        if year_match and "time_window" not in scope:
+            scope["time_window"] = year_match.group(1)
+
+        return scope
+
+    def _append_scope_note_to_prompt(self, prompt: str, scope: Dict[str, Any]) -> str:
+        """Annotate prompts with the locked scope for downstream retrieval and GraphRAG."""
+
+        if not scope:
+            return prompt
+
+        scope_pairs = [f"{k}={v}" for k, v in scope.items() if v]
+        scope_text = ", ".join(scope_pairs) if scope_pairs else "confirmed"
+        return f"{prompt}\n\n[Scope locked: {scope_text}]"
+
+    async def _finalize_scope_before_react(
+        self,
+        *,
+        websocket,
+        sequence_id: str,
+        user_prompt: str,
+        effective_prompt: str,
+        available_files: List[str],
+        project_context: Dict[str, Any],
+        laboratory_mode: bool,
+        lab_request_id: Optional[str],
+    ) -> Tuple[Optional[str], Optional[str], Dict[str, Any], List[str], str]:
+        """Enforce mandatory scope validation/filtering before the ReAct loop begins."""
+
+        if not laboratory_mode:
+            return None, None, {}, available_files, effective_prompt
+
+        # Reuse previously finalized scope for resumes
+        scope_state = getattr(self, "_sequence_scope_state", {})
+        if scope_state.get(sequence_id):
+            cached = scope_state[sequence_id]
+            scoped_prompt = self._append_scope_note_to_prompt(effective_prompt, cached.get("scope", {}))
+            return (
+                cached.get("alias"),
+                cached.get("path"),
+                cached.get("scope", {}),
+                available_files,
+                scoped_prompt,
+            )
+
+        source_dataset = self._get_latest_materialized_file(sequence_id, [], available_files)
+        if not source_dataset:
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "scope_blocked",
+                        {
+                            "sequence_id": sequence_id,
+                            "message": "No dataset available to finalize scope before ReAct. Upload or create a dataset first.",
+                        },
+                    ),
+                    "scope_blocked event",
+                )
+            except (WebSocketDisconnect, Exception):
+                logger.debug("⚠️ Unable to send scope_blocked event", exc_info=True)
+            raise RuntimeError("Scope finalization requires an uploaded dataset before starting ReAct")
+
+        inferred_scope = self._extract_scope_entities(user_prompt or effective_prompt, project_context or {})
+        validated_scope = inferred_scope or {"status": "unrestricted"}
+        scope_alias = "scope_dataset_1"
+        scoped_path = source_dataset
+
+        self._register_output_alias(sequence_id, scope_alias, scoped_path)
+        if scoped_path not in available_files:
+            available_files.append(scoped_path)
+
+        scoped_prompt = self._append_scope_note_to_prompt(effective_prompt, validated_scope)
+        self._sequence_available_files[sequence_id] = available_files
+
+        scope_state[sequence_id] = {"scope": validated_scope, "alias": scope_alias, "path": scoped_path}
+        self._sequence_scope_state = scope_state
+
+        try:
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "scope_finalized",
+                    {
+                        "sequence_id": sequence_id,
+                        "scope": validated_scope,
+                        "dataset_alias": scope_alias,
+                        "dataset_path": scoped_path,
+                    },
+                ),
+                "scope_finalized event",
+            )
+        except (WebSocketDisconnect, Exception):
+            logger.debug("⚠️ Unable to send scope_finalized event", exc_info=True)
+
+        if self.lab_memory_store and lab_request_id:
+            try:
+                self.lab_memory_store.update_react_context(
+                    session_id=sequence_id,
+                    request_id=lab_request_id,
+                    latest_dataset_alias=scope_alias,
+                    output_path=scoped_path,
+                    output_schema=None,
+                    created_by="scope_finalization",
+                    step_number=0,
+                    project_context=project_context,
+                    previous_available_files=available_files,
+                    execution_inputs={"scope": validated_scope},
+                    react_metadata={"scope_finalized": True},
+                    validated_scope=validated_scope,
+                )
+            except Exception as ctx_exc:
+                logger.warning("⚠️ Failed to persist scope finalization context: %s", ctx_exc)
+
+        return scope_alias, scoped_path, validated_scope, available_files, scoped_prompt
 
     async def execute_workflow_with_websocket(
             self,
@@ -316,6 +463,46 @@ class WorkflowCoreMixin:
                     regression_hash,
                 )
 
+            scope_alias: Optional[str] = None
+            scoped_path: Optional[str] = None
+            validated_scope: Dict[str, Any] = {}
+            if laboratory_mode:
+                try:
+                    (
+                        scope_alias,
+                        scoped_path,
+                        validated_scope,
+                        available_files,
+                        effective_user_prompt,
+                    ) = await self._finalize_scope_before_react(
+                        websocket=websocket,
+                        sequence_id=sequence_id,
+                        user_prompt=user_prompt,
+                        effective_prompt=effective_user_prompt,
+                        available_files=available_files,
+                        project_context=project_context,
+                        laboratory_mode=laboratory_mode,
+                        lab_request_id=context_request_id,
+                    )
+                    if validated_scope:
+                        project_context = {**(project_context or {}), "scope": validated_scope}
+                        self._sequence_project_context[sequence_id] = project_context
+                except Exception as scope_exc:
+                    logger.error("❌ Scope finalization failed: %s", scope_exc)
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "error",
+                            {
+                                "sequence_id": sequence_id,
+                                "error": str(scope_exc),
+                                "message": "Scope validation is required before the workflow can continue.",
+                            },
+                        ),
+                        "scope_finalization_failed",
+                    )
+                    raise
+
             # Build the full laboratory execution plan (hybrid retrieval → intent → GraphRAG → context)
             self._build_laboratory_execution_plan_context(
                 sequence_id=sequence_id,
@@ -327,6 +514,9 @@ class WorkflowCoreMixin:
                 lab_envelope=lab_envelope,
                 lab_bundle=lab_bundle,
                 laboratory_mode=laboratory_mode,
+                validated_scope=validated_scope if laboratory_mode else None,
+                scope_dataset_alias=scope_alias,
+                scope_dataset_path=scoped_path,
             )
 
             try:

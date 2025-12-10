@@ -113,6 +113,7 @@ class LabMemoryStore:
         previous_available_files: Optional[List[str]] = None,
         execution_inputs: Optional[Dict[str, Any]] = None,
         react_metadata: Optional[Dict[str, Any]] = None,
+        validated_scope: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Persist ReAct loop state so downstream atoms can consume fresh outputs.
 
@@ -173,6 +174,8 @@ class LabMemoryStore:
             update_doc["$set"]["available_files"] = previous_available_files
         if react_metadata is not None:
             update_doc["$set"]["react_state.metadata"] = react_metadata
+        if validated_scope is not None:
+            update_doc["$set"]["scope"] = validated_scope
 
         try:
             self.mongo_collection.update_one(base_filter, update_doc, upsert=True)
