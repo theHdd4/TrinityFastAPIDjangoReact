@@ -381,6 +381,7 @@ class StreamOrchestrator:
             "start_time": datetime.now().isoformat(),
             "end_time": None
         }
+        card_health: List[Dict[str, Any]] = []
         fsm_state = self._user_fsm_state.setdefault(
             session_id,
             {"pending_action_resolved": True, "last_user_response": {}, "pending_request_id": None},
@@ -639,6 +640,7 @@ class StreamOrchestrator:
                     atom_identity=atom_identity,
                     idempotency=idempotency,
                     force_execution=force_execution,
+                    card_tracker=card_health,
                 )
 
                 if atom_result.get("success"):
@@ -771,7 +773,17 @@ class StreamOrchestrator:
             atom_index += 1
         
         results["end_time"] = datetime.now().isoformat()
-        
+
+        if mode == "laboratory":
+            await self._cleanup_stale_laboratory_cards(
+                card_tracker=card_health,
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                progress_callback=progress_callback,
+                mode=mode,
+            )
+
         # Final progress update
         await self._emit_progress(progress_callback, {
             "type": "sequence_complete",
@@ -1173,6 +1185,7 @@ class StreamOrchestrator:
         atom_identity: Optional[AtomIdentity] = None,
         idempotency: str = "pure",
         force_execution: bool = False,
+        card_tracker: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Execute the 3-step pattern for a single atom.
@@ -1213,6 +1226,22 @@ class StreamOrchestrator:
         
         card_id = card_result.get("card_id")
         logger.info(f"  ✅ Card created: {card_id}")
+
+        card_entry = None
+        if card_tracker is not None:
+            card_entry = {
+                "card_id": card_id,
+                "atom_id": atom_id,
+                "status": "created",
+                "reason": None,
+                "atoms": card_result.get("atoms", []),
+            }
+            if card_entry["atoms"] is None:
+                card_entry["atoms"] = []
+            if not card_entry["atoms"]:
+                card_entry["status"] = "empty"
+                card_entry["reason"] = "card_has_no_atoms"
+            card_tracker.append(card_entry)
         
         # Step 2: Fetch Atom
         logger.info(f"  🔍 Step 2/3: Fetching atom...")
@@ -1226,6 +1255,9 @@ class StreamOrchestrator:
         
         fetch_result = await self._step2_fetch_atom(atom_id)
         if not fetch_result.get("success"):
+            if card_entry is not None:
+                card_entry["status"] = "fetch_failed"
+                card_entry["reason"] = fetch_result.get("error") or "atom_fetch_failed"
             return {
                 "success": False,
                 "error": f"Step 2 failed: {fetch_result.get('error')}",
@@ -1289,6 +1321,7 @@ class StreamOrchestrator:
             idempotency=idempotency,
             force=force_execution,
         )
+        configured_flag = execute_result.get("data", {}).get("configured")
         insight_text = await self._generate_step_insight(
             atom=atom,
             atom_index=atom_index,
@@ -1299,14 +1332,28 @@ class StreamOrchestrator:
         )
 
         if not execute_result.get("success"):
+            if card_entry is not None:
+                card_entry["status"] = "execution_failed"
+                card_entry["reason"] = execute_result.get("error") or "atom_execution_failed"
             return {
                 "success": False,
                 "error": f"Step 3 failed: {execute_result.get('error')}",
                 "duration": time.time() - start_time,
                 "insight": insight_text
             }
-        
+
         logger.info(f"  ✅ Atom executed successfully")
+
+        if card_entry is not None:
+            if configured_flag is False:
+                card_entry["status"] = "configuration_failed"
+                card_entry["reason"] = "atom_marked_unconfigured"
+            else:
+                card_entry["status"] = "configured"
+                card_entry["reason"] = None
+                card_entry["atoms"] = card_entry.get("atoms") or fetch_result.get("atoms", []) or [
+                    {"atom_id": atom_id}
+                ]
 
         # Refresh file context so subsequent atoms see newly generated files/columns
         # Use same context as sequence execution (stored in instance or passed)
@@ -1323,6 +1370,92 @@ class StreamOrchestrator:
             "duration": duration,
             "insight": insight_text
         }
+
+    async def _cleanup_stale_laboratory_cards(
+        self,
+        *,
+        card_tracker: List[Dict[str, Any]],
+        client_name: str,
+        app_name: str,
+        project_name: str,
+        progress_callback: Optional[Callable],
+        mode: str = "laboratory",
+    ) -> None:
+        """Remove empty or failed cards produced during laboratory runs."""
+
+        if not card_tracker:
+            return
+
+        stale_cards: List[Dict[str, Any]] = []
+        for entry in card_tracker:
+            atoms = entry.get("atoms") or []
+            status = entry.get("status")
+            if status != "configured" or not atoms:
+                stale_cards.append(entry)
+
+        if not stale_cards:
+            return
+
+        for entry in stale_cards:
+            card_id = entry.get("card_id")
+            if not card_id:
+                continue
+
+            await self._emit_progress(progress_callback, {
+                "type": "card_cleanup_scheduled",
+                "card_id": card_id,
+                "atom_id": entry.get("atom_id"),
+                "reason": entry.get("reason", "unspecified"),
+                "status": entry.get("status", "unknown"),
+            })
+
+            try:
+                await self._delete_laboratory_card(
+                    card_id=card_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    mode=mode,
+                )
+                await self._emit_progress(progress_callback, {
+                    "type": "card_cleanup_completed",
+                    "card_id": card_id,
+                    "status": entry.get("status", "unknown"),
+                })
+            except Exception as exc:
+                logger.error("Failed to delete stale card %s: %s", card_id, exc)
+
+    async def _delete_laboratory_card(
+        self,
+        *,
+        card_id: str,
+        client_name: str,
+        app_name: str,
+        project_name: str,
+        mode: str = "laboratory",
+    ) -> None:
+        """Call backend to delete a laboratory card without UI prompts."""
+
+        if not card_id or not client_name or not app_name or not project_name:
+            logger.debug("Skipping card deletion - missing context")
+            return
+
+        url = f"{self.fastapi_backend}/api/laboratory/cards/{client_name}/{app_name}/{project_name}/{card_id}"
+        params = {"mode": mode}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(url, params=params, timeout=aiohttp.ClientTimeout(total=20)) as response:
+                if response.status not in [200, 204]:
+                    text = await response.text()
+                    logger.warning(
+                        "Card deletion returned %s for %s (%s/%s/%s): %s",
+                        response.status,
+                        card_id,
+                        client_name,
+                        app_name,
+                        project_name,
+                        text,
+                    )
 
     def _detect_clarification_need(self, atom: Dict[str, Any], atom_index: int = 0) -> Optional[Dict[str, Any]]:
         """Check for low-confidence or incomplete inputs before executing an atom."""
@@ -1410,6 +1543,14 @@ class StreamOrchestrator:
             "progress_callback": progress_callback,
             "pending_action_resolved": False,
         }
+
+        cached_response = self._clarification_responses.get(key)
+        if cached_response and cached_response.get("pending_action_resolved"):
+            logger.info("⚡️ Cached clarification response found - resuming without wait")
+            future.set_result(cached_response)
+            self._clarification_waiters.pop(key, None)
+            self._clarification_metadata.pop(key, None)
+            return cached_response
 
         if self.storage:
             try:
@@ -1523,7 +1664,7 @@ class StreamOrchestrator:
                 "pending_action_resolved": True,
                 "last_user_response": payload,
                 "pending_request_id": None,
-                "pending_question": clarification_meta,
+                "pending_question": None,
             }
         )
 
@@ -1537,6 +1678,13 @@ class StreamOrchestrator:
                     "session_id": session_id,
                     "atom_id": metadata.get("atom_id"),
                     "pending_action_resolved": True,
+                })
+                await self._emit_progress(progress_callback, {
+                    "type": "clarification_action_ready",
+                    "status": "action",
+                    "requestId": request_id,
+                    "session_id": session_id,
+                    "atom_id": metadata.get("atom_id"),
                 })
             except Exception as exc:
                 logger.debug("Could not emit resumed status: %s", exc)
@@ -1577,7 +1725,8 @@ class StreamOrchestrator:
                         card_id = data.get("id") or data.get("card_id") or "card_created"
                         return {
                             "success": True,
-                            "card_id": card_id
+                            "card_id": card_id,
+                            "atoms": data.get("atoms", []),
                         }
                     else:
                         error_text = await response.text()
