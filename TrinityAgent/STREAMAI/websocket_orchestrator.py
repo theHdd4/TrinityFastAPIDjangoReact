@@ -3719,6 +3719,15 @@ WORKFLOW PLANNING:
                             # Continue anyway - file might still be usable
                     
                     # Add to execution history (include files_used for loop detection)
+                    recorded_inputs = next_step.inputs if hasattr(next_step, "inputs") else {}
+                    if not recorded_inputs:
+                        try:
+                            latest_metadata = (self._sequence_atom_execution_metadata.get(sequence_id) or [])
+                            if latest_metadata:
+                                recorded_inputs = latest_metadata[-1].get("inputs", {})
+                        except Exception:
+                            recorded_inputs = {}
+
                     execution_history.append({
                         "step_number": current_step_number,
                         "atom_id": next_step.atom_id,
@@ -3726,7 +3735,7 @@ WORKFLOW PLANNING:
                         "description": next_step.description,  # Track description for context
                         "output_alias": next_step.output_alias,
                         "result": execution_result,
-                        "inputs": parameters,
+                        "inputs": recorded_inputs,
                         "evaluation": evaluation.__dict__
                     })
                     if laboratory_mode and self.lab_memory_store and lab_envelope:

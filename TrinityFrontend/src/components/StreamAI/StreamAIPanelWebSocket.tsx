@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -331,6 +332,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   }, []);
   const [availableFiles, setAvailableFiles] = useState<any[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
+  const [filePickerPosition, setFilePickerPosition] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [showWorkflowPreview, setShowWorkflowPreview] = useState(false);
   const [showStepApproval, setShowStepApproval] = useState(false);
@@ -358,6 +360,16 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   // Laboratory store
   const { setCards, updateCard, isLaboratorySession, pendingClarification, setPendingClarification } = useLaboratoryStore();
   const isClarificationEnabled = (import.meta.env.VITE_ENABLE_STREAM_AI_CLARIFICATION ?? 'true') !== 'false';
+  const attachButtonRef = useRef<HTMLDivElement | null>(null);
+
+  const updateFilePickerPosition = useCallback(() => {
+    if (!attachButtonRef.current) return;
+    const rect = attachButtonRef.current.getBoundingClientRect();
+    setFilePickerPosition({
+      left: rect.left,
+      top: rect.top - 8,
+    });
+  }, []);
 
   // Clarification state (laboratory-only)
   const [clarificationRequest, setClarificationRequest] = useState<ClarificationRequest | null>(
@@ -1356,8 +1368,13 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   
   // Handle attach button click - load files when needed (EXACT Trinity AI pattern)
   const handleAttachClick = async () => {
-    setShowFilePicker(!showFilePicker);
-    
+    const nextShow = !showFilePicker;
+    setShowFilePicker(nextShow);
+
+    if (nextShow) {
+      updateFilePickerPosition();
+    }
+
     // Always refresh files when opening picker (not just first time)
     if (!showFilePicker) {
       setLoadingFiles(true);
@@ -1404,7 +1421,22 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       }
     }
   };
-  
+
+  useEffect(() => {
+    if (!showFilePicker) return;
+
+    const handleReposition = () => updateFilePickerPosition();
+    handleReposition();
+
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+
+    return () => {
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [showFilePicker, updateFilePickerPosition]);
+
   // Load available files (called when needed)
   const loadAvailableFiles = async (): Promise<string[]> => {
     try {
@@ -4480,77 +4512,82 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           >
             <RotateCcw className="w-4 h-4" />
           </Button>
-          <div className="relative">
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <div className="relative" ref={attachButtonRef}>
+          <Button
+            variant="ghost"
+            size="sm"
             className={`h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md ${showFilePicker ? 'bg-gray-100' : ''}`}
             onClick={handleAttachClick}
             title="Attach Saved DataFrames"
           >
             <Paperclip className="w-4 h-4" />
           </Button>
-          
+
             {/* File Picker Dropdown */}
-            {showFilePicker && (
-              <div className="absolute bottom-full left-0 mb-2 w-96 bg-white rounded-xl shadow-xl border-2 border-gray-200 max-h-96 z-50 animate-fade-in flex flex-col">
-                <div className="p-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-semibold text-gray-800 text-sm font-inter flex items-center gap-2">
-                      <File className="w-4 h-4" />
-                      Saved DataFrames
-                    </h4>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowFilePicker(false)}
-                      className="h-6 w-6 p-0 hover:bg-gray-100 rounded-lg"
-                    >
-                      <X className="w-3 h-3" />
-                    </Button>
+            {showFilePicker && attachButtonRef.current &&
+              createPortal(
+                <div
+                  className="fixed mb-2 w-96 bg-white rounded-xl shadow-xl border-2 border-gray-200 max-h-96 z-[105] animate-fade-in flex flex-col"
+                  style={{ left: filePickerPosition.left, top: filePickerPosition.top, transform: 'translateY(-100%)' }}
+                >
+                  <div className="p-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-gray-800 text-sm font-inter flex items-center gap-2">
+                        <File className="w-4 h-4" />
+                        Saved DataFrames
+                      </h4>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowFilePicker(false)}
+                        className="h-6 w-6 p-0 hover:bg-gray-100 rounded-lg"
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                <div className="overflow-auto max-h-80 p-2" style={{ overflowX: 'auto', overflowY: 'auto' }}>
-                  {loadingFiles ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-gray-500">
-                      <div
-                        className="w-6 h-6 border-2 border-gray-300 rounded-full animate-spin mb-2"
-                        style={{ borderTopColor: BRAND_GREEN }}
-                      />
-                      <p className="text-xs">Loading files...</p>
-                    </div>
-                  ) : availableFiles.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      <File className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-xs">No saved dataframes found</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      {availableFiles.map((file, index) => {
-                        const displayName = file.object_name.split('/').pop() || file.object_name;
-                        return (
-                          <button
-                            key={index}
-                            onClick={() => {
-                              setInputValue(prev => prev ? `${prev} @${displayName}` : `@${displayName}`);
-                              setShowFilePicker(false);
-                            }}
-                            className="w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors duration-150 group border border-transparent hover:border-[#50C878]/20 min-w-max"
-                          >
-                            <div className="flex items-center gap-2">
-                              <File className="w-4 h-4 text-[#50C878] flex-shrink-0" />
-                              <span className="text-sm font-medium text-gray-800 font-inter group-hover:text-[#50C878] whitespace-nowrap">
-                                {displayName}
-                              </span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+                  <div className="overflow-auto max-h-80 p-2" style={{ overflowX: 'auto', overflowY: 'auto' }}>
+                    {loadingFiles ? (
+                      <div className="flex flex-col items-center justify-center py-8 text-gray-500">
+                        <div
+                          className="w-6 h-6 border-2 border-gray-300 rounded-full animate-spin mb-2"
+                          style={{ borderTopColor: BRAND_GREEN }}
+                        />
+                        <p className="text-xs">Loading files...</p>
+                      </div>
+                    ) : availableFiles.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <File className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-xs">No saved dataframes found</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {availableFiles.map((file, index) => {
+                          const displayName = file.object_name.split('/').pop() || file.object_name;
+                          return (
+                            <button
+                              key={index}
+                              onClick={() => {
+                                setInputValue(prev => prev ? `${prev} @${displayName}` : `@${displayName}`);
+                                setShowFilePicker(false);
+                              }}
+                              className="w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors duration-150 group border border-transparent hover:border-[#50C878]/20 min-w-max"
+                            >
+                              <div className="flex items-center gap-2">
+                                <File className="w-4 h-4 text-[#50C878] flex-shrink-0" />
+                                <span className="text-sm font-medium text-gray-800 font-inter group-hover:text-[#50C878] whitespace-nowrap">
+                                  {displayName}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>,
+                document.body
+              )}
           </div>
           <VoiceInputButton
             onTranscript={(text) => {
