@@ -99,6 +99,7 @@ class StreamWebSocketOrchestrator(WorkflowExecutionMixin, WorkflowPlanningMixin,
         self._output_alias_registry: Dict[str, Dict[str, str]] = {}
         self._chat_file_mentions: Dict[str, List[str]] = {}
         self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
+        self._sequence_lab_execution_plan: Dict[str, Dict[str, Any]] = {}
         self._sequence_intent_routing: Dict[str, Dict[str, Any]] = {}
         self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
         self._sequence_step_plans: Dict[str, Dict[int, WorkflowStepPlan]] = {}  # Track executed step plans per sequence

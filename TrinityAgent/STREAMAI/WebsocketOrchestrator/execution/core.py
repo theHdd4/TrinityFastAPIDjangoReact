@@ -33,6 +33,123 @@ from STREAMAI.result_extractor import ResultExtractor
 
 class WorkflowCoreMixin:
     """Execution helper mixin extracted from WorkflowExecutionMixin."""
+
+    def _build_laboratory_execution_plan_context(
+        self,
+        *,
+        sequence_id: str,
+        user_prompt: str,
+        effective_user_prompt: str,
+        available_files: List[str],
+        file_focus: List[str],
+        project_context: Dict[str, Any],
+        lab_envelope: Optional[LaboratoryEnvelope],
+        lab_bundle: List[Dict[str, Any]],
+        laboratory_mode: bool,
+    ) -> Optional[Dict[str, Any]]:
+        """Assemble the full laboratory execution plan pipeline.
+
+        The pipeline mirrors the required laboratory flow:
+        hybrid retrieval → LLM rerank → intent detection → GraphRAG →
+        deterministic context → ReAct loop. Each stage stores its artifacts so
+        downstream logic and observability dashboards can validate behavior.
+        """
+
+        if not laboratory_mode:
+            return None
+
+        plan: Dict[str, Any] = {
+            "sequence_id": sequence_id,
+            "user_prompt": user_prompt,
+            "effective_prompt": effective_user_prompt,
+            "project_context": project_context,
+        }
+
+        # 1) Hybrid retrieval with BM25 + TF-IDF + embeddings, followed by LLM rerank
+        hybrid_context: List[Dict[str, Any]] = []
+        if getattr(self, "laboratory_retriever", None):
+            try:
+                hybrid_context = self.laboratory_retriever.search(
+                    effective_user_prompt,
+                    top_k=200,
+                    top_m=80,
+                    top_n=30,
+                )
+                plan["hybrid_retrieval"] = {
+                    "candidates": hybrid_context,
+                    "trace": self.laboratory_retriever.get_traces(),
+                }
+            except Exception as retrieval_exc:  # pragma: no cover - runtime guard
+                logger.warning("⚠️ Laboratory hybrid retrieval failed: %s", retrieval_exc)
+                plan["hybrid_retrieval"] = {"error": str(retrieval_exc)}
+        else:
+            plan["hybrid_retrieval"] = {"error": "retriever_unavailable"}
+
+        # 2) Intent detector (embeddings + rerank context)
+        try:
+            intent_service = IntentService()
+            intent_record = intent_service.infer_intent(
+                effective_user_prompt,
+                session_id=sequence_id,
+                available_files=available_files,
+                mode="laboratory",
+            )
+            plan["intent_detection"] = {
+                "intent_record": intent_record.to_dict(),
+                "semantic_support": hybrid_context[:10],
+            }
+        except Exception as intent_exc:  # pragma: no cover - network/LLM failures
+            logger.warning("⚠️ Laboratory intent detection failed: %s", intent_exc)
+            plan["intent_detection"] = {"error": str(intent_exc)}
+
+        # 3) GraphRAG retrieval with rerank hooks
+        graph_prompt: Optional[GraphRAGPhaseOnePrompt] = None
+        if getattr(self, "graph_prompt_builder", None):
+            try:
+                graph_prompt = self.graph_prompt_builder.build_phase_one_prompt(
+                    effective_user_prompt,
+                    available_files=available_files,
+                    files_exist=bool(available_files),
+                    prompt_files=file_focus,
+                )
+                plan["graphrag"] = {
+                    "prompt": graph_prompt.prompt,
+                    "context": graph_prompt.context,
+                    "files_exist": graph_prompt.files_exist,
+                    "prompt_files": graph_prompt.prompt_files,
+                }
+            except Exception as graph_exc:  # pragma: no cover - optional dependency
+                logger.warning("⚠️ GraphRAG prompt build failed: %s", graph_exc)
+                plan["graphrag"] = {"error": str(graph_exc)}
+        else:
+            plan["graphrag"] = {"error": "graphrag_unavailable"}
+
+        # 4) Laboratory context builder merges files, memory, and RAG context
+        if lab_envelope and getattr(self, "lab_context_builder", None):
+            try:
+                plan["lab_context"] = {
+                    "envelope": {
+                        "prompt_template_hash": lab_envelope.prompt_template_hash,
+                        "input_hash": lab_envelope.input_hash,
+                        "feature_flags": lab_envelope.feature_flags,
+                    },
+                    "bundle_docs": len(lab_bundle),
+                    "prompt": self.lab_context_builder.merge_context_into_prompt(
+                        effective_user_prompt,
+                        lab_bundle,
+                    ),
+                }
+            except Exception as lab_ctx_exc:  # pragma: no cover - persistence guard
+                logger.warning("⚠️ Laboratory context assembly failed: %s", lab_ctx_exc)
+                plan["lab_context"] = {"error": str(lab_ctx_exc)}
+        else:
+            plan["lab_context"] = {"error": "lab_context_builder_unavailable"}
+
+        # Cache per-sequence so ReAct loop and observability endpoints can inspect
+        self._sequence_lab_execution_plan[sequence_id] = plan
+        logger.info("🧭 Laboratory execution plan prepared for %s", sequence_id)
+        return plan
+
     async def execute_workflow_with_websocket(
             self,
             websocket,
@@ -171,6 +288,19 @@ class WorkflowCoreMixin:
                     len(lab_bundle),
                     regression_hash,
                 )
+
+            # Build the full laboratory execution plan (hybrid retrieval → intent → GraphRAG → context)
+            self._build_laboratory_execution_plan_context(
+                sequence_id=sequence_id,
+                user_prompt=user_prompt,
+                effective_user_prompt=effective_user_prompt,
+                available_files=available_files,
+                file_focus=file_focus or [],
+                project_context=project_context,
+                lab_envelope=lab_envelope,
+                lab_bundle=lab_bundle,
+                laboratory_mode=laboratory_mode,
+            )
 
             try:
                 # Send connected event
