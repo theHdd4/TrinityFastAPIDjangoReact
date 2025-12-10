@@ -29,6 +29,17 @@ from STREAMAI.stream_rag_engine import StreamRAGEngine
 from STREAMAI.intent_service import IntentService
 from STREAMAI.result_extractor import ResultExtractor
 
+# Import workflow_insight_agent - try both paths for Docker and local development
+try:  # pragma: no cover
+    from Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
+except ImportError:  # pragma: no cover
+    try:
+        from TrinityAgent.Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
+    except ImportError:  # pragma: no cover
+        # Fallback: define a no-op function
+        def get_workflow_insight_agent():
+            return None
+
 
 
 class WorkflowInsightsMixin:
@@ -223,6 +234,9 @@ class WorkflowInsightsMixin:
                     return
 
                 agent = get_workflow_insight_agent()
+                if agent is None:
+                    logger.warning("⚠️ Workflow insight agent unavailable; skipping insight generation")
+                    return
                 payload = {
                     "user_prompt": user_prompt,
                     "step_records": step_records,
