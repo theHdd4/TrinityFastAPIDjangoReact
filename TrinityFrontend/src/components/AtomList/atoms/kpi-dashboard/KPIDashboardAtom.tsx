@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import KPIDashboardCanvas from './components/KPIDashboardCanvas';
 import KPIDashboardProperties from './components/KPIDashboardProperties';
+import { KPI_DASHBOARD_API } from '@/lib/api';
+import { getActiveProjectContext } from '@/utils/projectEnv';
 
 export interface KPIMetric {
   id: string;
@@ -19,11 +21,26 @@ export interface KPIDashboardData {
   metrics: KPIMetric[];
 }
 
+export interface LayoutBox {
+  id: string;
+  elementType?: 'text-box' | 'metric-card' | 'insight-panel' | 'qa' | 'caption' | 'interactive-blocks' | 'chart' | 'table' | 'image';
+  width?: number;
+}
+
+export interface Layout {
+  id: string;
+  type: '4-box' | '3-box' | '2-box' | '1-box';
+  boxes: LayoutBox[];
+  height?: number;
+}
+
 export interface KPIDashboardSettings {
   title: string;
   metricColumns: string[];
   changeColumns: string[];
   insights: string;
+  layouts?: Layout[]; // Store layouts in settings
+  selectedBoxId?: string; // ID of the currently selected box for per-element settings
 }
 
 interface KPIDashboardAtomProps {
@@ -40,9 +57,77 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
       title: 'KPI Dashboard',
       metricColumns: [],
       changeColumns: [],
-      insights: ''
+      insights: '',
+      layouts: []
     };
   }, [atom?.settings]);
+  
+  // Load saved layouts from MongoDB on mount with priority loading
+  useEffect(() => {
+    let isMounted = true; // Prevent state updates after unmount
+    
+    const loadWithPriority = async () => {
+      try {
+        const projectContext = getActiveProjectContext();
+        if (!projectContext || !isMounted) {
+          return;
+        }
+        
+        console.log('🔍 Loading KPI Dashboard configuration from MongoDB...', { atomId });
+        
+        // PRIORITY 1: Try kpi_dashboard_configs (most recent auto-saves) with atom_id
+        const response = await fetch(
+          `${KPI_DASHBOARD_API}/get-config?` +
+          `client_name=${encodeURIComponent(projectContext.client_name)}&` +
+          `app_name=${encodeURIComponent(projectContext.app_name)}&` +
+          `project_name=${encodeURIComponent(projectContext.project_name)}&` +
+          `atom_id=${encodeURIComponent(atomId)}`,
+          { credentials: 'include' }
+        );
+        
+        if (response.ok) {
+          const result = await response.json();
+          
+          if (result.success && result.data) {
+            const hasLayouts = result.data.layouts && result.data.layouts.length > 0;
+            
+            if (hasLayouts) {
+              console.log('✅ Loaded from kpi_dashboard_configs (auto-saved data):', result.data.layouts.length, 'layouts');
+              
+              if (isMounted) {
+                // ✅ FIX: Build fresh settings object without spreading stale closure
+                updateSettings(atomId, {
+                  layouts: result.data.layouts,
+                  title: result.data.title || 'KPI Dashboard',
+                  metricColumns: result.data.metricColumns || [],
+                  changeColumns: result.data.changeColumns || [],
+                  insights: result.data.insights || '',
+                });
+              }
+              return; // Done - use this data
+            } else {
+              console.log('ℹ️ No layouts in kpi_dashboard_configs, using laboratory store data');
+            }
+          } else {
+            console.log('ℹ️ No data in kpi_dashboard_configs, using laboratory store data');
+          }
+        }
+        
+        // PRIORITY 2: Fallback to laboratory store (manual saves)
+        // Laboratory store data is already loaded into settings via parent component
+        console.log('ℹ️ Using laboratory store settings (if any)');
+        
+      } catch (error) {
+        console.error('❌ Error loading KPI Dashboard configuration:', error);
+      }
+    };
+    
+    loadWithPriority();
+    
+    return () => {
+      isMounted = false; // Cleanup to prevent state updates after unmount
+    };
+  }, [atomId]); // Only re-run if atomId changes
 
   // Get data from atom metadata or settings
   // If no data, KPIDashboardCanvas will use its built-in mockData
@@ -81,6 +166,7 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
   return (
     <div className="w-full h-full min-h-[600px] bg-background relative">
       <KPIDashboardCanvas
+        atomId={atomId}
         data={data}
         settings={settings}
         onDataUpload={handleDataUpload}

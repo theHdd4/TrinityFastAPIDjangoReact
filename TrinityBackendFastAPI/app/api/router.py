@@ -31,6 +31,7 @@ from app.features.laboratory.endpoint import router as laboratory_router
 from app.features.pivot_table.endpoint import router as pivot_table_router
 from app.features.unpivot.endpoint import router as unpivot_router
 from app.features.task_queue.endpoint import router as task_queue_router
+from app.features.kpi_dashboard.endpoint import router as kpi_dashboard_router
 
 api_router = APIRouter()
 text_router = APIRouter()
@@ -61,6 +62,11 @@ api_router.include_router(explore_router)
 api_router.include_router(laboratory_router)
 api_router.include_router(pivot_table_router)
 api_router.include_router(unpivot_router)
+api_router.include_router(
+    kpi_dashboard_router,
+    prefix="/kpi-dashboard",
+    tags=["KPI Dashboard"]
+)
 
 api_router.include_router(build_feature_router)
 api_router.include_router(build_model_router)

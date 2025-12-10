@@ -1,6 +1,6 @@
 import React from 'react';
 import { ElementType } from './ElementDropdown';
-import { TrendingUp, MessageSquare, Type, Zap, FileText, Grid3x3, BarChart3, Table2, ImageIcon } from 'lucide-react';
+import { TrendingUp, MessageSquare, Type, Zap, FileText, Grid3x3, BarChart3, Table2, ImageIcon, Target } from 'lucide-react';
 
 interface ElementRendererProps {
   type: ElementType;
@@ -60,23 +60,40 @@ const ElementRenderer: React.FC<ElementRendererProps> = ({ type }) => {
       
       case 'caption':
         return (
-          <div className="flex flex-col items-center justify-center h-full space-y-3">
-            <FileText className="w-8 h-8 text-primary" />
-            <p className="text-sm font-medium text-foreground">Caption</p>
-            <p className="text-xs text-muted-foreground text-center px-4">
-              Add descriptive captions and labels
-            </p>
+          <div className="flex flex-col h-full p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-green-600" />
+              </div>
+              <p className="text-sm font-medium text-foreground">Caption</p>
+            </div>
+            <p className="text-xs text-muted-foreground">Add captions with growth logos</p>
           </div>
         );
       
       case 'interactive-blocks':
         return (
-          <div className="flex flex-col items-center justify-center h-full space-y-3">
-            <Grid3x3 className="w-8 h-8 text-primary" />
-            <p className="text-sm font-medium text-foreground">Interactive Blocks</p>
-            <p className="text-xs text-muted-foreground text-center px-4">
-              Dynamic interactive components
-            </p>
+          <div className="flex gap-2 h-full p-2">
+            <div className="flex-1 rounded-lg p-3 bg-gradient-to-br from-green-50 to-green-100 border border-green-200">
+              <div className="flex items-center gap-2 mb-2">
+                <Zap className="w-4 h-4 text-green-600" />
+                <p className="text-xs font-bold text-green-700 uppercase">Key Drivers</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-foreground">• Sample point</p>
+                <p className="text-xs text-foreground">• Another point</p>
+              </div>
+            </div>
+            <div className="flex-1 rounded-lg p-3 bg-gradient-to-br from-yellow-50 to-yellow-100 border border-yellow-200">
+              <div className="flex items-center gap-2 mb-2">
+                <FileText className="w-4 h-4 text-yellow-600" />
+                <p className="text-xs font-bold text-yellow-700 uppercase">Opportunities</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-foreground">• Sample point</p>
+                <p className="text-xs text-foreground">• Another point</p>
+              </div>
+            </div>
           </div>
         );
       
