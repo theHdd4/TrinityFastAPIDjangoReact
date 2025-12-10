@@ -215,6 +215,38 @@ class LabMemoryStore:
             logger.warning("Failed to load existing lab context: %s", exc)
             return None
 
+    def load_react_context(
+        self,
+        *,
+        session_id: str,
+        request_id: Optional[str] = None,
+        project_context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the most recent ReAct context document for chaining outputs.
+
+        The returned document includes ``latest_dataset_alias``, ``datasets``
+        (alias → path/schema), and ``available_files`` so that the orchestrator
+        can hydrate alias resolution after a restart or crash.
+        """
+
+        self.apply_context(project_context)
+
+        query: Dict[str, Any] = {
+            "client_name": self.client_name,
+            "app_name": self.app_name,
+            "project_name": self.project_name,
+            "session_id": session_id,
+            "record_type": "react_context",
+        }
+        if request_id:
+            query["request_id"] = request_id
+
+        try:
+            return self.mongo_collection.find_one(query, sort=[("updated_at", -1)])
+        except PyMongoError as exc:  # pragma: no cover - defensive read guard
+            logger.warning("Failed to load ReAct context for chaining: %s", exc)
+            return None
+
     @staticmethod
     def _merge_atom_execution_metadata(
         existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]]

@@ -194,7 +194,6 @@ class WorkflowCoreMixin:
             existing_files = self._sequence_available_files.get(sequence_id)
             if existing_files:
                 available_files = existing_files
-            self._sequence_available_files[sequence_id] = available_files
             # Store project_context for this sequence (needed for dataframe-operations and other agents)
             self._sequence_project_context[sequence_id] = project_context or {}
             if self.lab_memory_store:
@@ -205,8 +204,35 @@ class WorkflowCoreMixin:
                         incoming_request_id=request_id,
                         project_context=project_context,
                     )
+                    persisted_react_context = self.lab_memory_store.load_react_context(
+                        session_id=sequence_id,
+                        request_id=request_id,
+                        project_context=project_context,
+                    )
+                    if persisted_react_context:
+                        datasets = persisted_react_context.get("datasets") or {}
+                        latest_alias = persisted_react_context.get("latest_dataset_alias")
+                        persisted_available = persisted_react_context.get("available_files") or []
+
+                        for alias, meta in datasets.items():
+                            path = (meta or {}).get("path")
+                            self._register_output_alias(sequence_id, alias, path)
+                            if path and path not in available_files:
+                                available_files.append(path)
+
+                        for path in persisted_available:
+                            if path and path not in available_files:
+                                available_files.append(path)
+
+                        if latest_alias and latest_alias in datasets:
+                            self._register_output_alias(sequence_id, latest_alias, datasets[latest_alias].get("path"))
+
+                        logger.info(
+                            "🔗 Hydrated ReAct dataset chaining state for %s from Trinity_AI_Context", sequence_id
+                        )
                 except Exception as ctx_exc:
                     logger.warning("⚠️ Failed to apply project context to lab memory store: %s", ctx_exc)
+            self._sequence_available_files[sequence_id] = available_files
             context_request_id = request_id
             if intent_route:
                 self._sequence_intent_routing[sequence_id] = intent_route
