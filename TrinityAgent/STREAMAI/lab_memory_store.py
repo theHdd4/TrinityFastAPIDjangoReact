@@ -98,6 +98,63 @@ class LabMemoryStore:
             logger.warning("Failed to create MongoDB indices for lab context: %s", exc)
         return collection
 
+    def _find_existing_primary_document(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Return the most recent non-snapshot document for a session."""
+
+        try:
+            return self.mongo_collection.find_one(
+                {
+                    "client_name": self.client_name,
+                    "app_name": self.app_name,
+                    "project_name": self.project_name,
+                    "session_id": session_id,
+                    "record_type": {"$exists": False},
+                },
+                sort=[("timestamp", -1)],
+            )
+        except PyMongoError as exc:  # pragma: no cover - database guard
+            logger.warning("Failed to query existing lab memory document: %s", exc)
+            return None
+
+    def get_stable_request_context(
+        self, session_id: str, request_id: str, project_context: Optional[Dict[str, Any]] = None
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        """Resolve a stable request_id and previously recorded atom metadata for a session."""
+
+        self.apply_context(project_context)
+        existing = self._find_existing_primary_document(session_id)
+        if not existing:
+            return request_id, []
+
+        stable_request_id = existing.get("request_id") or request_id
+        metadata = existing.get("atom_execution_metadata") or []
+
+        return stable_request_id, metadata
+
+    @staticmethod
+    def _merge_atom_metadata(
+        existing_metadata: List[Dict[str, Any]], new_metadata: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Merge atom metadata lists while preventing duplicates and preserving order."""
+
+        merged: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
+        def _metadata_key(entry: Dict[str, Any]) -> Tuple[str, int]:
+            return (entry.get("atom_id"), int(entry.get("step_number", 0)))
+
+        for entry in existing_metadata:
+            merged[_metadata_key(entry)] = entry
+
+        for entry in new_metadata:
+            merged[_metadata_key(entry)] = entry
+
+        return [merged[key] for key in sorted(merged.keys(), key=lambda item: item[1])]
+
+    @staticmethod
+    def _stable_hash(payload: Dict[str, Any]) -> str:
+        serialized = json.dumps(payload or {}, sort_keys=True, ensure_ascii=False, default=str)
+        return LaboratoryMemoryDocument.compute_hash_for_payload({"payload": serialized})
+
     def _resolve_context_from_env(self) -> Tuple[str, str, str]:
         """Resolve client/app/project from environment and settings overrides."""
 
@@ -208,10 +265,21 @@ class LabMemoryStore:
 
     def save_document(self, document: LaboratoryMemoryDocument, project_context: Optional[Dict[str, Any]] = None) -> None:
         self.apply_context(project_context)
+
+        existing = self._find_existing_primary_document(document.envelope.session_id)
+        if existing and existing.get("request_id") and existing.get("request_id") != document.envelope.request_id:
+            logger.info(
+                "🔁 Reusing stable request_id %s for session %s (incoming %s)",
+                existing.get("request_id"),
+                document.envelope.session_id,
+                document.envelope.request_id,
+            )
+            document.envelope.request_id = existing.get("request_id")
+
+        key = self._object_key(document.envelope.session_id, document.envelope.request_id)
         payload = document.to_sorted_dict()
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
         data = serialized.encode("utf-8")
-        key = self._object_key(document.envelope.session_id, document.envelope.request_id)
 
         try:
             self.minio_client.put_object(
@@ -225,6 +293,24 @@ class LabMemoryStore:
             logger.warning("Failed to store laboratory memory in MinIO: %s", exc)
 
         try:
+            existing_atom_metadata = []
+            if existing:
+                existing_atom_metadata = existing.get("atom_execution_metadata") or []
+
+            new_atom_metadata = [
+                {
+                    "step_number": step.step_number,
+                    "atom_id": step.atom_id,
+                    "tool_calls": step.tool_calls,
+                    "inputs": step.inputs,
+                    "outputs": step.outputs,
+                    "timestamp": step.timestamp,
+                    "input_hash": self._stable_hash(step.inputs),
+                }
+                for step in document.workflow_state.steps
+            ]
+
+            merged_atom_metadata = self._merge_atom_metadata(existing_atom_metadata, new_atom_metadata)
             mongo_payload = {
                 **payload,
                 "memory_type": "Trinity AI Persistent JSON Memory",
@@ -249,17 +335,7 @@ class LabMemoryStore:
                     "user_id": document.envelope.user_id,
                     "feature_flags": document.envelope.feature_flags,
                 },
-                "atom_execution_metadata": [
-                    {
-                        "step_number": step.step_number,
-                        "atom_id": step.atom_id,
-                        "tool_calls": step.tool_calls,
-                        "inputs": step.inputs,
-                        "outputs": step.outputs,
-                        "timestamp": step.timestamp,
-                    }
-                    for step in document.workflow_state.steps
-                ],
+                "atom_execution_metadata": merged_atom_metadata,
             }
             self.mongo_collection.replace_one(
                 {
@@ -267,7 +343,7 @@ class LabMemoryStore:
                     "app_name": self.app_name,
                     "project_name": self.project_name,
                     "session_id": document.envelope.session_id,
-                    "request_id": document.envelope.request_id,
+                    "record_type": {"$exists": False},
                 },
                 mongo_payload,
                 upsert=True,

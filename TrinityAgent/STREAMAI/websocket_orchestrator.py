@@ -326,6 +326,8 @@ class StreamWebSocketOrchestrator:
         self._react_step_guards: Dict[str, Dict[str, Any]] = {}  # Prevent overlapping ReAct steps
         self._react_stall_watchdogs: Dict[str, Dict[str, Any]] = {}  # Detect stalled ReAct loops without progress
         self._lab_atom_snapshot_cache: Dict[str, List[Dict[str, Any]]] = {}  # Realtime lab-mode atoms per sequence
+        self._sequence_request_ids: Dict[str, str] = {}  # Stable request_id per project/session
+        self._sequence_atom_execution_metadata: Dict[str, List[Dict[str, Any]]] = {}  # Atom execution history per session
 
         # Safety guards
         self.max_initial_plan_steps: int = 8  # Abort overly long upfront plans
@@ -432,6 +434,92 @@ class StreamWebSocketOrchestrator:
         if not text_a or not text_b:
             return 0.0
         return difflib.SequenceMatcher(None, text_a.lower(), text_b.lower()).ratio()
+
+    @staticmethod
+    def _stable_input_hash(payload: Dict[str, Any]) -> str:
+        """Return a stable hash for atom inputs to detect duplicate executions."""
+
+        serialized = json.dumps(payload or {}, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def _resolve_existing_atom_execution(
+        self, sequence_id: str, atom_id: str, parameters: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Return previously recorded execution entry if inputs match to prevent re-runs."""
+
+        history = self._sequence_atom_execution_metadata.get(sequence_id, [])
+        target_hash = self._stable_input_hash(parameters)
+        for entry in reversed(history):
+            if entry.get("atom_id") != atom_id:
+                continue
+            existing_hash = entry.get("input_hash") or self._stable_input_hash(entry.get("inputs") or {})
+            if existing_hash == target_hash:
+                return entry
+        return None
+
+    def _enforce_dataframe_readiness(self, atom_id: str, parameters: Dict[str, Any], session_id: str) -> None:
+        """Guard against executing dataframe atoms without filtered data."""
+
+        dataframe_atoms = {
+            "dataframe-operations",
+            "create-column",
+            "create-transform",
+            "groupby-wtg-avg",
+            "merge",
+            "concat",
+            "correlation",
+            "chart-maker",
+        }
+
+        if atom_id not in dataframe_atoms:
+            return
+
+        available_files = self._sequence_available_files.get(session_id, [])
+        file_candidate = parameters.get("file") or parameters.get("file_name") or parameters.get("object_name")
+        dataframe_config = parameters.get("dataframe_config") or {}
+        has_operations = bool((dataframe_config or {}).get("operations"))
+        has_dataframe_payload = any(parameters.get(key) for key in ("dataframe", "data", "csv_data"))
+
+        if not (file_candidate or has_dataframe_payload):
+            raise ValueError(
+                f"Dataframe atom '{atom_id}' requires a prepared dataframe or file reference before execution"
+            )
+
+        if file_candidate and available_files and all(file_candidate not in path for path in available_files):
+            raise ValueError(
+                f"File '{file_candidate}' not available for dataframe atom '{atom_id}'. Available: {available_files}"
+            )
+
+        if atom_id == "dataframe-operations" and not has_operations:
+            raise ValueError("dataframe-operations requires dataframe_config.operations to be populated before execution")
+
+    def _record_atom_metadata(
+        self,
+        sequence_id: str,
+        step_number: int,
+        atom_id: str,
+        parameters: Dict[str, Any],
+        execution_result: Dict[str, Any],
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        insight: Optional[str] = None,
+        atom_insights: Optional[List[Dict[str, str]]] = None,
+    ) -> None:
+        """Persist atom execution metadata in-memory for duplicate detection and persistence."""
+
+        entry = {
+            "step_number": step_number,
+            "atom_id": atom_id,
+            "inputs": parameters,
+            "outputs": execution_result,
+            "tool_calls": tool_calls or execution_result.get("tool_calls") or [],
+            "timestamp": datetime.utcnow().isoformat(),
+            "input_hash": self._stable_input_hash(parameters),
+            "insight": insight,
+            "atom_insights": atom_insights or [],
+        }
+
+        history = self._sequence_atom_execution_metadata.setdefault(sequence_id, [])
+        history.append(entry)
 
     def _find_repeated_lab_atom(
         self,
@@ -2835,7 +2923,7 @@ WORKFLOW PLANNING:
             frontend_chat_id,
             websocket_session_id,
         )
-        request_id = uuid.uuid4().hex
+        request_id = self._sequence_request_ids.get(sequence_id) or uuid.uuid4().hex
         laboratory_mode = (project_context.get("mode") or "laboratory").lower() == "laboratory"
         lab_envelope = None
         lab_bundle: List[Dict[str, Any]] = []
@@ -2849,6 +2937,20 @@ WORKFLOW PLANNING:
         if self.lab_memory_store:
             try:
                 self.lab_memory_store.apply_context(project_context)
+                stable_request_id, atom_history = self.lab_memory_store.get_stable_request_context(
+                    session_id=sequence_id,
+                    request_id=request_id,
+                    project_context=project_context,
+                )
+                request_id = stable_request_id
+                self._sequence_request_ids[sequence_id] = request_id
+                if atom_history:
+                    self._sequence_atom_execution_metadata[sequence_id] = atom_history
+                    logger.info(
+                        "🧠 Loaded %s atom executions from persistent context for session %s",
+                        len(atom_history),
+                        sequence_id,
+                    )
             except Exception as ctx_exc:
                 logger.warning("⚠️ Failed to apply project context to lab memory store: %s", ctx_exc)
         if intent_route:
@@ -3617,6 +3719,15 @@ WORKFLOW PLANNING:
                             # Continue anyway - file might still be usable
                     
                     # Add to execution history (include files_used for loop detection)
+                    recorded_inputs = next_step.inputs if hasattr(next_step, "inputs") else {}
+                    if not recorded_inputs:
+                        try:
+                            latest_metadata = (self._sequence_atom_execution_metadata.get(sequence_id) or [])
+                            if latest_metadata:
+                                recorded_inputs = latest_metadata[-1].get("inputs", {})
+                        except Exception:
+                            recorded_inputs = {}
+
                     execution_history.append({
                         "step_number": current_step_number,
                         "atom_id": next_step.atom_id,
@@ -3624,6 +3735,7 @@ WORKFLOW PLANNING:
                         "description": next_step.description,  # Track description for context
                         "output_alias": next_step.output_alias,
                         "result": execution_result,
+                        "inputs": recorded_inputs,
                         "evaluation": evaluation.__dict__
                     })
                     if laboratory_mode and self.lab_memory_store and lab_envelope:
@@ -4041,9 +4153,94 @@ WORKFLOW PLANNING:
                 ),
                 f"atom_prompt event (step {step_number})"
             )
-            
+
             logger.info(f"✅ Parameters: {json.dumps(parameters, indent=2)[:150]}...")
-            
+
+            existing_execution = self._resolve_existing_atom_execution(sequence_id, atom_id, parameters)
+            if existing_execution:
+                logger.info(
+                    "♻️ Skipping duplicate atom execution for %s (session=%s, step=%s) using cached result",
+                    atom_id,
+                    sequence_id,
+                    step_number,
+                )
+                reuse_result = existing_execution.get("outputs") or {}
+                insight_text = existing_execution.get("insight") or "Reused previous atom execution (no re-run)."
+                self._record_step_execution_result(
+                    sequence_id=sequence_id,
+                    step_number=step_number,
+                    atom_id=atom_id,
+                    execution_result=reuse_result,
+                    insight=insight_text,
+                    atom_insights=existing_execution.get("atom_insights") or [],
+                )
+                execution_history.append(
+                    {
+                        "step_number": step_number,
+                        "atom_id": atom_id,
+                        "files_used": step.files_used or [],
+                        "description": step.description,
+                        "output_alias": step.output_alias,
+                        "result": reuse_result,
+                        "inputs": parameters,
+                        "evaluation": None,
+                    }
+                )
+                self._record_atom_metadata(
+                    sequence_id=sequence_id,
+                    step_number=step_number,
+                    atom_id=atom_id,
+                    parameters=parameters,
+                    execution_result=reuse_result,
+                )
+                stall_guard = self._react_stall_watchdogs.get(sequence_id)
+                if stall_guard is not None:
+                    stall_guard["last_history_len"] = len(execution_history)
+                    stall_guard["stalled_attempts"] = 0
+
+                previous_results.append(reuse_result)
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "step_completed",
+                        {
+                            "step": step_number,
+                            "atom_id": atom_id,
+                            "sequence_id": sequence_id,
+                            "result": reuse_result,
+                            "status": "reused_previous_execution",
+                            "insight": insight_text,
+                        },
+                    ),
+                    f"step_completed event (reused step {step_number})",
+                )
+                return reuse_result
+
+            try:
+                self._enforce_dataframe_readiness(atom_id, parameters, sequence_id)
+            except Exception as readiness_error:
+                logger.error(
+                    "❌ Dataframe readiness check failed for %s (session=%s, step=%s): %s",
+                    atom_id,
+                    sequence_id,
+                    step_number,
+                    readiness_error,
+                )
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "step_failed",
+                        {
+                            "step": step_number,
+                            "atom_id": atom_id,
+                            "sequence_id": sequence_id,
+                            "error": str(readiness_error),
+                        },
+                    ),
+                    f"step_failed event (readiness guard {step_number})",
+                )
+                raise
+
             # ================================================================
             # PHASE B: CREATE EMPTY CARD (Like SuperAgent)
             # ================================================================
@@ -4123,6 +4320,16 @@ WORKFLOW PLANNING:
                 step_number=step_number,
                 atom_id=atom_id,
                 execution_result=execution_result,
+                insight=insight_text,
+                atom_insights=atom_insights,
+            )
+            self._record_atom_metadata(
+                sequence_id=sequence_id,
+                step_number=step_number,
+                atom_id=atom_id,
+                parameters=parameters,
+                execution_result=execution_result,
+                tool_calls=execution_result.get("tool_calls") or [],
                 insight=insight_text,
                 atom_insights=atom_insights,
             )
