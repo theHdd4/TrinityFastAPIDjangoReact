@@ -165,15 +165,11 @@ async def execute_workflow_websocket(websocket: WebSocket):
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
 
         # Start clarification response listener (non-blocking) so lab-mode clients can resume pauses
-        from STREAMAI.main_app import get_orchestrator  # Lazy import to avoid circular deps
-
-        orchestrator = get_orchestrator()
+        orchestrator = ws_orchestrator
 
         async def handle_clarification_response(incoming: dict) -> bool:
             if incoming.get("type") != "clarification_response":
                 return False
-            if not orchestrator:
-                return True
             accepted = await orchestrator.resume_clarification(
                 session_id=incoming.get("session_id"),
                 request_id=incoming.get("requestId"),

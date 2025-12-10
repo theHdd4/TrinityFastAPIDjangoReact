@@ -57,3 +57,4 @@ class WorkflowLifecycleMixin:
             self._sequence_replay_counts.pop(sequence_id, None)
             self._react_step_guards.pop(sequence_id, None)
             self._react_stall_watchdogs.pop(sequence_id, None)
+            self._clarification_events.pop(sequence_id, None)

@@ -128,6 +128,7 @@ class ReactWorkflowMixin:
                 f"Atom '{repeated_atom}' appears to repeat a prior action. Provide clarification or choose a different atom."
             )
             self._paused_sequences.add(sequence_id)
+            clarification_event = self._clarification_events.setdefault(sequence_id, asyncio.Event())
 
             message = (
                 f"Lab-mode guard: Atom '{repeated_atom}' looks similar to a previous step. "
@@ -150,6 +151,15 @@ class ReactWorkflowMixin:
                 )
             except (WebSocketDisconnect, Exception):
                 logger.debug("⚠️ Unable to send clarification request event", exc_info=True)
+
+            try:
+                await clarification_event.wait()
+            finally:
+                clarification_event.clear()
+                react_state.paused = False
+                react_state.awaiting_clarification = False
+                react_state.clarification_context = None
+                self._paused_sequences.discard(sequence_id)
 
     async def execute_react_workflow(
             self,

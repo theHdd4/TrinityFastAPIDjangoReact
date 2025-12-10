@@ -3,6 +3,7 @@ Stream AI WebSocket orchestrator broken into modular mixins for readability.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional, Set
 
 from .common import aiohttp, generate_insights, logger, memory_storage_module, summarize_chat_messages
@@ -108,6 +109,7 @@ class StreamWebSocketOrchestrator(WorkflowExecutionMixin, WorkflowPlanningMixin,
         self._react_step_guards: Dict[str, Dict[str, Any]] = {}  # Prevent overlapping ReAct steps
         self._react_stall_watchdogs: Dict[str, Dict[str, Any]] = {}  # Detect stalled ReAct loops without progress
         self._lab_atom_snapshot_cache: Dict[str, List[Dict[str, Any]]] = {}  # Realtime lab-mode atoms per sequence
+        self._clarification_events: Dict[str, asyncio.Event] = {}
 
         # Safety guards
         self.max_initial_plan_steps: int = 8  # Abort overly long upfront plans
@@ -172,3 +174,47 @@ class StreamWebSocketOrchestrator(WorkflowExecutionMixin, WorkflowPlanningMixin,
                 logger.warning(f"⚠️ Could not initialize ReAct orchestrator: {e}")
 
         logger.info("✅ StreamWebSocketOrchestrator initialized")
+
+    async def resume_clarification(
+        self,
+        session_id: str,
+        request_id: str,
+        message: str,
+        values: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Resume a paused ReAct sequence after receiving user clarification."""
+
+        react_state = self._sequence_react_state.get(session_id)
+        if not react_state:
+            return False
+
+        if not react_state.awaiting_clarification and not react_state.paused:
+            return False
+
+        logger.info(
+            "🧭 Received clarification for %s (request=%s): %s",
+            session_id,
+            request_id,
+            message,
+        )
+
+        react_state.awaiting_clarification = False
+        react_state.clarification_context = None
+        react_state.paused = False
+
+        if values:
+            react_state.observations.append(
+                {
+                    "type": "clarification_response",
+                    "request_id": request_id,
+                    "message": message,
+                    "values": values,
+                }
+            )
+
+        resume_event = self._clarification_events.get(session_id)
+        if resume_event:
+            resume_event.set()
+
+        self._paused_sequences.discard(session_id)
+        return True

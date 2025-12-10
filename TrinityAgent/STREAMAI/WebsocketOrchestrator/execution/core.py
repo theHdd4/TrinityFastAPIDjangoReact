@@ -978,7 +978,7 @@ class WorkflowCoreMixin:
                                     repeated_atom=next_step.atom_id,
                                     repeated_context=repeated_context.get("record", {}),
                                 )
-                                break
+                                continue
 
                         # ============================================================
                         # ACTION: Execute the step
