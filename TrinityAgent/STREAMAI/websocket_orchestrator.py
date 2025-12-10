@@ -4512,7 +4512,19 @@ WORKFLOW PLANNING:
         for key in ("file", "file_path", "input_file", "output_file", "result_file", "base_file"):
             value = parameters.get(key)
             if isinstance(value, str):
-                explicit_files.append(value)
+                resolved, fuzzy = self._resolve_dataframe_reference(value, available_files)
+                if resolved:
+                    explicit_files.append(resolved)
+                    if fuzzy:
+                        parameters[key] = resolved
+                        logger.info(
+                            "🔎 Fuzzy-matched dataframe reference '%s' → '%s' for atom %s",
+                            value,
+                            resolved,
+                            atom_id,
+                        )
+                else:
+                    explicit_files.append(value)
 
         dataframe_config = parameters.get("dataframe_config")
         if isinstance(dataframe_config, dict):
@@ -4533,6 +4545,37 @@ WORKFLOW PLANNING:
                     raise RuntimeError(
                         f"Requested dataframe '{path}' is not in the prepared set; refresh df_ops context before executing {atom_id}."
                     )
+
+    def _resolve_dataframe_reference(
+        self, requested_path: str, available_files: List[str]
+    ) -> Tuple[Optional[str], bool]:
+        """
+        Resolve a dataframe path using fuzzy matching when an exact match is unavailable.
+
+        Returns a tuple of (resolved_path, used_fuzzy_match).
+        """
+
+        if not requested_path:
+            return None, False
+
+        if requested_path in available_files:
+            return requested_path, False
+
+        if not available_files:
+            return None, False
+
+        best_match: Optional[str] = None
+        best_score = 0.0
+        for candidate in available_files:
+            score = difflib.SequenceMatcher(None, requested_path.lower(), candidate.lower()).ratio()
+            if score > best_score:
+                best_score = score
+                best_match = candidate
+
+        if best_match and best_score >= 0.74:
+            return best_match, True
+
+        return None, False
 
     async def _replay_previous_step_for_output(
         self,
@@ -7505,6 +7548,8 @@ WORKFLOW PLANNING:
             columns = metadata.get("columns", [])
             if isinstance(columns, list):
                 valid_columns_set.update(columns)
+
+        valid_columns_list = list(valid_columns_set)
         
         # Validate each column name (case-sensitive and case-insensitive matching)
         validated_columns: List[str] = []
@@ -7528,7 +7573,24 @@ WORKFLOW PLANNING:
                     break
             
             if not found:
-                logger.debug(f"⚠️ Column '{col_clean}' not found in file metadata")
+                best_match: Optional[str] = None
+                best_score = 0.0
+                for valid_col in valid_columns_list:
+                    score = difflib.SequenceMatcher(None, col_clean.lower(), valid_col.lower()).ratio()
+                    if score > best_score:
+                        best_score = score
+                        best_match = valid_col
+
+                if best_match and best_score >= 0.75:
+                    logger.info(
+                        "🔎 Fuzzy-matched column '%s' to '%s' (score=%.2f) for dataframe validation",
+                        col_clean,
+                        best_match,
+                        best_score,
+                    )
+                    validated_columns.append(best_match)
+                else:
+                    logger.debug(f"⚠️ Column '{col_clean}' not found in file metadata")
         
         return validated_columns
 
