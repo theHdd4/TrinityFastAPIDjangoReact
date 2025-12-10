@@ -240,13 +240,31 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
   // Auto-load data ONLY if sourceFile exists but tableData doesn't (like dataframe-operations)
   useEffect(() => {
     const autoLoadData = async () => {
-      if (settings.mode === 'load' && settings.sourceFile && !settings.tableData && !loading) {
+      // Check if we need to load: mode is 'load', sourceFile exists, and tableData is missing/undefined
+      const hasSourceFile = !!settings.sourceFile;
+      const hasTableData = settings.tableData !== undefined && settings.tableData !== null;
+      const shouldLoad = settings.mode === 'load' && hasSourceFile && !hasTableData && !loading;
+      
+      console.log('📊 [TABLE-ATOM] Auto-load check:', {
+        atomId,
+        mode: settings.mode,
+        sourceFile: settings.sourceFile,
+        hasTableData,
+        loading,
+        shouldLoad
+      });
+      
+      if (shouldLoad) {
         console.log('📊 [TABLE-ATOM] Auto-loading data from source:', settings.sourceFile);
         setLoading(true);
         setError(null);
         try {
           const data = await loadTable(settings.sourceFile);
-          console.log('✅ [TABLE-ATOM] Data loaded:', data);
+          console.log('✅ [TABLE-ATOM] Data loaded successfully:', {
+            tableId: data.table_id,
+            columns: data.columns?.length,
+            rows: data.rows?.length
+          });
           
           // ✅ Store data in Zustand settings (like DataFrame Operations)
           updateSettings(atomId, {

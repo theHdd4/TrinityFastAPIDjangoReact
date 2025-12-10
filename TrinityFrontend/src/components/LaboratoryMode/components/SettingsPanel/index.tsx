@@ -195,7 +195,35 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   }, [selectedAtomId, selectedCardId, tab, setTab]);
 
-
+  // Set context for metric operations (for table atom auto-display)
+  useEffect(() => {
+    if (mainTab === 'metrics') {
+      // Get the atom ID - prefer selectedAtomId, otherwise get first atom from selectedCard
+      const contextAtomId = selectedAtomId || (selectedCard?.atoms && selectedCard.atoms.length > 0 
+        ? selectedCard.atoms[0].id 
+        : undefined);
+      
+      // Get card ID - prefer selectedCardId, otherwise find card containing the atom
+      const contextCardId = selectedCardId || (selectedAtomId && selectedCard
+        ? selectedCard.id
+        : undefined);
+      
+      // Always set context when metrics tab is active (even if no selection, clear it)
+      updateMetricsInputs({
+        contextCardId: contextCardId || undefined,
+        contextAtomId: contextAtomId || undefined,
+      });
+      
+      console.log('📋 [Metrics Context] Updated context:', {
+        mainTab,
+        contextCardId,
+        contextAtomId,
+        selectedCardId,
+        selectedAtomId,
+        hasSelectedCard: !!selectedCard
+      });
+    }
+  }, [mainTab, selectedCardId, selectedAtomId, selectedCard, updateMetricsInputs]);
 
   return (
     <div
