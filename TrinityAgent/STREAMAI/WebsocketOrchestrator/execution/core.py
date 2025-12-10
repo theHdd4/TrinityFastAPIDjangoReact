@@ -207,6 +207,7 @@ class WorkflowCoreMixin:
                     )
                 except Exception as ctx_exc:
                     logger.warning("⚠️ Failed to apply project context to lab memory store: %s", ctx_exc)
+            context_request_id = request_id
             if intent_route:
                 self._sequence_intent_routing[sequence_id] = intent_route
             logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
@@ -818,7 +819,7 @@ class WorkflowCoreMixin:
                                     frontend_chat_id=frontend_chat_id,
                                     react_state=react_state,
                                     lab_envelope=lab_envelope,
-                                    lab_request_id=lab_envelope.request_id if lab_envelope else None,
+                                    lab_request_id=context_request_id,
                                     dependency_tokens=dependency_tokens,
                                 )
                                 if replayed_previous:
@@ -872,7 +873,7 @@ class WorkflowCoreMixin:
                                   available_files=current_available_files_for_exec,  # Use updated file list with newly created files
                                   frontend_chat_id=frontend_chat_id,  # Pass chat_id for cache isolation
                                   lab_envelope=lab_envelope,
-                                  lab_request_id=lab_envelope.request_id if lab_envelope else None,
+                                  lab_request_id=context_request_id,
                               )
                         except Exception as e:
                             logger.error(f"❌ ReAct: Step execution failed: {e}")
@@ -978,11 +979,42 @@ class WorkflowCoreMixin:
                                                     "file_path": saved_path,
                                                     "output_alias": next_step.output_alias,
                                                     "message": f"File created: {saved_path}",
-                                                    "available_for_next_steps": True
-                                                }
+                                                    "available_for_next_steps": True,
+                                                },
                                             ),
-                                            "file_created event"
+                                            "file_created event",
                                         )
+
+                                        if self.lab_memory_store and lab_request_id:
+                                            try:
+                                                dataset_alias = next_step.output_alias or f"dataset_{current_step_number}"
+                                                output_schema = (
+                                                    execution_result.get("schema")
+                                                    or execution_result.get("output_schema")
+                                                    or execution_result.get("columns")
+                                                )
+                                                self.lab_memory_store.update_react_context(
+                                                    session_id=sequence_id,
+                                                    request_id=lab_request_id,
+                                                    latest_dataset_alias=dataset_alias,
+                                                    output_path=saved_path,
+                                                    output_schema=output_schema,
+                                                    created_by=next_step.atom_id,
+                                                    step_number=current_step_number,
+                                                    project_context=project_context,
+                                                    previous_available_files=self._sequence_available_files.get(
+                                                        sequence_id, []
+                                                    ),
+                                                    execution_inputs={
+                                                        "files_used": next_step.files_used or [],
+                                                        "inputs": next_step.inputs or [],
+                                                    },
+                                                    react_metadata={"description": next_step.description},
+                                                )
+                                            except Exception as ctx_exc:
+                                                logger.warning(
+                                                    "⚠️ Failed to persist Trinity_AI_Context chaining info: %s", ctx_exc
+                                                )
                                 except (WebSocketDisconnect, Exception) as e:
                                     logger.warning(f"⚠️ Failed to send file_created event: {e}")
                             except Exception as save_error:

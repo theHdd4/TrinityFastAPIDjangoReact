@@ -72,7 +72,8 @@ class LabMemoryStore:
             logger.warning("Failed to ensure MinIO bucket: %s", exc)
 
     def _ensure_collection(self) -> Collection:
-        database = self.mongo_client[settings.CONFIG_DB or "trinity_db"]
+        database_name = settings.CONFIG_DB or getattr(settings, "MONGO_DB", None) or "trinity_db"
+        database = self.mongo_client[database_name]
         collection = database.get_collection("Trinity_AI_Context")
         try:
             collection.create_index(
@@ -97,6 +98,93 @@ class LabMemoryStore:
         except PyMongoError as exc:  # pragma: no cover - index creation best-effort
             logger.warning("Failed to create MongoDB indices for lab context: %s", exc)
         return collection
+
+    def update_react_context(
+        self,
+        *,
+        session_id: str,
+        request_id: Optional[str],
+        latest_dataset_alias: Optional[str],
+        output_path: Optional[str],
+        output_schema: Optional[Any],
+        created_by: Optional[str],
+        step_number: Optional[int],
+        project_context: Optional[Dict[str, Any]] = None,
+        previous_available_files: Optional[List[str]] = None,
+        execution_inputs: Optional[Dict[str, Any]] = None,
+        react_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist ReAct loop state so downstream atoms can consume fresh outputs.
+
+        This mirrors the laboratory-mode state diagram by ensuring MongoDB holds
+        the latest dataset alias, dataset registry, and atom lineage so the
+        next atom can deterministically locate the correct input file.
+        """
+
+        if not request_id or not latest_dataset_alias or not output_path:
+            return
+
+        self.apply_context(project_context)
+
+        dataset_entry = {
+            "path": output_path,
+            "schema": output_schema,
+            "created_by": created_by,
+            "updated_at": datetime.utcnow(),
+        }
+
+        history_entry = {
+            "step_number": step_number,
+            "atom_id": created_by,
+            "output_alias": latest_dataset_alias,
+            "output_path": output_path,
+            "timestamp": datetime.utcnow(),
+            "inputs": execution_inputs or {},
+        }
+
+        base_filter = {
+            "client_name": self.client_name,
+            "app_name": self.app_name,
+            "project_name": self.project_name,
+            "session_id": session_id,
+            "request_id": request_id,
+            "record_type": {"$ne": "atom_snapshot"},
+        }
+
+        update_doc: Dict[str, Any] = {
+            "$set": {
+                "client_name": self.client_name,
+                "app_name": self.app_name,
+                "project_name": self.project_name,
+                "session_id": session_id,
+                "request_id": request_id,
+                "record_type": "react_context",
+                "latest_dataset_alias": latest_dataset_alias,
+                "react_state.last_output_alias": latest_dataset_alias,
+                f"datasets.{latest_dataset_alias}": dataset_entry,
+                "updated_at": datetime.utcnow(),
+            },
+            "$push": {
+                "atom_history": history_entry,
+            },
+        }
+
+        if previous_available_files is not None:
+            update_doc["$set"]["available_files"] = previous_available_files
+        if react_metadata is not None:
+            update_doc["$set"]["react_state.metadata"] = react_metadata
+
+        try:
+            self.mongo_collection.update_one(base_filter, update_doc, upsert=True)
+            logger.info(
+                "💾 Updated Trinity_AI_Context for session=%s request=%s with alias %s → %s",
+                session_id,
+                request_id,
+                latest_dataset_alias,
+                output_path,
+            )
+        except PyMongoError as exc:  # pragma: no cover - database guard
+            logger.warning("Failed to update Trinity_AI_Context for ReAct chaining: %s", exc)
 
     def _load_existing_context(
         self,
