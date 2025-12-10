@@ -362,16 +362,17 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 # Exit loop if no additional clarifications are required
                 break
 
-        # Step 2: Intent Detection (ONCE at the start - like 28_NOV)
-        # This is the ONLY place intent detection should happen for this WebSocket request
-        # Use session_id for caching to prevent repeated detection
+        # Step 2: Intent Detection (per prompt)
+        # Always re-run intent detection for each incoming prompt so laboratory mode
+        # correctly routes between workflow vs. direct LLM responses. Caching the
+        # result caused stale paths after websocket_orchestrator.py restructuring.
         logger.info("=" * 80)
-        logger.info(f"🔍 STARTING INTENT DETECTION (ONCE at start)")
+        logger.info(f"🔍 STARTING INTENT DETECTION (per prompt)")
         logger.info(f"   User prompt: {user_prompt}")
-        logger.info(f"   Session ID: {session_id} (for caching)")
+        logger.info(f"   Session ID: {session_id} (no cache)")
         logger.info("=" * 80)
 
-        intent_result = await _detect_intent_simple(user_prompt, session_id=session_id, use_cache=True)
+        intent_result = await _detect_intent_simple(user_prompt, session_id=session_id, use_cache=False)
         intent = intent_result.get("intent", "workflow")
         if decision:
             intent = "text_reply" if decision.path == "llm_only" else "workflow"
@@ -380,11 +381,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
             intent_service.update_scratchpad(session_id, f"Routing via {decision.path}: {decision.rationale}")
 
         logger.info("=" * 80)
-        logger.info(f"✅ INTENT DETECTION RESULT (will NOT be called again):")
+        logger.info(f"✅ INTENT DETECTION RESULT (fresh run)")
         logger.info(f"   Intent: {intent}")
         logger.info(f"   Confidence: {intent_result.get('confidence', 0.5):.2f}")
         logger.info(f"   Reasoning: {intent_result.get('reasoning', 'N/A')}")
-        logger.info(f"🔒 Intent detection CACHED for session {session_id} - will NOT be called again")
         if intent_record:
             logger.info(
                 "📘 Intent record: goal=%s tools=%s output=%s", intent_record.goal_type, intent_record.required_tools, intent_record.output_format
