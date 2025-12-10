@@ -42,3 +42,5 @@ export interface ConditionalFormatRule {
   thresholds?: Record<string, number>;
 }
 
+
+

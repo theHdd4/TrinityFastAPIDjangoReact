@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
 import { atoms as allAtoms } from "@/components/AtomList/data";
 import { ClarificationRequestMessage as ClarificationRequest } from "@/types/streaming";
+import { LABORATORY_API } from "@/lib/api";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -1979,7 +1980,8 @@ export type LaboratorySubMode = 'analytics' | 'dashboard';
 export const DASHBOARD_ALLOWED_ATOMS = [
   'dataframe-operations',
   'chart-maker',
-  'correlation'
+  'correlation',
+  'table'  // ✅ Enable table atom in dashboard mode
 ] as const;
 
 // Helper function to get allowed atoms based on mode
@@ -2405,7 +2407,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
 
   updateTableAtomWithFile: async (atomId: string, objectName: string) => {
     // Update atom settings to trigger auto-load
-    // We need to explicitly set sourceFile and mode, and ensure tableData is not set
+    // We need to explicitly set sourceFile and mode, and ensure tableData is cleared
     // so the auto-load mechanism will trigger
     
     const currentAtom = get().getAtom(atomId);
@@ -2415,35 +2417,41 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     }
     
     const currentSettings = (currentAtom.settings as any) || {};
+    const currentSourceFile = currentSettings.sourceFile;
+    const isOverwrite = currentSourceFile === objectName; // Same file = overwrite
     
-    // Create new settings object without tableData to force reload
+    // Create new settings object with tableData explicitly set to null
+    // This ensures the merged settings will have tableData: null (not undefined)
+    // Also add reloadTrigger to force useEffect to trigger even if sourceFile is same
+    const reloadTrigger = Date.now();
     const newSettings: any = {
       ...currentSettings,
       sourceFile: objectName,
       mode: 'load',
+      tableData: null,  // Explicitly set to null to clear existing data
+      reloadTrigger: reloadTrigger,  // Force reload even if sourceFile is same (for overwrite case)
     };
-    
-    // Explicitly delete tableData if it exists to trigger auto-load
-    if ('tableData' in newSettings) {
-      delete newSettings.tableData;
-    }
     
     console.log('🔄 [updateTableAtomWithFile] Updating atom settings:', {
       atomId,
       objectName,
+      currentSourceFile,
+      isOverwrite,
       mode: 'load',
-      tableDataRemoved: true,
-      hasOtherSettings: Object.keys(currentSettings).length > 0
+      tableDataCleared: true,
+      reloadTrigger: reloadTrigger,
+      hadTableData: currentSettings.tableData !== undefined && currentSettings.tableData !== null
     });
     
     get().updateAtomSettings(atomId, newSettings);
+    
+    console.log('✅ [updateTableAtomWithFile] Settings updated, waiting for useEffect to trigger reload');
   },
 
   createCardWithTableAtom: async (objectName: string, position?: number) => {
     try {
-      console.log('🆕 [createCardWithTableAtom] Starting:', { objectName, position });
-      
-      const LABORATORY_API = import.meta.env.VITE_DJANGO_API_URL + '/api/laboratory';
+      // console.log('🆕 [createCardWithTableAtom] Starting:', { objectName, position });
+      // console.log('🆕 [createCardWithTableAtom] LABORATORY_API:', LABORATORY_API);
       
       const response = await fetch(`${LABORATORY_API}/cards`, {
         method: 'POST',
@@ -2462,7 +2470,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       }
       
       const payload = await response.json();
-      console.log('✅ [createCardWithTableAtom] API response:', payload);
+      // console.log('✅ [createCardWithTableAtom] API response:', payload);
       
       const tableAtomInfo = allAtoms.find(a => a.id === 'table');
       
@@ -2497,10 +2505,10 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
         }
       };
       
-      console.log('🆕 [createCardWithTableAtom] Created Table atom:', {
-        id: newTableAtom.id,
-        sourceFile: objectName
-      });
+      // console.log('🆕 [createCardWithTableAtom] Created Table atom:', {
+      //   id: newTableAtom.id,
+      //   sourceFile: objectName
+      // });
       
       // Build card from API payload
       const newCard: LayoutCard = {
@@ -2522,15 +2530,15 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
         ...currentCards.slice(insertIndex)
       ];
       
-      console.log('💾 [createCardWithTableAtom] Updating cards:', {
-        currentCount: currentCards.length,
-        newCount: updatedCards.length,
-        insertIndex
-      });
+      // console.log('💾 [createCardWithTableAtom] Updating cards:', {
+      //   currentCount: currentCards.length,
+      //   newCount: updatedCards.length,
+      //   insertIndex
+      // });
       
       set({ cards: updatedCards });
       
-      console.log('✅ [createCardWithTableAtom] Successfully created card with Table atom');
+      // console.log('✅ [createCardWithTableAtom] Successfully created card with Table atom');
       return newTableAtom.id;
     } catch (error) {
       console.error('❌ [createCardWithTableAtom] Error:', error);
@@ -2566,17 +2574,17 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       return { success: false, error: 'Atom not found in card' };
     }
     
-    console.log('🔄 [replaceAtomWithTable] Processing:', {
-      cardId,
-      currentAtomId,
-      currentAtomType: currentAtom.atomId,
-      newDataframePath
-    });
+    // console.log('🔄 [replaceAtomWithTable] Processing:', {
+    //   cardId,
+    //   currentAtomId,
+    //   currentAtomType: currentAtom.atomId,
+    //   newDataframePath
+    // });
     
     // Check if current atom is already Table
     if (currentAtom.atomId === 'table') {
       // Just update the existing Table atom
-      console.log('✅ [replaceAtomWithTable] Atom is already Table, updating file');
+      // console.log('✅ [replaceAtomWithTable] Atom is already Table, updating file');
       await get().updateTableAtomWithFile(currentAtomId, newDataframePath);
       return { success: true, tableAtomId: currentAtomId };
     }
@@ -2616,10 +2624,10 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       }
     };
     
-    console.log('🆕 [replaceAtomWithTable] Created new Table atom:', {
-      id: newTableAtomId,
-      sourceFile: newDataframePath
-    });
+    // console.log('🆕 [replaceAtomWithTable] Created new Table atom:', {
+    //   id: newTableAtomId,
+    //   sourceFile: newDataframePath
+    // });
     
     // Create new card for original atom at position cardIndex + 1
     const newCardId = `card-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -2646,15 +2654,15 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       ...cards.slice(cardIndex + 1) // Shift rest
     ];
     
-    console.log('💾 [replaceAtomWithTable] Updating cards array:', {
-      totalCards: updatedCards.length,
-      cardIndex,
-      newCardInsertedAt: cardIndex + 1
-    });
+    // console.log('💾 [replaceAtomWithTable] Updating cards array:', {
+    //   totalCards: updatedCards.length,
+    //   cardIndex,
+    //   newCardInsertedAt: cardIndex + 1
+    // });
     
     set({ cards: updatedCards });
     
-    console.log('✅ [replaceAtomWithTable] Successfully replaced atom');
+    // console.log('✅ [replaceAtomWithTable] Successfully replaced atom');
     return { success: true, tableAtomId: newTableAtomId };
   },
 

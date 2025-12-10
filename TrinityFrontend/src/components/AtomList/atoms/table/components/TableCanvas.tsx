@@ -92,6 +92,11 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   } | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  
+  // Filter data state - stores data without current column's filter for showing all options
+  const [filterData, setFilterData] = useState<TableData | null>(null);
+  const [filterColumn, setFilterColumn] = useState<string | null>(null);
+  const [loadingFilterData, setLoadingFilterData] = useState(false);
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
   const rowRefs = useRef<{ [key: number]: HTMLTableRowElement | null }>({});
   const portalTarget = typeof document !== 'undefined' ? document.body : null;
@@ -198,13 +203,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     e.preventDefault();
     e.stopPropagation();
     
-    console.log('🔧 [COLUMN-RESIZE] Start resize for column:', column);
-    
     // Get width from settings (like DataFrameOperations)
     const currentWidth = settings.columnWidths?.[column] || 112.5;
     const startX = e.clientX;
-    
-    console.log('🔧 [COLUMN-RESIZE] Current width:', currentWidth, 'Start X:', startX);
     
     setResizingCol({ column, startX, startWidth: currentWidth });
     document.body.style.cursor = 'col-resize';
@@ -333,12 +334,15 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         }
       });
 
+      // Clear filter data when filter is applied (will reload on next open)
+      setFilterData(null);
+      setFilterColumn(null);
+
       toast({
         title: 'Filter applied',
         description: `Filter applied to column: ${column}`,
       });
     } catch (error: any) {
-      console.error('[Table] Filter error:', error);
       toast({
         title: 'Filter failed',
         description: error.message || 'Failed to apply filter',
@@ -349,6 +353,54 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
   const handleClearFilter = async (column: string) => {
     await handleColumnFilter(column, []);
+    // Clear filter data when filter is cleared
+    setFilterData(null);
+    setFilterColumn(null);
+  };
+
+  // Handle opening filter dialog - load data without current column's filter
+  const handleOpenFilter = async (column: string) => {
+    if (!settings.tableId) {
+      // If no tableId, just open filter with current data
+      setFilterData(null);
+      setFilterColumn(column);
+      setOpenDropdown(openDropdown === 'filter' ? null : 'filter');
+      return;
+    }
+
+    try {
+      setLoadingFilterData(true);
+      
+      // Temporarily remove this column's filter to show all options
+      const tempFilters = { ...settings.filters };
+      delete tempFilters[column];
+      
+      // Load data with all filters EXCEPT current column's filter
+      const resp = await updateTable(settings.tableId, {
+        ...settings,
+        filters: tempFilters,  // All filters EXCEPT current column
+      });
+      
+      // Store this data for filter component (shows all options for this column)
+      setFilterData({
+        table_id: resp.table_id,
+        columns: resp.columns,
+        rows: resp.rows,
+        row_count: resp.row_count,
+        column_types: resp.column_types,
+        object_name: resp.object_name || data.object_name,
+      });
+      setFilterColumn(column);
+      setOpenDropdown(openDropdown === 'filter' ? null : 'filter');
+    } catch (error: any) {
+      console.error('Failed to load filter data:', error);
+      // Fallback: use current data if loading fails
+      setFilterData(null);
+      setFilterColumn(column);
+      setOpenDropdown(openDropdown === 'filter' ? null : 'filter');
+    } finally {
+      setLoadingFilterData(false);
+    }
   };
 
   // Execute deletion of multiple columns
@@ -384,12 +436,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           // Session recovery for individual column
           const errorMessage = error?.message || String(error);
           if (errorMessage.includes('session not found') || errorMessage.includes('Table session not found')) {
-            console.log('[Table] Session not found, attempting recovery...');
-            
             try {
               const newTableId = await reloadTableFromSource();
               if (newTableId) {
-                console.log('[Table] Retrying delete with new session:', newTableId);
                 const resp = await apiDeleteColumn(newTableId, column);
                 activeTableId = resp.table_id;
                 deletedCount++;
@@ -409,7 +458,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                 });
               }
             } catch (recoveryError: any) {
-              console.error('[Table] Recovery failed:', recoveryError);
+              // Recovery failed, continue with next column
             }
           }
         }
@@ -429,7 +478,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         });
       }
     } catch (error: any) {
-      console.error('[Table] Delete columns error:', error);
       toast({
         title: 'Delete failed',
         description: error.message || 'Failed to delete columns',
@@ -497,12 +545,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // Session recovery: if session not found, reload from source and retry
       const errorMessage = error?.message || String(error);
       if (errorMessage.includes('session not found') || errorMessage.includes('Table session not found')) {
-        console.log('[Table] Session not found, attempting recovery...');
-        
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            console.log('[Table] Retrying insert with new session:', newTableId);
             const resp = await apiInsertColumn(newTableId, colIdx, name, '');
             
             onSettingsChange({
@@ -526,7 +571,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             return;
           }
         } catch (recoveryError: any) {
-          console.error('[Table] Recovery failed:', recoveryError);
           toast({
             title: 'Insert failed',
             description: recoveryError.message || 'Failed to insert column (session recovery failed)',
@@ -536,7 +580,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         }
       }
       
-      console.error('[Table] Insert column error:', error);
       toast({
         title: 'Insert failed',
         description: error.message || 'Failed to insert column',
@@ -576,12 +619,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // Session recovery: if session not found, reload from source and retry
       const errorMessage = error?.message || String(error);
       if (errorMessage.includes('session not found') || errorMessage.includes('Table session not found')) {
-        console.log('[Table] Session not found, attempting recovery...');
-        
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            console.log('[Table] Retrying rename with new session:', newTableId);
             const resp = await apiRenameColumn(newTableId, oldName, newName);
             
             onSettingsChange({
@@ -605,7 +645,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             return;
           }
         } catch (recoveryError: any) {
-          console.error('[Table] Recovery failed:', recoveryError);
           toast({
             title: 'Rename failed',
             description: recoveryError.message || 'Failed to rename column (session recovery failed)',
@@ -615,7 +654,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         }
       }
       
-      console.error('[Table] Rename column error:', error);
       toast({
         title: 'Rename failed',
         description: error.message || 'Failed to rename column',
@@ -684,12 +722,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // Session recovery: if session not found, reload from source and retry
       const errorMessage = error?.message || String(error);
       if (errorMessage.includes('session not found') || errorMessage.includes('Table session not found')) {
-        console.log('[Table] Session not found, attempting recovery...');
-        
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            console.log('[Table] Retrying round with new session:', newTableId);
             const resp = await apiRoundColumn(newTableId, column, decimalPlaces);
             
             onSettingsChange({
@@ -711,7 +746,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             return;
           }
         } catch (recoveryError: any) {
-          console.error('[Table] Recovery failed:', recoveryError);
           toast({
             title: 'Round failed',
             description: recoveryError.message || 'Failed to round column (session recovery failed)',
@@ -721,7 +755,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         }
       }
       
-      console.error('[Table] Round column error:', error);
       toast({
         title: 'Round failed',
         description: error.message || 'Failed to round column',
@@ -759,12 +792,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // Session recovery: if session not found, reload from source and retry
       const errorMessage = error?.message || String(error);
       if (errorMessage.includes('session not found') || errorMessage.includes('Table session not found')) {
-        console.log('[Table] Session not found, attempting recovery...');
-        
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            console.log('[Table] Retrying retype with new session:', newTableId);
             const resp = await apiRetypeColumn(newTableId, column, newType);
             
             onSettingsChange({
@@ -786,7 +816,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             return;
           }
         } catch (recoveryError: any) {
-          console.error('[Table] Recovery failed:', recoveryError);
           toast({
             title: 'Retype failed',
             description: recoveryError.message || 'Failed to change column type (session recovery failed)',
@@ -796,7 +825,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         }
       }
       
-      console.error('[Table] Retype column error:', error);
       toast({
         title: 'Retype failed',
         description: error.message || 'Failed to change column type',
@@ -834,12 +862,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // Session recovery: if session not found, reload from source and retry
       const errorMessage = error?.message || String(error);
       if (errorMessage.includes('session not found') || errorMessage.includes('Table session not found')) {
-        console.log('[Table] Session not found, attempting recovery...');
-        
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            console.log('[Table] Retrying transform case with new session:', newTableId);
             const resp = await apiTransformCase(newTableId, column, caseType);
             
             onSettingsChange({
@@ -861,7 +886,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             return;
           }
         } catch (recoveryError: any) {
-          console.error('[Table] Recovery failed:', recoveryError);
           toast({
             title: 'Transform failed',
             description: recoveryError.message || 'Failed to transform case (session recovery failed)',
@@ -871,7 +895,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         }
       }
       
-      console.error('[Table] Transform case error:', error);
       toast({
         title: 'Transform failed',
         description: error.message || 'Failed to transform case',
@@ -911,12 +934,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // Session recovery: if session not found, reload from source and retry
       const errorMessage = error?.message || String(error);
       if (errorMessage.includes('session not found') || errorMessage.includes('Table session not found')) {
-        console.log('[Table] Session not found, attempting recovery...');
-        
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            console.log('[Table] Retrying duplicate with new session:', newTableId);
             const resp = await apiDuplicateColumn(newTableId, column, newName);
             
             onSettingsChange({
@@ -940,7 +960,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             return;
           }
         } catch (recoveryError: any) {
-          console.error('[Table] Recovery failed:', recoveryError);
           toast({
             title: 'Duplicate failed',
             description: recoveryError.message || 'Failed to duplicate column (session recovery failed)',
@@ -950,7 +969,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         }
       }
       
-      console.error('[Table] Duplicate column error:', error);
       toast({
         title: 'Duplicate failed',
         description: error.message || 'Failed to duplicate column',
@@ -988,6 +1006,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
         setContextMenu(null);
         setOpenDropdown(null);
+        // Clear filter data when context menu closes
+        setFilterData(null);
+        setFilterColumn(null);
       }
     };
 
@@ -1081,12 +1102,10 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   // Reload table from source file if session is lost (like DataFrame Operations recovery)
   const reloadTableFromSource = async (): Promise<string | null> => {
     if (!settings.sourceFile) {
-      console.error('[CellEdit] Cannot reload: no sourceFile in settings');
       return null;
     }
 
     try {
-      console.log('[CellEdit] Reloading table from source:', settings.sourceFile);
       const reloadedData = await loadTable(settings.sourceFile);
       
       // Update settings with new session ID and data
@@ -1098,10 +1117,8 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         columnOrder: reloadedData.columns,
       });
       
-      console.log('[CellEdit] Table reloaded successfully, new tableId:', reloadedData.table_id);
       return reloadedData.table_id;
     } catch (error) {
-      console.error('[CellEdit] Failed to reload table from source:', error);
       throw error;
     }
   };
@@ -1114,7 +1131,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     // Use tableId from settings (like DataFrame Operations uses fileId)
     let activeTableId = settings.tableId;
     if (!activeTableId) {
-      console.error('[CellEdit] No tableId available');
       return null;
     }
 
@@ -1169,15 +1185,12 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // Session recovery: if session not found, reload from source and retry
       const errorMessage = error?.message || String(error);
       if (errorMessage.includes('session not found') || errorMessage.includes('Table session not found')) {
-        console.log('[CellEdit] Session not found, attempting recovery...');
-        
         try {
           // Reload table from source file
           const newTableId = await reloadTableFromSource();
           
           if (newTableId) {
             // Retry the edit with new session ID
-            console.log('[CellEdit] Retrying edit with new session:', newTableId);
             const resp = await editTableCell(newTableId, globalRowIndex, column, newValue);
             
             // Update with response (same logic as above)
@@ -1211,7 +1224,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             };
           }
         } catch (recoveryError) {
-          console.error('[CellEdit] Session recovery failed:', recoveryError);
           throw recoveryError;
         }
       }
@@ -1228,11 +1240,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     
     // Prevent multiple commits if already committing or cell doesn't match
     if (!currentEditingCell || (currentEditingCell.row !== globalRowIdx || currentEditingCell.col !== column)) {
-      // Log for debugging (can be removed in production)
-      console.log('[CellEdit] Commit skipped - cell mismatch or no editing cell', {
-        currentEditingCell,
-        requestedCell: { row: globalRowIdx, col: column }
-      });
       return;
     }
     
@@ -1295,7 +1302,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       editingCellHtmlRef.current = '';
     } catch (error) {
       // If save fails, restore editing state so user can try again
-      console.error('[CellEdit] Failed to save cell:', error);
       setEditingCell({ row: globalRowIdx, col: column });
       setEditingCellValue(valueToSave);
       setEditingCellHtml(htmlToSave);
@@ -1339,7 +1345,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             left: rect.left + rect.width / 2, // Center horizontally
           });
         } catch (error) {
-          console.error('[Toolbar] Failed to position toolbar:', error);
           setToolbarPosition(null);
         }
       } else {
@@ -1358,7 +1363,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                   left: rect.left + rect.width / 2,
                 });
               } catch (error) {
-                console.error('[Toolbar] Failed to position toolbar on retry:', error);
                 setToolbarPosition(null);
               }
             }
@@ -1457,17 +1461,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         const cellStyle = rowStyles[column] || rowStyles[dataColumnKey];
         
         if (cellStyle) {
-          // Debug logging for first few cells
-          if (rowIdx < 2 && colIdx < 2) {
-            console.log(`🎨 [CELL-STYLE] ✅ Applied CF: Row ${rowIdx} (actual: ${rowIndex}), Col "${column}"`, {
-              rowKey,
-              cellStyle,
-              matchedColumn: rowStyles[column] ? column : dataColumnKey,
-              allColumnsInRow: Object.keys(rowStyles),
-              styleApplied: style
-            });
-          }
-          
           // Merge conditional formatting styles - CRITICAL: These must override theme styles
           // Inline styles in React have high specificity, so they should override
           if (cellStyle.backgroundColor) {
@@ -1482,23 +1475,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           if (cellStyle.fontSize) {
             style.fontSize = typeof cellStyle.fontSize === 'string' ? cellStyle.fontSize : `${cellStyle.fontSize}px`;
           }
-        } else if (rowIdx < 2 && colIdx < 2) {
-          // Debug: Check why style isn't found
-          console.log(`🔍 [CELL-STYLE] ⚠️ No style found for row ${rowIdx} (actual: ${rowIndex}), col "${column}"`, {
-            rowKey,
-            tryingColumns: [column, dataColumnKey],
-            availableColumnsInRow: Object.keys(rowStyles),
-            rowStylesSample: Object.fromEntries(Object.entries(rowStyles).slice(0, 3)),
-            availableRowKeys: Object.keys(cellStyles).slice(0, 5)
-          });
         }
-      } else if (rowIdx === 0 && colIdx === 0) {
-        // Debug: Check why row doesn't exist (only log once per render)
-        console.log(`🔍 [CELL-STYLE] ⚠️ No row styles for key "${rowKey}"`, {
-          sampleRowKeys: Object.keys(cellStyles).slice(0, 5),
-          totalStyleKeys: Object.keys(cellStyles).length,
-          firstRowKeyExample: Object.keys(cellStyles)[0]
-        });
       }
     }
 
@@ -1675,13 +1652,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                           data-column-resize-handle="true"
                           className="absolute top-0 right-0 h-full cursor-col-resize bg-blue-300 opacity-0 hover:opacity-100 transition-opacity duration-150"
                           onMouseDown={(e) => {
-                            console.log('🔧 [COLUMN-RESIZE] Handle clicked for column:', column);
                             e.stopPropagation(); // Prevent header click
                             e.preventDefault(); // Prevent default behavior
                             startColumnResize(column, e);
-                          }}
-                          onMouseEnter={() => {
-                            console.log('🔧 [COLUMN-RESIZE] Handle hover for column:', column);
                           }}
                           style={{ 
                             zIndex: 20,
@@ -1750,18 +1723,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                           const dataColumnKey = columnKeyMap[column] || column;
                           const cellValue = row[dataColumnKey];
                           
-                          // Debug logging for first few cells
-                          if (rowIdx < 2 && colIdx < 3) {
-                            console.log(`🔍 [CELL-RENDER] Row ${rowIdx}, Col ${colIdx}, Column "${column}":`, {
-                              effectiveColumn: column,
-                              colIdx,
-                              dataColumnKey,
-                              cellValue,
-                              rowKeys: Object.keys(row).slice(0, 10),
-                              rowDataSample: Object.fromEntries(Object.entries(row).slice(0, 5))
-                            });
-                          }
-                        
                         return (
                           <TableCell
                             key={column}
@@ -1810,7 +1771,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                                 return undefined;
                               })()}
                               isEditing={isEditing}
-                              enableRichText={settings.enableRichText || false}
                               onValueChange={(plainText, htmlText) => {
                                 setEditingCellValue(plainText);
                                 editingCellValueRef.current = plainText; // Update ref immediately
@@ -2017,35 +1977,51 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                 className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setOpenDropdown(openDropdown === 'filter' ? null : 'filter');
+                  if (contextMenu) {
+                    handleOpenFilter(contextMenu.col);
+                  }
                 }}
+                disabled={loadingFilterData}
               >
                 Filter <span style={{ fontSize: '10px', marginLeft: 4 }}>▶</span>
+                {loadingFilterData && <span className="ml-2 text-xs text-gray-500">Loading...</span>}
               </button>
-              {openDropdown === 'filter' && (
+              {openDropdown === 'filter' && contextMenu && (
                 <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md z-50">
-                  {data.column_types[contextMenu.col] === 'number' ? (
-                    <NumberFilterComponent
-                      column={contextMenu.col}
-                      data={data}
-                      onApplyFilter={handleColumnFilter}
-                      onClearFilter={handleClearFilter}
-                      onClose={() => {
-                        setContextMenu(null);
-                        setOpenDropdown(null);
-                      }}
-                    />
+                  {loadingFilterData ? (
+                    <div className="p-4 text-xs text-gray-500">Loading filter options...</div>
                   ) : (
-                    <TextFilterComponent
-                      column={contextMenu.col}
-                      data={data}
-                      onApplyFilter={handleColumnFilter}
-                      onClearFilter={handleClearFilter}
-                      onClose={() => {
-                        setContextMenu(null);
-                        setOpenDropdown(null);
-                      }}
-                    />
+                    <>
+                      {data.column_types[contextMenu.col] === 'number' ? (
+                        <NumberFilterComponent
+                          column={contextMenu.col}
+                          data={filterData && filterColumn === contextMenu.col ? filterData : data}
+                          onApplyFilter={handleColumnFilter}
+                          onClearFilter={handleClearFilter}
+                          onClose={() => {
+                            setContextMenu(null);
+                            setOpenDropdown(null);
+                            setFilterData(null);
+                            setFilterColumn(null);
+                          }}
+                          currentFilter={settings.filters[contextMenu.col]}
+                        />
+                      ) : (
+                        <TextFilterComponent
+                          column={contextMenu.col}
+                          data={filterData && filterColumn === contextMenu.col ? filterData : data}
+                          onApplyFilter={handleColumnFilter}
+                          onClearFilter={handleClearFilter}
+                          onClose={() => {
+                            setContextMenu(null);
+                            setOpenDropdown(null);
+                            setFilterData(null);
+                            setFilterColumn(null);
+                          }}
+                          currentFilter={settings.filters[contextMenu.col]}
+                        />
+                      )}
+                    </>
                   )}
                 </div>
               )}

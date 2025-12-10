@@ -214,14 +214,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         contextAtomId: contextAtomId || undefined,
       });
       
-      console.log('📋 [Metrics Context] Updated context:', {
-        mainTab,
-        contextCardId,
-        contextAtomId,
-        selectedCardId,
-        selectedAtomId,
-        hasSelectedCard: !!selectedCard
-      });
+      // console.log('📋 [Metrics Context] Updated context:', {
+      //   mainTab,
+      //   contextCardId,
+      //   contextAtomId,
+      //   selectedCardId,
+      //   selectedAtomId,
+      //   hasSelectedCard: !!selectedCard
+      // });
     }
   }, [mainTab, selectedCardId, selectedAtomId, selectedCard, updateMetricsInputs]);
 

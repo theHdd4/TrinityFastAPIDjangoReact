@@ -29,8 +29,10 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [apiAtoms, setApiAtoms] = useState<Array<{id: string; name: string; description: string; category: string; tags: string[]; color: string}>>([]);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
   const { cards } = useExhibitionStore();
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const resultsContainerRef = useRef<HTMLDivElement>(null);
 
   // Get all atoms from all cards (similar to navigation list logic)
   const allAtoms = useMemo(() => {
@@ -639,6 +641,11 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     return filtered;
   }, [searchQuery, apiAtoms, allowedAtomIds]);
 
+  // Reset selected index when filtered atoms change
+  useEffect(() => {
+    setSelectedIndex(-1);
+  }, [filteredAtoms.length, searchQuery]);
+
   // Handle adding a suggested atom
   const handleAddSuggestedAtom = (atomId: string, atomName: string, color: string) => {
     if (onAddAtom) {
@@ -668,7 +675,63 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     }
     setSearchQuery('');
     setShowSearchResults(false);
+    setSelectedIndex(-1);
     onClose();
+  };
+
+  // Handle keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSearchResults || filteredAtoms.length === 0) {
+      if (e.key === 'Escape') {
+        setSearchQuery('');
+        setShowSearchResults(false);
+        setSelectedIndex(-1);
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setSelectedIndex(prev => {
+          const nextIndex = prev < filteredAtoms.length - 1 ? prev + 1 : prev;
+          // Scroll into view
+          if (resultsContainerRef.current && nextIndex >= 0) {
+            const itemElement = resultsContainerRef.current.children[nextIndex] as HTMLElement;
+            if (itemElement) {
+              itemElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+          }
+          return nextIndex;
+        });
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setSelectedIndex(prev => {
+          const nextIndex = prev > 0 ? prev - 1 : -1;
+          // Scroll into view
+          if (resultsContainerRef.current && nextIndex >= 0) {
+            const itemElement = resultsContainerRef.current.children[nextIndex] as HTMLElement;
+            if (itemElement) {
+              itemElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+          }
+          return nextIndex;
+        });
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (selectedIndex >= 0 && selectedIndex < filteredAtoms.length) {
+          handleAddAtomFromSearch(filteredAtoms[selectedIndex]);
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setSearchQuery('');
+        setShowSearchResults(false);
+        setSelectedIndex(-1);
+        break;
+    }
   };
 
   // If suggestion should be shown, return the suggestion
@@ -688,12 +751,14 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
                   setShowSearchResults(e.target.value.trim().length > 0);
+                  setSelectedIndex(-1);
                 }}
                 onFocus={() => {
                   if (searchQuery.trim().length > 0) {
                     setShowSearchResults(true);
                   }
                 }}
+                onKeyDown={handleKeyDown}
                 className="w-full pl-12 pr-12 py-3 border-2 border-gray-200 rounded-xl bg-white shadow-sm hover:shadow-md focus:shadow-lg focus:border-blue-400 focus:outline-none transition-all duration-200 placeholder:text-gray-400 text-gray-700 hover:border-gray-300"
               />
               {searchQuery && (
@@ -701,6 +766,7 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
                   onClick={() => {
                     setSearchQuery('');
                     setShowSearchResults(false);
+                    setSelectedIndex(-1);
                   }}
                   className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 transition-colors duration-200 p-1 rounded-full hover:bg-red-50"
                 >
@@ -711,12 +777,19 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
             
             {/* Search Results */}
             {showSearchResults && filteredAtoms.length > 0 && (
-              <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-xl shadow-xl max-h-60 overflow-y-auto">
-                {filteredAtoms.map((atom) => (
+              <div 
+                ref={resultsContainerRef}
+                className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-xl shadow-xl max-h-60 overflow-y-auto"
+              >
+                {filteredAtoms.map((atom, index) => (
                   <button
                     key={atom.id}
                     onClick={() => handleAddAtomFromSearch(atom)}
-                    className="w-full flex items-start space-x-3 px-4 py-3 hover:bg-blue-50 border-b border-gray-100 last:border-b-0 transition-all duration-150 first:rounded-t-xl last:rounded-b-xl active:bg-blue-100"
+                    className={`w-full flex items-start space-x-3 px-4 py-3 border-b border-gray-100 last:border-b-0 transition-all duration-150 first:rounded-t-xl last:rounded-b-xl ${
+                      index === selectedIndex 
+                        ? 'bg-blue-100 border-blue-300' 
+                        : 'hover:bg-blue-50 active:bg-blue-100'
+                    }`}
                   >
                     <div className={`w-3 h-3 ${atom.color} rounded-full mt-1 flex-shrink-0`}></div>
                     <div className="flex-1 text-left min-w-0">
@@ -789,12 +862,14 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
               onChange={(e) => {
                 setSearchQuery(e.target.value);
                 setShowSearchResults(e.target.value.trim().length > 0);
+                setSelectedIndex(-1);
               }}
               onFocus={() => {
                 if (searchQuery.trim().length > 0) {
                   setShowSearchResults(true);
                 }
               }}
+              onKeyDown={handleKeyDown}
               className="w-full pl-12 pr-12 py-3 border-2 border-gray-200 rounded-xl bg-white shadow-sm hover:shadow-md focus:shadow-lg focus:border-blue-400 focus:outline-none transition-all duration-200 placeholder:text-gray-400 text-gray-700 hover:border-gray-300"
             />
             {searchQuery && (
@@ -812,12 +887,19 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
           
           {/* Search Results */}
           {showSearchResults && filteredAtoms.length > 0 && (
-            <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-xl shadow-xl max-h-60 overflow-y-auto">
-              {filteredAtoms.map((atom) => (
+            <div 
+              ref={resultsContainerRef}
+              className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-xl shadow-xl max-h-60 overflow-y-auto"
+            >
+              {filteredAtoms.map((atom, index) => (
                 <button
                   key={atom.id}
                   onClick={() => handleAddAtomFromSearch(atom)}
-                  className="w-full flex items-start space-x-3 px-4 py-3 hover:bg-blue-50 border-b border-gray-100 last:border-b-0 transition-all duration-150 first:rounded-t-xl last:rounded-b-xl active:bg-blue-100"
+                  className={`w-full flex items-start space-x-3 px-4 py-3 border-b border-gray-100 last:border-b-0 transition-all duration-150 first:rounded-t-xl last:rounded-b-xl ${
+                    index === selectedIndex 
+                      ? 'bg-blue-100 border-blue-300' 
+                      : 'hover:bg-blue-50 active:bg-blue-100'
+                  }`}
                 >
                   <div className={`w-3 h-3 ${atom.color} rounded-full mt-1 flex-shrink-0`}></div>
                   <div className="flex-1 text-left min-w-0">

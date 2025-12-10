@@ -19,7 +19,6 @@ interface CellRendererProps {
   html?: string;
   formatting?: RichTextFormatting;
   isEditing: boolean;
-  enableRichText: boolean;
   onValueChange: (value: string, html?: string) => void;
   onCommit: (value: string, html?: string) => void;
   onCancel: () => void;
@@ -36,7 +35,6 @@ const CellRenderer: React.FC<CellRendererProps> = ({
   html,
   formatting,
   isEditing,
-  enableRichText,
   onValueChange,
   onCommit,
   onCancel,
@@ -47,8 +45,9 @@ const CellRenderer: React.FC<CellRendererProps> = ({
   className,
   style,
 }) => {
-  // Use RichTextCellEditor only if rich text is enabled AND formatting exists
-  if (enableRichText && (formatting || html)) {
+  // Always use RichTextCellEditor if formatting or html exists, otherwise use SimpleCellEditor
+  // Rich text is always available - no toggle needed
+  if (formatting || html) {
     return (
       <RichTextCellEditor
         value={value}
@@ -66,7 +65,7 @@ const CellRenderer: React.FC<CellRendererProps> = ({
     );
   }
   
-  // Default: Use SimpleCellEditor (like DataFrameOperations)
+  // Default: Use SimpleCellEditor for plain text cells
   return (
     <SimpleCellEditor
       value={value}

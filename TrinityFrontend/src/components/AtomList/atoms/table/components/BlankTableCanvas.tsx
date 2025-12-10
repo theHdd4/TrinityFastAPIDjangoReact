@@ -163,7 +163,6 @@ const BlankTableCanvas: React.FC<BlankTableCanvasProps> = ({
   // Handle cell edit (internal function - called by commitCellEdit)
   const handleCellEdit = async (rowIdx: number, colIdx: number, newValue: string) => {
     const colId = getColumnId(colIdx);
-    console.log(`✏️ [BLANK-TABLE] Editing cell [${rowIdx}, ${colIdx} (${colId})] = "${newValue}"`);
 
     // Update local state immediately for responsiveness
     setCellValues(prev => ({
@@ -176,7 +175,6 @@ const BlankTableCanvas: React.FC<BlankTableCanvasProps> = ({
 
     // Call backend to update session (use internal column identifier)
     await editTableCell(tableId, rowIdx, colId, newValue);
-    console.log('✅ [BLANK-TABLE] Cell updated in backend');
 
     // Update settings.tableData for persistence (like DataFrame Operations)
     if (onSettingsChange) {
@@ -201,8 +199,6 @@ const BlankTableCanvas: React.FC<BlankTableCanvasProps> = ({
           rows: updatedRows
         }
       });
-      
-      console.log('✅ [BLANK-TABLE] Cell value saved to settings for persistence');
     }
   };
 
@@ -257,7 +253,6 @@ const BlankTableCanvas: React.FC<BlankTableCanvasProps> = ({
       }
     } catch (error) {
       // If save fails, restore editing state so user can try again
-      console.error('❌ [BLANK-TABLE] Edit failed:', error);
       setEditingCell({ row: rowIdx, colIdx: colIdx });
       setEditingCellValue(valueToSave);
       setEditingCellHtml(htmlToSave);
@@ -307,7 +302,6 @@ const BlankTableCanvas: React.FC<BlankTableCanvasProps> = ({
       
       if (Object.keys(restoredValues).length > 0) {
         setCellValues(restoredValues);
-        console.log('✅ [BLANK-TABLE] Restored cell values from settings:', Object.keys(restoredValues).length, 'rows');
       }
     }
   }, []); // Run once on mount
