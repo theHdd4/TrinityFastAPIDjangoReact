@@ -165,36 +165,48 @@ const convertBackendMetadataToFrontend = (backendMetadata: any): TableMetadata |
 // Helper function to apply metadata to settings
 const applyMetadataToSettings = (
   metadata: TableMetadata | undefined,
-  currentSettings: TableSettings
+  currentSettings: Partial<TableSettings> = {}
 ): Partial<TableSettings> => {
   if (!metadata) return {};
   
   const updates: Partial<TableSettings> = {};
   
+  // Apply cell formatting (metadata takes priority)
   if (metadata.cellFormatting) {
-    updates.cellFormatting = metadata.cellFormatting;
+    updates.cellFormatting = {
+      ...(currentSettings.cellFormatting || {}),
+      ...metadata.cellFormatting,
+    };
   }
+  
+  // Apply design (theme, borderStyle, etc.) - metadata takes priority
   if (metadata.design) {
     updates.design = {
-      ...currentSettings.design,
-      ...metadata.design,
+      ...(currentSettings.design || DEFAULT_SETTINGS.design),
+      ...metadata.design,  // Loaded design overrides everything
     };
   }
+  
+  // Apply layout - metadata takes priority
   if (metadata.layout) {
     updates.layout = {
-      ...currentSettings.layout,
-      ...metadata.layout,
+      ...(currentSettings.layout || DEFAULT_SETTINGS.layout),
+      ...metadata.layout,  // Loaded layout overrides everything
     };
   }
+  
+  // Apply column widths (merge, metadata takes priority)
   if (metadata.columnWidths) {
     updates.columnWidths = {
-      ...currentSettings.columnWidths,
+      ...(currentSettings.columnWidths || {}),
       ...metadata.columnWidths,
     };
   }
+  
+  // Apply row heights (merge, metadata takes priority)
   if (metadata.rowHeights) {
     updates.rowHeights = {
-      ...currentSettings.rowHeights,
+      ...(currentSettings.rowHeights || {}),
       ...metadata.rowHeights,
     };
   }
@@ -241,17 +253,35 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   
   const baseSettings = (atom?.settings as Partial<TableSettings> | undefined) || {};
+  
+  // ✅ Read data from settings, not local state (like dataframe-operations)
+  const tableData = baseSettings.tableData || null;
+  
+  // Check if tableData has metadata that should be applied (highest priority)
+  const loadedMetadata = tableData?.metadata 
+    ? convertBackendMetadataToFrontend(tableData.metadata)
+    : null;
+  
+  // Apply loaded metadata first (if available)
+  const metadataSettings = loadedMetadata
+    ? applyMetadataToSettings(loadedMetadata, baseSettings)
+    : {};
+  
+  // Merge settings with priority: Loaded Metadata > Base Settings > Defaults
   const settings: TableSettings = {
     ...DEFAULT_SETTINGS,
     ...baseSettings,
-    // Deep merge nested objects
+    ...metadataSettings,  // Loaded metadata overrides base settings
+    // Deep merge nested objects (metadata takes priority)
     layout: {
       ...DEFAULT_SETTINGS.layout,
       ...(baseSettings.layout || {}),
+      ...(metadataSettings.layout || {}),  // Loaded metadata layout takes priority
     },
     design: {
       ...DEFAULT_SETTINGS.design,
       ...(baseSettings.design || {}),
+      ...(metadataSettings.design || {}),  // Loaded metadata design takes priority
     },
     totalRowConfig: {
       ...DEFAULT_SETTINGS.totalRowConfig,
@@ -260,8 +290,43 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
     conditionalFormats: baseSettings.conditionalFormats || DEFAULT_SETTINGS.conditionalFormats,
   };
   
-  // ✅ Read data from settings, not local state (like dataframe-operations)
-  const tableData = settings.tableData || null;
+  // Debug logging for metadata application
+  if (loadedMetadata) {
+    console.log('📋 [TABLE] Applied metadata from tableData:', {
+      design: metadataSettings.design,
+      layout: metadataSettings.layout,
+    });
+  }
+  
+  // Effect to ensure metadata is applied when tableData changes
+  useEffect(() => {
+    if (tableData?.metadata && atom) {
+      const frontendMetadata = convertBackendMetadataToFrontend(tableData.metadata);
+      if (frontendMetadata) {
+        // Check if metadata is already applied (avoid infinite loop)
+        const currentSettings = atom.settings as Partial<TableSettings> | undefined;
+        const currentDesign = currentSettings?.design;
+        const currentLayout = currentSettings?.layout;
+        
+        // Only update if metadata differs from current settings
+        const designChanged = frontendMetadata.design && 
+          JSON.stringify(frontendMetadata.design) !== JSON.stringify(currentDesign);
+        const layoutChanged = frontendMetadata.layout && 
+          JSON.stringify(frontendMetadata.layout) !== JSON.stringify(currentLayout);
+        
+        if (designChanged || layoutChanged) {
+          console.log('📋 [TABLE] Re-applying metadata from tableData (settings out of sync)', {
+            designChanged,
+            layoutChanged,
+            metadataDesign: frontendMetadata.design,
+            currentDesign,
+          });
+          const metadataUpdates = applyMetadataToSettings(frontendMetadata, currentSettings || {});
+          updateSettings(atomId, metadataUpdates);
+        }
+      }
+    }
+  }, [tableData?.metadata, atomId, atom?.settings, updateSettings]);
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -281,6 +346,8 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         try {
           const data = await loadTable(settings.sourceFile);
           
+          console.log('📋 [TABLE-LOAD] Loading table with metadata:', data.metadata);
+          
           // ✅ Store data in Zustand settings (like DataFrame Operations)
           const settingsUpdate: Partial<TableSettings> = {
             tableData: data,
@@ -291,9 +358,17 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           };
           
           // Apply metadata if available (formatting, design, layout)
+          // Metadata should override any existing settings
           const frontendMetadata = convertBackendMetadataToFrontend(data.metadata);
-          const metadataUpdates = applyMetadataToSettings(frontendMetadata, settings);
+          console.log('📋 [TABLE-LOAD] Converted metadata:', frontendMetadata);
+          
+          const metadataUpdates = applyMetadataToSettings(frontendMetadata, {});
+          console.log('📋 [TABLE-LOAD] Metadata updates to apply:', metadataUpdates);
+          
+          // Merge metadata updates into settings update
           Object.assign(settingsUpdate, metadataUpdates);
+          
+          console.log('📋 [TABLE-LOAD] Final settings update:', settingsUpdate);
           
           updateSettings(atomId, settingsUpdate);
         } catch (err: any) {
@@ -328,6 +403,8 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
             const restored = await restoreSession(settings.tableId, atomId);
             
             if (restored.restored && restored.data) {
+              console.log('📋 [TABLE-RESTORE] Restored data with metadata:', restored.data.metadata);
+              
               // Update settings with restored data
               const settingsUpdate: Partial<TableSettings> = {
                 tableData: restored.data,
@@ -337,10 +414,12 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
                 columnOrder: restored.data.columns,
               };
               
-              // Apply metadata if available
+              // Apply metadata if available (metadata takes priority)
               const frontendMetadata = convertBackendMetadataToFrontend(restored.data.metadata);
-              const metadataUpdates = applyMetadataToSettings(frontendMetadata, settings);
+              const metadataUpdates = applyMetadataToSettings(frontendMetadata, {});
               Object.assign(settingsUpdate, metadataUpdates);
+              
+              console.log('📋 [TABLE-RESTORE] Applied metadata updates:', metadataUpdates);
               
               updateSettings(atomId, settingsUpdate);
               
@@ -354,6 +433,8 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
               // Fallback: reload from source file
               if (settings.sourceFile) {
                 const data = await loadTable(settings.sourceFile);
+                console.log('📋 [TABLE-RESTORE] Fallback load with metadata:', data.metadata);
+                
                 const settingsUpdate: Partial<TableSettings> = {
                   tableData: data,
                   tableId: data.table_id,
@@ -362,10 +443,12 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
                   columnOrder: data.columns,
                 };
                 
-                // Apply metadata if available
+                // Apply metadata if available (metadata takes priority)
                 const frontendMetadata = convertBackendMetadataToFrontend(data.metadata);
-                const metadataUpdates = applyMetadataToSettings(frontendMetadata, settings);
+                const metadataUpdates = applyMetadataToSettings(frontendMetadata, {});
                 Object.assign(settingsUpdate, metadataUpdates);
+                
+                console.log('📋 [TABLE-RESTORE] Applied metadata updates:', metadataUpdates);
                 
                 updateSettings(atomId, settingsUpdate);
               } else {
@@ -377,13 +460,22 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
             if (settings.sourceFile) {
               try {
                 const data = await loadTable(settings.sourceFile);
-                updateSettings(atomId, {
+                console.log('📋 [TABLE-RESTORE] Error fallback load with metadata:', data.metadata);
+                
+                const settingsUpdate: Partial<TableSettings> = {
                   tableData: data,
                   tableId: data.table_id,
                   sourceFile: settings.sourceFile || data.object_name,
                   visibleColumns: data.columns,
                   columnOrder: data.columns,
-                });
+                };
+                
+                // Apply metadata if available (metadata takes priority)
+                const frontendMetadata = convertBackendMetadataToFrontend(data.metadata);
+                const metadataUpdates = applyMetadataToSettings(frontendMetadata, {});
+                Object.assign(settingsUpdate, metadataUpdates);
+                
+                updateSettings(atomId, settingsUpdate);
               } catch (loadErr: any) {
                 setError(loadErr.message || 'Failed to restore table session');
               }
@@ -507,6 +599,8 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
     try {
       const data = await loadTable(settings.sourceFile);
       
+      console.log('📋 [TABLE-LOAD] Manual load with metadata:', data.metadata);
+      
       // ✅ Store data in Zustand settings (like DataFrame Operations)
       const settingsUpdate: Partial<TableSettings> = {
         tableData: data,
@@ -517,9 +611,17 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
       };
       
       // Apply metadata if available (formatting, design, layout)
+      // Metadata should override any existing settings
       const frontendMetadata = convertBackendMetadataToFrontend(data.metadata);
-      const metadataUpdates = applyMetadataToSettings(frontendMetadata, settings);
+      console.log('📋 [TABLE-LOAD] Converted metadata:', frontendMetadata);
+      
+      const metadataUpdates = applyMetadataToSettings(frontendMetadata, {});
+      console.log('📋 [TABLE-LOAD] Metadata updates to apply:', metadataUpdates);
+      
+      // Merge metadata updates into settings update
       Object.assign(settingsUpdate, metadataUpdates);
+      
+      console.log('📋 [TABLE-LOAD] Final settings update:', settingsUpdate);
       
       updateSettings(atomId, settingsUpdate);
       
@@ -572,6 +674,14 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         columnWidths: settings.columnWidths,
         rowHeights: settings.rowHeights,
       };
+      
+      console.log('💾 [TABLE-SAVE] Saving metadata:', {
+        design: metadata.design,
+        layout: metadata.layout,
+        hasCellFormatting: !!metadata.cellFormatting,
+        columnWidthsCount: Object.keys(metadata.columnWidths || {}).length,
+        rowHeightsCount: Object.keys(metadata.rowHeights || {}).length,
+      });
       
       const response = await saveTable(
         settings.tableId, 
@@ -639,6 +749,14 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         columnWidths: settings.columnWidths,
         rowHeights: settings.rowHeights,
       };
+      
+      console.log('💾 [TABLE-SAVE-AS] Saving metadata:', {
+        design: metadata.design,
+        layout: metadata.layout,
+        hasCellFormatting: !!metadata.cellFormatting,
+        columnWidthsCount: Object.keys(metadata.columnWidths || {}).length,
+        rowHeightsCount: Object.keys(metadata.rowHeights || {}).length,
+      });
       
       const response = await saveTable(
         settings.tableId, 

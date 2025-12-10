@@ -92,6 +92,11 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   } | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  
+  // Filter data state - stores data without current column's filter for showing all options
+  const [filterData, setFilterData] = useState<TableData | null>(null);
+  const [filterColumn, setFilterColumn] = useState<string | null>(null);
+  const [loadingFilterData, setLoadingFilterData] = useState(false);
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
   const rowRefs = useRef<{ [key: number]: HTMLTableRowElement | null }>({});
   const portalTarget = typeof document !== 'undefined' ? document.body : null;
@@ -329,6 +334,10 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         }
       });
 
+      // Clear filter data when filter is applied (will reload on next open)
+      setFilterData(null);
+      setFilterColumn(null);
+
       toast({
         title: 'Filter applied',
         description: `Filter applied to column: ${column}`,
@@ -344,6 +353,54 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
   const handleClearFilter = async (column: string) => {
     await handleColumnFilter(column, []);
+    // Clear filter data when filter is cleared
+    setFilterData(null);
+    setFilterColumn(null);
+  };
+
+  // Handle opening filter dialog - load data without current column's filter
+  const handleOpenFilter = async (column: string) => {
+    if (!settings.tableId) {
+      // If no tableId, just open filter with current data
+      setFilterData(null);
+      setFilterColumn(column);
+      setOpenDropdown(openDropdown === 'filter' ? null : 'filter');
+      return;
+    }
+
+    try {
+      setLoadingFilterData(true);
+      
+      // Temporarily remove this column's filter to show all options
+      const tempFilters = { ...settings.filters };
+      delete tempFilters[column];
+      
+      // Load data with all filters EXCEPT current column's filter
+      const resp = await updateTable(settings.tableId, {
+        ...settings,
+        filters: tempFilters,  // All filters EXCEPT current column
+      });
+      
+      // Store this data for filter component (shows all options for this column)
+      setFilterData({
+        table_id: resp.table_id,
+        columns: resp.columns,
+        rows: resp.rows,
+        row_count: resp.row_count,
+        column_types: resp.column_types,
+        object_name: resp.object_name || data.object_name,
+      });
+      setFilterColumn(column);
+      setOpenDropdown(openDropdown === 'filter' ? null : 'filter');
+    } catch (error: any) {
+      console.error('Failed to load filter data:', error);
+      // Fallback: use current data if loading fails
+      setFilterData(null);
+      setFilterColumn(column);
+      setOpenDropdown(openDropdown === 'filter' ? null : 'filter');
+    } finally {
+      setLoadingFilterData(false);
+    }
   };
 
   // Execute deletion of multiple columns
@@ -949,6 +1006,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
         setContextMenu(null);
         setOpenDropdown(null);
+        // Clear filter data when context menu closes
+        setFilterData(null);
+        setFilterColumn(null);
       }
     };
 
@@ -1917,35 +1977,51 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                 className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setOpenDropdown(openDropdown === 'filter' ? null : 'filter');
+                  if (contextMenu) {
+                    handleOpenFilter(contextMenu.col);
+                  }
                 }}
+                disabled={loadingFilterData}
               >
                 Filter <span style={{ fontSize: '10px', marginLeft: 4 }}>▶</span>
+                {loadingFilterData && <span className="ml-2 text-xs text-gray-500">Loading...</span>}
               </button>
-              {openDropdown === 'filter' && (
+              {openDropdown === 'filter' && contextMenu && (
                 <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md z-50">
-                  {data.column_types[contextMenu.col] === 'number' ? (
-                    <NumberFilterComponent
-                      column={contextMenu.col}
-                      data={data}
-                      onApplyFilter={handleColumnFilter}
-                      onClearFilter={handleClearFilter}
-                      onClose={() => {
-                        setContextMenu(null);
-                        setOpenDropdown(null);
-                      }}
-                    />
+                  {loadingFilterData ? (
+                    <div className="p-4 text-xs text-gray-500">Loading filter options...</div>
                   ) : (
-                    <TextFilterComponent
-                      column={contextMenu.col}
-                      data={data}
-                      onApplyFilter={handleColumnFilter}
-                      onClearFilter={handleClearFilter}
-                      onClose={() => {
-                        setContextMenu(null);
-                        setOpenDropdown(null);
-                      }}
-                    />
+                    <>
+                      {data.column_types[contextMenu.col] === 'number' ? (
+                        <NumberFilterComponent
+                          column={contextMenu.col}
+                          data={filterData && filterColumn === contextMenu.col ? filterData : data}
+                          onApplyFilter={handleColumnFilter}
+                          onClearFilter={handleClearFilter}
+                          onClose={() => {
+                            setContextMenu(null);
+                            setOpenDropdown(null);
+                            setFilterData(null);
+                            setFilterColumn(null);
+                          }}
+                          currentFilter={settings.filters[contextMenu.col]}
+                        />
+                      ) : (
+                        <TextFilterComponent
+                          column={contextMenu.col}
+                          data={filterData && filterColumn === contextMenu.col ? filterData : data}
+                          onApplyFilter={handleColumnFilter}
+                          onClearFilter={handleClearFilter}
+                          onClose={() => {
+                            setContextMenu(null);
+                            setOpenDropdown(null);
+                            setFilterData(null);
+                            setFilterColumn(null);
+                          }}
+                          currentFilter={settings.filters[contextMenu.col]}
+                        />
+                      )}
+                    </>
                   )}
                 </div>
               )}

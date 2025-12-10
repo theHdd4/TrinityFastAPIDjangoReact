@@ -204,20 +204,24 @@ async def update_table(request: TableUpdateRequest):
         metadata = await get_session_metadata(request.table_id)
         object_name = metadata.get("object_name") if metadata else ""
         
-        # Apply settings (filters, sorting, column selection)
+        # Apply settings (filters, sorting, column selection) for response only
+        # NOTE: Do NOT update session with filtered data - session should always contain
+        # original unfiltered data. Filters are view operations, not data changes.
         processed_df = apply_table_settings(
             df=df,
             settings=request.settings.dict()
         )
         
-        # Update session with processed DataFrame
-        SESSIONS[request.table_id] = processed_df
+        # ❌ REMOVED: Don't update session with filtered data
+        # Session should remain as original unfiltered data
+        # Filters are applied only when generating response, not stored in session
+        # This ensures filter options always show all unique values from entire dataset
         
-        # Queue draft save (debounced)
+        # Queue draft save (debounced) - save original data, not filtered
         if object_name:
             await queue_draft_save(
                 table_id=request.table_id,
-                df=processed_df,
+                df=df,  # Save original data, not filtered
                 atom_id=atom_id,
                 project_id=project_id,
                 object_name=object_name

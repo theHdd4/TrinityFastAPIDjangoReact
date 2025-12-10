@@ -339,13 +339,13 @@ def dataframe_to_response(df: pl.DataFrame, table_id: str,
     Returns:
         Dictionary in TableResponse format
     """
-    # Limit rows for initial response (pagination handled separately)
-    preview_df = df.head(100)
+    # Return all rows - frontend handles pagination (15 rows per page)
+    # This ensures filter components have access to all unique values from entire dataset
     
     response = {
         "table_id": table_id,
         "columns": df.columns,
-        "rows": preview_df.to_dicts(),
+        "rows": df.to_dicts(),  # Return all rows, not limited to 100
         "row_count": len(df),
         "column_types": get_column_types(df)
     }

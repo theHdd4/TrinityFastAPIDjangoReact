@@ -7,6 +7,7 @@ interface TextFilterComponentProps {
   onApplyFilter: (column: string, filterValue: string[] | [number, number]) => void;
   onClearFilter: (column: string) => void;
   onClose: () => void;
+  currentFilter?: string[]; // Current filter values for this column
 }
 
 function safeToString(val: any): string {
@@ -28,11 +29,9 @@ const TextFilterComponent: React.FC<TextFilterComponentProps> = ({
   data,
   onApplyFilter,
   onClearFilter,
-  onClose
+  onClose,
+  currentFilter
 }) => {
-  const [selectedValues, setSelectedValues] = useState<string[]>([]);
-  const [searchTerm, setSearchTerm] = useState<string>('');
-
   // Get unique values for this column
   const uniqueValues = useMemo(() => {
     const values = data.rows
@@ -54,6 +53,29 @@ const TextFilterComponent: React.FC<TextFilterComponentProps> = ({
     
     return unique;
   }, [data.rows, column]);
+
+  // Initialize selectedValues based on current filter or all values
+  const [selectedValues, setSelectedValues] = useState<string[]>([]);
+  
+  const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // Update selectedValues when uniqueValues or currentFilter changes
+  React.useEffect(() => {
+    if (currentFilter && Array.isArray(currentFilter) && currentFilter.length > 0) {
+      // Convert current filter to strings and filter to only include valid values
+      const filterStrings = currentFilter.map(v => safeToString(v));
+      const validFilterValues = filterStrings.filter(v => uniqueValues.includes(v));
+      if (validFilterValues.length > 0) {
+        setSelectedValues(validFilterValues);
+      } else {
+        // If filter values don't match, select all
+        setSelectedValues([...uniqueValues]);
+      }
+    } else {
+      // If no filter, select all by default
+      setSelectedValues([...uniqueValues]);
+    }
+  }, [uniqueValues, currentFilter]);
 
   // Filter values based on search term
   const filteredValues = useMemo(() => {
