@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import logging
 import json
+import re
 import uuid
 from dataclasses import asdict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -87,6 +88,52 @@ async def _wait_for_clarification_response(websocket: WebSocket) -> dict | None:
 
         logger.debug("Ignoring non-clarification message while waiting: %s", parsed)
 
+
+def _compute_vagueness_score(prompt: str) -> float:
+    """Compute a lightweight vagueness score between 0 and 1.
+
+    Heuristic factors:
+    - Longer prompts increase the score
+    - Presence of concrete signals (numbers, dates, file-like tokens)
+    - Penalize vague starter phrases and excessive interrogatives
+    """
+
+    if not prompt:
+        return 0.0
+
+    normalized = prompt.strip().lower()
+    word_count = len(re.findall(r"\b\w+\b", normalized))
+    sentence_count = max(1, normalized.count(".") + normalized.count("!") + normalized.count("?"))
+
+    # Base score from length (cap at ~25 words)
+    length_score = min(1.0, word_count / 25)
+
+    # Specificity indicators
+    has_numbers = bool(re.search(r"\d", normalized))
+    has_dates = bool(re.search(r"\b(\d{4}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b", normalized))
+    has_paths = bool(re.search(r"\w+/\w+", normalized))
+    specificity_bonus = 0.15 * sum([has_numbers, has_dates, has_paths])
+
+    # Penalize vague openers
+    vague_prefixes = (
+        "can you help",
+        "please assist",
+        "i need help",
+        "can you do",
+    )
+    vague_penalty = 0.2 if normalized.startswith(vague_prefixes) else 0.0
+
+    # Penalize question-only statements with few words
+    interrogative_penalty = 0.0
+    if normalized.endswith("?") and word_count < 8:
+        interrogative_penalty = 0.1
+
+    score = max(0.0, min(1.0, length_score + specificity_bonus - vague_penalty - interrogative_penalty))
+
+    # Smooth by sentence count to reward structured inputs
+    score = min(1.0, score * (1 + min(0.2, sentence_count * 0.05)))
+    return score
+
 # Initialize components (will be set by main_api.py)
 rag_engine = None
 parameter_generator = None
@@ -137,6 +184,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
     close_code = 1000
     close_reason = "workflow_complete"
     clarification_task = None
+    clarification_history: list[dict] = []
 
     try:
         # Import components
@@ -215,7 +263,77 @@ async def execute_workflow_websocket(websocket: WebSocket):
         logger.info(f"📨 NEW REQUEST RECEIVED: {user_prompt}")
         logger.info(f"📨 Full message: {json.dumps(message, indent=2)}")
         logger.info("=" * 80)
-        
+
+        # Evaluate vagueness before processing to engage human-in-the-loop when needed
+        vagueness_threshold = float(message.get("vagueness_threshold", 0.6))
+        vagueness_score = _compute_vagueness_score(user_prompt)
+        logger.info(
+            "🧭 Vagueness check -> score=%.2f threshold=%.2f", vagueness_score, vagueness_threshold
+        )
+
+        while vagueness_score < vagueness_threshold:
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "clarification_required",
+                    "message": (
+                        "I need more details to proceed. Please provide additional context or specifics. "
+                        f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
+                    ),
+                    "vagueness_score": vagueness_score,
+                    "vagueness_threshold": vagueness_threshold,
+                },
+            )
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "awaiting_clarification",
+                    "message": "Awaiting more details to reduce vagueness.",
+                },
+            )
+
+            clarification_response = await _wait_for_clarification_response(websocket)
+            if not clarification_response:
+                close_code = 1001
+                close_reason = "clarification_aborted"
+                return
+
+            clarification_history.append(
+                {
+                    "message": clarification_response.get("message", ""),
+                    "values": clarification_response.get("values") or {},
+                }
+            )
+
+            clarification_parts = []
+            if clarification_response.get("message"):
+                clarification_parts.append(clarification_response["message"])
+            values = clarification_response.get("values") or {}
+            if values:
+                clarification_parts.append(" | ".join(f"{k}: {v}" for k, v in values.items()))
+
+            if clarification_parts:
+                user_prompt = f"{user_prompt}\n\nUser clarification: {'; '.join(clarification_parts)}"
+
+            vagueness_score = _compute_vagueness_score(user_prompt)
+            logger.info(
+                "🧭 Recomputed vagueness score after clarification -> %.2f (threshold=%.2f)",
+                vagueness_score,
+                vagueness_threshold,
+            )
+
+        await _safe_send_json(
+            websocket,
+            {
+                "type": "status",
+                "status": "clarification_complete",
+                "message": "Received enough details. Proceeding with execution.",
+                "vagueness_score": vagueness_score,
+                "vagueness_threshold": vagueness_threshold,
+            },
+        )
+
         # Step 1: Send "Analyzing the query..." message immediately
         if not await _safe_send_json(websocket, {
             "type": "status",
@@ -450,6 +568,12 @@ async def execute_workflow_websocket(websocket: WebSocket):
         user_id = message.get("user_id", "default_user")
         history_summary = message.get("history_summary")
         mentioned_files = message.get("mentioned_files") or []
+
+        # Persist vagueness metadata for downstream execution
+        project_context = project_context or {}
+        project_context["vagueness_score"] = vagueness_score
+        project_context["vagueness_threshold"] = vagueness_threshold
+        project_context["clarification_history"] = clarification_history
         
         # 🔧 CRITICAL FIX: Extract project context from file paths if not provided or contains 'default' values
         # Check if project_context is missing, empty, or contains 'default' values
