@@ -11,6 +11,7 @@ from .types import ReActState, WebSocketEvent, WorkflowStepPlan
 from .react_mixin import ReactWorkflowMixin
 from .planning_mixin import WorkflowPlanningMixin
 from .execution_mixin import WorkflowExecutionMixin
+from .settings import settings
 from STREAMAI.lab_context_builder import LabContextBuilder
 from STREAMAI.lab_memory_store import LabMemoryStore
 from ..graphrag import GraphRAGWorkspaceConfig
@@ -30,33 +31,6 @@ except ImportError:  # pragma: no cover
         # Fallback: define a no-op function
         def get_workflow_insight_agent():
             return None
-
-# Import centralized settings
-try:  # pragma: no cover
-    from BaseAgent.config import settings
-except ImportError:  # pragma: no cover
-    try:
-        from TrinityAgent.BaseAgent.config import settings
-    except ImportError:  # pragma: no cover
-        # Fallback: create minimal settings wrapper if BaseAgent not available
-        class SettingsWrapper:
-            OLLAMA_IP = None
-            OLLAMA_PORT = "11434"
-            HOST_IP = "127.0.0.1"
-            LLM_API_URL = None
-            LLM_MODEL_NAME = "deepseek-r1:32b"
-            LLM_BEARER_TOKEN = "aakash_api_key"
-            FASTAPI_BASE_URL = None
-            FASTAPI_HOST = None
-            FASTAPI_PORT = "8001"
-            CLIENT_NAME = None
-            APP_NAME = None
-            PROJECT_NAME = None
-            STREAM_AI_ATOM_RETRY_ATTEMPTS = 3
-            STREAM_AI_ATOM_RETRY_DELAY_SECONDS = 2.0
-            RUNNING_IN_DOCKER = None
-
-        settings = SettingsWrapper()
 
 # Import ReAct orchestrator - try both paths
 try:  # pragma: no cover
