@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Plus,
   Search,
@@ -54,7 +55,6 @@ interface Tenant {
   created_on: string;
   primary_domain: string;
   seats_allowed: number;
-  project_cap: number;
   allowed_apps: number[];
   projects_allowed: string[];
   users_in_use: number;
@@ -88,12 +88,9 @@ const Clients = () => {
     schema_name: '',
     primary_domain: '',
     seats_allowed: '',
-    project_cap: '',
     apps_allowed: [] as number[],
-    projects_allowed: '',
     admin_name: '',
     admin_email: '',
-    admin_password: '',
   });
 
   const navigate = useNavigate();
@@ -174,15 +171,21 @@ const Clients = () => {
   }, [updatePillDimensions, showAddForm, activeTab]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value, options } = e.target as HTMLSelectElement;
-    if (name === 'apps_allowed') {
-      const selected = Array.from(options)
-        .filter((o) => o.selected)
-        .map((o) => Number(o.value));
-      setForm({ ...form, apps_allowed: selected });
-    } else {
-      setForm({ ...form, [name]: value });
-    }
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
+  };
+
+  const handleAppToggle = (appId: number) => {
+    setForm((prev) => {
+      const currentApps = prev.apps_allowed;
+      const isSelected = currentApps.includes(appId);
+      return {
+        ...prev,
+        apps_allowed: isSelected
+          ? currentApps.filter((id) => id !== appId)
+          : [...currentApps, appId],
+      };
+    });
   };
 
   const handleEditClient = (tenantId: number) => {
@@ -195,14 +198,9 @@ const Clients = () => {
       schema_name: client.schema_name,
       primary_domain: client.primary_domain || '',
       seats_allowed: String(client.seats_allowed),
-      project_cap: String(client.project_cap),
       apps_allowed: client.allowed_apps || [],
-      projects_allowed: Array.isArray(client.projects_allowed) 
-        ? client.projects_allowed.join(', ') 
-        : client.projects_allowed || '',
       admin_name: client.admin_name || '',
       admin_email: client.admin_email || '',
-      admin_password: '',
     });
     setShowAddForm(true);
   };
@@ -235,12 +233,9 @@ const Clients = () => {
             schema_name: '',
             primary_domain: '',
             seats_allowed: '',
-            project_cap: '',
             apps_allowed: [],
-            projects_allowed: '',
             admin_name: '',
             admin_email: '',
-            admin_password: '',
           });
           setEditingTenantId(null);
           setShowAddForm(false);
@@ -268,20 +263,16 @@ const Clients = () => {
       }
     } else {
       // Create new tenant
+      // Backend will generate UUID for admin password if not provided
       const payload = {
         name: form.name,
         schema_name: form.schema_name,
         primary_domain: form.primary_domain,
         seats_allowed: Number(form.seats_allowed),
-        project_cap: Number(form.project_cap),
         allowed_apps: form.apps_allowed,
-        projects_allowed: form.projects_allowed
-          .split(',')
-          .map((p) => p.trim())
-          .filter((p) => p.length > 0),
         admin_name: form.admin_name,
         admin_email: form.admin_email,
-        admin_password: form.admin_password,
+        // admin_password omitted - backend will generate UUID
       };
       console.log('Submitting tenant payload', payload);
       setIsCreatingClient(true);
@@ -344,12 +335,9 @@ const Clients = () => {
               schema_name: '',
               primary_domain: '',
               seats_allowed: '',
-              project_cap: '',
               apps_allowed: [],
-              projects_allowed: '',
               admin_name: '',
               admin_email: '',
-              admin_password: '',
             });
             setIsCreatingClient(false);
             setShowAddForm(false);
@@ -511,12 +499,9 @@ const Clients = () => {
                     schema_name: '',
                     primary_domain: '',
                     seats_allowed: '',
-                    project_cap: '',
                     apps_allowed: [],
-                    projects_allowed: '',
                     admin_name: '',
                     admin_email: '',
-                    admin_password: '',
                   });
                 }
                 setShowAddForm(!showAddForm);
@@ -668,49 +653,24 @@ const Clients = () => {
                     className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="project_cap" className="text-sm font-medium text-gray-700">Projects Allowed</Label>
-                  <Input
-                    id="project_cap"
-                    name="project_cap"
-                    type="number"
-                    value={form.project_cap}
-                    onChange={handleChange}
-                    placeholder="0"
-                    disabled={editingTenantId !== null}
-                    readOnly={editingTenantId !== null}
-                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                  />
-                </div>
                 <div className="space-y-2 md:col-span-2 lg:col-span-3">
                   <Label htmlFor="apps_allowed" className="text-sm font-medium text-gray-700">Allowed Apps</Label>
-                  <select
-                    id="apps_allowed"
-                    name="apps_allowed"
-                    multiple
-                    value={form.apps_allowed.map(String)}
-                    onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
+                  <div className="w-full max-h-[200px] overflow-y-auto border border-gray-200 rounded-md p-3 space-y-2 bg-white">
                     {apps.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
+                      <label
+                        key={a.id}
+                        htmlFor={`app-${a.id}`}
+                        className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded-md transition-colors"
+                      >
+                        <Checkbox
+                          id={`app-${a.id}`}
+                          checked={form.apps_allowed.includes(a.id)}
+                          onCheckedChange={() => handleAppToggle(a.id)}
+                        />
+                        <span className="text-sm text-gray-700">{a.name}</span>
+                      </label>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-2 md:col-span-2 lg:col-span-3">
-                  <Label htmlFor="projects_allowed" className="text-sm font-medium text-gray-700">Allowed Projects (comma separated)</Label>
-                  <Input
-                    id="projects_allowed"
-                    name="projects_allowed"
-                    value={form.projects_allowed}
-                    onChange={handleChange}
-                    placeholder="project1, project2"
-                    disabled={editingTenantId !== null}
-                    readOnly={editingTenantId !== null}
-                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                  />
+                  </div>
                 </div>
 
                 <div className="space-y-2 md:col-span-2 lg:col-span-3">
@@ -745,21 +705,6 @@ const Clients = () => {
                     required={editingTenantId === null}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="admin_password" className="text-sm font-medium text-gray-700">Admin Password *</Label>
-                  <Input
-                    id="admin_password"
-                    name="admin_password"
-                    type="password"
-                    value={form.admin_password}
-                    onChange={handleChange}
-                    placeholder="********"
-                    disabled={editingTenantId !== null}
-                    readOnly={editingTenantId !== null}
-                    className={`border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${editingTenantId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                    required={editingTenantId === null}
-                  />
-                </div>
 
                 <div className="md:col-span-2 lg:col-span-3 flex justify-end">
                   <Button type="submit" className="bg-gradient-to-r from-green-500 to-emerald-600 hover:opacity-90 shadow-md">
@@ -769,6 +714,7 @@ const Clients = () => {
                 </div>
 
                 {/* Bills and Plans Tab Content */}
+                {activeTab === 'bills' && (
                 <div className="md:col-span-2 lg:col-span-3 space-y-6 mt-8 pt-8 border-t border-gray-200">
                   <h3 className="text-lg font-semibold text-gray-800 mb-4">Bills and Plans</h3>
                     {/* Current Plan Section */}
@@ -902,8 +848,10 @@ const Clients = () => {
                       </Button>
                     </div>
                 </div>
+                )}
 
                 {/* Client's Quota Tab Content */}
+                {activeTab === 'quota' && (
                 <div className="md:col-span-2 lg:col-span-3 space-y-6 mt-8 pt-8 border-t border-gray-200">
                   <h3 className="text-lg font-semibold text-gray-800 mb-4">Client's Quota</h3>
                     {/* Usage Metrics Section */}
@@ -1106,6 +1054,7 @@ const Clients = () => {
                       </Button>
                     </div>
                 </div>
+                )}
               </form>
             </Card>
           )}
@@ -1241,10 +1190,6 @@ const Clients = () => {
                     <span>
                       Users: {client.users_in_use}/{client.seats_allowed}
                     </span>
-                  </div>
-                  <div className="flex items-center text-sm text-gray-600">
-                    <Calendar className="w-4 h-4 mr-2" />
-                    <span>Projects allowed: {client.project_cap}</span>
                   </div>
                 </div>
 

@@ -7,6 +7,7 @@ from datetime import timedelta
 import os
 import re
 import sys
+import uuid
 from .models import Tenant, Domain
 from apps.registry.models import App
 from apps.accounts.models import User, UserTenant, OnboardToken
@@ -27,7 +28,7 @@ class TenantSerializer(serializers.ModelSerializer):
     users_in_use = serializers.IntegerField(read_only=True)
     admin_name = serializers.CharField()
     admin_email = serializers.EmailField()
-    admin_password = serializers.CharField(write_only=True)
+    admin_password = serializers.CharField(write_only=True, required=False)
     onboard_token = serializers.SerializerMethodField()
     onboard_token_expires_at = serializers.SerializerMethodField()
     admin_username = serializers.SerializerMethodField()
@@ -84,7 +85,12 @@ class TenantSerializer(serializers.ModelSerializer):
         projects_allowed = validated_data.pop("projects_allowed", [])
         admin_name = validated_data.pop("admin_name")
         admin_email = validated_data.pop("admin_email")
-        admin_password = validated_data.pop("admin_password")
+        admin_password = validated_data.pop("admin_password", None)
+        
+        # Generate random UUID if password not provided - user will set password during onboarding
+        if admin_password is None:
+            admin_password = str(uuid.uuid4())
+            print(f"→ Generated UUID password for admin user: {admin_name}")
 
         # Normalize schema name
         schema = (

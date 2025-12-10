@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Search,
   Plus,
@@ -75,7 +76,6 @@ const Users = () => {
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [form, setForm] = useState({
     username: '',
-    password: '',
     email: '',
     role: 'viewer',
     allowed_apps: [] as number[],
@@ -161,15 +161,21 @@ const Users = () => {
   const handleFormChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
-    const { name, value, options } = e.target as HTMLSelectElement;
-    if (name === 'allowed_apps') {
-      const selected = Array.from(options)
-        .filter((o) => o.selected)
-        .map((o) => Number(o.value));
-      setForm({ ...form, allowed_apps: selected });
-    } else {
-      setForm({ ...form, [name]: value });
-    }
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
+  };
+
+  const handleAppToggle = (appId: number) => {
+    setForm((prev) => {
+      const currentApps = prev.allowed_apps;
+      const isSelected = currentApps.includes(appId);
+      return {
+        ...prev,
+        allowed_apps: isSelected
+          ? currentApps.filter((id) => id !== appId)
+          : [...currentApps, appId],
+      };
+    });
   };
 
   const handleEditUser = (userId: number) => {
@@ -179,7 +185,6 @@ const Users = () => {
       setForm({
         username: user.username,
         email: user.email,
-        password: '', // Empty for editing
         role: user.role || 'viewer',
         allowed_apps: user.allowed_apps_read || [],
       });
@@ -254,7 +259,7 @@ const Users = () => {
           });
         }
         
-        setForm({ username: '', password: '', email: '', role: 'viewer', allowed_apps: [] });
+        setForm({ username: '', email: '', role: 'viewer', allowed_apps: [] });
         setEditingUserId(null);
         setShowAddForm(false);
         await loadUsers();
@@ -510,7 +515,7 @@ const Users = () => {
                 setShowAddForm((v) => !v);
                 if (showAddForm) {
                   setEditingUserId(null);
-                  setForm({ username: '', password: '', email: '', role: 'viewer', allowed_apps: [] });
+                  setForm({ username: '', email: '', role: 'viewer', allowed_apps: [] });
                 }
               }}
             >
@@ -533,16 +538,6 @@ const Users = () => {
                   name="username"
                   placeholder="Username"
                   value={form.username}
-                  onChange={handleFormChange}
-                  disabled={editingUserId !== null}
-                  readOnly={editingUserId !== null}
-                  className={`border-gray-200 ${editingUserId !== null ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                />
-                <Input
-                  name="password"
-                  type="password"
-                  placeholder="Password"
-                  value={form.password}
                   onChange={handleFormChange}
                   disabled={editingUserId !== null}
                   readOnly={editingUserId !== null}
@@ -578,22 +573,24 @@ const Users = () => {
                   <label htmlFor="allowed_apps" className="text-sm font-medium text-gray-700">
                     Allowed Apps
                   </label>
-                  <select
-                    id="allowed_apps"
-                    name="allowed_apps"
-                    multiple
-                    value={form.allowed_apps.map(String)}
-                    onChange={handleFormChange}
-                    className="w-full border border-gray-200 rounded-md px-3 py-2"
-                  >
+                  <div className="w-full max-h-[200px] overflow-y-auto border border-gray-200 rounded-md p-3 space-y-2 bg-white">
                     {apps
                       .filter((a) => tenantAppIds.includes(a.id))
                       .map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
+                        <label
+                          key={a.id}
+                          htmlFor={`app-${a.id}`}
+                          className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded-md transition-colors"
+                        >
+                          <Checkbox
+                            id={`app-${a.id}`}
+                            checked={form.allowed_apps.includes(a.id)}
+                            onCheckedChange={() => handleAppToggle(a.id)}
+                          />
+                          <span className="text-sm text-gray-700">{a.name}</span>
+                        </label>
                       ))}
-                  </select>
+                  </div>
                 </div>
                 <div className="md:col-span-3 flex justify-end">
                   <Button type="submit" className="bg-gradient-to-r from-green-500 to-emerald-600">
