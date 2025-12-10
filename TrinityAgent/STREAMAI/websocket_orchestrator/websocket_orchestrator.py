@@ -46,14 +46,24 @@ except ImportError:  # pragma: no cover
             self.reason = reason
             super().__init__(code, reason)
 
-from .atom_mapping import ATOM_MAPPING
-from .graphrag import GraphRAGWorkspaceConfig
-from .graphrag.client import GraphRAGQueryClient
-from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
-from .laboratory_retriever import LaboratoryRetrievalPipeline
+from ..atom_mapping import ATOM_MAPPING
+from ..graphrag import GraphRAGWorkspaceConfig
+from ..graphrag.client import GraphRAGQueryClient
+from ..graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
+from ..laboratory_retriever import LaboratoryRetrievalPipeline
 from STREAMAI.lab_context_builder import LabContextBuilder
 from STREAMAI.lab_memory_models import LaboratoryEnvelope, WorkflowStepRecord
 from STREAMAI.lab_memory_store import LabMemoryStore
+from STREAMAI.websocket_orchestrator.atoms.dataset_rules import (
+    PREFERS_LATEST_DATASET_ATOMS,
+    DATASET_OUTPUT_ATOMS,
+)
+from STREAMAI.websocket_orchestrator.planning.step_models import WorkflowPlan, WorkflowStepPlan
+from STREAMAI.websocket_orchestrator.react.react_state import ReActState, StepEvaluation
+from STREAMAI.websocket_orchestrator.safety.llm_retry import (
+    RetryableJSONGenerationError,
+    retry_llm_json_generation,
+)
 # Import workflow_insight_agent - try both paths for Docker and local development
 try:
     from Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
@@ -92,7 +102,7 @@ except ImportError:
 
 # Import ReAct orchestrator - try both paths
 try:
-    from .react_workflow_orchestrator import get_react_orchestrator
+    from ..react_workflow_orchestrator import get_react_orchestrator
     REACT_AVAILABLE = True
 except ImportError:
     try:
@@ -116,155 +126,15 @@ except Exception:  # pragma: no cover - memory service optional
     memory_storage_module = None
     summarize_chat_messages = None
 
-# Atom capability metadata for file/alias handling
-DATASET_OUTPUT_ATOMS = {
-    "data-upload-validate",
-    "dataframe-operations",
-    "groupby-wtg-avg",
-    "create-column",
-    "create-transform",
-    "merge",
-    "concat",
-    "pivot-table",
-}
-
-# Atoms that should default to using the latest produced dataset when inputs aren't explicit
-PREFERS_LATEST_DATASET_ATOMS = {
-    "dataframe-operations",
-    "groupby-wtg-avg",
-    "create-column",
-    "create-transform",
-    "chart-maker",
-}
-
-
 @dataclass
 class WebSocketEvent:
     """WebSocket event to send to frontend"""
     type: str
     data: Dict[str, Any]
-    
+
     def to_json(self) -> str:
         """Convert to JSON string"""
         return json.dumps({"type": self.type, **self.data})
-
-
-@dataclass
-class WorkflowStepPlan:
-    """Represents a single workflow step with prompt metadata."""
-    step_number: int
-    atom_id: str
-    description: str
-    prompt: str
-    files_used: List[str]
-    inputs: List[str]
-    output_alias: str
-    enriched_description: Optional[str] = None  # Enriched description with file details for UI
-    atom_prompt: Optional[str] = None  # Full prompt that will be sent to atom LLM
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "step_number": self.step_number,
-            "atom_id": self.atom_id,
-            "description": self.description,
-            "enriched_description": self.enriched_description or self.description,
-            "prompt": self.prompt,
-            "atom_prompt": self.atom_prompt,  # Include full prompt for UI display
-            "files_used": self.files_used,
-            "inputs": self.inputs,
-            "output_alias": self.output_alias
-        }
-
-
-@dataclass
-class WorkflowPlan:
-    """Plan containing ordered workflow steps."""
-    workflow_steps: List[WorkflowStepPlan]
-    total_steps: int
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "workflow_steps": [step.to_dict() for step in self.workflow_steps],
-            "total_steps": self.total_steps
-        }
-
-
-class RetryableJSONGenerationError(Exception):
-    """Exception raised when JSON generation fails after all retries"""
-    def __init__(self, message: str, attempts: int, last_error: Exception):
-        super().__init__(message)
-        self.attempts = attempts
-        self.last_error = last_error
-
-
-@dataclass
-class StepEvaluation:
-    """Evaluation result for a workflow step execution."""
-    decision: str  # "continue", "retry_with_correction", "change_approach", "complete"
-    reasoning: str
-    quality_score: Optional[float] = None  # 0.0 to 1.0
-    correctness: bool = True
-    issues: List[str] = None
-    corrected_prompt: Optional[str] = None  # For retry_with_correction
-    alternative_approach: Optional[str] = None  # For change_approach
-    
-    def __post_init__(self):
-        if self.issues is None:
-            self.issues = []
-
-
-@dataclass
-class ReActState:
-    """ReAct agent state for a workflow sequence."""
-    sequence_id: str
-    user_prompt: str
-    goal_achieved: bool = False
-    current_step_number: int = 0
-    paused: bool = False  # Indicates whether the loop was paused mid-generation
-    paused_at_step: int = 0  # The step where generation paused
-    awaiting_clarification: bool = False  # True when user input is required to proceed
-    clarification_context: Optional[str] = None
-    execution_history: List[Dict[str, Any]] = None  # Previous steps and results
-    thoughts: List[str] = None  # Reasoning history
-    observations: List[str] = None  # Observation history
-    retry_count: int = 0  # Current step retry count
-    max_retries_per_step: int = 2
-    
-    def __post_init__(self):
-        if self.execution_history is None:
-            self.execution_history = []
-        if self.thoughts is None:
-            self.thoughts = []
-        if self.observations is None:
-            self.observations = []
-    
-    def add_thought(self, thought: str):
-        """Add a reasoning thought to history."""
-        self.thoughts.append(thought)
-    
-    def add_observation(self, observation: str):
-        """Add an observation to history."""
-        self.observations.append(observation)
-    
-    def add_execution(
-        self, 
-        step_number: int, 
-        atom_id: str, 
-        result: Dict[str, Any], 
-        evaluation: Optional[StepEvaluation] = None,
-        description: Optional[str] = None,
-        files_used: Optional[List[str]] = None
-    ):
-        """Add execution result to history."""
-        self.execution_history.append({
-            "step_number": step_number,
-            "atom_id": atom_id,
-            "result": result,
-            "evaluation": evaluation.__dict__ if evaluation else None,
-            "description": description,
-            "files_used": files_used or []
-        })
-        self.current_step_number = step_number
 
 
 class StreamWebSocketOrchestrator:
@@ -625,90 +495,24 @@ class StreamWebSocketOrchestrator:
         attempt_timeout: Optional[float] = None,
         pause_after_timeout: bool = False
     ) -> Any:
-        """
-        Retry mechanism for LLM JSON generation.
-        
-        Args:
-            llm_call_func: Async function that calls LLM and returns JSON-parsed result
-            step_name: Name of the step (for logging)
-            max_attempts: Maximum number of retry attempts (default: 3)
-            
-        Returns:
-            Parsed JSON result from LLM
-            
-        Raises:
-            RetryableJSONGenerationError: If all retry attempts fail
-        """
-        last_error = None
-        last_content = None
-        
-        for attempt in range(1, max_attempts + 1):
-            start_time = datetime.utcnow()
-            status_task = None
-            try:
-                logger.info(f"🔄 [{step_name}] Attempt {attempt}/{max_attempts}: Calling LLM for JSON generation...")
-                if status_callback:
-                    status_task = asyncio.create_task(
-                        self._periodic_generation_status(
-                            status_callback=status_callback,
-                            step_name=step_name,
-                            attempt=attempt,
-                            start_time=start_time,
-                            max_elapsed=attempt_timeout or self.llm_attempt_timeout_seconds,
-                        )
-                    )
+        """Delegate JSON generation retries to the shared helper."""
 
-                if attempt_timeout:
-                    result = await asyncio.wait_for(llm_call_func(), timeout=attempt_timeout)
-                else:
-                    result = await llm_call_func()
-                logger.info(f"✅ [{step_name}] Attempt {attempt} succeeded: Valid JSON generated")
-                return result
-            except asyncio.TimeoutError as e:
-                last_error = e
-                logger.warning(
-                    f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} timed out after {attempt_timeout or self.llm_attempt_timeout_seconds}s"
-                )
-                if status_callback:
-                    try:
-                        await status_callback(attempt, (datetime.utcnow() - start_time).total_seconds(), True)
-                    except Exception:
-                        logger.debug("⚠️ Status callback failed after timeout", exc_info=True)
-                if pause_after_timeout:
-                    raise
-            except json.JSONDecodeError as e:
-                last_error = e
-                logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: Invalid JSON - {e}")
-                if attempt < max_attempts:
-                    logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
-                else:
-                    logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed to generate valid JSON")
-            except ValueError as e:
-                last_error = e
-                logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: Validation error - {e}")
-                if attempt < max_attempts:
-                    logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
-                else:
-                    logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed: {e}")
-            except Exception as e:
-                last_error = e
-                logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: {type(e).__name__} - {e}")
-                if attempt < max_attempts:
-                    logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
-                else:
-                    logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed: {e}")
-            finally:
-                if status_task:
-                    status_task.cancel()
-                    with contextlib.suppress(Exception):
-                        await status_task
-        
-        # All attempts failed
-        error_msg = (
-            f"Failed to generate valid JSON for '{step_name}' after {max_attempts} attempts. "
-            f"Please rephrase your query in a clearer way."
+        async def attempt_fn():
+            if attempt_timeout:
+                return await asyncio.wait_for(llm_call_func(), timeout=attempt_timeout)
+            return await llm_call_func()
+
+        async def status_fn(attempt: int, elapsed: float, timed_out: bool) -> None:
+            if status_callback:
+                await status_callback(attempt, elapsed, timed_out)
+
+        return await retry_llm_json_generation(
+            attempt_fn=attempt_fn,
+            attempts=max_attempts,
+            delay_seconds=self.atom_retry_delay,
+            timeout_seconds=attempt_timeout or self.llm_attempt_timeout_seconds,
+            status_callback=status_fn,
         )
-        raise RetryableJSONGenerationError(error_msg, max_attempts, last_error)
 
     async def _periodic_generation_status(
         self,
