@@ -266,6 +266,15 @@ const Users = () => {
         try {
           const errorData = await res.json();
           errorMessage = errorData.detail || errorMessage;
+          
+          // Check if error is related to user quota
+          if (errorMessage && (
+            errorMessage.toLowerCase().includes('maximum allowed users') ||
+            errorMessage.toLowerCase().includes('quota') ||
+            errorMessage.toLowerCase().includes('seats_allowed')
+          )) {
+            errorMessage = 'You have exceeded your users quota. Please contact Quant Matrix to increase your quota.';
+          }
         } catch {
           // If response is not JSON, use default message
         }
@@ -342,6 +351,15 @@ const Users = () => {
         try {
           const errorData = await res.json();
           errorMessage = errorData.detail || errorMessage;
+          
+          // Check if error is related to user quota
+          if (errorMessage && (
+            errorMessage.toLowerCase().includes('maximum allowed users') ||
+            errorMessage.toLowerCase().includes('quota') ||
+            errorMessage.toLowerCase().includes('seats_allowed')
+          )) {
+            errorMessage = 'You have exceeded your users quota. Please contact Quant Matrix to increase your quota.';
+          }
         } catch {
           // If response is not JSON, use default message
         }

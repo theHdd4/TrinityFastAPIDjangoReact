@@ -146,6 +146,13 @@ class UserViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Check if adding a user would exceed seats_allowed
+        if admin_tenant.users_in_use >= admin_tenant.seats_allowed:
+            return Response(
+                {"detail": f"Cannot add user. Tenant has reached the maximum allowed users ({admin_tenant.seats_allowed}). Current users in use: {admin_tenant.users_in_use}. Please contact Quant Matrix to increase your quota."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         # Validate role if provided
         role = request.data.get("role")
         if role and role not in [UserRole.ROLE_ADMIN, UserRole.ROLE_EDITOR, UserRole.ROLE_VIEWER]:
@@ -229,9 +236,8 @@ class UserViewSet(viewsets.ModelViewSet):
                 print("=" * 50)
                 sys.stdout.flush()
                 
-                # Increment tenant's users_in_use counter
-                from apps.tenants.models import Tenant
-                Tenant.objects.filter(id=admin_tenant.id).update(users_in_use=models.F("users_in_use") + 1)
+                # Note: users_in_use is NOT incremented here
+                # It will be incremented when the user completes onboarding (OnboardCompleteView)
                 
         except Exception as e:
             # If UserRole creation fails, the transaction will rollback
@@ -446,6 +452,13 @@ class UserViewSet(viewsets.ModelViewSet):
             )
         
         tenant = user_tenant.tenant
+        
+        # Check if reactivating a user would exceed seats_allowed
+        if tenant.users_in_use >= tenant.seats_allowed:
+            return Response(
+                {"detail": f"Cannot reactivate user. Tenant has reached the maximum allowed users ({tenant.seats_allowed}). Current users in use: {tenant.users_in_use}. Please contact Quant Matrix to increase your quota."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         try:
             with transaction.atomic():
@@ -818,6 +831,34 @@ class OnboardCompleteView(APIView):
         try:
             with transaction.atomic():
                 user = onboard_token.user
+                
+                # Only increment users_in_use for first-time onboarding, not password reset
+                if onboard_token.purpose == "onboard":
+                    # Get user's tenant via UserTenant mapping
+                    user_tenant = user.tenant_mappings.filter(is_primary=True).first()
+                    if not user_tenant:
+                        user_tenant = user.tenant_mappings.first()
+                    
+                    if not user_tenant:
+                        return Response(
+                            {"detail": "User has no tenant mapping. Cannot complete onboarding."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    
+                    tenant = user_tenant.tenant
+                    
+                    # Check quota before activating user
+                    if tenant.users_in_use >= tenant.seats_allowed:
+                        return Response(
+                            {"detail": f"Cannot complete onboarding. Tenant has reached the maximum allowed users ({tenant.seats_allowed}). Current users in use: {tenant.users_in_use}. Please contact Quant Matrix to increase your quota."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    
+                    # Increment tenant's users_in_use counter for first-time onboarding
+                    from apps.tenants.models import Tenant
+                    Tenant.objects.filter(id=tenant.id).update(
+                        users_in_use=models.F("users_in_use") + 1
+                    )
                 
                 # Set password
                 user.set_password(password)

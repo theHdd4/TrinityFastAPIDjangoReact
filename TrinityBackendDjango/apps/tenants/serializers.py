@@ -326,8 +326,9 @@ class TenantSerializer(serializers.ModelSerializer):
             else:
                 print(f"   ♻️  Updated UserRole: {admin_name} - {UserRole.ROLE_ADMIN}")
 
-        # Update tenant users_in_use count
-        Tenant.objects.filter(id=tenant.id).update(users_in_use=1)
+        # Initialize tenant users_in_use count to 0
+        # It will be incremented when the admin user completes onboarding
+        Tenant.objects.filter(id=tenant.id).update(users_in_use=0)
 
         # Store token in tenant instance for serializer response
         tenant._onboard_token = str(onboard_token.token)

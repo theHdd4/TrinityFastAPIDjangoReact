@@ -559,6 +559,7 @@ const Clients = () => {
                   
                   <button
                     type="button"
+                    disabled
                     ref={(el) => {
                       tabButtonRefs.current['general'] = el;
                       if (activeTab === 'general' && el) {
@@ -567,12 +568,11 @@ const Clients = () => {
                         });
                       }
                     }}
-                    onClick={() => setActiveTab('general')}
                     className={cn(
-                      "relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200",
+                      "relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200 cursor-not-allowed opacity-60",
                       activeTab === 'general'
                         ? "text-gray-900"
-                        : "text-gray-600 hover:text-gray-900"
+                        : "text-gray-600"
                     )}
                   >
                     <span>General Settings</span>
@@ -580,20 +580,15 @@ const Clients = () => {
                   
                   <button
                     type="button"
+                    disabled
                     ref={(el) => {
                       tabButtonRefs.current['bills'] = el;
-                      if (activeTab === 'bills' && el) {
-                        requestAnimationFrame(() => {
-                          updatePillDimensions();
-                        });
-                      }
                     }}
-                    onClick={() => setActiveTab('bills')}
                     className={cn(
-                      "relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200",
+                      "relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200 cursor-not-allowed opacity-60",
                       activeTab === 'bills'
                         ? "text-gray-900"
-                        : "text-gray-600 hover:text-gray-900"
+                        : "text-gray-600"
                     )}
                   >
                     <span>Bills and Plans</span>
@@ -601,20 +596,15 @@ const Clients = () => {
                   
                   <button
                     type="button"
+                    disabled
                     ref={(el) => {
                       tabButtonRefs.current['quota'] = el;
-                      if (activeTab === 'quota' && el) {
-                        requestAnimationFrame(() => {
-                          updatePillDimensions();
-                        });
-                      }
                     }}
-                    onClick={() => setActiveTab('quota')}
                     className={cn(
-                      "relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200",
+                      "relative z-10 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200 cursor-not-allowed opacity-60",
                       activeTab === 'quota'
                         ? "text-gray-900"
-                        : "text-gray-600 hover:text-gray-900"
+                        : "text-gray-600"
                     )}
                   >
                     <span>Client's Quota</span>
@@ -624,8 +614,9 @@ const Clients = () => {
 
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {/* General Settings Tab Content */}
-                {activeTab === 'general' && (
-                  <>
+                <div className="md:col-span-2 lg:col-span-3">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">General Settings</h3>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="name" className="text-sm font-medium text-gray-700">Client Name *</Label>
                   <Input
@@ -776,12 +767,10 @@ const Clients = () => {
                     {editingTenantId !== null ? 'Update Client' : 'Save Client'}
                   </Button>
                 </div>
-                  </>
-                )}
 
                 {/* Bills and Plans Tab Content */}
-                {activeTab === 'bills' && (
-                  <div className="md:col-span-2 lg:col-span-3 space-y-6">
+                <div className="md:col-span-2 lg:col-span-3 space-y-6 mt-8 pt-8 border-t border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Bills and Plans</h3>
                     {/* Current Plan Section */}
                     <Card className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200">
                       <div className="flex items-start gap-4 mb-6">
@@ -912,12 +901,11 @@ const Clients = () => {
                         Save Client
                       </Button>
                     </div>
-                  </div>
-                )}
+                </div>
 
                 {/* Client's Quota Tab Content */}
-                {activeTab === 'quota' && (
-                  <div className="md:col-span-2 lg:col-span-3 space-y-6">
+                <div className="md:col-span-2 lg:col-span-3 space-y-6 mt-8 pt-8 border-t border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Client's Quota</h3>
                     {/* Usage Metrics Section */}
                     <div className="space-y-4">
                       <h3 className="text-lg font-semibold text-gray-900">Usage Metrics</h3>
@@ -1117,8 +1105,7 @@ const Clients = () => {
                         Save Client
                       </Button>
                     </div>
-                  </div>
-                )}
+                </div>
               </form>
             </Card>
           )}
