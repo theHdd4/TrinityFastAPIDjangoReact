@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import copy
 import hashlib
+import difflib
 import json
 import logging
 import os
@@ -50,6 +51,9 @@ from .graphrag import GraphRAGWorkspaceConfig
 from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
 from .laboratory_retriever import LaboratoryRetrievalPipeline
+from STREAMAI.lab_context_builder import LabContextBuilder
+from STREAMAI.lab_memory_models import LaboratoryEnvelope, WorkflowStepRecord
+from STREAMAI.lab_memory_store import LabMemoryStore
 # Import workflow_insight_agent - try both paths for Docker and local development
 try:
     from Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
@@ -218,6 +222,8 @@ class ReActState:
     current_step_number: int = 0
     paused: bool = False  # Indicates whether the loop was paused mid-generation
     paused_at_step: int = 0  # The step where generation paused
+    awaiting_clarification: bool = False  # True when user input is required to proceed
+    clarification_context: Optional[str] = None
     execution_history: List[Dict[str, Any]] = None  # Previous steps and results
     thoughts: List[str] = None  # Reasoning history
     observations: List[str] = None  # Observation history
@@ -288,6 +294,17 @@ class StreamWebSocketOrchestrator:
             logger.warning("⚠️ Laboratory retrieval pipeline unavailable: %s", lab_exc)
             self.laboratory_retriever = None
 
+        self.lab_memory_store: Optional[LabMemoryStore] = None
+        self.lab_context_builder: Optional[LabContextBuilder] = None
+        try:
+            self.lab_memory_store = LabMemoryStore()
+            self.lab_context_builder = LabContextBuilder(self.lab_memory_store)
+            logger.info("✅ Laboratory deterministic memory store initialized")
+        except Exception as lab_memory_exc:
+            logger.warning("⚠️ Laboratory memory store unavailable: %s", lab_memory_exc)
+            self.lab_memory_store = None
+            self.lab_context_builder = None
+
         # GraphRAG integration
         self.graph_workspace_config = GraphRAGWorkspaceConfig()
         self.graph_rag_client = GraphRAGQueryClient(self.graph_workspace_config)
@@ -308,6 +325,7 @@ class StreamWebSocketOrchestrator:
         self._paused_sequences: Set[str] = set()
         self._react_step_guards: Dict[str, Dict[str, Any]] = {}  # Prevent overlapping ReAct steps
         self._react_stall_watchdogs: Dict[str, Dict[str, Any]] = {}  # Detect stalled ReAct loops without progress
+        self._lab_atom_snapshot_cache: Dict[str, List[Dict[str, Any]]] = {}  # Realtime lab-mode atoms per sequence
 
         # Safety guards
         self.max_initial_plan_steps: int = 8  # Abort overly long upfront plans
@@ -406,6 +424,94 @@ class StreamWebSocketOrchestrator:
         if guard_entry and guard_entry.get("token") == guard_token:
             guard_entry["status"] = status
             guard_entry["updated_at"] = datetime.utcnow().isoformat()
+
+    @staticmethod
+    def _description_similarity(text_a: Optional[str], text_b: Optional[str]) -> float:
+        """Return similarity score between two descriptions (0-1)."""
+
+        if not text_a or not text_b:
+            return 0.0
+        return difflib.SequenceMatcher(None, text_a.lower(), text_b.lower()).ratio()
+
+    def _find_repeated_lab_atom(
+        self,
+        sequence_id: str,
+        request_id: Optional[str],
+        atom_id: str,
+        description: str,
+        execution_history: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Check recent history and persisted lab snapshots for repeated atoms with similar intent."""
+
+        similarity_threshold = 0.78
+        for hist in reversed(execution_history):
+            if hist.get("atom_id") != atom_id:
+                continue
+            if self._description_similarity(description, hist.get("description")) >= similarity_threshold:
+                return {"source": "memory", "record": hist}
+
+        cached_snapshots = self._lab_atom_snapshot_cache.get(sequence_id)
+        if cached_snapshots is None and self.lab_memory_store and request_id:
+            project_context = self._sequence_project_context.get(sequence_id, {})
+            cached_snapshots = self.lab_memory_store.load_atom_snapshots(
+                session_id=sequence_id,
+                request_id=request_id,
+                limit=25,
+                project_context=project_context,
+            )
+            self._lab_atom_snapshot_cache[sequence_id] = cached_snapshots
+
+        for snapshot in cached_snapshots or []:
+            step = (snapshot.get("step") or {}) if isinstance(snapshot, dict) else {}
+            if step.get("atom_id") != atom_id:
+                continue
+            if self._description_similarity(description, step.get("description")) >= similarity_threshold:
+                return {"source": "snapshot", "record": step}
+
+        return None
+
+    async def _pause_for_lab_clarification(
+        self,
+        websocket,
+        sequence_id: str,
+        react_state: ReActState,
+        guard_token: str,
+        current_step_number: int,
+        repeated_atom: str,
+        repeated_context: Dict[str, Any],
+    ) -> None:
+        """Pause workflow and prompt for clarification when repeat intent detected in lab mode."""
+
+        self._update_react_step_guard(sequence_id, guard_token, "paused_clarification")
+        react_state.paused = True
+        react_state.awaiting_clarification = True
+        react_state.paused_at_step = current_step_number
+        react_state.clarification_context = (
+            f"Atom '{repeated_atom}' appears to repeat a prior action. Provide clarification or choose a different atom."
+        )
+        self._paused_sequences.add(sequence_id)
+
+        message = (
+            f"Lab-mode guard: Atom '{repeated_atom}' looks similar to a previous step. "
+            "Please confirm an alternative approach or provide more detail to proceed."
+        )
+        try:
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "react_clarification_needed",
+                    {
+                        "sequence_id": sequence_id,
+                        "step_number": current_step_number,
+                        "repeated_atom": repeated_atom,
+                        "message": message,
+                        "previous_context": repeated_context,
+                    },
+                ),
+                "react_clarification_needed event",
+            )
+        except (WebSocketDisconnect, Exception):
+            logger.debug("⚠️ Unable to send clarification request event", exc_info=True)
     
     async def execute_react_workflow(
         self,
@@ -785,7 +891,7 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
      * Example: If Step 1 merged files → Step 2 grouped data → Use the grouped output file for chart, NOT the original files
      * Check EXECUTION HISTORY for output files created by previous steps
 
-8. **correlation** - Correlation Analysis (EDA Tool)
+9. **correlation** - Correlation Analysis (EDA Tool)
    - **CAN DO**: 
      * Calculates correlation matrix between numeric columns
      * Analyzes relationships and dependencies between variables
@@ -810,7 +916,7 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
    - **REQUIRED IN PROMPT**: Specify the file (column names optional - will analyze all numeric columns)
    - **WORKFLOW POSITION**: Early to mid workflow - use after data loading/merging for EDA insights
 
-9. **data-upload-validate** - Load Data
+10. **data-upload-validate** - Load Data
    - **CAN DO**: Loads and validates data files (CSV, Excel, Arrow) from MinIO
    - **USE WHEN**: Files don't exist yet and need to be uploaded/loaded
    - **REQUIRES**: File name to load
@@ -2285,10 +2391,11 @@ WORKFLOW PLANNING:
         lines.append("1. **Review EXECUTION HISTORY**: What steps have been completed? What files were created?")
         lines.append("2. **Review USER REQUEST**: What did the user ask for? What still needs to be done?")
         lines.append("3. **Review AVAILABLE FILES**: Which files are available? Which is the most recent output?")
-        lines.append("4. **Determine NEXT ACTION**: What specific operation needs to be done next?")
-        lines.append("5. **Check CHART REQUIREMENT**: Has chart-maker been used? If not, plan to use it (usually at the end)")
-        lines.append("6. **Select APPROPRIATE TOOL**: Which atom_id matches the next action?")
-        lines.append("7. **Verify FILE SELECTION**: Which file(s) should be used? Use the most recent output file if available.")
+        lines.append("4. **Review DATAFRAME SCHEMA**: What columns exist in the current DataFrame? (Check FILE METADATA above)")
+        lines.append("5. **Determine NEXT ACTION**: What specific operation needs to be done next?")
+        lines.append("6. **Check CHART REQUIREMENT**: Has chart-maker been used? If not, plan to use it (usually at the end)")
+        lines.append("7. **Select APPROPRIATE TOOL**: Which atom_id matches the next action?")
+        lines.append("8. **Verify FILE SELECTION**: Which file(s) should be used? Use the most recent output file if available.")
         lines.append("")
         lines.append("**ACTION (REQUIRED - Be specific):**")
         lines.append("- Select the next tool (atom_id) - must match one of the available atoms")
@@ -2728,6 +2835,10 @@ WORKFLOW PLANNING:
             frontend_chat_id,
             websocket_session_id,
         )
+        request_id = uuid.uuid4().hex
+        laboratory_mode = (project_context.get("mode") or "laboratory").lower() == "laboratory"
+        lab_envelope = None
+        lab_bundle: List[Dict[str, Any]] = []
         available_files = list(available_files or [])
         existing_files = self._sequence_available_files.get(sequence_id)
         if existing_files:
@@ -2735,6 +2846,16 @@ WORKFLOW PLANNING:
         self._sequence_available_files[sequence_id] = available_files
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
+        if self.lab_memory_store:
+            try:
+                self.lab_memory_store.apply_context(project_context)
+                request_id = self.lab_memory_store.get_or_create_request_id(
+                    session_id=sequence_id,
+                    incoming_request_id=request_id,
+                    project_context=project_context,
+                )
+            except Exception as ctx_exc:
+                logger.warning("⚠️ Failed to apply project context to lab memory store: %s", ctx_exc)
         if intent_route:
             self._sequence_intent_routing[sequence_id] = intent_route
         logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
@@ -2749,6 +2870,13 @@ WORKFLOW PLANNING:
                 sequence_id,
                 react_state.paused_at_step or react_state.current_step_number,
             )
+            if react_state.awaiting_clarification:
+                logger.info(
+                    "🧭 Resuming after clarification for %s; clearing clarification guard",
+                    sequence_id,
+                )
+                react_state.awaiting_clarification = False
+                react_state.clarification_context = None
 
         persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
         if persisted_history:
@@ -2777,6 +2905,38 @@ WORKFLOW PLANNING:
             self._chat_file_mentions[sequence_id] = file_focus
             effective_user_prompt = self._append_file_focus_note(effective_user_prompt, file_focus)
             logger.info("📁 Tracking %d file references from chat context", len(file_focus))
+
+        if laboratory_mode and self.lab_context_builder:
+            lab_envelope = self.lab_context_builder.build_envelope(
+                request_id=request_id,
+                session_id=sequence_id,
+                user_id=user_id,
+                model_version=self.llm_model,
+                feature_flags=project_context.get("feature_flags"),
+                prompt_template=self.lab_context_builder.prompt_template,
+                prompt_template_version=self.lab_context_builder.prompt_template_version,
+                raw_inputs={
+                    "user_prompt": user_prompt,
+                    "project_context": project_context,
+                    "history_summary": history_summary,
+                },
+            )
+            lab_bundle = self.lab_context_builder.load_context_bundle(
+                lab_envelope,
+                project_context=project_context,
+            )
+            effective_user_prompt = self.lab_context_builder.merge_context_into_prompt(
+                effective_user_prompt,
+                lab_bundle,
+            )
+            regression_hash = self.lab_context_builder.regression_hash(effective_user_prompt, lab_bundle)
+            logger.info(
+                "🧪 Laboratory context prepared | template_hash=%s input_hash=%s bundle_docs=%s regression_hash=%s",
+                lab_envelope.prompt_template_hash,
+                lab_envelope.input_hash,
+                len(lab_bundle),
+                regression_hash,
+            )
 
         try:
             # Send connected event
@@ -3213,7 +3373,32 @@ WORKFLOW PLANNING:
                             if atom_count >= 2:
                                 logger.warning(f"⚠️ ReAct: Atom '{current_atom}' used {atom_count} times in last 3 steps - potential loop risk")
                                 # Don't stop, but log warning for evaluation to catch
-                    
+
+                    if laboratory_mode and lab_envelope:
+                        repeated_context = self._find_repeated_lab_atom(
+                            sequence_id=sequence_id,
+                            request_id=lab_envelope.request_id,
+                            atom_id=next_step.atom_id,
+                            description=next_step.description,
+                            execution_history=execution_history,
+                        )
+                        if repeated_context:
+                            logger.warning(
+                                "⚠️ Lab-mode guard: Atom %s appears to repeat previous intent (%s)",
+                                next_step.atom_id,
+                                repeated_context.get("source"),
+                            )
+                            await self._pause_for_lab_clarification(
+                                websocket=websocket,
+                                sequence_id=sequence_id,
+                                react_state=react_state,
+                                guard_token=guard_token,
+                                current_step_number=current_step_number,
+                                repeated_atom=next_step.atom_id,
+                                repeated_context=repeated_context.get("record", {}),
+                            )
+                            break
+
                     # ============================================================
                     # ACTION: Execute the step
                     # ============================================================
@@ -3268,8 +3453,10 @@ WORKFLOW PLANNING:
                                 available_files=available_files,
                                 frontend_chat_id=frontend_chat_id,
                                 react_state=react_state,
-                              dependency_tokens=dependency_tokens,
-                          )
+                                lab_envelope=lab_envelope,
+                                lab_request_id=lab_envelope.request_id if lab_envelope else None,
+                                dependency_tokens=dependency_tokens,
+                            )
                             if replayed_previous:
                                 logger.info("🔄 ReAct: Previous step re-executed to produce materialized output; retrying current step plan")
                         
@@ -3311,16 +3498,18 @@ WORKFLOW PLANNING:
                     logger.info(f"📁 ReAct: Using {len(current_available_files_for_exec)} available files for step {current_step_number} execution")
                     try:
                         execution_result = await self._execute_step_with_events(
-                            websocket=websocket,
-                            step=next_step,
-                            plan=plan,
-                            sequence_id=sequence_id,
-                            original_prompt=effective_user_prompt,
-                            project_context=project_context,
-                            user_id=user_id,
-                            available_files=current_available_files_for_exec,  # Use updated file list with newly created files
-                            frontend_chat_id=frontend_chat_id  # Pass chat_id for cache isolation
-                        )
+                              websocket=websocket,
+                              step=next_step,
+                              plan=plan,
+                              sequence_id=sequence_id,
+                              original_prompt=effective_user_prompt,
+                              project_context=project_context,
+                              user_id=user_id,
+                              available_files=current_available_files_for_exec,  # Use updated file list with newly created files
+                              frontend_chat_id=frontend_chat_id,  # Pass chat_id for cache isolation
+                              lab_envelope=lab_envelope,
+                              lab_request_id=lab_envelope.request_id if lab_envelope else None,
+                          )
                     except Exception as e:
                         logger.error(f"❌ ReAct: Step execution failed: {e}")
                         execution_result = {
@@ -3446,6 +3635,32 @@ WORKFLOW PLANNING:
                         "result": execution_result,
                         "evaluation": evaluation.__dict__
                     })
+                    if laboratory_mode and self.lab_memory_store and lab_envelope:
+                        try:
+                            step_record = WorkflowStepRecord(
+                                step_number=current_step_number,
+                                atom_id=next_step.atom_id,
+                                inputs={"files": next_step.files_used or [], "raw_inputs": next_step.inputs},
+                                outputs=execution_result,
+                                tool_calls=execution_result.get("tool_calls") or [],
+                                decision_rationale=next_step.description,
+                                edge_cases=evaluation.issues or [],
+                            )
+                            available_snapshot_files = self._sequence_available_files.get(sequence_id, [])
+                            self.lab_memory_store.save_atom_snapshot(
+                                envelope=lab_envelope,
+                                step_record=step_record,
+                                project_context=project_context,
+                                available_files=available_snapshot_files,
+                            )
+                            self._lab_atom_snapshot_cache.setdefault(sequence_id, []).append(
+                                {
+                                    "step": step_record.model_dump(mode="python", exclude_none=True),
+                                    "available_files": available_snapshot_files,
+                                }
+                            )
+                        except Exception as lab_snapshot_exc:
+                            logger.warning("⚠️ Failed to persist real-time lab atom snapshot: %s", lab_snapshot_exc)
                     # Reset stall watchdog now that we have material progress
                     stall_guard = self._react_stall_watchdogs.get(sequence_id)
                     if stall_guard is not None:
@@ -3673,9 +3888,18 @@ WORKFLOW PLANNING:
             except Exception as insight_error:
                 logger.warning(f"⚠️ Failed to emit workflow insight (connection may be closed): {insight_error}")
                 # Don't fail the entire workflow if insight emission fails
-            
+
+            if laboratory_mode and self.lab_context_builder and lab_envelope:
+                self.lab_context_builder.persist_run(
+                    envelope=lab_envelope,
+                    user_prompt=user_prompt,
+                    project_context=project_context,
+                    execution_history=execution_history,
+                    history_summary=history_summary,
+                )
+
             # ReAct loop handles all execution - old loop code removed
-            
+
         except WebSocketDisconnect:
             logger.info(f"🔌 WebSocket disconnected during workflow {sequence_id}")
         except Exception as e:
@@ -3727,7 +3951,9 @@ WORKFLOW PLANNING:
         project_context: Dict[str, Any],
         user_id: str,
         available_files: List[str],
-        frontend_chat_id: Optional[str] = None
+        frontend_chat_id: Optional[str] = None,
+        lab_envelope: Optional[LaboratoryEnvelope] = None,
+        lab_request_id: Optional[str] = None,
     ):
         """
         Execute a single step with WebSocket events (SuperAgent pattern).
@@ -3828,47 +4054,92 @@ WORKFLOW PLANNING:
             )
             
             logger.info(f"✅ Parameters: {json.dumps(parameters, indent=2)[:150]}...")
-            
+
+            reuse_entry = None
+            try:
+                reuse_entry = self._find_reusable_atom_metadata(
+                    sequence_id=sequence_id,
+                    request_id=lab_request_id,
+                    step=step,
+                    parameters=parameters,
+                    project_context=project_context,
+                )
+            except Exception as reuse_exc:
+                logger.warning("⚠️ Failed to check atom_execution_metadata reuse: %s", reuse_exc)
+
+            execution_result: Dict[str, Any] = {}
+            atom_insights: List[Dict[str, str]] = []
+
             # ================================================================
             # PHASE B: CREATE EMPTY CARD (Like SuperAgent)
             # ================================================================
-            logger.info(f"🎴 Creating empty card for {atom_id}...")
-            
-            # Create card via FastAPI
-            card_id = f"card-{uuid.uuid4().hex}"
-            
-            # EVENT 2: CARD_CREATED
-            await self._send_event(
-                websocket,
-                WebSocketEvent(
-                    "card_created",
-                    {
-                        "step": step_number,
-                        "card_id": card_id,
-                        "atom_id": atom_id,
-                        "sequence_id": sequence_id,
-                        "action": "CARD_CREATION"
-                    }
-                ),
-                f"card_created event (step {step_number})"
-            )
-            
-            logger.info(f"✅ Card created: {card_id}")
-            
-            # ================================================================
-            # PHASE C: EXECUTE ATOM TO GET RESULTS
-            # ================================================================
-            logger.info(f"⚙️ Executing atom {atom_id}...")
-            
-            execution_result = await self._execute_atom_with_retry(
-                atom_id=atom_id,
-                parameters=parameters,
-                session_id=sequence_id,
-                step_number=step_number,
-                sequence_id=sequence_id,
-                websocket=websocket,
-                frontend_chat_id=frontend_chat_id
-            )
+            if reuse_entry:
+                card_id = reuse_entry.get("outputs", {}).get("card_id") or step.output_alias or f"card-reuse-{step_number}"
+                logger.info(
+                    "♻️ Reusing atom_execution_metadata for step %s (atom=%s); skipping duplicate execution",
+                    step_number,
+                    atom_id,
+                )
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "atom_reused",
+                        {
+                            "step": step_number,
+                            "atom_id": atom_id,
+                            "sequence_id": sequence_id,
+                            "message": "Atom execution reused from persisted history; no duplicate run.",
+                        },
+                    ),
+                    f"atom_reused event (step {step_number})",
+                )
+                execution_result = reuse_entry.get("outputs") or {"success": True}
+                execution_result.setdefault("success", True)
+                execution_result["reused"] = True
+                execution_result.setdefault(
+                    "message",
+                    "Reused prior atom execution based on atom_execution_metadata.",
+                )
+            else:
+                logger.info(f"🎴 Creating empty card for {atom_id}...")
+
+                # Create card via FastAPI
+                card_id = f"card-{uuid.uuid4().hex}"
+
+                # EVENT 2: CARD_CREATED
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "card_created",
+                        {
+                            "step": step_number,
+                            "card_id": card_id,
+                            "atom_id": atom_id,
+                            "sequence_id": sequence_id,
+                            "action": "CARD_CREATION"
+                        }
+                    ),
+                    f"card_created event (step {step_number})",
+                )
+
+                logger.info(f"✅ Card created: {card_id}")
+
+                # ================================================================
+                # PHASE C: EXECUTE ATOM TO GET RESULTS
+                # ================================================================
+                logger.info(f"⚙️ Executing atom {atom_id}...")
+
+                self._enforce_dataframe_guard(atom_id, parameters, sequence_id)
+
+                execution_result = await self._execute_atom_with_retry(
+                    atom_id=atom_id,
+                    parameters=parameters,
+                    session_id=sequence_id,
+                    step_number=step_number,
+                    sequence_id=sequence_id,
+                    websocket=websocket,
+                    frontend_chat_id=frontend_chat_id
+                )
 
             # Log atom result details for debugging
             logger.info(f"📊 Atom {atom_id} execution result keys: {list(execution_result.keys())}")
@@ -3901,6 +4172,26 @@ WORKFLOW PLANNING:
                 step=step,
                 execution_result=execution_result,
             )
+
+            if lab_envelope and self.lab_memory_store:
+                try:
+                    step_record = WorkflowStepRecord(
+                        step_number=step_number,
+                        atom_id=atom_id,
+                        inputs=parameters or {},
+                        outputs=execution_result or {},
+                        tool_calls=execution_result.get("tool_calls")
+                        if isinstance(execution_result.get("tool_calls"), list)
+                        else [],
+                        decision_rationale=step.description,
+                    )
+                    self.lab_memory_store.append_atom_execution_metadata(
+                        envelope=lab_envelope,
+                        step_record=step_record,
+                        project_context=project_context,
+                    )
+                except Exception as meta_exc:
+                    logger.warning("⚠️ Failed to append atom execution metadata: %s", meta_exc)
 
             logger.info(f"✅ Atom executed: {json.dumps(execution_result, indent=2)[:150]}...")
             self._record_step_execution_result(
@@ -4158,6 +4449,134 @@ WORKFLOW PLANNING:
 
         return True, ""
 
+    @staticmethod
+    def _normalize_inputs_for_compare(inputs: Any) -> Any:
+        if not isinstance(inputs, dict):
+            return inputs
+        return {key: value for key, value in inputs.items() if key != "prompt"}
+
+    def _find_reusable_atom_metadata(
+        self,
+        *,
+        sequence_id: str,
+        request_id: Optional[str],
+        step: WorkflowStepPlan,
+        parameters: Dict[str, Any],
+        project_context: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Return matching metadata entry if this atom/input was already executed."""
+
+        if not self.lab_memory_store or not request_id:
+            return None
+
+        history = self.lab_memory_store.get_atom_execution_metadata(
+            session_id=sequence_id,
+            request_id=request_id,
+            project_context=project_context,
+        )
+        normalized_parameters = self._normalize_inputs_for_compare(parameters)
+
+        for entry in history:
+            if entry.get("atom_id") != step.atom_id:
+                continue
+
+            if entry.get("step_number") == step.step_number:
+                return entry
+
+            normalized_entry_inputs = self._normalize_inputs_for_compare(entry.get("inputs"))
+            if normalized_entry_inputs and normalized_entry_inputs == normalized_parameters:
+                return entry
+
+        return None
+
+    def _enforce_dataframe_guard(
+        self, atom_id: str, parameters: Dict[str, Any], session_id: str
+    ) -> None:
+        """Ensure a prepared dataframe exists before executing dataframe atoms."""
+
+        dataframe_atoms = {
+            "dataframe-operations",
+            "create-column",
+            "create-transform",
+            "merge",
+            "concat",
+            "groupby-wtg-avg",
+            "pivot-table",
+        }
+
+        if atom_id not in dataframe_atoms:
+            return
+
+        available_files = self._sequence_available_files.get(session_id, []) or []
+        explicit_files: List[str] = []
+        for key in ("file", "file_path", "input_file", "output_file", "result_file", "base_file"):
+            value = parameters.get(key)
+            if isinstance(value, str):
+                resolved, fuzzy = self._resolve_dataframe_reference(value, available_files)
+                if resolved:
+                    explicit_files.append(resolved)
+                    if fuzzy:
+                        parameters[key] = resolved
+                        logger.info(
+                            "🔎 Fuzzy-matched dataframe reference '%s' → '%s' for atom %s",
+                            value,
+                            resolved,
+                            atom_id,
+                        )
+                else:
+                    explicit_files.append(value)
+
+        dataframe_config = parameters.get("dataframe_config")
+        if isinstance(dataframe_config, dict):
+            operations = dataframe_config.get("operations") or []
+            if not operations:
+                raise RuntimeError(
+                    "dataframe_config.operations is empty; run df_ops/filters to prepare the dataset before executing atoms."
+                )
+
+        if not available_files and not explicit_files:
+            raise RuntimeError(
+                "No dataframe available for execution; ensure df_ops/filters prepared the correct dataset before running this atom."
+            )
+
+        if available_files and explicit_files:
+            for path in explicit_files:
+                if path not in available_files:
+                    raise RuntimeError(
+                        f"Requested dataframe '{path}' is not in the prepared set; refresh df_ops context before executing {atom_id}."
+                    )
+
+    def _resolve_dataframe_reference(
+        self, requested_path: str, available_files: List[str]
+    ) -> Tuple[Optional[str], bool]:
+        """
+        Resolve a dataframe path using fuzzy matching when an exact match is unavailable.
+
+        Returns a tuple of (resolved_path, used_fuzzy_match).
+        """
+
+        if not requested_path:
+            return None, False
+
+        if requested_path in available_files:
+            return requested_path, False
+
+        if not available_files:
+            return None, False
+
+        best_match: Optional[str] = None
+        best_score = 0.0
+        for candidate in available_files:
+            score = difflib.SequenceMatcher(None, requested_path.lower(), candidate.lower()).ratio()
+            if score > best_score:
+                best_score = score
+                best_match = candidate
+
+        if best_match and best_score >= 0.74:
+            return best_match, True
+
+        return None, False
+
     async def _replay_previous_step_for_output(
         self,
         websocket,
@@ -4170,6 +4589,8 @@ WORKFLOW PLANNING:
         frontend_chat_id: Optional[str],
         react_state: Optional[ReActState],
         dependency_tokens: Optional[List[str]] = None,
+        lab_envelope: Optional[LaboratoryEnvelope] = None,
+        lab_request_id: Optional[str] = None,
     ) -> bool:
         """Re-execute the prior step when chaining fails due to missing materialized output."""
 
@@ -4267,6 +4688,8 @@ WORKFLOW PLANNING:
                 user_id=user_id,
                 available_files=current_available_files,
                 frontend_chat_id=frontend_chat_id,
+                lab_envelope=lab_envelope,
+                lab_request_id=lab_request_id,
             )
         except Exception as exec_exc:
             logger.error(f"❌ ReAct: Replay of step {step_number} failed: {exec_exc}")
@@ -5003,7 +5426,7 @@ WORKFLOW PLANNING:
             "original_file_name": file_name,
             "message": f"Preserved original file name '{original_file_path}' for downstream steps"
         }
-    
+
     async def _auto_save_create_transform(
         self,
         workflow_step: WorkflowStepPlan,
@@ -7125,6 +7548,8 @@ WORKFLOW PLANNING:
             columns = metadata.get("columns", [])
             if isinstance(columns, list):
                 valid_columns_set.update(columns)
+
+        valid_columns_list = list(valid_columns_set)
         
         # Validate each column name (case-sensitive and case-insensitive matching)
         validated_columns: List[str] = []
@@ -7140,21 +7565,168 @@ WORKFLOW PLANNING:
                 continue
             
             # Then try case-insensitive match
-            found_match = False
+            found = False
             for valid_col in valid_columns_set:
                 if col_clean.lower() == valid_col.lower():
-                    validated_columns.append(valid_col)  # Use the actual column name from metadata
-                    found_match = True
+                    validated_columns.append(valid_col)  # Use the actual column name from file
+                    found = True
                     break
             
-            if not found_match:
-                logger.warning(f"⚠️ Column '{col_clean}' not found in file metadata. Valid columns: {list(valid_columns_set)[:10]}...")
-        
-        if len(validated_columns) < len(column_names):
-            logger.info(f"✅ Validated columns: {len(validated_columns)}/{len(column_names)} passed validation")
+            if not found:
+                best_match: Optional[str] = None
+                best_score = 0.0
+                for valid_col in valid_columns_list:
+                    score = difflib.SequenceMatcher(None, col_clean.lower(), valid_col.lower()).ratio()
+                    if score > best_score:
+                        best_score = score
+                        best_match = valid_col
+
+                if best_match and best_score >= 0.75:
+                    logger.info(
+                        "🔎 Fuzzy-matched column '%s' to '%s' (score=%.2f) for dataframe validation",
+                        col_clean,
+                        best_match,
+                        best_score,
+                    )
+                    validated_columns.append(best_match)
+                else:
+                    logger.debug(f"⚠️ Column '{col_clean}' not found in file metadata")
         
         return validated_columns
-    
+
+    async def _validate_required_columns(
+        self,
+        atom_id: str,
+        parameters: Dict[str, Any],
+        data_source: str,
+        sequence_id: str
+    ) -> List[str]:
+        """
+        Validate that all required columns exist in the DataFrame before executing a step.
+        Returns list of missing columns that need to be created.
+        
+        Args:
+            atom_id: The atom being executed
+            parameters: Parameters for the atom (may contain column references)
+            data_source: Path to the DataFrame file
+            sequence_id: Sequence ID for context
+            
+        Returns:
+            List of missing column names that need to be created
+        """
+        missing_columns: List[str] = []
+        
+        # Get current DataFrame schema
+        file_metadata = self._get_file_metadata([data_source], sequence_id=sequence_id)
+        if not file_metadata or data_source not in file_metadata:
+            logger.warning(f"⚠️ Could not get metadata for {data_source} - skipping column validation")
+            return missing_columns
+        
+        current_columns = file_metadata[data_source].get("columns", [])
+        if not current_columns:
+            logger.warning(f"⚠️ No columns found in metadata for {data_source} - skipping validation")
+            return missing_columns
+        
+        logger.info(f"📊 Current DataFrame has {len(current_columns)} columns: {current_columns[:10]}...")
+        
+        # Extract required columns based on atom type
+        required_columns = self._extract_required_columns(atom_id, parameters)
+        
+        if not required_columns:
+            logger.debug(f"✅ No specific columns required for {atom_id}")
+            return missing_columns
+        
+        logger.info(f"🔍 Checking required columns for {atom_id}: {required_columns}")
+        
+        # Check which columns are missing
+        for col in required_columns:
+            col_clean = col.strip()
+            # Check exact match
+            if col_clean not in current_columns:
+                # Check case-insensitive match
+                found = False
+                for existing_col in current_columns:
+                    if col_clean.lower() == existing_col.lower():
+                        found = True
+                        break
+                
+                if not found:
+                    missing_columns.append(col_clean)
+                    logger.warning(f"⚠️ Missing column: '{col_clean}'")
+        
+        if missing_columns:
+            logger.warning(f"⚠️ Found {len(missing_columns)} missing columns: {missing_columns}")
+        else:
+            logger.info(f"✅ All required columns exist in DataFrame")
+        
+        return missing_columns
+
+    def _extract_required_columns(
+        self,
+        atom_id: str,
+        parameters: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Extract required column names from atom parameters.
+        
+        Args:
+            atom_id: The atom ID
+            parameters: Parameters dictionary
+            
+        Returns:
+            List of required column names
+        """
+        required_columns: List[str] = []
+        
+        # Extract columns from prompt/parameters based on atom type
+        prompt = parameters.get("prompt", "")
+        
+        # Common patterns for column extraction
+        import re
+        
+        # Pattern 1: Column names in quotes or backticks
+        quoted_cols = re.findall(r'["\'`]([^"\'`]+)["\'`]', prompt)
+        required_columns.extend(quoted_cols)
+        
+        # Pattern 2: Column names after keywords like "by", "on", "group by", "join"
+        keyword_patterns = [
+            r'group\s+by\s+([a-zA-Z_][a-zA-Z0-9_]*)',
+            r'join\s+on\s+([a-zA-Z_][a-zA-Z0-9_]*)',
+            r'by\s+([a-zA-Z_][a-zA-Z0-9_]*)',
+            r'column\s+([a-zA-Z_][a-zA-Z0-9_]*)',
+        ]
+        
+        for pattern in keyword_patterns:
+            matches = re.findall(pattern, prompt, re.IGNORECASE)
+            required_columns.extend(matches)
+        
+        # Pattern 3: Extract from JSON parameters if available
+        if "merge_json" in parameters:
+            merge_cfg = parameters.get("merge_json", {})
+            join_cols = merge_cfg.get("join_columns", [])
+            if isinstance(join_cols, list):
+                required_columns.extend(join_cols)
+        
+        if "groupby_json" in parameters:
+            groupby_cfg = parameters.get("groupby_json", {})
+            group_cols = groupby_cfg.get("group_by", [])
+            metric_cols = groupby_cfg.get("metrics", [])
+            if isinstance(group_cols, list):
+                required_columns.extend(group_cols)
+            if isinstance(metric_cols, list):
+                for metric in metric_cols:
+                    if isinstance(metric, dict) and "column" in metric:
+                        required_columns.append(metric["column"])
+        
+        # Remove duplicates and clean
+        required_columns = list(set([col.strip() for col in required_columns if col.strip()]))
+        
+        # Filter out common non-column words
+        non_column_words = {"the", "a", "an", "and", "or", "by", "on", "in", "at", "to", "for", "with"}
+        required_columns = [col for col in required_columns if col.lower() not in non_column_words]
+        
+        return required_columns
+
     def _validate_file_names(
         self, 
         file_names: List[str], 
@@ -7254,6 +7826,7 @@ WORKFLOW PLANNING:
                 )
             except Exception as exec_error:
                 last_error = exec_error
+                
                 logger.warning(
                     "⚠️ Atom %s execution attempt %s/%s failed with exception: %s",
                     atom_id,
@@ -7291,6 +7864,7 @@ WORKFLOW PLANNING:
                 or result.get("message")
                 or "Atom returned success=false"
             )
+            
             logger.warning(
                 "⚠️ Atom %s returned success=False on attempt %s/%s: %s",
                 atom_id,

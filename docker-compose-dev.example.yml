@@ -1,3 +1,4 @@
+name: trinity-dev
 x-redis-env: &redis-env
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   REDIS_HOST: ${REDIS_HOST:-redis}
@@ -383,6 +384,8 @@ services:
       - "traefik.http.routers.trinity-ai-dev.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/trinityai`)"
       - "traefik.http.routers.trinity-ai-dev.entrypoints=web"
       - "traefik.http.routers.trinity-ai-dev.priority=100"
+      - "traefik.http.routers.trinity-ai-dev.middlewares=trinity-ai-strip@docker"
+      - "traefik.http.middlewares.trinity-ai-strip.stripprefix.prefixes=/trinityai"
       - "traefik.http.services.trinity-ai-dev.loadbalancer.server.port=8002"
       - "traefik.http.services.trinity-ai-dev.loadbalancer.passhostheader=true"
     restart: always

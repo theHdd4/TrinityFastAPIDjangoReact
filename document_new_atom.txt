@@ -1,0 +1,2198 @@
+================================================================================
+    TRINITY ATOM CREATION GUIDE - COMPREHENSIVE DOCUMENTATION
+================================================================================
+
+This document provides complete step-by-step instructions for creating a new
+atom in the Trinity platform, covering all three tiers (Database, Backend,
+Frontend) and comprehensive testing procedures.
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+1. OVERVIEW - Architecture & Data Flow
+2. PHASE 1 - Database Registration (Django)
+3. PHASE 2 - Backend Implementation (FastAPI)
+4. PHASE 3 - Frontend Implementation (React)
+5. PHASE 4 - Testing & Verification
+6. COMMON ISSUES & SOLUTIONS
+7. BEST PRACTICES
+8. COMPLETE CHECKLIST
+
+================================================================================
+1. OVERVIEW - ARCHITECTURE & DATA FLOW
+================================================================================
+
+Trinity atoms follow a 3-tier architecture:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         TRINITY ARCHITECTURE                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Tier 1: Frontend (React/TypeScript)                                    │
+│    - UI components and user interaction                                 │
+│    - Zustand for state management                                       │
+│    - Shadcn UI components                                               │
+│                                                                          │
+│  Tier 2: Backend (FastAPI)                                              │
+│    - API endpoints and business logic                                   │
+│    - Polars for data processing                                         │
+│    - Pydantic for data validation                                       │
+│                                                                          │
+│  Tier 3: Database (Django/PostgreSQL)                                   │
+│    - Atom metadata and configuration                                    │
+│    - Django ORM and management commands                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Data Storage Layer:
+  - MinIO: Object storage for data files (.arrow format using Apache Arrow)
+  - Redis: Caching layer for frequently accessed data
+  - MongoDB: Additional metadata storage
+  - PostgreSQL: Primary database for atom configurations
+
+Data Flow:
+  1. User selects atom from Atom Library
+  2. Frontend loads atom metadata from Zustand store
+  3. User configures atom through Properties Panel
+  4. Frontend sends request to FastAPI backend
+  5. Backend processes data using Polars
+  6. Data saved to MinIO in .arrow format
+  7. Redis caches frequently accessed data
+  8. Frontend displays results on Canvas
+
+================================================================================
+2. PHASE 1 - DATABASE REGISTRATION (Django)
+================================================================================
+
+Location: TrinityBackendDjango/
+
+2.1 ADD ATOM TO DATABASE POPULATION SCRIPT
+────────────────────────────────────────────────────────────────────────────
+
+File: apps/trinity_v1_atoms/management/commands/populate_trinity_v1_atoms.py
+
+Add your atom to the 'atoms_data' list:
+
+atoms_data = [
+    # ... existing atoms ...
+    {
+        'atom_id': 'my-new-atom',
+        'title': 'My New Atom',
+        'description': 'Brief description of what this atom does. Be specific about its functionality.',
+        'category': 'Data Processing',  # Options: Data Processing, Analytics, Business Intelligence, ML/AI
+        'icon': 'database',  # lucide-react icon name (lowercase)
+        'color': 'bg-blue-500',  # Tailwind color class
+        'tags': ['data', 'processing', 'custom', 'transform'],
+        'version': '1.0.0',
+        'author': 'Your Name',
+        'available_atoms': True,  # ⚠️ CRITICAL: Must be True for atom to appear
+        'inputs': ['dataframe'],  # What this atom accepts as input
+        'outputs': ['dataframe'],  # What this atom produces as output
+        'settings_schema': {},  # JSON schema for atom settings (optional)
+    },
+]
+
+⚠️ IMPORTANT NOTES:
+  - 'atom_id' must be unique and use kebab-case (lowercase with hyphens)
+  - 'available_atoms' MUST be True or atom won't appear in frontend
+  - 'icon' must match a valid lucide-react icon name
+  - 'category' must match existing categories in frontend
+
+
+2.2 MARK ATOM AS AVAILABLE
+────────────────────────────────────────────────────────────────────────────
+
+File: apps/trinity_v1_atoms/management/commands/update_available_atoms.py
+
+Add your atom ID to the 'working_atom_ids' list:
+
+working_atom_ids = [
+    'text-box',
+    'data-upload-validate',
+    'feature-overview',
+    'explore',
+    'chart-maker',
+    'pivot-table',
+    'unpivot',
+    'concat',
+    'merge',
+    'column-classifier',
+    'dataframe-operations',
+    'table',
+    'my-new-atom',  # ← Add your atom here
+]
+
+This ensures your atom's 'available_atoms' flag remains True even after
+running update commands.
+
+
+2.3 RUN DJANGO MIGRATIONS
+────────────────────────────────────────────────────────────────────────────
+
+Execute the following commands:
+
+# Navigate to Django directory
+cd TrinityBackendDjango
+
+# Create migrations (if schema changed)
+python manage.py makemigrations
+
+# Apply migrations
+python manage.py migrate
+
+# Populate the trinity_v1_atoms table
+python manage.py populate_trinity_v1_atoms
+
+# Update available atoms status
+python manage.py update_available_atoms
+
+
+2.4 VERIFY DATABASE ENTRY
+────────────────────────────────────────────────────────────────────────────
+
+Connect to PostgreSQL and verify:
+
+# Using Docker
+docker exec -it <postgres-container-name> psql -U <username> -d <database>
+
+# Check atom is registered
+SELECT atom_id, title, available_atoms, category 
+FROM trinity_v1_atoms 
+WHERE atom_id = 'my-new-atom';
+
+Expected output:
+  atom_id      | title        | available_atoms | category
+  -------------+--------------+-----------------+------------------
+  my-new-atom  | My New Atom  | t               | Data Processing
+
+If available_atoms is 'f' (false), fix it:
+
+UPDATE trinity_v1_atoms 
+SET available_atoms = true 
+WHERE atom_id = 'my-new-atom';
+
+================================================================================
+3. PHASE 2 - BACKEND IMPLEMENTATION (FastAPI)
+================================================================================
+
+Location: TrinityBackendFastAPI/
+
+3.1 CREATE FEATURE FOLDER STRUCTURE
+────────────────────────────────────────────────────────────────────────────
+
+Create the following structure:
+
+app/features/my_new_atom/
+├── __init__.py
+├── routes.py          # API endpoints
+├── service.py         # Business logic and data processing
+├── schemas.py         # Pydantic models for request/response
+└── README.md          # API documentation (optional but recommended)
+
+
+3.2 DEFINE PYDANTIC SCHEMAS
+────────────────────────────────────────────────────────────────────────────
+
+File: app/features/my_new_atom/schemas.py
+
+"""
+Pydantic models for My New Atom API
+"""
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, List, Any
+
+class MyAtomLoadRequest(BaseModel):
+    """Request model for loading data"""
+    object_name: str = Field(..., description="MinIO object name (file path)")
+    
+class MyAtomLoadResponse(BaseModel):
+    """Response model for loaded data"""
+    atom_id: str = Field(..., description="Session ID for this atom instance")
+    columns: List[str] = Field(..., description="Column names")
+    rows: List[Dict[str, Any]] = Field(..., description="Data rows")
+    row_count: int = Field(..., description="Total number of rows")
+    column_types: Dict[str, str] = Field(..., description="Column data types")
+    object_name: Optional[str] = Field(None, description="Original object name")
+
+class MyAtomSaveRequest(BaseModel):
+    """Request model for saving data"""
+    atom_id: str = Field(..., description="Session ID")
+    filename: Optional[str] = Field(None, description="Output filename")
+    overwrite_original: bool = Field(False, description="Whether to overwrite original file")
+
+class MyAtomSaveResponse(BaseModel):
+    """Response model for save operation"""
+    object_name: str = Field(..., description="Saved object name in MinIO")
+    status: str = Field(..., description="Operation status")
+    message: str = Field(..., description="Status message")
+    row_count: int = Field(..., description="Number of rows saved")
+    column_count: int = Field(..., description="Number of columns saved")
+
+
+3.3 IMPLEMENT SERVICE LOGIC
+────────────────────────────────────────────────────────────────────────────
+
+File: app/features/my_new_atom/service.py
+
+"""
+Business logic for My New Atom
+Handles data loading, processing, and saving with MinIO and Redis integration
+"""
+import polars as pl
+import uuid
+import logging
+from typing import Dict, Any
+from app.core.minio_client import minio_client
+from app.core.redis import redis_client
+
+logger = logging.getLogger(__name__)
+
+# Configuration
+MINIO_BUCKET = "trinity-data"
+
+# In-memory session storage for active operations
+# Key: session_id (UUID), Value: Polars DataFrame
+SESSIONS: Dict[str, pl.DataFrame] = {}
+
+
+def load_data_from_minio(object_name: str) -> pl.DataFrame:
+    """
+    Load data from MinIO storage with Redis caching
+    
+    Args:
+        object_name: Path to object in MinIO bucket
+        
+    Returns:
+        Polars DataFrame containing the data
+        
+    Raises:
+        Exception: If file doesn't exist or can't be read
+    """
+    logger.info(f"📂 [MY-ATOM] Loading from MinIO: {object_name}")
+    
+    # Try Redis cache first
+    cached = redis_client.get(object_name)
+    if cached:
+        logger.info(f"✅ [MY-ATOM] Cache hit for {object_name}")
+        import io
+        return pl.read_ipc(io.BytesIO(cached))
+    
+    # Load from MinIO
+    try:
+        response = minio_client.get_object(MINIO_BUCKET, object_name)
+        data = response.read()
+        df = pl.read_ipc(data)
+        
+        # Cache in Redis (1 hour TTL)
+        redis_client.setex(object_name, 3600, data)
+        logger.info(f"💾 [MY-ATOM] Cached in Redis: {object_name}")
+        
+        return df
+    except Exception as e:
+        logger.error(f"❌ [MY-ATOM] Failed to load {object_name}: {e}")
+        raise
+
+
+def save_data_to_minio(df: pl.DataFrame, object_name: str) -> str:
+    """
+    Save DataFrame to MinIO storage in Arrow format
+    
+    Args:
+        df: Polars DataFrame to save
+        object_name: Destination path in MinIO
+        
+    Returns:
+        The object name that was saved
+        
+    Raises:
+        Exception: If save operation fails
+    """
+    import io
+    
+    logger.info(f"💾 [MY-ATOM] Saving to MinIO: {object_name}")
+    
+    try:
+        # Convert to Arrow IPC format
+        buffer = io.BytesIO()
+        df.write_ipc(buffer)
+        buffer.seek(0)
+        
+        # Upload to MinIO
+        minio_client.put_object(
+            MINIO_BUCKET,
+            object_name,
+            buffer,
+            length=buffer.getbuffer().nbytes,
+            content_type='application/octet-stream'
+        )
+        
+        # Cache in Redis (1 hour TTL)
+        buffer.seek(0)
+        redis_client.setex(object_name, 3600, buffer.read())
+        
+        logger.info(f"✅ [MY-ATOM] Saved successfully: {object_name}")
+        return object_name
+    except Exception as e:
+        logger.error(f"❌ [MY-ATOM] Failed to save {object_name}: {e}")
+        raise
+
+
+def dataframe_to_response(df: pl.DataFrame, atom_id: str, object_name: str = None) -> Dict[str, Any]:
+    """
+    Convert Polars DataFrame to API response format
+    
+    Args:
+        df: Polars DataFrame
+        atom_id: Session ID
+        object_name: Original object name (optional)
+        
+    Returns:
+        Dictionary with formatted data for API response
+    """
+    return {
+        "atom_id": atom_id,
+        "columns": df.columns,
+        "rows": df.to_dicts(),
+        "row_count": len(df),
+        "column_types": {col: str(df[col].dtype) for col in df.columns},
+        "object_name": object_name
+    }
+
+
+# Export for use in routes
+__all__ = ['SESSIONS', 'load_data_from_minio', 'save_data_to_minio', 'dataframe_to_response']
+
+
+3.4 CREATE API ROUTES
+────────────────────────────────────────────────────────────────────────────
+
+File: app/features/my_new_atom/routes.py
+
+"""
+API endpoints for My New Atom
+"""
+from fastapi import APIRouter, HTTPException
+from urllib.parse import unquote
+import uuid
+import logging
+
+from .schemas import (
+    MyAtomLoadRequest, MyAtomLoadResponse,
+    MyAtomSaveRequest, MyAtomSaveResponse
+)
+from .service import (
+    SESSIONS, 
+    load_data_from_minio, 
+    save_data_to_minio,
+    dataframe_to_response
+)
+
+logger = logging.getLogger(__name__)
+
+# ⚠️ IMPORTANT: No prefix here if you add it in api/router.py
+router = APIRouter()
+
+
+@router.post("/load", response_model=MyAtomLoadResponse)
+async def load_data(request: MyAtomLoadRequest):
+    """
+    Load data from MinIO storage
+    
+    Process:
+    1. Decode URL-encoded object name
+    2. Validate file extension
+    3. Load from MinIO (with Redis caching)
+    4. Create session and store DataFrame
+    5. Return data in API response format
+    """
+    logger.info(f"🔵 [MY-ATOM-LOAD] Loading: {request.object_name}")
+    
+    try:
+        # ⚠️ IMPORTANT: URL decode the object name
+        object_name = unquote(request.object_name)
+        
+        # Validate file extension
+        if not object_name.endswith(".arrow"):
+            raise HTTPException(
+                status_code=400, 
+                detail="Only .arrow files are supported"
+            )
+        
+        # Load data from MinIO
+        df = load_data_from_minio(object_name)
+        
+        # Create session
+        session_id = str(uuid.uuid4())
+        SESSIONS[session_id] = df
+        
+        logger.info(f"✅ [MY-ATOM-LOAD] Session created: {session_id}, shape: {df.shape}")
+        
+        # Format response
+        response = dataframe_to_response(
+            df=df, 
+            atom_id=session_id, 
+            object_name=object_name
+        )
+        
+        return MyAtomLoadResponse(**response)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [MY-ATOM-LOAD] Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/save", response_model=MyAtomSaveResponse)
+async def save_data(request: MyAtomSaveRequest):
+    """
+    Save processed data to MinIO storage
+    
+    Supports two modes:
+    1. Save (overwrite_original=True): Updates the original file
+    2. Save As (overwrite_original=False): Creates a new file
+    """
+    logger.info(f"🔵 [MY-ATOM-SAVE] Saving: {request.atom_id}")
+    
+    # Get DataFrame from session
+    df = SESSIONS.get(request.atom_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    try:
+        # Determine output path
+        if request.overwrite_original and request.filename:
+            # Overwrite original file
+            object_name = request.filename
+            if not object_name.endswith(".arrow"):
+                object_name += ".arrow"
+            message = "Original file updated successfully"
+            logger.info(f"🔄 [MY-ATOM-SAVE] Overwriting: {object_name}")
+        else:
+            # Save as new file
+            filename = request.filename or f"my_atom_{request.atom_id[:8]}.arrow"
+            if not filename.endswith(".arrow"):
+                filename += ".arrow"
+            object_name = f"my-new-atom/{filename}"
+            message = "Data saved as new file successfully"
+            logger.info(f"💾 [MY-ATOM-SAVE] Saving as new: {object_name}")
+        
+        # Save to MinIO
+        saved_object = save_data_to_minio(df, object_name)
+        
+        logger.info(f"✅ [MY-ATOM-SAVE] Complete: {saved_object}")
+        
+        return MyAtomSaveResponse(
+            object_name=saved_object,
+            status="success",
+            message=message,
+            row_count=len(df),
+            column_count=len(df.columns)
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ [MY-ATOM-SAVE] Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# Additional endpoints as needed
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "active_sessions": len(SESSIONS)
+    }
+
+
+3.5 REGISTER ROUTER IN API
+────────────────────────────────────────────────────────────────────────────
+
+File: app/api/router.py
+
+# Add import at the top
+from app.features.my_new_atom.routes import router as my_new_atom_router
+
+# Add to api_router includes (around line 50-100)
+api_router.include_router(
+    my_new_atom_router,
+    prefix="/v1/atoms/my-new-atom",  # ⚠️ Ensure no double prefix
+    tags=["My New Atom"]
+)
+
+⚠️ CRITICAL: Prefix Issue
+  - If your routes.py already has prefix="/my-new-atom" in the APIRouter,
+    don't add it again here
+  - This causes double prefix: /api/v1/atoms/my-new-atom/my-new-atom/load
+  - Correct path should be: /api/v1/atoms/my-new-atom/load
+
+
+3.6 TEST BACKEND ENDPOINTS
+────────────────────────────────────────────────────────────────────────────
+
+Restart backend and test:
+
+# Restart backend
+docker-compose restart backend
+
+# Test health check
+curl http://localhost:8000/api/v1/atoms/my-new-atom/health
+
+# Test load endpoint (replace with actual file)
+curl -X POST http://localhost:8000/api/v1/atoms/my-new-atom/load \
+  -H "Content-Type: application/json" \
+  -d '{"object_name": "test-data/sample.arrow"}'
+
+Expected response:
+{
+  "atom_id": "uuid-here",
+  "columns": ["col1", "col2"],
+  "rows": [...],
+  "row_count": 100,
+  "column_types": {"col1": "Int64", "col2": "Utf8"}
+}
+
+================================================================================
+4. PHASE 3 - FRONTEND IMPLEMENTATION (React)
+================================================================================
+
+Location: TrinityFrontend/
+
+4.1 CREATE ATOM FOLDER STRUCTURE
+────────────────────────────────────────────────────────────────────────────
+
+Create the following structure:
+
+src/components/AtomList/atoms/my-new-atom/
+├── index.ts                              # Atom metadata and registration
+├── MyNewAtom.tsx                         # Main atom component
+├── types.ts                              # TypeScript interfaces
+├── components/
+│   ├── MyNewAtomCanvas.tsx              # Data display/visualization
+│   ├── MyNewAtomToolbar.tsx             # Action buttons (optional)
+│   ├── MyNewAtomPagination.tsx          # Pagination (if needed)
+│   └── properties/
+│       ├── MyNewAtomProperties.tsx      # Main properties panel
+│       ├── MyNewAtomInputs.tsx          # Inputs tab
+│       ├── MyNewAtomSettings.tsx        # Settings tab
+│       └── MyNewAtomExhibition.tsx      # Exhibition/display settings tab
+└── services/
+    └── myNewAtomApi.ts                  # API client functions
+
+
+4.2 DEFINE ATOM METADATA
+────────────────────────────────────────────────────────────────────────────
+
+File: src/components/AtomList/atoms/my-new-atom/index.ts
+
+import { Database } from 'lucide-react'; // ⚠️ Choose UNIQUE icon
+import MyNewAtom from './MyNewAtom';
+
+export default {
+  id: 'my-new-atom',  // Must match backend atom_id
+  title: 'My New Atom',
+  category: 'Data Processing',
+  description: 'Brief description of what this atom does',
+  tags: ['data', 'processing', 'custom', 'transform'],
+  color: 'bg-blue-500',
+  icon: Database,  // ⚠️ CRITICAL: Must be unique to avoid conflicts
+  component: MyNewAtom
+};
+
+⚠️ ICON CONFLICT WARNING:
+  If two atoms use the same icon (e.g., both using 'Table'), one atom won't
+  appear in the UI. Use unique icons like:
+  - Table → Table2
+  - Database → Database
+  - FileSpreadsheet
+  - Grid3x3
+  Check existing atoms to avoid conflicts!
+
+
+4.3 DEFINE TYPESCRIPT INTERFACES
+────────────────────────────────────────────────────────────────────────────
+
+File: src/components/AtomList/atoms/my-new-atom/types.ts
+
+/**
+ * TypeScript interfaces for My New Atom
+ */
+
+export interface MyNewAtomData {
+  atom_id: string;
+  columns: string[];
+  rows: Array<Record<string, any>>;
+  row_count: number;
+  column_types: Record<string, string>;
+  object_name?: string;
+}
+
+export interface MyNewAtomSettings {
+  // Data source
+  sourceFile?: string;
+  atomId?: string;
+  
+  // Stored data (⚠️ CRITICAL: Store in settings, not component state)
+  data?: MyNewAtomData;
+  
+  // Display settings
+  visibleColumns?: string[];
+  columnOrder?: string[];
+  
+  // Pagination
+  currentPage?: number;
+  pageSize?: number;
+  
+  // Any other atom-specific settings
+  customSetting?: any;
+}
+
+export interface MyNewAtomProps {
+  atomId: string;  // Unique ID for this atom instance
+}
+
+
+4.4 CREATE API CLIENT
+────────────────────────────────────────────────────────────────────────────
+
+File: src/components/AtomList/atoms/my-new-atom/services/myNewAtomApi.ts
+
+/**
+ * API client for My New Atom backend endpoints
+ */
+
+const API_BASE = '/api/v1/atoms/my-new-atom';
+
+/**
+ * Load data from MinIO
+ */
+export const loadData = async (objectName: string) => {
+  const response = await fetch(`${API_BASE}/load`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ object_name: objectName }),
+  });
+  
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to load data: ${error}`);
+  }
+  
+  return response.json();
+};
+
+/**
+ * Save data to MinIO
+ */
+export const saveData = async (
+  atomId: string, 
+  filename: string, 
+  overwriteOriginal: boolean = false
+) => {
+  const response = await fetch(`${API_BASE}/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      atom_id: atomId,
+      filename,
+      overwrite_original: overwriteOriginal
+    }),
+  });
+  
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to save data: ${error}`);
+  }
+  
+  return response.json();
+};
+
+/**
+ * Health check
+ */
+export const healthCheck = async () => {
+  const response = await fetch(`${API_BASE}/health`);
+  return response.json();
+};
+
+
+4.5 IMPLEMENT MAIN ATOM COMPONENT
+────────────────────────────────────────────────────────────────────────────
+
+File: src/components/AtomList/atoms/my-new-atom/MyNewAtom.tsx
+
+import React, { useState, useEffect } from 'react';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { loadData, saveData } from './services/myNewAtomApi';
+import { MyNewAtomData, MyNewAtomSettings, MyNewAtomProps } from './types';
+import { Loader2, Save, AlertCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
+import MyNewAtomCanvas from './components/MyNewAtomCanvas';
+
+// Default settings
+const DEFAULT_SETTINGS: MyNewAtomSettings = {
+  currentPage: 1,
+  pageSize: 15,
+  visibleColumns: [],
+  columnOrder: [],
+};
+
+const MyNewAtom: React.FC<MyNewAtomProps> = ({ atomId }) => {
+  // ✅ CRITICAL PATTERN: Subscribe to cards array, not individual atom
+  // This ensures component re-renders when settings change
+  const cards = useLaboratoryStore(state => state.cards);
+  const atom = cards.flatMap(card => card.atoms).find(a => a.id === atomId);
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  
+  // Merge default settings with stored settings
+  const settings: MyNewAtomSettings = {
+    ...DEFAULT_SETTINGS,
+    ...(atom?.settings || {})
+  };
+  
+  // ✅ CRITICAL PATTERN: Read data from settings, not local state
+  // This ensures data persists across renders and is saved to store
+  const data = settings.data || null;
+  
+  // Local state for UI only (not persistent data)
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
+  const [showOverwriteDialog, setShowOverwriteDialog] = useState(false);
+  const [saveFileName, setSaveFileName] = useState('');
+  const { toast } = useToast();
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('🎯 [MY-ATOM] Render:', {
+      atomId,
+      hasData: !!data,
+      sourceFile: settings.sourceFile
+    });
+  });
+  
+  // ✅ CRITICAL PATTERN: Auto-load data when sourceFile changes
+  // Only load if sourceFile exists but data doesn't (fallback)
+  useEffect(() => {
+    if (settings.sourceFile && !settings.data && !loading) {
+      console.log('📊 [MY-ATOM] Auto-loading:', settings.sourceFile);
+      setLoading(true);
+      setError(null);
+      
+      loadData(settings.sourceFile)
+        .then(result => {
+          // ✅ Store data in Zustand settings
+          updateSettings(atomId, {
+            data: result,
+            atomId: result.atom_id,
+            visibleColumns: result.columns,
+            columnOrder: result.columns
+          });
+          console.log('✅ [MY-ATOM] Loaded successfully');
+        })
+        .catch(err => {
+          console.error('❌ [MY-ATOM] Load error:', err);
+          setError(err.message || 'Failed to load data');
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [settings.sourceFile, settings.data, loading, atomId, updateSettings]);
+  
+  // Save handlers
+  const handleSave = () => {
+    if (!settings.atomId) {
+      toast({
+        title: 'Error',
+        description: 'No data to save',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    if (!settings.sourceFile) {
+      toast({
+        title: 'Error',
+        description: 'No original file. Use "Save As" instead.',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    setShowOverwriteDialog(true);
+  };
+  
+  const confirmOverwriteSave = async () => {
+    if (!settings.atomId || !settings.sourceFile) return;
+    
+    setShowOverwriteDialog(false);
+    setSaving(true);
+    
+    try {
+      await saveData(settings.atomId, settings.sourceFile, true);
+      toast({
+        title: 'Success',
+        description: 'Data saved successfully',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save',
+        variant: 'destructive'
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+  
+  const handleSaveAs = () => {
+    if (!settings.atomId) {
+      toast({
+        title: 'Error',
+        description: 'No data to save',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    const defaultName = settings.sourceFile 
+      ? `${settings.sourceFile.split('/').pop()?.replace('.arrow', '')}_copy`
+      : `my_atom_${Date.now()}`;
+    setSaveFileName(defaultName);
+    setShowSaveAsDialog(true);
+  };
+  
+  const confirmSaveAs = async () => {
+    if (!settings.atomId) return;
+    
+    setSaving(true);
+    try {
+      const filename = saveFileName.trim() || `my_atom_${Date.now()}`;
+      const response = await saveData(settings.atomId, filename, false);
+      
+      toast({
+        title: 'Success',
+        description: `Saved as ${response.object_name}`,
+      });
+      
+      updateSettings(atomId, {
+        sourceFile: response.object_name
+      });
+      
+      setShowSaveAsDialog(false);
+      setSaveFileName('');
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save',
+        variant: 'destructive'
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+  
+  // Render logic
+  const hasData = Boolean(data && data.columns && data.columns.length > 0);
+  
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64 bg-white rounded-lg shadow">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
+          <p className="text-gray-600">Loading data...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // Error state (if no data)
+  if (error && !data) {
+    return (
+      <div className="flex items-center justify-center h-64 bg-white rounded-lg shadow">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">❌ {error}</p>
+          <Button onClick={() => setError(null)}>Retry</Button>
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden flex flex-col">
+      {hasData ? (
+        <>
+          {/* Error banner (if error but has data) */}
+          {error && (
+            <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-red-700 text-sm">
+              ⚠️ {error}
+            </div>
+          )}
+          
+          {/* Save Buttons */}
+          <div className="px-4 py-2 border-b border-gray-200 bg-white flex items-center justify-end gap-2">
+            <Button
+              onClick={handleSave}
+              disabled={saving || !settings.atomId || !settings.sourceFile}
+              className="bg-green-600 hover:bg-green-700 text-white"
+              size="sm"
+            >
+              {saving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Save
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={handleSaveAs}
+              disabled={saving || !settings.atomId}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              size="sm"
+            >
+              {saving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Save As
+                </>
+              )}
+            </Button>
+          </div>
+          
+          {/* Canvas - Main content area */}
+          <div className="flex-1 overflow-hidden">
+            <MyNewAtomCanvas
+              data={data}
+              settings={settings}
+              onSettingsChange={(newSettings) => updateSettings(atomId, newSettings)}
+            />
+          </div>
+        </>
+      ) : (
+        // Empty state
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+              <Database className="w-12 h-12 text-white" />
+            </div>
+            <h3 className="text-2xl font-bold text-gray-900 mb-2">
+              My New Atom
+            </h3>
+            <p className="text-gray-600">
+              Select a data source from the properties panel to get started
+            </p>
+          </div>
+        </div>
+      )}
+      
+      {/* Save As Dialog */}
+      <Dialog open={showSaveAsDialog} onOpenChange={setShowSaveAsDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Save As</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="filename" className="text-sm mb-2 block">
+              Filename (without .arrow extension)
+            </Label>
+            <Input
+              id="filename"
+              value={saveFileName}
+              onChange={(e) => setSaveFileName(e.target.value)}
+              placeholder="my_data"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !saving) {
+                  confirmSaveAs();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveAsDialog(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveAs}
+              disabled={saving || !saveFileName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Overwrite Confirmation Dialog */}
+      <Dialog open={showOverwriteDialog} onOpenChange={setShowOverwriteDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Confirm Overwrite</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-500 mt-0.5" />
+              <div>
+                <p className="text-sm text-gray-700 mb-2">
+                  Are you sure you want to save changes to the original file?
+                </p>
+                <p className="text-sm font-medium text-gray-900 mb-1">
+                  File: {settings.sourceFile?.split('/').pop()}
+                </p>
+                <p className="text-xs text-gray-600">
+                  This action cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowOverwriteDialog(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmOverwriteSave}
+              disabled={saving}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {saving ? 'Saving...' : 'Yes, Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default MyNewAtom;
+
+✅ KEY PATTERNS IN THIS COMPONENT:
+  1. Subscribe to 'cards' array, not individual atom
+  2. Store data in settings, not component state
+  3. Auto-load when sourceFile changes
+  4. Handle loading, error, and empty states
+  5. Save/Save As with confirmation dialogs
+  6. Use toast for user notifications
+
+
+4.6 REGISTER IN ATOM CATEGORIES
+────────────────────────────────────────────────────────────────────────────
+
+File: src/components/AtomCategory/data/atomCategories.ts
+
+// Add import at the top
+import myNewAtom from '@/components/AtomList/atoms/my-new-atom';
+
+// Add to appropriate category (can be in multiple categories)
+export const atomCategories: AtomCategory[] = [
+  {
+    name: 'Data Processing',
+    atoms: [
+      textBox,
+      dataUploadValidate,
+      myNewAtom,  // ← Add here
+      dataframeOperations,
+      // ... other atoms
+    ]
+  },
+  {
+    name: 'Analytics',
+    atoms: [
+      featureOverview,
+      explore,
+      myNewAtom,  // ← Can add to multiple categories
+      // ... other atoms
+    ]
+  },
+  // ... other categories
+];
+
+
+4.7 REGISTER IN CANVAS AREA
+────────────────────────────────────────────────────────────────────────────
+
+File: src/components/LaboratoryMode/components/CanvasArea/index.tsx
+
+⚠️ CRITICAL: You must add your atom in ALL 5 rendering locations!
+
+// Add import at the top
+import MyNewAtom from '@/components/AtomList/atoms/my-new-atom/MyNewAtom';
+
+// Search for all occurrences of this pattern:
+// atom.atomId === 'text-box' ? (
+
+// You'll find 5 locations. Add your atom in EACH one:
+
+// LOCATION 1 (around line 500)
+{atom.atomId === 'text-box' ? (
+  <TextBoxEditor textId={atom.id} />
+) : atom.atomId === 'data-upload-validate' ? (
+  <DataUploadValidateAtom atomId={atom.id} />
+) : atom.atomId === 'my-new-atom' ? (  // ← Add this
+  <MyNewAtom atomId={atom.id} />
+) : atom.atomId === 'dataframe-operations' ? (
+  <DataFrameOperationsAtom atomId={atom.id} />
+) : (
+  // ... other atoms
+)}
+
+// LOCATION 2 (around line 1000) - Repeat the same pattern
+// LOCATION 3 (around line 1500) - Repeat the same pattern
+// LOCATION 4 (around line 2000) - Repeat the same pattern
+// LOCATION 5 (around line 2500) - Repeat the same pattern
+
+⚠️ WHY 5 LOCATIONS?
+  The canvas renders atoms differently based on:
+  - View mode (Laboratory vs Dashboard)
+  - Card state (minimized, maximized, normal)
+  - Layout type (grid, list, etc.)
+  
+  Missing even one location means your atom won't render in certain scenarios!
+
+💡 TIP: Use your IDE's "Find All" to search for:
+  atom.atomId === 'text-box'
+  
+Then add your condition right after each occurrence.
+
+
+4.8 REGISTER IN SETTINGS PANEL
+────────────────────────────────────────────────────────────────────────────
+
+File: src/components/LaboratoryMode/components/SettingsPanel/index.tsx
+
+// Add import at the top
+import MyNewAtomProperties from '@/components/AtomList/atoms/my-new-atom/components/properties/MyNewAtomProperties';
+
+// Find the section that renders properties (around line 200-300)
+{selectedAtom?.atomId === 'text-box' ? (
+  <TextBoxProperties atomId={selectedAtom.id} />
+) : selectedAtom?.atomId === 'data-upload-validate' ? (
+  <DataUploadValidateProperties atomId={selectedAtom.id} />
+) : selectedAtom?.atomId === 'my-new-atom' ? (  // ← Add this
+  <MyNewAtomProperties atomId={selectedAtom.id} />
+) : selectedAtom?.atomId === 'dataframe-operations' ? (
+  <DataFrameOperationsProperties atomId={selectedAtom.id} />
+) : (
+  // ... other properties
+)}
+
+
+4.9 CREATE PROPERTIES PANEL (Example)
+────────────────────────────────────────────────────────────────────────────
+
+File: src/components/AtomList/atoms/my-new-atom/components/properties/MyNewAtomProperties.tsx
+
+import React, { useState } from 'react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Upload, Settings, Eye } from 'lucide-react';
+import MyNewAtomInputs from './MyNewAtomInputs';
+import MyNewAtomSettings from './MyNewAtomSettings';
+import MyNewAtomExhibition from './MyNewAtomExhibition';
+
+interface Props {
+  atomId: string;
+}
+
+const MyNewAtomProperties: React.FC<Props> = ({ atomId }) => {
+  const [activeTab, setActiveTab] = useState('inputs');
+  
+  return (
+    <div className="h-full flex flex-col">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="inputs" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Inputs
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
+          </TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="inputs" className="flex-1 mt-0 overflow-y-auto">
+          <MyNewAtomInputs atomId={atomId} />
+        </TabsContent>
+        
+        <TabsContent value="settings" className="flex-1 mt-0 overflow-y-auto">
+          <MyNewAtomSettings atomId={atomId} />
+        </TabsContent>
+        
+        <TabsContent value="exhibition" className="flex-1 mt-0 overflow-y-auto">
+          <MyNewAtomExhibition atomId={atomId} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+};
+
+export default MyNewAtomProperties;
+
+
+File: src/components/AtomList/atoms/my-new-atom/components/properties/MyNewAtomInputs.tsx
+
+import React, { useEffect, useState } from 'react';
+import { Card } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { VALIDATE_API } from '@/lib/api';
+import { loadData } from '../../services/myNewAtomApi';
+
+interface Frame {
+  object_name: string;
+  arrow_name: string;
+}
+
+interface Props {
+  atomId: string;
+}
+
+const MyNewAtomInputs: React.FC<Props> = ({ atomId }) => {
+  const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const settings = atom?.settings || {};
+  
+  const [frames, setFrames] = useState<Frame[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string>(settings.sourceFile || '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Fetch available dataframes
+  useEffect(() => {
+    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+      .then(r => r.json())
+      .then(d => {
+        const framesList = Array.isArray(d.files)
+          ? d.files
+              .filter((f: any) => !!f.arrow_name)
+              .map((f: any) => ({ object_name: f.object_name, arrow_name: f.arrow_name }))
+          : [];
+        setFrames(framesList);
+      })
+      .catch(err => {
+        console.error('Failed to fetch frames:', err);
+        setFrames([]);
+      });
+  }, []);
+  
+  const handleFileSelect = async (fileId: string) => {
+    setError(null);
+    setSelectedFile(fileId);
+    
+    if (!fileId) return;
+    
+    setLoading(true);
+    try {
+      const data = await loadData(fileId);
+      
+      // ✅ Store full data in settings
+      updateSettings(atomId, {
+        sourceFile: fileId,
+        atomId: data.atom_id,
+        data: data,
+        visibleColumns: data.columns,
+        columnOrder: data.columns
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to load file');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  return (
+    <div className="space-y-4 p-2">
+      <Card className="p-4 space-y-3">
+        <label className="text-sm font-medium text-gray-700 block">
+          Data Source
+        </label>
+        <Select value={selectedFile} onValueChange={handleFileSelect}>
+          <SelectTrigger className="bg-white border-gray-300">
+            <SelectValue placeholder="Choose a saved dataframe..." />
+          </SelectTrigger>
+          <SelectContent>
+            {frames.map(f => (
+              <SelectItem key={f.object_name} value={f.object_name}>
+                {f.arrow_name.split('/').pop()}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        
+        {loading && (
+          <div className="text-xs text-gray-600">Loading data...</div>
+        )}
+        
+        {error && (
+          <div className="text-red-600 text-xs p-2">{error}</div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+export default MyNewAtomInputs;
+
+================================================================================
+5. PHASE 4 - TESTING & VERIFICATION
+================================================================================
+
+5.1 PRE-DEPLOYMENT CHECKS
+────────────────────────────────────────────────────────────────────────────
+
+Before building, verify these files:
+
+□ Database Registration
+  □ populate_trinity_v1_atoms.py updated
+  □ update_available_atoms.py updated
+  □ Django migrations run
+  □ Database entry verified (available_atoms = true)
+
+□ Backend Implementation
+  □ Feature folder created with all files
+  □ Router registered in api/router.py
+  □ No double prefix issues
+  □ Endpoints tested with curl
+
+□ Frontend Implementation
+  □ Atom folder created with all components
+  □ Unique icon chosen (no conflicts)
+  □ Registered in atomCategories.ts
+  □ Registered in ALL 5 places in CanvasArea/index.tsx
+  □ Registered in SettingsPanel/index.tsx
+  □ API client created
+
+
+5.2 CLEAR FRONTEND CACHE
+────────────────────────────────────────────────────────────────────────────
+
+Frontend cache (.vite) can cause atoms to not appear even when correctly
+registered. Always clear it before testing:
+
+# On Linux/Mac
+rm -rf TrinityFrontend/.vite
+rm -rf TrinityFrontend/node_modules/.vite
+
+# On Windows PowerShell
+Remove-Item -Recurse -Force TrinityFrontend\.vite
+Remove-Item -Recurse -Force TrinityFrontend\node_modules\.vite
+
+# On Windows CMD
+rmdir /s /q TrinityFrontend\.vite
+rmdir /s /q TrinityFrontend\node_modules\.vite
+
+
+5.3 BUILD AND RESTART SERVICES
+────────────────────────────────────────────────────────────────────────────
+
+Using Docker Compose:
+
+# Build backend
+docker-compose build backend
+
+# Build frontend
+docker-compose build frontend
+
+# Restart services
+docker-compose restart backend
+docker-compose restart frontend
+
+# Or restart all services
+docker-compose down
+docker-compose up -d
+
+# View logs
+docker-compose logs -f backend
+docker-compose logs -f frontend
+
+
+5.4 VERIFY DATABASE
+────────────────────────────────────────────────────────────────────────────
+
+Connect to PostgreSQL and verify atom registration:
+
+# Connect to database
+docker exec -it <postgres-container-name> psql -U <username> -d <database-name>
+
+# List all registered atoms
+SELECT atom_id, title, available_atoms, category 
+FROM trinity_v1_atoms 
+ORDER BY atom_id;
+
+# Check specific atom
+SELECT * FROM trinity_v1_atoms WHERE atom_id = 'my-new-atom';
+
+Expected result:
+  atom_id: my-new-atom
+  title: My New Atom
+  available_atoms: t (true)
+  category: Data Processing
+
+# If available_atoms is false, fix it:
+UPDATE trinity_v1_atoms 
+SET available_atoms = true 
+WHERE atom_id = 'my-new-atom';
+
+
+5.5 TEST BACKEND API
+────────────────────────────────────────────────────────────────────────────
+
+Test endpoints using curl or Postman:
+
+# Health check
+curl http://localhost:8000/api/v1/atoms/my-new-atom/health
+
+Expected: {"status": "healthy", "active_sessions": 0}
+
+# Test load endpoint (replace with actual MinIO file)
+curl -X POST http://localhost:8000/api/v1/atoms/my-new-atom/load \
+  -H "Content-Type: application/json" \
+  -d '{"object_name": "test-data/sample.arrow"}'
+
+Expected: 
+{
+  "atom_id": "uuid-string",
+  "columns": ["col1", "col2"],
+  "rows": [...],
+  "row_count": 100,
+  "column_types": {"col1": "Int64", "col2": "Utf8"}
+}
+
+# Test invalid file extension
+curl -X POST http://localhost:8000/api/v1/atoms/my-new-atom/load \
+  -H "Content-Type: application/json" \
+  -d '{"object_name": "test.csv"}'
+
+Expected: {"detail": "Only .arrow files are supported"}
+
+
+5.6 TEST FRONTEND UI
+────────────────────────────────────────────────────────────────────────────
+
+□ Step 1: Open application in browser
+  URL: http://localhost:3000 (or configured port)
+  
+□ Step 2: Navigate to Laboratory mode
+  Click "Laboratory" in the top navigation
+  
+□ Step 3: Check Atom Library
+  □ Open Atom Library panel (left side)
+  □ Find your atom in the "Data Processing" category
+  □ Verify icon appears correctly
+  □ Verify no duplicate icons
+  
+  ⚠️ If atom not visible:
+    - Check browser console for errors
+    - Clear frontend cache and rebuild
+    - Verify database available_atoms flag
+    - Check for icon conflicts
+  
+□ Step 4: Drag atom onto canvas
+  □ Drag atom from library
+  □ Drop onto a card
+  □ Atom should appear with empty state message
+  
+  ⚠️ If atom doesn't render:
+    - Check CanvasArea/index.tsx has all 5 registrations
+    - Check browser console for errors
+    - Verify component import path
+  
+□ Step 5: Test Properties Panel
+  □ Click on the atom
+  □ Properties panel should open on the right
+  □ Verify all tabs appear (Inputs, Settings, Exhibition)
+  
+  ⚠️ If properties don't show:
+    - Check SettingsPanel/index.tsx registration
+    - Verify properties component import
+  
+□ Step 6: Test Data Loading
+  □ Go to "Inputs" tab
+  □ Select a dataframe from dropdown
+  □ Data should load and display on canvas
+  □ Check browser console for any errors
+  
+  ⚠️ If data doesn't load:
+    - Check Network tab for API calls
+    - Verify backend endpoint is responding
+    - Check console for errors
+  
+□ Step 7: Test Save Functionality
+  □ Click "Save As" button
+  □ Enter filename
+  □ Click Save
+  □ Verify success toast appears
+  
+  □ Click "Save" button (if original file exists)
+  □ Confirm overwrite
+  □ Verify success toast appears
+  
+□ Step 8: Test Data Persistence
+  □ Save data
+  □ Navigate away from Laboratory
+  □ Return to Laboratory
+  □ Verify data is still loaded
+  
+□ Step 9: Test Multiple Instances
+  □ Add another instance of your atom
+  □ Verify both instances work independently
+  □ Verify they don't share data incorrectly
+
+
+5.7 BROWSER CONSOLE CHECKS
+────────────────────────────────────────────────────────────────────────────
+
+Open browser Developer Tools (F12) and check for:
+
+□ No red errors in Console tab
+□ No 404 errors in Network tab
+□ API calls return 200 status codes
+□ No CORS errors
+□ Redux/Zustand state updates correctly
+
+Common console messages to look for:
+  ✅ "🚀🚀🚀 [MY-ATOM] COMPONENT MOUNTED"
+  ✅ "📊 [MY-ATOM] Auto-loading: <file>"
+  ✅ "✅ [MY-ATOM] Loaded successfully"
+  ❌ "404 Not Found: /api/v1/atoms/my-new-atom/load"
+  ❌ "TypeError: Cannot read property 'columns' of undefined"
+
+
+5.8 HARD REFRESH TEST
+────────────────────────────────────────────────────────────────────────────
+
+After making changes, always test with hard refresh:
+
+Windows: Ctrl + Shift + R
+Mac: Cmd + Shift + R
+Linux: Ctrl + Shift + R
+
+This clears browser cache and ensures you're seeing latest changes.
+
+
+5.9 TEST CHECKLIST SUMMARY
+────────────────────────────────────────────────────────────────────────────
+
+Complete this checklist before considering your atom "done":
+
+□ BACKEND
+  □ Health endpoint responds
+  □ Load endpoint works with valid .arrow file
+  □ Load endpoint rejects invalid files
+  □ Save endpoint creates new files
+  □ Save endpoint can overwrite files
+  □ Session management works
+  □ MinIO integration works
+  □ Redis caching works
+  □ Proper error messages returned
+
+□ DATABASE
+  □ Atom registered in trinity_v1_atoms
+  □ available_atoms flag is true
+  □ All metadata fields populated
+  □ Migrations applied successfully
+
+□ FRONTEND - VISIBILITY
+  □ Atom appears in Atom Library
+  □ Icon displays correctly (no conflicts)
+  □ Description shows in tooltip
+  □ Can be dragged onto canvas
+
+□ FRONTEND - RENDERING
+  □ Empty state displays correctly
+  □ Component renders after data load
+  □ No console errors
+  □ Properties panel appears when clicked
+  □ All tabs render in properties panel
+
+□ FRONTEND - FUNCTIONALITY
+  □ Data loads from dropdown
+  □ Data displays correctly on canvas
+  □ Save As creates new file
+  □ Save overwrites with confirmation
+  □ Toast notifications appear
+  □ Error states handled gracefully
+  □ Loading states display
+
+□ FRONTEND - PERSISTENCE
+  □ Data persists after navigation
+  □ Settings persist after refresh
+  □ Multiple instances work independently
+
+□ INTEGRATION
+  □ End-to-end data flow works
+  □ No 404 errors in Network tab
+  □ No CORS errors
+  □ API responses match expected format
+  □ File saved to MinIO successfully
+  □ File cached in Redis
+
+================================================================================
+6. COMMON ISSUES & SOLUTIONS
+================================================================================
+
+ISSUE 1: Atom Not Visible in Frontend
+────────────────────────────────────────────────────────────────────────────
+
+Symptoms:
+  - Atom doesn't appear in Atom Library
+  - Other atoms visible but not this one
+
+Causes & Solutions:
+
+1. available_atoms flag is false
+   
+   Check:
+     SELECT available_atoms FROM trinity_v1_atoms WHERE atom_id = 'my-new-atom';
+   
+   Fix:
+     UPDATE trinity_v1_atoms SET available_atoms = true WHERE atom_id = 'my-new-atom';
+
+2. Icon conflict with another atom
+   
+   Check:
+     Open src/components/AtomList/atoms/*/index.ts files
+     Look for duplicate icon imports
+   
+   Fix:
+     Change icon to a unique one (Table → Table2, Database, etc.)
+
+3. Not registered in atomCategories.ts
+   
+   Check:
+     Open src/components/AtomCategory/data/atomCategories.ts
+     Search for your atom ID
+   
+   Fix:
+     Add atom to appropriate category array
+
+4. Frontend cache not cleared
+   
+   Fix:
+     rm -rf TrinityFrontend/.vite
+     docker-compose build frontend
+     docker-compose restart frontend
+
+5. Django management commands not run
+   
+   Fix:
+     cd TrinityBackendDjango
+     python manage.py populate_trinity_v1_atoms
+     python manage.py update_available_atoms
+
+
+ISSUE 2: Atom Doesn't Render on Canvas
+────────────────────────────────────────────────────────────────────────────
+
+Symptoms:
+  - Can drag atom from library
+  - Atom disappears or shows generic message
+  - Console shows "Component not found" or similar
+
+Causes & Solutions:
+
+1. Not registered in ALL 5 locations in CanvasArea/index.tsx
+   
+   Check:
+     Search for "atom.atomId === 'text-box'" in CanvasArea/index.tsx
+     Count how many times your atom condition appears
+   
+   Fix:
+     Add your atom condition in all 5 locations:
+     
+     ) : atom.atomId === 'my-new-atom' ? (
+       <MyNewAtom atomId={atom.id} />
+     ) : (
+
+2. Component import path incorrect
+   
+   Check:
+     import MyNewAtom from '@/components/AtomList/atoms/my-new-atom/MyNewAtom';
+   
+   Verify file exists at that path
+
+3. Component has runtime errors
+   
+   Check:
+     Browser console for errors
+     Component render method
+   
+   Fix:
+     Add error boundary
+     Fix any undefined references
+
+
+ISSUE 3: API Endpoint Returns 404
+────────────────────────────────────────────────────────────────────────────
+
+Symptoms:
+  - Browser shows "404 Not Found"
+  - Network tab shows failed requests
+
+Causes & Solutions:
+
+1. Router not registered in api/router.py
+   
+   Check:
+     Open TrinityBackendFastAPI/app/api/router.py
+     Search for your atom import and include_router call
+   
+   Fix:
+     from app.features.my_new_atom.routes import router as my_new_atom_router
+     
+     api_router.include_router(
+         my_new_atom_router,
+         prefix="/v1/atoms/my-new-atom",
+         tags=["My New Atom"]
+     )
+
+2. Double prefix issue
+   
+   Symptom:
+     URL is /api/v1/atoms/my-new-atom/my-new-atom/load
+   
+   Cause:
+     Prefix defined in both routes.py and api/router.py
+   
+   Fix:
+     Remove prefix from routes.py:
+     router = APIRouter()  # No prefix here
+
+3. Backend not restarted
+   
+   Fix:
+     docker-compose restart backend
+
+4. Wrong URL in frontend API client
+   
+   Check:
+     services/myNewAtomApi.ts
+     const API_BASE = '/api/v1/atoms/my-new-atom';
+   
+   Verify matches backend route
+
+
+ISSUE 4: Data Not Persisting
+────────────────────────────────────────────────────────────────────────────
+
+Symptoms:
+  - Data loads but disappears on refresh
+  - Settings don't persist
+  - Multiple atom instances share data
+
+Causes & Solutions:
+
+1. Data stored in component state instead of Zustand
+   
+   Wrong:
+     const [data, setData] = useState(null);
+   
+   Correct:
+     const data = settings.data || null;
+     updateSettings(atomId, { data: loadedData });
+
+2. Not calling updateSettings after operations
+   
+   Check:
+     All data loading/modification functions
+   
+   Fix:
+     updateSettings(atomId, { data: newData });
+
+3. Not subscribing to cards array
+   
+   Wrong:
+     const atom = useLaboratoryStore(state => state.getAtom(atomId));
+   
+   Correct:
+     const cards = useLaboratoryStore(state => state.cards);
+     const atom = cards.flatMap(card => card.atoms).find(a => a.id === atomId);
+
+
+ISSUE 5: Properties Panel Not Showing
+────────────────────────────────────────────────────────────────────────────
+
+Symptoms:
+  - Click on atom, nothing happens
+  - Generic properties shown instead of custom ones
+
+Causes & Solutions:
+
+1. Not registered in SettingsPanel/index.tsx
+   
+   Check:
+     Open SettingsPanel/index.tsx
+     Search for your atom ID
+   
+   Fix:
+     ) : selectedAtom?.atomId === 'my-new-atom' ? (
+       <MyNewAtomProperties atomId={selectedAtom.id} />
+     ) : (
+
+2. Properties component import incorrect
+   
+   Check:
+     Import path in SettingsPanel/index.tsx
+   
+   Verify component exists at that path
+
+
+ISSUE 6: URL Encoding Issues
+────────────────────────────────────────────────────────────────────────────
+
+Symptoms:
+  - Files with spaces or special characters fail to load
+  - Error: "File not found" but file exists
+
+Cause:
+  - File paths need URL decoding
+
+Fix (Backend):
+  from urllib.parse import unquote
+  
+  @router.post("/load")
+  async def load_data(request: MyAtomLoadRequest):
+      object_name = unquote(request.object_name)  # ← Add this
+      df = load_data_from_minio(object_name)
+
+
+ISSUE 7: MinIO Connection Errors
+────────────────────────────────────────────────────────────────────────────
+
+Symptoms:
+  - "Connection refused"
+  - "Bucket does not exist"
+  - "Access denied"
+
+Causes & Solutions:
+
+1. MinIO not running
+   
+   Check:
+     docker ps | grep minio
+   
+   Fix:
+     docker-compose up -d minio
+
+2. Wrong bucket name
+   
+   Check:
+     MINIO_BUCKET in service.py
+   
+   Fix:
+     Verify bucket exists in MinIO
+     Or create it: mc mb myminio/trinity-data
+
+3. Wrong credentials
+   
+   Check:
+     Environment variables:
+     MINIO_ROOT_USER
+     MINIO_ROOT_PASSWORD
+   
+   Fix:
+     Update .env file
+     Restart services
+
+
+ISSUE 8: Redis Caching Not Working
+────────────────────────────────────────────────────────────────────────────
+
+Symptoms:
+  - Every load is slow (no cache benefit)
+  - Redis errors in logs
+
+Causes & Solutions:
+
+1. Redis not running
+   
+   Check:
+     docker ps | grep redis
+   
+   Fix:
+     docker-compose up -d redis
+
+2. Redis connection not configured
+   
+   Check:
+     app/core/redis.py exists
+     REDIS_URL environment variable set
+   
+   Fix:
+     Add to .env:
+     REDIS_URL=redis://redis:6379/0
+
+================================================================================
+7. BEST PRACTICES
+================================================================================
+
+7.1 FRONTEND BEST PRACTICES
+────────────────────────────────────────────────────────────────────────────
+
+✅ State Management
+  - Store ALL persistent data in Zustand settings
+  - Use component state only for UI-only data (modals, loading spinners)
+  - Subscribe to 'cards' array, not individual atoms
+  - Always call updateSettings after data changes
+
+✅ Data Loading
+  - Implement auto-load when sourceFile changes
+  - Handle loading, error, and empty states
+  - Show user-friendly error messages
+  - Use skeleton loaders for better UX
+
+✅ Icons
+  - Use unique icons to avoid conflicts
+  - Check existing atoms before choosing
+  - Icons from lucide-react are preferred
+  - Test icon visibility after changes
+
+✅ Dialogs and Modals
+  - Use shadcn Dialog components
+  - Implement proper keyboard handlers (Enter to submit, Escape to close)
+  - Disable actions during loading
+  - Show loading state in buttons
+
+✅ Toast Notifications
+  - Use useToast hook for feedback
+  - Show success messages after operations
+  - Show error details in toast
+  - Use appropriate variants (default, destructive)
+
+✅ Error Handling
+  - Catch and display all errors
+  - Log errors to console for debugging
+  - Provide actionable error messages
+  - Don't crash on errors - show error state
+
+✅ TypeScript
+  - Define interfaces for all data structures
+  - Use proper types (avoid 'any' when possible)
+  - Export types for reuse
+  - Use optional chaining for safety
+
+
+7.2 BACKEND BEST PRACTICES
+────────────────────────────────────────────────────────────────────────────
+
+✅ Session Management
+  - Use in-memory dict for active sessions
+  - Clear old sessions periodically
+  - Generate unique session IDs (UUID)
+  - Return session ID in responses
+
+✅ Data Storage
+  - Use Apache Arrow (.arrow) format for efficiency
+  - Store in MinIO with organized folder structure
+  - Use Redis for frequently accessed data
+  - Set appropriate TTL for cache (1 hour recommended)
+
+✅ File Handling
+  - Always validate file extensions
+  - URL decode object names
+  - Handle missing files gracefully
+  - Check file exists before operations
+
+✅ Error Handling
+  - Use HTTPException with appropriate status codes
+  - Log all errors with context
+  - Return user-friendly error messages
+  - Include error details in logs, not in user messages
+
+✅ Logging
+  - Use logger.info for important operations
+  - Use logger.error for failures
+  - Include operation context in logs
+  - Use emoji prefixes for visibility (✅ ❌ 🔵 💾)
+
+✅ Pydantic Models
+  - Define clear request/response schemas
+  - Use Field() for descriptions
+  - Validate data at API boundary
+  - Use Optional for nullable fields
+
+✅ API Design
+  - Use consistent naming conventions
+  - Version your APIs (/v1/, /v2/)
+  - Document endpoints (README.md)
+  - Return consistent response format
+
+
+7.3 DATABASE BEST PRACTICES
+────────────────────────────────────────────────────────────────────────────
+
+✅ Migrations
+  - Always run after schema changes
+  - Test migrations in development first
+  - Backup database before major changes
+  - Keep migration files in version control
+
+✅ Management Commands
+  - Keep populate and update scripts in sync
+  - Document what each command does
+  - Make commands idempotent (safe to run multiple times)
+  - Add your atom to both populate and update scripts
+
+✅ Data Integrity
+  - Verify atom registered before frontend testing
+  - Check available_atoms flag frequently
+  - Use meaningful atom IDs (kebab-case)
+  - Keep metadata accurate and up-to-date
+
+
+7.4 TESTING BEST PRACTICES
+────────────────────────────────────────────────────────────────────────────
+
+✅ Development Testing
+  - Clear cache before testing changes
+  - Test in multiple browsers
+  - Test with different data sizes
+  - Test error scenarios
+
+✅ Integration Testing
+  - Test full data flow (frontend → backend → storage)
+  - Verify data persists correctly
+  - Test multiple concurrent users
+  - Test with real MinIO and Redis
+
+✅ User Testing
+  - Test with realistic data
+  - Test common user workflows
+  - Get feedback from actual users
+  - Document known limitations
+
+================================================================================
+8. COMPLETE CHECKLIST
+================================================================================
+
+Use this checklist to ensure nothing is missed:
+
+PHASE 1: DATABASE ✓
+────────────────────────────────────────────────────────────────────────────
+□ Added atom to populate_trinity_v1_atoms.py
+□ Added atom to update_available_atoms.py
+□ Set available_atoms = True
+□ Ran makemigrations
+□ Ran migrate
+□ Ran populate_trinity_v1_atoms command
+□ Ran update_available_atoms command
+□ Verified database entry with psql
+
+PHASE 2: BACKEND ✓
+────────────────────────────────────────────────────────────────────────────
+□ Created feature folder: app/features/my_new_atom/
+□ Created __init__.py
+□ Created schemas.py with Pydantic models
+□ Created service.py with business logic
+□ Created routes.py with API endpoints
+□ Implemented MinIO integration
+□ Implemented Redis caching
+□ Implemented session management
+□ Added URL decoding in load endpoint
+□ Added file extension validation
+□ Registered router in api/router.py
+□ No double prefix issue
+□ Tested health endpoint with curl
+□ Tested load endpoint with curl
+□ Tested save endpoint with curl
+
+PHASE 3: FRONTEND ✓
+────────────────────────────────────────────────────────────────────────────
+□ Created atom folder: src/components/AtomList/atoms/my-new-atom/
+□ Created index.ts with metadata
+□ Chose unique icon (no conflicts)
+□ Created types.ts with interfaces
+□ Created services/myNewAtomApi.ts
+□ Implemented loadData function
+□ Implemented saveData function
+□ Created MyNewAtom.tsx main component
+□ Subscribed to cards array (not individual atom)
+□ Stored data in settings (not component state)
+□ Implemented auto-load on sourceFile change
+□ Implemented loading state
+□ Implemented error state
+□ Implemented empty state
+□ Implemented Save button with dialog
+□ Implemented Save As button with dialog
+□ Created MyNewAtomCanvas.tsx
+□ Created properties/MyNewAtomProperties.tsx
+□ Created properties/MyNewAtomInputs.tsx
+□ Created properties/MyNewAtomSettings.tsx
+□ Created properties/MyNewAtomExhibition.tsx
+□ Registered in atomCategories.ts
+□ Registered in ALL 5 places in CanvasArea/index.tsx
+□ Registered in SettingsPanel/index.tsx
+
+PHASE 4: TESTING ✓
+────────────────────────────────────────────────────────────────────────────
+□ Cleared .vite cache
+□ Built backend: docker-compose build backend
+□ Built frontend: docker-compose build frontend
+□ Restarted services: docker-compose restart
+□ Verified database: available_atoms = true
+□ Backend health check passed
+□ Backend load endpoint works
+□ Backend save endpoint works
+□ Atom appears in Atom Library
+□ Icon displays correctly
+□ Can drag atom onto canvas
+□ Atom renders on canvas
+□ Properties panel shows when clicked
+□ All tabs visible in properties
+□ Can select file from dropdown
+□ Data loads and displays
+□ Save As creates new file
+□ Save overwrites with confirmation
+□ Toast notifications appear
+□ No errors in browser console
+□ No 404s in Network tab
+□ Data persists after navigation
+□ Multiple instances work independently
+□ Hard refresh works (Ctrl+Shift+R)
+
+DOCUMENTATION ✓
+────────────────────────────────────────────────────────────────────────────
+□ Added comments to complex code
+□ Created README.md for backend API
+□ Documented known limitations
+□ Updated this guide with learnings
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+
+For questions or issues, refer to:
+  - Existing atoms (dataframe-operations, table) as reference
+  - Trinity architecture documentation
+  - FastAPI documentation: https://fastapi.tiangolo.com
+  - Polars documentation: https://docs.pola.rs
+  - React documentation: https://react.dev
+  - Zustand documentation: https://zustand-demo.pmnd.rs
+
+Last updated: 2025-12-05
+
+

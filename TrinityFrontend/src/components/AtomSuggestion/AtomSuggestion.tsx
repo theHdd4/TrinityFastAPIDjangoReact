@@ -8,6 +8,7 @@ interface AtomSuggestionProps {
   isVisible: boolean;
   onClose: () => void;
   onAddAtom?: (atomId: string, atomData: any, targetCardId?: string) => void;
+  allowedAtomIds?: string[]; // Optional: filter atoms by IDs. If undefined, show all atoms.
 }
 
 interface SavedFrameMeta {
@@ -20,7 +21,8 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
   cardId,
   isVisible,
   onClose,
-  onAddAtom
+  onAddAtom,
+  allowedAtomIds
 }) => {
   const [savedDataframes, setSavedDataframes] = useState<SavedFrameMeta[]>([]);
   const [isLoadingDataframes, setIsLoadingDataframes] = useState(false);
@@ -430,18 +432,27 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
       });
     }
     
-    // If card above has dataframe operations, suggest groupby, correlation, and merge
+    // If card above has dataframe operations, suggest chart-maker and correlation (Dashboard-friendly)
+    // Also suggest groupby and merge for Analytics mode (will be filtered by mode if needed)
     if (cardAboveHasDataframeOperations) {
+      // Always suggest chart-maker and correlation (both work in Dashboard and Analytics)
       suggestions.push({
-        id: 'groupby-wtg-avg',
-        name: 'Groupby',
-        color: 'bg-yellow-500'
+        id: 'chart-maker',
+        name: 'Chart maker',
+        color: 'bg-pink-500'
       });
       
       suggestions.push({
         id: 'correlation',
         name: 'Correlation',
         color: 'bg-red-500'
+      });
+      
+      // Also suggest these for Analytics mode (will be filtered out in Dashboard mode)
+      suggestions.push({
+        id: 'groupby-wtg-avg',
+        name: 'Groupby',
+        color: 'bg-yellow-500'
       });
       
       suggestions.push({
@@ -559,10 +570,29 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
       });
     }
     
+    // Apply mode filter if provided (Dashboard mode restriction)
+    let filteredSuggestions = suggestions;
+    if (allowedAtomIds && allowedAtomIds.length > 0) {
+      filteredSuggestions = suggestions.filter(suggestion => allowedAtomIds.includes(suggestion.id));
+      
+      // If in Dashboard mode and no suggestions match (or no cards exist), show all allowed atoms as defaults
+      if (filteredSuggestions.length === 0 && allAtoms.length === 0) {
+        // Show all 3 allowed atoms in Dashboard mode when starting fresh
+        filteredSuggestions = allowedAtomIds.map(atomId => {
+          if (atomId === 'dataframe-operations') {
+            return { id: 'dataframe-operations', name: 'Dataframe operations', color: 'bg-purple-500' };
+          } else if (atomId === 'chart-maker') {
+            return { id: 'chart-maker', name: 'Chart maker', color: 'bg-pink-500' };
+          } else if (atomId === 'correlation') {
+            return { id: 'correlation', name: 'Correlation', color: 'bg-red-500' };
+          }
+          return null;
+        }).filter(Boolean) as Array<{id: string; name: string; color: string}>;
+      }
+    }
     
-    
-    return suggestions;
-  }, [hasDataUploadAtom, hasColumnClassifierAtom, hasDataframeOperationsAtom, hasFeatureOverviewAtom, hasExploreAtom, hasCorrelationAtom, hasCreateAndTransformAtom, hasChartMakerAtom, hasGroupByAtom, hasMergeAtom, hasConcatAtom, hasScopeSelectorAtom, hasClusteringAtom, hasBuildFeatureBasedAtom, hasBuildAutoregressiveAtom, hasSelectModelsFeatureAtom, hasEvaluateModelsFeatureAtom, hasScenarioPlannerAtom, savedDataframes.length, cards, cardId, allAtoms.length]);
+    return filteredSuggestions;
+  }, [hasDataUploadAtom, hasColumnClassifierAtom, hasDataframeOperationsAtom, hasFeatureOverviewAtom, hasExploreAtom, hasCorrelationAtom, hasCreateAndTransformAtom, hasChartMakerAtom, hasGroupByAtom, hasMergeAtom, hasConcatAtom, hasScopeSelectorAtom, hasClusteringAtom, hasBuildFeatureBasedAtom, hasBuildAutoregressiveAtom, hasSelectModelsFeatureAtom, hasEvaluateModelsFeatureAtom, hasScenarioPlannerAtom, savedDataframes.length, cards, cardId, allAtoms.length, allowedAtomIds]);
 
   // Check if we should show the suggestion
   const shouldShowSuggestion = useMemo(() => {
@@ -592,7 +622,7 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
       return [];
     }
     const query = searchQuery.toLowerCase();
-    return apiAtoms.filter(atom => {
+    let filtered = apiAtoms.filter(atom => {
       const name = atom.name || '';
       const description = atom.description || '';
       const tags = atom.tags || [];
@@ -600,7 +630,14 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
              description.toLowerCase().includes(query) ||
              tags.some(tag => tag && tag.toLowerCase().includes(query));
     });
-  }, [searchQuery, apiAtoms]);
+    
+    // Apply mode filter if provided (Dashboard mode restriction)
+    if (allowedAtomIds && allowedAtomIds.length > 0) {
+      filtered = filtered.filter(atom => allowedAtomIds.includes(atom.id));
+    }
+    
+    return filtered;
+  }, [searchQuery, apiAtoms, allowedAtomIds]);
 
   // Handle adding a suggested atom
   const handleAddSuggestedAtom = (atomId: string, atomName: string, color: string) => {

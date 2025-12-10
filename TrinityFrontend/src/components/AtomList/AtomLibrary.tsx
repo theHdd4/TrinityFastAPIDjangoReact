@@ -11,6 +11,7 @@ import { TRINITY_V1_ATOMS_API } from '@/lib/api';
 interface AtomLibraryProps {
   onAtomDragStart?: (e: React.DragEvent, atomId: string) => void;
   onCollapse?: () => void;
+  allowedAtomIds?: string[];  // Optional: filter atoms by IDs. If undefined, show all atoms.
 }
 
 interface Atom {
@@ -29,7 +30,7 @@ interface AtomCategory {
   atoms: Atom[];
 }
 
-const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }) => {
+const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse, allowedAtomIds }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [atoms, setAtoms] = useState<Atom[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +62,13 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
               color: atom.color || getCategoryColor(atom.category || 'Utilities')
             }));
             console.log('Transformed atoms:', transformedAtoms.slice(0, 3));
-            setAtoms(transformedAtoms);
+            
+            // Filter atoms if allowedAtomIds is provided
+            const filteredAtoms = allowedAtomIds 
+              ? transformedAtoms.filter(atom => allowedAtomIds.includes(atom.id))
+              : transformedAtoms;
+            
+            setAtoms(filteredAtoms);
           } else {
             console.log('No atoms found, using fallback');
             setAtoms([]);
@@ -80,7 +87,7 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
     };
 
     fetchAtoms();
-  }, []);
+  }, [allowedAtomIds]); // Re-fetch and filter when allowedAtomIds changes
 
   // Helper function to get category color
   const getCategoryColor = (category: string) => {
@@ -131,6 +138,10 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
   const filteredCategories = categoriesToUse.map(category => ({
     ...category,
     atoms: category.atoms.filter(atom => {
+      // Check if atom is allowed (mode filter)
+      const isAllowed = !allowedAtomIds || allowedAtomIds.includes(atom.id);
+      if (!isAllowed) return false;
+      
       // Safely check if fields exist before calling toLowerCase
       const name = atom.name || '';
       const description = atom.description || '';

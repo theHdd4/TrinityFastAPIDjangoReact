@@ -9,6 +9,7 @@ import FeatureOverview from './atoms/FeatureOverview';
 import ChartMaker from './atoms/ChartMaker';
 import EvaluateModelsFeature from './atoms/EvaluateModelsFeature';
 import KPIDashboardExhibition from '@/components/AtomList/atoms/kpi-dashboard/components/KPIDashboardExhibition';
+import Correlation from './atoms/Correlation';
 
 interface ExhibitedAtomRendererProps {
   atom: DroppedAtom;
@@ -988,6 +989,10 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   if (atom.atomId === 'kpi-dashboard') {
     const dashboardData = metadata?.data as any;
     return <KPIDashboardExhibition data={dashboardData || null} />;
+  }
+
+  if (atom.atomId === 'correlation') {
+    return <Correlation metadata={atom.metadata} variant={variant} />;
   }
 
   const previewImage = typeof metadata?.['previewImage'] === 'string' ? (metadata['previewImage'] as string) : undefined;

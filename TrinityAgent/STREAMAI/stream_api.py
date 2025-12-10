@@ -189,14 +189,22 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 })
             return True
 
+        clarification_stop = asyncio.Event()
+
         async def clarification_router():
-            while True:
+            while not clarification_stop.is_set():
                 try:
-                    router_message = await websocket.receive_text()
+                    router_message = await asyncio.wait_for(
+                        websocket.receive_text(), timeout=5.0
+                    )
                     parsed_router = json.loads(router_message)
                     handled = await handle_clarification_response(parsed_router)
                     if not handled:
                         logger.debug("Received non-clarification message during stream: %s", parsed_router)
+                except asyncio.TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    break
                 except WebSocketDisconnect:
                     break
                 except Exception as exc:  # pragma: no cover - defensive logging
@@ -332,13 +340,14 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     continue
 
                 if policy_flip:
-                    await _safe_send_json(websocket, {
-                        "type": "policy_shift",
-                        "message": "Detected a change in execution path; please confirm before continuing.",
-                    })
-                    close_code = 1000
-                    close_reason = "policy_shift"
-                    return
+                    await _safe_send_json(
+                        websocket,
+                        {
+                            "type": "policy_shift",
+                            "message": "Detected a change in execution path; proceeding with the updated plan.",
+                        },
+                    )
+                    # Continue execution without requesting user confirmation
 
                 if decision.requires_files and not available_files:
                     await _safe_send_json(websocket, {
@@ -624,10 +633,12 @@ async def execute_workflow_websocket(websocket: WebSocket):
         except:
             pass
     finally:
+        if 'clarification_stop' in locals():
+            clarification_stop.set()
         if clarification_task:
             clarification_task.cancel()
             with contextlib.suppress(Exception):
-                await clarification_task
+                await asyncio.wait_for(clarification_task, timeout=0.5)
         await _safe_close_websocket(websocket, code=close_code, reason=close_reason)
 
 

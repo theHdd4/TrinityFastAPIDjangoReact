@@ -525,7 +525,7 @@ class StreamRAGEngine:
 - Use output from previous step that has numeric columns
 - Example: After merging datasets, use correlation to find relationships between numeric columns
 - Example: Use correlation early in EDA workflow to guide further analysis
-"""
+""",
         }
         
         return guidance_map.get(atom_id, "\n## Parameter Generation Guidance:\nFollow the parameter schema and use previous step outputs when applicable.\n")

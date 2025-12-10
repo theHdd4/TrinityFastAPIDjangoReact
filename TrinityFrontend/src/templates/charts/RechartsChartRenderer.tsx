@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 // Separate component for axis label editing to prevent re-renders
@@ -203,6 +203,7 @@ interface Props {
   // Series settings props for persistence
   seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>; // Per-series settings from parent
   onSeriesSettingsChange?: (settings: Record<string, { color?: string; showDataLabels?: boolean }>) => void; // Callback to update series settings
+  isMobile?: boolean; // Flag to enable mobile-specific optimizations
 }
 
 // Excel-like color themes
@@ -536,6 +537,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   stackBars = false,
   seriesSettings: propSeriesSettings, // Series settings from parent
   onSeriesSettingsChange, // Callback to update series settings
+  isMobile = false, // Default to false for backward compatibility
 }) => {
 
   // Create storage key for theme based on data fields (not chart type) to persist across chart type changes
@@ -631,6 +633,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [axisToggleSubmenuPos, setAxisToggleSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const chartRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const colorSubmenuRef = useRef<HTMLDivElement>(null);
+  const sortSubmenuRef = useRef<HTMLDivElement>(null);
+  const chartTypeSubmenuRef = useRef<HTMLDivElement>(null);
+  const axisLabelSubmenuRef = useRef<HTMLDivElement>(null);
+  const axisToggleSubmenuRef = useRef<HTMLDivElement>(null);
+  const seriesSettingsSubmenuRef = useRef<HTMLDivElement>(null);
   const chartRenderedRef = useRef(false);
   const animationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
@@ -932,16 +941,53 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const handleSeriesSettingsClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setSeriesSettingsSubmenuPos({ x: rect.right + 4, y: rect.top });
-    setShowSeriesSettingsSubmenu(prev => !prev);
+    
+    // Close all other submenus first
+    closeAllSubmenus();
+    
+    const buttonRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const menuRect = contextMenuRef.current?.getBoundingClientRect();
+    
+    // Reset series settings state
     setSelectedSeriesTab(null); // Reset to first series when reopening
     setSeriesTabOffset(0); // Reset tab offset when reopening
-    setShowColorSubmenu(false);
-    setShowSortSubmenu(false);
-    setShowChartTypeSubmenu(false);
-    setShowAxisLabelSubmenu(false);
-    setShowAxisToggleSubmenu(false);
+    
+    if (!menuRect) {
+      // Fallback if menu ref not available
+      setSeriesSettingsSubmenuPos({ x: buttonRect.right + 4, y: buttonRect.top });
+      setShowSeriesSettingsSubmenu(true);
+      return;
+    }
+    
+    // Position submenu adjacent to main menu (not overlapping)
+    let x = menuRect.right + 4; // Start to the right of menu
+    let y = buttonRect.top;      // Align with clicked button
+    
+    const submenuWidth = 400; // Approximate width of series settings submenu (wider than others)
+    const submenuHeight = 500; // Approximate max height
+    const padding = 8;
+    
+    // Check if submenu would overflow on the right
+    if (x + submenuWidth > window.innerWidth - padding) {
+      // Position to the left of the menu instead
+      x = menuRect.left - submenuWidth - 4;
+      
+      // If still overflowing on left, align to right edge
+      if (x < padding) {
+        x = window.innerWidth - submenuWidth - padding;
+      }
+    }
+    
+    // Check vertical bounds
+    if (y + submenuHeight > window.innerHeight - padding) {
+      y = Math.max(padding, window.innerHeight - submenuHeight - padding);
+    }
+    if (y < padding) {
+      y = padding;
+    }
+    
+    setSeriesSettingsSubmenuPos({ x, y });
+    setShowSeriesSettingsSubmenu(true);
   };
 
   const resolvedTitle = useMemo(() => {
@@ -1023,49 +1069,124 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }
   }, [customTitle, xAxisLabel, yAxisLabel, type]);
 
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setShowContextMenu(false);
+  // Helper function to close all submenus
+  const closeAllSubmenus = useCallback(() => {
     setShowColorSubmenu(false);
     setShowSortSubmenu(false);
     setShowChartTypeSubmenu(false);
     setShowAxisLabelSubmenu(false);
     setShowAxisToggleSubmenu(false);
     setShowSeriesSettingsSubmenu(false);
+  }, []);
+
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShowContextMenu(false);
+    closeAllSubmenus();
   };
 
   // Handler for axis label editing submenu
   const handleAxisLabelClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setAxisLabelSubmenuPos({ x: rect.right + 4, y: rect.top });
+    
+    // Close all other submenus first
+    closeAllSubmenus();
+    
+    const buttonRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const menuRect = contextMenuRef.current?.getBoundingClientRect();
     
     // Initialize temp values with current values
     setTempXAxisLabel(customXAxisLabel || xAxisLabel || '');
     setTempYAxisLabel(customYAxisLabel || yAxisLabel || '');
     
-    setShowAxisLabelSubmenu(prev => !prev);
-    setShowColorSubmenu(false);
-    setShowSortSubmenu(false);
-    setShowChartTypeSubmenu(false);
-    setShowAxisToggleSubmenu(false);
-  }, [customXAxisLabel, xAxisLabel, customYAxisLabel, yAxisLabel]);
+    if (!menuRect) {
+      // Fallback if menu ref not available
+      setAxisLabelSubmenuPos({ x: buttonRect.right + 4, y: buttonRect.top });
+      setShowAxisLabelSubmenu(true);
+      return;
+    }
+    
+    // Position submenu adjacent to main menu (not overlapping)
+    let x = menuRect.right + 4; // Start to the right of menu
+    let y = buttonRect.top;      // Align with clicked button
+    
+    const submenuWidth = 280; // Approximate width of axis label submenu
+    const submenuHeight = 400; // Approximate max height
+    const padding = 8;
+    
+    // Check if submenu would overflow on the right
+    if (x + submenuWidth > window.innerWidth - padding) {
+      // Position to the left of the menu instead
+      x = menuRect.left - submenuWidth - 4;
+      
+      // If still overflowing on left, align to right edge
+      if (x < padding) {
+        x = window.innerWidth - submenuWidth - padding;
+      }
+    }
+    
+    // Check vertical bounds
+    if (y + submenuHeight > window.innerHeight - padding) {
+      y = Math.max(padding, window.innerHeight - submenuHeight - padding);
+    }
+    if (y < padding) {
+      y = padding;
+    }
+    
+    setAxisLabelSubmenuPos({ x, y });
+    setShowAxisLabelSubmenu(true);
+  }, [customXAxisLabel, xAxisLabel, customYAxisLabel, yAxisLabel, closeAllSubmenus]);
 
   // Handler for axis toggle submenu
   const handleAxisToggleClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setAxisToggleSubmenuPos({ x: rect.right + 4, y: rect.top });
-    setShowAxisToggleSubmenu(prev => !prev);
-    setShowColorSubmenu(false);
-    setShowSortSubmenu(false);
-    setShowChartTypeSubmenu(false);
-    setShowAxisLabelSubmenu(false);
-    setShowSeriesSettingsSubmenu(false);
-  }, []);
+    
+    // Close all other submenus first
+    closeAllSubmenus();
+    
+    const buttonRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const menuRect = contextMenuRef.current?.getBoundingClientRect();
+    
+    if (!menuRect) {
+      // Fallback if menu ref not available
+      setAxisToggleSubmenuPos({ x: buttonRect.right + 4, y: buttonRect.top });
+      setShowAxisToggleSubmenu(true);
+      return;
+    }
+    
+    // Position submenu adjacent to main menu (not overlapping)
+    let x = menuRect.right + 4; // Start to the right of menu
+    let y = buttonRect.top;      // Align with clicked button
+    
+    const submenuWidth = 200; // Approximate width of axis toggle submenu
+    const submenuHeight = 200; // Approximate max height
+    const padding = 8;
+    
+    // Check if submenu would overflow on the right
+    if (x + submenuWidth > window.innerWidth - padding) {
+      // Position to the left of the menu instead
+      x = menuRect.left - submenuWidth - 4;
+      
+      // If still overflowing on left, align to right edge
+      if (x < padding) {
+        x = window.innerWidth - submenuWidth - padding;
+      }
+    }
+    
+    // Check vertical bounds
+    if (y + submenuHeight > window.innerHeight - padding) {
+      y = Math.max(padding, window.innerHeight - submenuHeight - padding);
+    }
+    if (y < padding) {
+      y = padding;
+    }
+    
+    setAxisToggleSubmenuPos({ x, y });
+    setShowAxisToggleSubmenu(true);
+  }, [closeAllSubmenus]);
 
   // Handler for saving X-axis label
   const handleSaveXAxisLabel = () => {
@@ -1112,6 +1233,67 @@ const RechartsChartRenderer: React.FC<Props> = ({
   //     setShowYAxisLabels(propShowAxisLabels);
   //   }
   // }, [propShowAxisLabels]);
+
+  // Viewport bounds checking for context menu (works on all devices - desktop and mobile)
+  useLayoutEffect(() => {
+    if (!showContextMenu || !contextMenuRef.current) {
+      return;
+    }
+
+    const menu = contextMenuRef.current;
+    const menuRect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const padding = 8;
+
+    let adjustedX = contextMenuPosition.x;
+    let adjustedY = contextMenuPosition.y;
+
+    // Check right edge
+    if (menuRect.right > viewportWidth - padding) {
+      adjustedX = Math.max(padding, viewportWidth - menuRect.width - padding);
+    }
+
+    // Check left edge
+    if (menuRect.left < padding) {
+      adjustedX = padding;
+    }
+
+    // Check bottom edge
+    if (menuRect.bottom > viewportHeight - padding) {
+      adjustedY = Math.max(padding, viewportHeight - menuRect.height - padding);
+    }
+
+    // Check top edge
+    if (menuRect.top < padding) {
+      adjustedY = padding;
+    }
+
+    // Only update if position changed
+    if (adjustedX !== contextMenuPosition.x || adjustedY !== contextMenuPosition.y) {
+      setContextMenuPosition({ x: adjustedX, y: adjustedY });
+    }
+  }, [showContextMenu, contextMenuPosition.x, contextMenuPosition.y]);
+
+  // Close context menu when scrolling (prevents "floating menu" issue in scrollable containers)
+  useEffect(() => {
+    if (!showContextMenu) {
+      return;
+    }
+
+    const handleScroll = () => {
+      setShowContextMenu(false);
+      closeAllSubmenus();
+    };
+
+    // Use capture phase (true) to catch scroll events on any parent container
+    // This handles both window scroll and overflow-auto container scrolls
+    window.addEventListener('scroll', handleScroll, true);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [showContextMenu, closeAllSubmenus]);
 
   useEffect(() => {
     if (propShowXAxisLabels !== undefined) setShowXAxisLabels(propShowXAxisLabels);
@@ -1272,27 +1454,108 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const effectiveYAxisLabel = customYAxisLabel || yAxisLabel;
   const effectiveYAxisLabels = yAxisLabels; // For dual Y-axes, we don't have custom editing yet
 
-  // Calculate dynamic margins based on axis labels visibility
-  const getChartMargins = () => {
-    // Base margins for when no axis labels are shown
-    let left = 20;
-    let bottom = 80;
+  // Helper function: Calculate dynamic X-axis label offset based on label length and tick rotation
+  const calculateDynamicXAxisOffset = (labelText: string | undefined, tickAngle: number): number => {
+    if (!labelText || !labelText.trim()) return 0;
     
-    // Adjust based on which axis labels are visible
-    if (currentShowYAxisLabels) {
-      left = 60; // Add space for Y-axis label
+    const labelLength = labelText.trim().length;
+    const hasRotatedTicks = Math.abs(tickAngle) > 15;  // Ticks rotated > 15 degrees
+    
+    if (hasRotatedTicks) {
+      // Rotated ticks take more vertical space, need more offset
+      if (labelLength <= 8) return 12;      // Short labels (e.g., "Date", "Year", "Sales")
+      if (labelLength <= 16) return 18;     // Medium labels (e.g., "Product Name", "Sales Volume")
+      return 26;                             // Long labels (e.g., "Product Category Name")
+    } else {
+      // Horizontal ticks take less vertical space, need less offset
+      if (labelLength <= 8) return 10;
+      if (labelLength <= 16) return 14;
+      return 20;
+    }
+  };
+
+  // Helper function: Calculate dynamic Y-axis label offset (Y-axis labels don't need offset)
+  const calculateDynamicYAxisOffset = (): number => {
+    // Y-axis labels are rotated -90° and positioned to the left
+    // They don't need offset - tight to axis maximizes graph width
+    return 0;
+  };
+
+  // Calculate dynamic margins based on visible elements (adaptive and content-aware)
+  const getChartMargins = (calculatedYKeys?: string[]) => {
+    // Start with minimal base margins (just for tick marks and spacing)
+    let top = 10;
+    let right = 10;
+    let left = 20;    // Base space for Y-axis tick values
+    let bottom = 30;  // Base space for X-axis tick values
+    
+    // Calculate dual Y-axes status from parameter (passed from renderChart where yKeys is defined)
+    const hasDualYAxes = (calculatedYKeys && calculatedYKeys.length > 1) || (yFields && yFields.length > 1);
+    
+    // === Adaptive Adjustments Based on Visible Elements ===
+    
+    // 1. Y-Axis Label (left side)
+    if (currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim()) {
+      // Add space for rotated Y-axis label (offset now 0, margin includes everything)
+      left = 50;  // Optimized from 55px (tighter fit with 0 offset)
+    } else {
+      // No label, just tick values - use minimal space
+      left = 38;  // Optimized from 40px
     }
     
-    if (currentShowXAxisLabels) {
-      bottom = 100; // Add space for X-axis label
+    // 2. Y-Axis Label (right side - for dual Y-axes)
+    if (currentShowYAxisLabels && effectiveYAxisLabels?.[1] && hasDualYAxes) {
+      // Add space for right Y-axis label
+      right = 50;  // Optimized from 55px
+    } else if (hasDualYAxes) {
+      // Dual axes but no label - just tick values
+      right = 38;  // Optimized from 40px
     }
     
-    return { top: 20, right: 20, left, bottom };
+    // 3. X-Axis Label (bottom)
+    if (currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim()) {
+      // Space for tick labels + dynamic offset (calculated separately in label config)
+      // Estimate average offset for margin calculation based on label length
+      const estimatedOffset = effectiveXAxisLabel.length <= 8 ? 12 : 
+                             effectiveXAxisLabel.length <= 16 ? 18 : 26;
+      bottom = 48 + estimatedOffset;  // Base (48) + estimated offset = 60-74px total
+    } else {
+      // No label, just tick values
+      bottom = 45;  // Optimized from 55px
+    }
+    
+    // 4. Legend (adds minimal space - legend fits within margin area)
+    if (currentShowLegend) {
+      bottom += 5;  // Minimal spacing (optimized from 20px - legend positioned inside margin)
+    }
+    
+    // 5. Data Labels (need top margin for labels above bars/points)
+    if (currentShowDataLabels) {
+      top = 25;  // Extra space for data labels
+    }
+    
+    // === Mobile: Aggressive space-saving optimizations ===
+    if (isMobile) {
+      top = currentShowDataLabels ? 15 : 5;
+      right = hasDualYAxes ? 30 : 5;
+      left = currentShowYAxisLabels && effectiveYAxisLabel ? 35 : 15;
+      bottom = currentShowXAxisLabels && effectiveXAxisLabel ? 50 : 20;
+      
+      // Add minimal legend space on mobile if shown
+      if (currentShowLegend) {
+        bottom += 15;
+      }
+    }
+    
+    return { top, right, left, bottom };
   };
 
   // Calculate dynamic margins for pie charts (no axis labels, but may have legend)
   const getPieChartMargins = () => {
-    return { top: 20, right: 20, left: 20, bottom: 20 };
+    // Mobile: reduce all margins to save space
+    // Desktop: keep original margins
+    const margin = isMobile ? 10 : 20;
+    return { top: margin, right: margin, left: margin, bottom: margin };
   };
 
   // Get current theme colors - recalculate whenever currentTheme changes
@@ -1579,6 +1842,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Styling for axis ticks & labels
   const axisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569' } as const;
+  // Mobile-aware YAxis tick style: smaller font for mobile
+  const yAxisTickStyle = isMobile 
+    ? { fontFamily: FONT_FAMILY, fontSize: 10, fill: '#475569' } 
+    : axisTickStyle;
   const xAxisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569', angle: -45, textAnchor: 'end' } as const;
   
   // Custom tick formatter for X-axis to show full value
@@ -1586,6 +1853,95 @@ const RechartsChartRenderer: React.FC<Props> = ({
     const strValue = String(value);
     return strValue.length > 15 ? strValue.substring(0, 15) + '...' : strValue;
   };
+  
+  // Mobile-specific formatter: truncate at 10 chars
+  const mobileTickFormatter = (value: any) => {
+    const strValue = String(value);
+    return strValue.length > 10 ? strValue.substring(0, 10) + '...' : strValue;
+  };
+  
+  // Use mobile formatter if isMobile, otherwise use existing formatter
+  const effectiveTickFormatter = isMobile ? mobileTickFormatter : xAxisTickFormatter;
+  
+  // Adaptive X-Axis Configuration (Hybrid Strategy)
+  // Desktop: Let Recharts auto-calculate spacing for optimal display
+  // Mobile: Use density-aware thresholds with smart interval calculation
+  const getMobileAxisConfig = (dataLength: number, isMobileFlag: boolean, isNumericOrDate: boolean) => {
+    
+    // ========================================
+    // DESKTOP: Restore original Recharts auto-spacing behavior
+    // ========================================
+    if (!isMobileFlag) {
+      // For very dense data (>30 points), use calculated interval to prevent clustering
+      if (dataLength > 30) {
+        const interval = Math.ceil(dataLength / 10) - 1; // Show ~10 labels evenly distributed
+        return {
+          interval: interval,
+          height: 80,
+          tick: { ...xAxisTickStyle, angle: -45, textAnchor: 'end' },
+          tickFormatter: xAxisTickFormatter,
+        };
+      }
+      
+      // For moderate data (≤30 points), let Recharts auto-calculate
+      // NO interval prop = Recharts uses smart spacing algorithm
+      return {
+        height: 80,
+        tick: xAxisTickStyle,
+        tickFormatter: xAxisTickFormatter,
+      };
+    }
+    
+    // ========================================
+    // MOBILE: Aggressive space-saving with smart interval calculation
+    // ========================================
+    
+    // Very High Density (>50 points): Hide all labels - trend-only view
+    if (dataLength > 50) {
+      return {
+        interval: 0,
+        height: 10, // Collapse bottom area
+        tick: false, // Hide labels entirely
+        tickFormatter: () => '',
+      };
+    }
+    
+    // High Density (21-50 points): Show alternating labels with diagonal orientation
+    if (dataLength > 20) {
+      const interval = Math.ceil(dataLength / 8) - 1; // Show ~8 labels evenly distributed
+      return {
+        interval: interval,
+        minTickGap: 10,
+        height: 80,
+        tick: { ...xAxisTickStyle, angle: -45, textAnchor: 'end' },
+        tickFormatter: mobileTickFormatter,
+      };
+    }
+    
+    // Medium Density (5-20 points): Show all labels with diagonal orientation
+    if (dataLength > 4) {
+      return {
+        interval: 0, // Show all (they fit with diagonal orientation)
+        minTickGap: 0,
+        height: 80,
+        tick: { ...xAxisTickStyle, angle: -45, textAnchor: 'end' },
+        tickFormatter: mobileTickFormatter,
+      };
+    }
+    
+    // Low Density (≤4 points): Show all labels horizontally
+    return {
+      interval: 0, // Show all
+      minTickGap: 0,
+      height: 60,
+      tick: { ...xAxisTickStyle, angle: 0, textAnchor: 'middle' },
+      tickFormatter: (value: any) => {
+        const strValue = String(value);
+        return strValue.length > 15 ? strValue.substring(0, 15) + '...' : strValue;
+      },
+    };
+  };
+  
   const axisLabelStyle = {
     fontFamily: FONT_FAMILY,
     fontSize: 14,
@@ -1656,38 +2012,147 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const handleColorThemeClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setColorSubmenuPos({ x: rect.right + 4, y: rect.top });
-    setShowColorSubmenu(prevState => !prevState);
-    setShowSortSubmenu(false);
-    setShowAxisLabelSubmenu(false);
-    setShowSeriesSettingsSubmenu(false);
+    
+    // Close all other submenus first
+    closeAllSubmenus();
+    
+    const buttonRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const menuRect = contextMenuRef.current?.getBoundingClientRect();
+    
+    if (!menuRect) {
+      // Fallback if menu ref not available
+      setColorSubmenuPos({ x: buttonRect.right + 4, y: buttonRect.top });
+      setShowColorSubmenu(true);
+      return;
+    }
+    
+    // Position submenu adjacent to main menu (not overlapping)
+    let x = menuRect.right + 4; // Start to the right of menu
+    let y = buttonRect.top;      // Align with clicked button
+    
+    const submenuWidth = 240; // Approximate width of color submenu
+    const submenuHeight = 400; // Approximate max height
+    const padding = 8;
+    
+    // Check if submenu would overflow on the right
+    if (x + submenuWidth > window.innerWidth - padding) {
+      // Position to the left of the menu instead
+      x = menuRect.left - submenuWidth - 4;
+      
+      // If still overflowing on left, align to right edge
+      if (x < padding) {
+        x = window.innerWidth - submenuWidth - padding;
+      }
+    }
+    
+    // Check vertical bounds
+    if (y + submenuHeight > window.innerHeight - padding) {
+      y = Math.max(padding, window.innerHeight - submenuHeight - padding);
+    }
+    if (y < padding) {
+      y = padding;
+    }
+    
+    setColorSubmenuPos({ x, y });
+    setShowColorSubmenu(true);
   };
 
   // Handle sort submenu toggle
   const handleSortClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setSortSubmenuPos({ x: rect.right + 4, y: rect.top });
-    setShowSortSubmenu(prev => !prev);
-    setShowColorSubmenu(false);
-    setShowChartTypeSubmenu(false);
-    setShowAxisLabelSubmenu(false);
-    setShowSeriesSettingsSubmenu(false);
+    
+    // Close all other submenus first
+    closeAllSubmenus();
+    
+    const buttonRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const menuRect = contextMenuRef.current?.getBoundingClientRect();
+    
+    if (!menuRect) {
+      // Fallback if menu ref not available
+      setSortSubmenuPos({ x: buttonRect.right + 4, y: buttonRect.top });
+      setShowSortSubmenu(true);
+      return;
+    }
+    
+    // Position submenu adjacent to main menu (not overlapping)
+    let x = menuRect.right + 4; // Start to the right of menu
+    let y = buttonRect.top;      // Align with clicked button
+    
+    const submenuWidth = 200; // Approximate width of sort submenu
+    const submenuHeight = 300; // Approximate max height
+    const padding = 8;
+    
+    // Check if submenu would overflow on the right
+    if (x + submenuWidth > window.innerWidth - padding) {
+      // Position to the left of the menu instead
+      x = menuRect.left - submenuWidth - 4;
+      
+      // If still overflowing on left, align to right edge
+      if (x < padding) {
+        x = window.innerWidth - submenuWidth - padding;
+      }
+    }
+    
+    // Check vertical bounds
+    if (y + submenuHeight > window.innerHeight - padding) {
+      y = Math.max(padding, window.innerHeight - submenuHeight - padding);
+    }
+    if (y < padding) {
+      y = padding;
+    }
+    
+    setSortSubmenuPos({ x, y });
+    setShowSortSubmenu(true);
   };
 
   // Handle chart type submenu toggle
   const handleChartTypeClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setChartTypeSubmenuPos({ x: rect.right + 4, y: rect.top });
-    setShowChartTypeSubmenu(prev => !prev);
-    setShowColorSubmenu(false);
-    setShowSortSubmenu(false);
-    setShowAxisLabelSubmenu(false);
-    setShowSeriesSettingsSubmenu(false);
+    
+    // Close all other submenus first
+    closeAllSubmenus();
+    
+    const buttonRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const menuRect = contextMenuRef.current?.getBoundingClientRect();
+    
+    if (!menuRect) {
+      // Fallback if menu ref not available
+      setChartTypeSubmenuPos({ x: buttonRect.right + 4, y: buttonRect.top });
+      setShowChartTypeSubmenu(true);
+      return;
+    }
+    
+    // Position submenu adjacent to main menu (not overlapping)
+    let x = menuRect.right + 4; // Start to the right of menu
+    let y = buttonRect.top;      // Align with clicked button
+    
+    const submenuWidth = 180; // Approximate width of chart type submenu
+    const submenuHeight = 350; // Approximate max height
+    const padding = 8;
+    
+    // Check if submenu would overflow on the right
+    if (x + submenuWidth > window.innerWidth - padding) {
+      // Position to the left of the menu instead
+      x = menuRect.left - submenuWidth - 4;
+      
+      // If still overflowing on left, align to right edge
+      if (x < padding) {
+        x = window.innerWidth - submenuWidth - padding;
+      }
+    }
+    
+    // Check vertical bounds
+    if (y + submenuHeight > window.innerHeight - padding) {
+      y = Math.max(padding, window.innerHeight - submenuHeight - padding);
+    }
+    if (y < padding) {
+      y = padding;
+    }
+    
+    setChartTypeSubmenuPos({ x, y });
+    setShowChartTypeSubmenu(true);
   };
 
   // Apply selected sort order
@@ -1887,6 +2352,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const menu = (
       <div
+        ref={contextMenuRef}
         className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 context-menu"
         style={{
           left: contextMenuPosition.x,
@@ -2078,6 +2544,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const submenu = (
       <div
+        ref={colorSubmenuRef}
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
         style={{
           left: colorSubmenuPos.x,
@@ -2167,6 +2634,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const submenu = (
       <div
+        ref={sortSubmenuRef}
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
         style={{
           left: sortSubmenuPos.x,
@@ -2339,6 +2807,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const submenu = (
       <div
+        ref={chartTypeSubmenuRef}
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 chart-type-submenu"
         style={{
           left: chartTypeSubmenuPos.x,
@@ -2412,6 +2881,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const submenu = (
       <div
+        ref={axisToggleSubmenuRef}
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 axis-toggle-submenu"
         style={{
           left: axisToggleSubmenuPos.x,
@@ -2705,6 +3175,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const submenu = (
       <div
+        ref={seriesSettingsSubmenuRef}
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-3 series-settings-submenu"
         style={{
           left: seriesSettingsSubmenuPos.x,
@@ -3404,27 +3875,27 @@ const RechartsChartRenderer: React.FC<Props> = ({
             xField ||
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
+          const firstValue = pivotedLineData[0]?.[xKeyForBar];
+          const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+          const dataLength = Array.isArray(pivotedLineData) ? pivotedLineData.length : 0;
+          const axisConfig = getMobileAxisConfig(dataLength, isMobile, isNumericOrDate);
+          const xAxisLabelOffset = calculateDynamicXAxisOffset(effectiveXAxisLabel, axisConfig.tick?.angle || 0);
           return (
-            <BarChart data={pivotedLineData} margin={getChartMargins()}>
+            <BarChart data={pivotedLineData} margin={getChartMargins(yKeys)}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis 
                 dataKey={xKeyForBar}
                 type="category"
-                label={currentShowXAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
-                tick={xAxisTickStyle}
+                label={currentShowXAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: xAxisLabelOffset } : undefined}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={xAxisTickFormatter}
-                {...(() => {
-                  const firstValue = pivotedLineData[0]?.[xKeyForBar];
-                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
-                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
-                })()}
+                {...axisConfig}
               />
               <YAxis
+                width={isMobile ? 35 : 60}
                 tickFormatter={formatLargeNumber}
-                label={currentShowYAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-                tick={axisTickStyle}
+                label={currentShowYAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+                tick={yAxisTickStyle}
                 tickLine={false}
               />
               <Tooltip
@@ -3492,26 +3963,26 @@ const RechartsChartRenderer: React.FC<Props> = ({
           );
         } else {
           // ---- Fallback to original single-bar rendering ----
+          const firstValue = transformedChartData[0]?.[xKey];
+          const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+          const dataLength = Array.isArray(transformedChartData) ? transformedChartData.length : 0;
+          const axisConfig = getMobileAxisConfig(dataLength, isMobile, isNumericOrDate);
+          const xAxisLabelOffset = calculateDynamicXAxisOffset(effectiveXAxisLabel, axisConfig.tick?.angle || 0);
           return (
-            <BarChart data={transformedChartData} margin={getChartMargins()}>
+            <BarChart data={transformedChartData} margin={getChartMargins(yKeys)}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis 
               dataKey={xKey} 
-                label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
-              tick={xAxisTickStyle}
+                label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: xAxisLabelOffset } : undefined}
               tickLine={false}
-              tickFormatter={xAxisTickFormatter}
-              {...(() => {
-                const firstValue = transformedChartData[0]?.[xKey];
-                const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
-                return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
-              })()}
+              {...axisConfig}
             />
             {/* Primary Y-Axis (Left) */}
             <YAxis 
               yAxisId={0}
-                label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-              tick={axisTickStyle}
+              width={isMobile ? 35 : 60}
+                label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+              tick={yAxisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
               {...(combinedDomain ? { domain: combinedDomain } : {})}
@@ -3521,8 +3992,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <YAxis 
                 yAxisId={1}
                 orientation="right"
-                  label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-                tick={axisTickStyle}
+                width={isMobile ? 35 : 60}
+                  label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+                tick={yAxisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
               />
@@ -3664,27 +4136,27 @@ const RechartsChartRenderer: React.FC<Props> = ({
             xField ||
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
+          const firstValue = pivotedLineData[0]?.[xKeyForBar];
+          const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+          const dataLength = Array.isArray(pivotedLineData) ? pivotedLineData.length : 0;
+          const axisConfig = getMobileAxisConfig(dataLength, isMobile, isNumericOrDate);
+          const xAxisLabelOffset = calculateDynamicXAxisOffset(effectiveXAxisLabel, axisConfig.tick?.angle || 0);
           return (
-            <BarChart data={pivotedLineData} margin={getChartMargins()}>
+            <BarChart data={pivotedLineData} margin={getChartMargins(yKeys)}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis 
                 dataKey={xKeyForBar}
                 type="category"
-                label={currentShowXAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
-                tick={xAxisTickStyle}
+                label={currentShowXAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: xAxisLabelOffset } : undefined}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={xAxisTickFormatter}
-                {...(() => {
-                  const firstValue = pivotedLineData[0]?.[xKeyForBar];
-                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
-                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
-                })()}
+                {...axisConfig}
               />
               <YAxis
+                width={isMobile ? 35 : 60}
                 tickFormatter={formatLargeNumber}
-                label={currentShowYAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-                tick={axisTickStyle}
+                label={currentShowYAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+                tick={yAxisTickStyle}
                 tickLine={false}
               />
               <Tooltip
@@ -3788,27 +4260,31 @@ const RechartsChartRenderer: React.FC<Props> = ({
             pivotedLineData.length > 0 &&
             typeof pivotedLineData[0][xKeyForLine] === 'number';
           const formatDateTickMultiLine = d3.timeFormat('%d-%B-%y');
+          const firstValue = pivotedLineData[0]?.[xKeyForLine];
+          const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+          const dataLength = Array.isArray(pivotedLineData) ? pivotedLineData.length : 0;
+          const axisConfig = getMobileAxisConfig(dataLength, isMobile, isNumericOrDate);
+          // Override tickFormatter for date axes
+          const finalAxisConfig = isDateAxisMultiLine 
+            ? { ...axisConfig, tickFormatter: (value: any) => formatDateTickMultiLine(new Date(value)) }
+            : axisConfig;
+          const xAxisLabelOffset = calculateDynamicXAxisOffset(effectiveXAxisLabel, finalAxisConfig.tick?.angle || 0);
           
           return (
-            <LineChart data={pivotedLineData} margin={getChartMargins()}>
+            <LineChart data={pivotedLineData} margin={getChartMargins(yKeys)}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForLine}
-                label={currentShowXAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
-                tick={xAxisTickStyle}
+                label={currentShowXAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: xAxisLabelOffset } : undefined}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={isDateAxisMultiLine ? (value) => formatDateTickMultiLine(new Date(value)) : xAxisTickFormatter}
-                {...(() => {
-                  const firstValue = pivotedLineData[0]?.[xKeyForLine];
-                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
-                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
-                })()}
+                {...finalAxisConfig}
               />
               <YAxis
+                width={isMobile ? 35 : 60}
                 tickFormatter={formatLargeNumber}
-                label={currentShowYAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-                tick={axisTickStyle}
+                label={currentShowYAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+                tick={yAxisTickStyle}
                 tickLine={false}
               />
               <Tooltip 
@@ -3888,26 +4364,30 @@ const RechartsChartRenderer: React.FC<Props> = ({
             chartDataForRendering.length > 0 &&
             typeof chartDataForRendering[0][xKey] === 'number';
           const formatDateTick = d3.timeFormat('%d-%B-%y');
+          const firstValue = transformedChartData[0]?.[xKey];
+          const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+          const dataLength = Array.isArray(transformedChartData) ? transformedChartData.length : 0;
+          const axisConfig = getMobileAxisConfig(dataLength, isMobile, isNumericOrDate);
+          // Override tickFormatter for date axes
+          const finalAxisConfig = isDateAxis 
+            ? { ...axisConfig, tickFormatter: (value: any) => formatDateTick(new Date(value)) }
+            : axisConfig;
+          const xAxisLabelOffset = calculateDynamicXAxisOffset(effectiveXAxisLabel, finalAxisConfig.tick?.angle || 0);
           return (
-            <LineChart data={transformedChartData} margin={getChartMargins()} className="explore-chart-line">
+            <LineChart data={transformedChartData} margin={getChartMargins(yKeys)} className="explore-chart-line">
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKey}
-                label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
-                tick={xAxisTickStyle}
+                label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: xAxisLabelOffset } : undefined}
                 tickLine={false}
-                tickFormatter={isDateAxis ? (value) => formatDateTick(new Date(value)) : xAxisTickFormatter}
-                {...(() => {
-                  const firstValue = transformedChartData[0]?.[xKey];
-                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
-                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
-                })()}
+                {...finalAxisConfig}
               />
               {/* Primary Y-Axis (Left) */}
               <YAxis
                 yAxisId={0}
-                label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-                tick={axisTickStyle}
+                width={isMobile ? 35 : 60}
+                label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+                tick={yAxisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
                 {...(combinedDomain ? { domain: combinedDomain } : { domain: ['dataMin', 'dataMax'] })}
@@ -3917,8 +4397,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 <YAxis
                   yAxisId={1}
                   orientation="right"
-                  label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-                  tick={axisTickStyle}
+                  width={isMobile ? 35 : 60}
+                  label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+                  tick={yAxisTickStyle}
                   tickLine={false}
                   tickFormatter={formatLargeNumber}
                   domain={['dataMin', 'dataMax']}
@@ -4078,26 +4559,30 @@ const RechartsChartRenderer: React.FC<Props> = ({
             pivotedLineData.length > 0 &&
             typeof pivotedLineData[0][xKeyForArea] === 'number';
           const formatDateTickArea = d3.timeFormat('%d-%B-%y');
+          const firstValue = pivotedLineData[0]?.[xKeyForArea];
+          const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+          const dataLength = Array.isArray(pivotedLineData) ? pivotedLineData.length : 0;
+          const axisConfig = getMobileAxisConfig(dataLength, isMobile, isNumericOrDate);
+          // Override tickFormatter for date axes
+          const finalAxisConfig = isDateAxisArea 
+            ? { ...axisConfig, tickFormatter: (value: any) => formatDateTickArea(new Date(value)) }
+            : axisConfig;
+          const xAxisLabelOffset = calculateDynamicXAxisOffset(effectiveXAxisLabel, finalAxisConfig.tick?.angle || 0);
           
           return (
-            <AreaChart data={pivotedLineData} margin={getChartMargins()}>
+            <AreaChart data={pivotedLineData} margin={getChartMargins(yKeys)}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForArea}
-                label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
-                tick={xAxisTickStyle}
+                label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: xAxisLabelOffset } : undefined}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={isDateAxisArea ? (value) => formatDateTickArea(new Date(value)) : xAxisTickFormatter}
-                {...(() => {
-                  const firstValue = pivotedLineData[0]?.[xKeyForArea];
-                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
-                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
-                })()}
+                {...finalAxisConfig}
               />
               <YAxis
-                label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-                tick={axisTickStyle}
+                width={isMobile ? 35 : 60}
+                label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+                tick={yAxisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
               />
@@ -4168,25 +4653,25 @@ const RechartsChartRenderer: React.FC<Props> = ({
             </AreaChart>
           );
         }
+        const firstValue = transformedChartData[0]?.[xKey];
+        const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+        const dataLength = Array.isArray(transformedChartData) ? transformedChartData.length : 0;
+        const axisConfig = getMobileAxisConfig(dataLength, isMobile, isNumericOrDate);
+        const xAxisLabelOffset = calculateDynamicXAxisOffset(effectiveXAxisLabel, axisConfig.tick?.angle || 0);
         return (
-          <AreaChart data={transformedChartData} margin={getChartMargins()}>
+          <AreaChart data={transformedChartData} margin={getChartMargins(yKeys)}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKey}
-              label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
-              tick={xAxisTickStyle}
+              label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: axisLabelStyle, offset: xAxisLabelOffset } : undefined}
               tickLine={false}
-              tickFormatter={xAxisTickFormatter}
-              {...(() => {
-                const firstValue = transformedChartData[0]?.[xKey];
-                const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
-                return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
-              })()}
+              {...axisConfig}
             />
             <YAxis
               yAxisId={0}
+              width={isMobile ? 35 : 60}
               label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
-              tick={axisTickStyle}
+              tick={yAxisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
               {...(combinedDomain ? { domain: combinedDomain } : {})}
@@ -4195,8 +4680,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <YAxis
                 yAxisId={1}
                 orientation="right"
-                label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-                tick={axisTickStyle}
+                width={isMobile ? 35 : 60}
+                label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+                tick={yAxisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
               />
@@ -4318,7 +4804,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           </AreaChart>
         );
 
-      case 'scatter_chart':
+      case 'scatter_chart': {
         const xKeyForScatter =
           legendField && legendValues.length > 0 && pivotedLineData.length > 0
             ?
@@ -4336,27 +4822,35 @@ const RechartsChartRenderer: React.FC<Props> = ({
             (pivotedLineData.length > 0 && typeof pivotedLineData[0][xKeyForScatter] === 'number') :
             (chartDataForRendering.length > 0 && typeof chartDataForRendering[0][xKeyForScatter] === 'number'));
         const formatDateTickScatter = d3.timeFormat('%d-%B-%y');
+        const firstValue = transformedChartData[0]?.[xKeyForScatter];
+        const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+        // Use appropriate data source for length calculation
+        const dataForLength = (legendField && legendValues.length > 0 && pivotedLineData.length > 0) 
+          ? pivotedLineData 
+          : transformedChartData;
+        const dataLength = Array.isArray(dataForLength) ? dataForLength.length : 0;
+        const axisConfig = getMobileAxisConfig(dataLength, isMobile, isNumericOrDate);
+        // Override tickFormatter for date axes
+        const finalAxisConfig = isDateAxisScatter 
+          ? { ...axisConfig, tickFormatter: (value: any) => formatDateTickScatter(new Date(value)) }
+          : axisConfig;
+        const xAxisLabelOffset = calculateDynamicXAxisOffset(effectiveXAxisLabel, finalAxisConfig.tick?.angle || 0);
         
         return (
-          <ScatterChart margin={getChartMargins()}>
+          <ScatterChart margin={getChartMargins(yKeys)}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKeyForScatter}
-              label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
-              tick={xAxisTickStyle}
+              label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: xAxisLabelOffset } : undefined}
               tickLine={false}
               allowDuplicatedCategory={false}
-              tickFormatter={isDateAxisScatter ? (value) => formatDateTickScatter(new Date(value)) : xAxisTickFormatter}
-              {...(() => {
-                const firstValue = transformedChartData[0]?.[xKeyForScatter];
-                const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
-                return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
-              })()}
+              {...finalAxisConfig}
             />
             <YAxis
               yAxisId={0}
+              width={isMobile ? 35 : 60}
               label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
-              tick={axisTickStyle}
+              tick={yAxisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
               {...(combinedDomain ? { domain: combinedDomain } : {})}
@@ -4365,8 +4859,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <YAxis
                 yAxisId={1}
                 orientation="right"
-                label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
-                tick={axisTickStyle}
+                width={isMobile ? 35 : 60}
+                label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 0 } : undefined}
+                tick={yAxisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
               />
@@ -4471,6 +4966,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             )}
           </ScatterChart>
         );
+      }
 
       case 'pie_chart':
         // For pie charts with dual Y-axes, we need to handle it differently
@@ -4802,20 +5298,18 @@ const RechartsChartRenderer: React.FC<Props> = ({
         style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%' }}
       >
         <div 
-          className="w-full h-full transition-all duration-500 ease-in-out overflow-y-auto overflow-x-hidden chart-scroll-container"
+          className="w-full h-full transition-all duration-500 ease-in-out overflow-visible chart-scroll-container"
           style={{ 
-            paddingBottom: type === 'pie_chart' ? '10px' : '10px',
-            paddingTop: type === 'pie_chart' ? '8px' : '16px',
+            paddingBottom: '0px',  // Removed: handled by chart margins
+            paddingTop: '0px',     // Removed: handled by chart margins
             maxWidth: '100%',
-            width: '100%',
-            scrollbarWidth: 'thin',
-            scrollbarColor: '#cbd5e1 #f1f5f9'
+            width: '100%'
           }}
           onContextMenu={handleContextMenu}
           ref={chartRef}
         >
           <div 
-            className={`w-full h-full p-4 ${type === 'pie_chart' ? 'flex items-center justify-center' : ''}`}
+            className={`w-full h-full ${isMobile ? 'p-1' : 'p-2'} ${type === 'pie_chart' ? 'flex items-center justify-center' : ''}`}
             style={{ 
               minHeight: '300px',
               maxWidth: '100%',

@@ -154,3 +154,73 @@ class DataFrameShareLink(models.Model):
     @property
     def is_valid(self) -> bool:
         return self.is_active and not self.is_expired
+
+
+class DashboardShareLink(models.Model):
+    """Stores share tokens for dashboard layouts."""
+
+    id = models.BigAutoField(primary_key=True)
+    token = models.CharField(max_length=64, unique=True, db_index=True, editable=False)
+    client_name = models.CharField(max_length=255)
+    app_name = models.CharField(max_length=255)
+    project_name = models.CharField(max_length=255)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="dashboard_share_links",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    last_accessed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "dashboard_share_links"
+        indexes = [
+            models.Index(fields=["client_name", "app_name", "project_name"]),
+        ]
+        verbose_name = "Dashboard Share Link"
+        verbose_name_plural = "Dashboard Share Links"
+
+    def __str__(self) -> str:  # pragma: no cover - admin representation helper
+        return f"Share link for {self.client_name}/{self.app_name}/{self.project_name}"
+
+    @classmethod
+    def create_link(
+        cls,
+        *,
+        client_name: str,
+        app_name: str,
+        project_name: str,
+        created_by: Optional[models.Model] = None,
+        expires_at: Optional[timezone.datetime] = None,
+    ) -> "DashboardShareLink":
+        token = _generate_token()
+        while cls.objects.filter(token=token).exists():
+            token = _generate_token()
+
+        link = cls.objects.create(
+            token=token,
+            client_name=client_name.strip(),
+            app_name=app_name.strip(),
+            project_name=project_name.strip(),
+            created_by=created_by,
+            expires_at=expires_at,
+        )
+        return link
+
+    def mark_accessed(self) -> None:
+        self.last_accessed_at = timezone.now()
+        self.save(update_fields=["last_accessed_at"])
+
+    @property
+    def is_expired(self) -> bool:
+        if self.expires_at is None:
+            return False
+        return self.expires_at < timezone.now()
+
+    @property
+    def is_valid(self) -> bool:
+        return self.is_active and not self.is_expired

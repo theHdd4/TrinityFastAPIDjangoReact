@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
-import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
+import { 
+  sanitizeLabConfig, 
+  persistLaboratoryConfig,
+  getWorkflowMoleculesKey,
+  getWorkflowSelectedAtomsKey,
+  getWorkflowDataKey
+} from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
@@ -62,6 +68,7 @@ import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/Sc
 import PivotTableAtom from '@/components/AtomList/atoms/pivot-table/PivotTableAtom';
 import UnpivotAtom from '@/components/AtomList/atoms/unpivot/UnpivotAtom';
 import KPIDashboardAtom from '@/components/AtomList/atoms/kpi-dashboard/KPIDashboardAtom';
+import TableAtom from '@/components/AtomList/atoms/table/TableAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -81,6 +88,7 @@ import {
   createDefaultDataUploadSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  DASHBOARD_ALLOWED_ATOMS,
   DEFAULT_CHART_MAKER_SETTINGS,
   DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS,
@@ -252,8 +260,8 @@ const normalizeCardVariables = (variables: any, fallbackCardId: string): CardVar
         typeof variable.value === 'string'
           ? variable.value
           : variable.value != null
-          ? String(variable.value)
-          : undefined;
+            ? String(variable.value)
+            : undefined;
 
       return {
         id: resolvedId,
@@ -1025,7 +1033,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
 };
 
 // Function to fetch atom configurations from MongoDB
-const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
+const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashboard' = 'analytics'): Promise<{
   cards: LayoutCard[];
   workflowMolecules: WorkflowMolecule[];
   autosaveEnabled?: boolean;
@@ -1037,11 +1045,15 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
       return null;
     }
 
-    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+    // Include mode parameter to fetch mode-specific data
+    const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}?mode=${mode}`;
 
     console.info('[Laboratory API] Fetching atom configurations from MongoDB', {
       url: requestUrl,
       project: projectContext.project_name,
+      subMode: subMode,
+      mode: mode,
     });
 
     const response = await fetch(requestUrl, {
@@ -1192,7 +1204,7 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
 
       // Return autosaveEnabled if available (will be handled by parent component)
       const autosaveEnabled = data.autosaveEnabled !== undefined ? data.autosaveEnabled : true;
-
+      
       return { cards, workflowMolecules, autosaveEnabled };
     } else {
       console.warn('[Laboratory API] Invalid response format from MongoDB fetch', data);
@@ -1222,7 +1234,15 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   onCardFocus,
   onCardBlur,
 }, ref) => {
-  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen } = useLaboratoryStore();
+  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen, subMode } = useLaboratoryStore();
+
+  // Calculate allowed atom IDs based on current mode
+  const allowedAtomIds = useMemo(() => {
+    if (subMode === 'dashboard') {
+      return DASHBOARD_ALLOWED_ATOMS.slice(); // Convert readonly array to regular array
+    }
+    return undefined; // undefined = show all atoms for analytics mode
+  }, [subMode]);
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
@@ -1286,8 +1306,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           const infoText = originAtomTitle
             ? `Origin atom: ${originAtomTitle}`
             : variable.originCardId !== card.id
-            ? originTitle
-            : '';
+              ? originTitle
+              : '';
 
           return (
             <div
@@ -1612,16 +1632,16 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             const cols =
               existingColumns.length > 0
                 ? {
-                    summary: existingColumns,
-                    numeric: Array.isArray(a.settings?.numericColumns)
-                      ? (a.settings.numericColumns as string[])
-                      : [],
-                    xField: a.settings?.xAxis || '',
-                  }
+                  summary: existingColumns,
+                  numeric: Array.isArray(a.settings?.numericColumns)
+                    ? (a.settings.numericColumns as string[])
+                    : [],
+                  xField: a.settings?.xAxis || '',
+                }
                 : await fetchColumnSummary(a.settings.dataSource, {
-                    signal,
-                    retries: 2,
-                  });
+                  signal,
+                  retries: 2,
+                });
             layoutCandidate = {
               csv: a.settings.dataSource,
               display: a.settings.csvDisplay || a.settings.dataSource,
@@ -1838,8 +1858,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       );
       const numericColumns = Array.isArray(summaryDetails.numeric)
         ? Array.from(
-            new Set(summaryDetails.numeric.filter(col => summaryColumnSet.has(col))),
-          )
+          new Set(summaryDetails.numeric.filter(col => summaryColumnSet.has(col))),
+        )
         : [];
       const identifiers = Array.isArray(prev.identifiers)
         ? prev.identifiers.filter(Boolean)
@@ -2012,8 +2032,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     //   .flatMap(([, v]) => v)
     //   .filter(Boolean);
     // Fetch identifiers directly from mapping (same as feature overview)
-    const identifiers = rawMapping && rawMapping["identifiers"] 
-      ? Array.isArray(rawMapping["identifiers"]) 
+    const identifiers = rawMapping && rawMapping["identifiers"]
+      ? Array.isArray(rawMapping["identifiers"])
         ? rawMapping["identifiers"].filter(Boolean)
         : []
       : [];
@@ -2090,8 +2110,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         // Only try to fetch molecule info if cards are NOT from MongoDB (e.g., from localStorage fallback)
         console.log('[Laboratory API] Cards from localStorage - attempting to fetch molecule information from MongoDB');
 
-        // Try to fetch molecule information from MongoDB
-        fetchAtomConfigurationsFromMongoDB()
+        // Try to fetch molecule information from MongoDB (with subMode)
+        fetchAtomConfigurationsFromMongoDB(subMode)
           .then((mongoData) => {
             if (mongoData && mongoData.cards.length > 0) {
               console.log('[Laboratory API] Found MongoDB data with molecule info, updating cards');
@@ -2150,10 +2170,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         setLayoutCards(normalizedCards);
       }
 
-      // Check for saved workflowMolecules in localStorage if no override provided
+      // Check for saved workflowMolecules in mode-specific localStorage if no override provided
       let workflow = workflowOverride;
       if (!workflow) {
-        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        // Check mode-specific key first, then legacy key
+        const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode)) || localStorage.getItem('workflow-molecules');
         if (storedWorkflowMolecules) {
           try {
             workflow = JSON.parse(storedWorkflowMolecules);
@@ -2183,7 +2204,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       const validWorkflow = workflow.filter(molecule => Array.isArray(molecule.atoms) && molecule.atoms.length > 0);
 
       if (validWorkflow.length !== workflow.length) {
-        console.log('[Laboratory API] Removed empty molecule containers:', 
+        console.log('[Laboratory API] Removed empty molecule containers:',
           workflow.length - validWorkflow.length, 'empty molecules removed');
       }
 
@@ -2197,15 +2218,15 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
       // Set all workflow molecules as collapsed by default when session restarts
       // This ensures molecules are collapsed on page refresh/reload
-        const initialCollapsedState: Record<string, boolean> = {};
+      const initialCollapsedState: Record<string, boolean> = {};
       moleculesWithActiveFlag.forEach(molecule => {
         // Only set collapsed state for active molecules
         if (molecule.isActive !== false) {
           initialCollapsedState[molecule.moleculeId] = true; // true = collapsed
         }
-        });
+      });
       console.log('[Laboratory API] Setting all molecules to collapsed by default on session restart:', initialCollapsedState);
-        setCollapsedMolecules(initialCollapsedState);
+      setCollapsedMolecules(initialCollapsedState);
 
       // Validate and fix standalone card orders
       // Standalone cards with order values referencing non-existent molecule indices
@@ -2224,7 +2245,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           // But we only use active molecules for positioning calculations
           const activeMolecules = moleculesWithActiveFlag.filter(m => m.isActive !== false);
 
-          const afterMolecule = card.afterMoleculeId 
+          const afterMolecule = card.afterMoleculeId
             ? moleculesWithActiveFlag.find(m => m.moleculeId === card.afterMoleculeId)
             : null;
           const beforeMolecule = card.beforeMoleculeId
@@ -2426,8 +2447,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             // Invalid moleculeIndex - this card should be placed after the last molecule
             // But preserve its subOrder relative to other orphaned cards
             // Use full workflow length (not just active) for consistency
-            const newOrder = moleculesWithActiveFlag.length > 0 
-              ? ((moleculesWithActiveFlag.length - 1) * 1000) + subOrder 
+            const newOrder = moleculesWithActiveFlag.length > 0
+              ? ((moleculesWithActiveFlag.length - 1) * 1000) + subOrder
               : subOrder;
             console.warn(`[Laboratory API] Standalone card ${card.id} has invalid order: ${card.order} (moleculeIndex: ${moleculeIndex} but only ${moleculesWithActiveFlag.length} molecules exist). Recalculating to: ${newOrder}`);
             return {
@@ -2438,8 +2459,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         } else {
           // No order field - assign to after last molecule
           // Use full workflow length minus 1 (to place after last molecule)
-          const newOrder = moleculesWithActiveFlag.length > 0 
-            ? ((moleculesWithActiveFlag.length - 1) * 1000) + 1 
+          const newOrder = moleculesWithActiveFlag.length > 0
+            ? ((moleculesWithActiveFlag.length - 1) * 1000) + 1
             : 1;
           console.warn(`[Laboratory API] Standalone card ${card.id} is missing order field. Assigning to: ${newOrder}`);
           return {
@@ -2462,10 +2483,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     };
 
     // PRIORITY: Fetch from MongoDB FIRST, then fall back to localStorage if MongoDB fails
-    console.info('[Laboratory API] Starting data load - prioritizing MongoDB over localStorage');
+    console.info('[Laboratory API] Starting data load - prioritizing MongoDB over localStorage', {
+      subMode: subMode
+    });
 
     hasPendingAsyncLoad = true;
-    fetchAtomConfigurationsFromMongoDB()
+    fetchAtomConfigurationsFromMongoDB(subMode)
       .then((mongoData) => {
         if (!isMounted) {
           return;
@@ -2474,23 +2497,28 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         if (mongoData && mongoData.cards && mongoData.cards.length > 0) {
           console.info('[Laboratory API] ✅ Successfully loaded data from MongoDB (primary source)', {
             cardsCount: mongoData.cards.length,
-            workflowMoleculesCount: mongoData.workflowMolecules?.length || 0
+            workflowMoleculesCount: mongoData.workflowMolecules?.length || 0,
+            subMode: subMode
           });
           applyInitialCards(mongoData.cards, mongoData.workflowMolecules || [], true); // fromMongoDB = true
           return; // Successfully loaded from MongoDB, no need to check localStorage
         } else {
           // FIX: If MongoDB returns empty cards array, clear workflow data and return to regular laboratory mode
           if (mongoData && Array.isArray(mongoData.cards) && mongoData.cards.length === 0) {
-            console.info('[Laboratory API] ⚠️ MongoDB returned empty cards array - clearing workflow data and returning to regular laboratory mode');
-            // Clear workflow-related localStorage items
-            localStorage.removeItem('workflow-molecules');
-            localStorage.removeItem('workflow-selected-atoms');
-            localStorage.removeItem('workflow-data');
+            console.info('[Laboratory API] ⚠️ MongoDB returned empty cards array - clearing workflow data and returning to regular laboratory mode', {
+              subMode: subMode
+            });
+            // Clear mode-specific workflow-related localStorage items
+            localStorage.removeItem(getWorkflowMoleculesKey(subMode));
+            localStorage.removeItem(getWorkflowSelectedAtomsKey(subMode));
+            localStorage.removeItem(getWorkflowDataKey(subMode));
             // Apply empty cards with no workflow molecules to return to regular laboratory mode
             applyInitialCards([], [], true); // fromMongoDB = true, empty cards and workflow molecules
             return;
           }
-          console.info('[Laboratory API] ⚠️ MongoDB returned no data, falling back to localStorage');
+          console.info('[Laboratory API] ⚠️ MongoDB returned no data, falling back to localStorage', {
+            subMode: subMode
+          });
           // MongoDB returned null/undefined, fall back to localStorage
           return loadFromLocalStorage();
         }
@@ -2499,7 +2527,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         if (!isMounted) {
           return;
         }
-        console.warn('[Laboratory API] ⚠️ MongoDB fetch failed, falling back to localStorage', error);
+        console.warn('[Laboratory API] ⚠️ MongoDB fetch failed, falling back to localStorage', error, {
+          subMode: subMode
+        });
         // MongoDB fetch failed, fall back to localStorage
         return loadFromLocalStorage();
       });
@@ -2510,104 +2540,23 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         return;
       }
 
-      console.info('[Laboratory API] Attempting to load from localStorage (fallback)');
+      console.info('[Laboratory API] Attempting to load from localStorage (fallback)', {
+        subMode: subMode
+      });
 
-    // Check for both workflow-selected-atoms and workflow-data
-    const storedAtoms = localStorage.getItem('workflow-selected-atoms');
-    const storedWorkflowData = localStorage.getItem('workflow-data');
-    let workflowAtoms: {
-      atomName: string;
-      moleculeId: string;
-      moleculeTitle: string;
-      order: number;
-    }[] = [];
+    // Check for mode-specific workflow keys first, then fall back to legacy keys
+    const storedAtoms = localStorage.getItem(getWorkflowSelectedAtomsKey(subMode)) || localStorage.getItem('workflow-selected-atoms');
+    const storedWorkflowData = localStorage.getItem(getWorkflowDataKey(subMode)) || localStorage.getItem('workflow-data');
+      let workflowAtoms: {
+        atomName: string;
+        moleculeId: string;
+        moleculeTitle: string;
+        order: number;
+      }[] = [];
 
-    if (storedAtoms) {
-      try {
-        workflowAtoms = JSON.parse(storedAtoms);
-
-        const moleculeMap = new Map<string, WorkflowMolecule>();
-        workflowAtoms.forEach(atom => {
-          if (!moleculeMap.has(atom.moleculeId)) {
-            moleculeMap.set(atom.moleculeId, {
-              moleculeId: atom.moleculeId,
-              moleculeTitle: atom.moleculeTitle,
-              atoms: [],
-            });
-          }
-          moleculeMap.get(atom.moleculeId)!.atoms.push({
-            atomName: atom.atomName,
-            order: atom.order,
-          });
-        });
-
-        moleculeMap.forEach(molecule => {
-          molecule.atoms.sort((a, b) => a.order - b.order);
-        });
-
-        const molecules = Array.from(moleculeMap.values());
-        if (molecules.length > 0) {
-          initialWorkflow = molecules;
-        }
-
-        const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
-        initialCards = workflowAtoms.map(atom => {
-          const atomInfo =
-            allAtoms.find(
-              a =>
-                normalize(a.id) === normalize(atom.atomName) ||
-                normalize(a.title) === normalize(atom.atomName),
-            ) || ({} as any);
-          const atomId = atomInfo.id || atom.atomName;
-          const dropped: DroppedAtom = {
-            id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
-            atomId,
-            title: atomInfo.title || atom.atomName,
-            category: atomInfo.category || 'Atom',
-            color: atomInfo.color || 'bg-gray-400',
-            source: 'manual',
-            llm: LLM_MAP[atomId],
-          };
-          return {
-            id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
-            atoms: [dropped],
-            isExhibited: false,
-            moleculeId: atom.moleculeId,
-            moleculeTitle: atom.moleculeTitle,
-          } as LayoutCard;
-        });
-
-        localStorage.removeItem('workflow-selected-atoms');
-          console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-selected-atoms)');
-          if (initialCards && initialCards.length > 0) {
-            applyInitialCards(initialCards, initialWorkflow);
-            return;
-          }
-      } catch (e) {
-        console.error('Failed to parse workflow atoms', e);
-        workflowAtoms = [];
-      }
-    } else if (storedWorkflowData) {
-      // Handle workflow-data format from handleRenderWorkflow
-      try {
-        const workflowData = JSON.parse(storedWorkflowData);
-        console.log('Processing workflow-data:', workflowData);
-
-        if (workflowData.molecules && Array.isArray(workflowData.molecules)) {
-          // Convert workflow-data format to workflowAtoms format
-          workflowAtoms = [];
-          workflowData.molecules.forEach((molecule: any, moleculeIndex: number) => {
-            if (molecule.atoms && Array.isArray(molecule.atoms)) {
-              molecule.atoms.forEach((atomId: string, atomIndex: number) => {
-                workflowAtoms.push({
-                  atomName: atomId,
-                  moleculeId: molecule.id,
-                  moleculeTitle: molecule.title,
-                  order: atomIndex
-                });
-              });
-            }
-          });
+      if (storedAtoms) {
+        try {
+          workflowAtoms = JSON.parse(storedAtoms);
 
           const moleculeMap = new Map<string, WorkflowMolecule>();
           workflowAtoms.forEach(atom => {
@@ -2631,8 +2580,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           const molecules = Array.from(moleculeMap.values());
           if (molecules.length > 0) {
             initialWorkflow = molecules;
-            // Save the molecules to workflow-molecules localStorage for future switches
-            localStorage.setItem('workflow-molecules', JSON.stringify(molecules));
           }
 
           const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
@@ -2662,30 +2609,130 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             } as LayoutCard;
           });
 
+        // Remove mode-specific key after loading
+        localStorage.removeItem(getWorkflowSelectedAtomsKey(subMode));
+        // Also remove legacy key for migration
+        localStorage.removeItem('workflow-selected-atoms');
+          console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-selected-atoms)', {
+            subMode: subMode
+          });
+          if (initialCards && initialCards.length > 0) {
+            applyInitialCards(initialCards, initialWorkflow);
+            return;
+          }
+        } catch (e) {
+          console.error('Failed to parse workflow atoms', e);
+          workflowAtoms = [];
+        }
+      } else if (storedWorkflowData) {
+        // Handle workflow-data format from handleRenderWorkflow
+        try {
+          const workflowData = JSON.parse(storedWorkflowData);
+          console.log('Processing workflow-data:', workflowData);
+
+          if (workflowData.molecules && Array.isArray(workflowData.molecules)) {
+            // Convert workflow-data format to workflowAtoms format
+            workflowAtoms = [];
+            workflowData.molecules.forEach((molecule: any, moleculeIndex: number) => {
+              if (molecule.atoms && Array.isArray(molecule.atoms)) {
+                molecule.atoms.forEach((atomId: string, atomIndex: number) => {
+                  workflowAtoms.push({
+                    atomName: atomId,
+                    moleculeId: molecule.id,
+                    moleculeTitle: molecule.title,
+                    order: atomIndex
+                  });
+                });
+              }
+            });
+
+            const moleculeMap = new Map<string, WorkflowMolecule>();
+            workflowAtoms.forEach(atom => {
+              if (!moleculeMap.has(atom.moleculeId)) {
+                moleculeMap.set(atom.moleculeId, {
+                  moleculeId: atom.moleculeId,
+                  moleculeTitle: atom.moleculeTitle,
+                  atoms: [],
+                });
+              }
+              moleculeMap.get(atom.moleculeId)!.atoms.push({
+                atomName: atom.atomName,
+                order: atom.order,
+              });
+            });
+
+            moleculeMap.forEach(molecule => {
+              molecule.atoms.sort((a, b) => a.order - b.order);
+            });
+
+            const molecules = Array.from(moleculeMap.values());
+            if (molecules.length > 0) {
+              initialWorkflow = molecules;
+            // Save the molecules to mode-specific workflow-molecules localStorage for future switches
+            localStorage.setItem(getWorkflowMoleculesKey(subMode), JSON.stringify(molecules));
+            }
+
+            const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
+            initialCards = workflowAtoms.map(atom => {
+              const atomInfo =
+                allAtoms.find(
+                  a =>
+                    normalize(a.id) === normalize(atom.atomName) ||
+                    normalize(a.title) === normalize(atom.atomName),
+                ) || ({} as any);
+              const atomId = atomInfo.id || atom.atomName;
+              const dropped: DroppedAtom = {
+                id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
+                atomId,
+                title: atomInfo.title || atom.atomName,
+                category: atomInfo.category || 'Atom',
+                color: atomInfo.color || 'bg-gray-400',
+                source: 'manual',
+                llm: LLM_MAP[atomId],
+              };
+              return {
+                id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
+                atoms: [dropped],
+                isExhibited: false,
+                moleculeId: atom.moleculeId,
+                moleculeTitle: atom.moleculeTitle,
+              } as LayoutCard;
+            });
+
+          // Remove mode-specific key after loading
+          localStorage.removeItem(getWorkflowDataKey(subMode));
+          // Also remove legacy key for migration
           localStorage.removeItem('workflow-data');
-            console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-data)');
+            console.info('[Laboratory API] ✅ Loaded from localStorage (workflow-data)', {
+              subMode: subMode
+            });
             if (initialCards && initialCards.length > 0) {
               applyInitialCards(initialCards, initialWorkflow);
               return;
             }
-        }
-      } catch (e) {
-        console.error('Failed to parse workflow-data', e);
+          }
+        } catch (e) {
+          console.error('Failed to parse workflow-data', e);
+        // Remove mode-specific key after loading error
+        localStorage.removeItem(getWorkflowDataKey(subMode));
+        // Also remove legacy key
         localStorage.removeItem('workflow-data');
+        }
       }
-    }
 
       // If still no cards, try stored layout from localStorage
       if (!initialCards || initialCards.length === 0) {
-      const storedLayout = localStorage.getItem(STORAGE_KEY);
-      if (storedLayout && storedLayout !== 'undefined') {
-        try {
-          const raw = JSON.parse(storedLayout);
-          initialCards = hydrateLayoutCards(raw);
+      // Use mode-specific key for stored layout
+      const storageKey = subMode === 'analytics' ? 'laboratory-analytics-layout-cards' : 'laboratory-dashboard-layout-cards';
+      const storedLayout = localStorage.getItem(storageKey) || localStorage.getItem(STORAGE_KEY); // Fallback to legacy key
+        if (storedLayout && storedLayout !== 'undefined') {
+          try {
+            const raw = JSON.parse(storedLayout);
+            initialCards = hydrateLayoutCards(raw);
 
-            // Check for workflow molecules in localStorage
+            // Check for workflow molecules in mode-specific localStorage first, then legacy
             if (!initialWorkflow) {
-              const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+              const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode)) || localStorage.getItem('workflow-molecules');
               if (storedWorkflowMolecules) {
                 try {
                   initialWorkflow = JSON.parse(storedWorkflowMolecules);
@@ -2695,40 +2742,45 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               }
             }
 
-            console.info('[Laboratory API] ✅ Loaded from localStorage (stored layout)');
+            console.info('[Laboratory API] ✅ Loaded from localStorage (stored layout)', {
+              subMode: subMode,
+              storageKey: storageKey
+            });
             if (initialCards && initialCards.length > 0) {
               applyInitialCards(initialCards, initialWorkflow);
               return;
             }
-        } catch (e) {
-          console.error('Failed to parse stored laboratory layout', e);
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      }
-
-      // No data found in MongoDB or localStorage
-      console.info('[Laboratory API] No data found in MongoDB or localStorage');
-      markLoadingComplete();
-    } else {
-        // We have initialCards from workflow data, but need to check for workflow molecules
-      if (!initialWorkflow) {
-        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
-        if (storedWorkflowMolecules) {
-          try {
-            initialWorkflow = JSON.parse(storedWorkflowMolecules);
           } catch (e) {
-            console.error('Failed to parse stored workflow molecules during layout load', e);
+            console.error('Failed to parse stored laboratory layout', e);
+          localStorage.removeItem(storageKey);
+          localStorage.removeItem(STORAGE_KEY); // Also remove legacy key
           }
         }
-      }
-              applyInitialCards(initialCards, initialWorkflow);
+
+        // No data found in MongoDB or localStorage
+        console.info('[Laboratory API] No data found in MongoDB or localStorage');
+        markLoadingComplete();
+      } else {
+        // We have initialCards from workflow data, but need to check for workflow molecules
+        if (!initialWorkflow) {
+        // Check mode-specific workflow molecules first, then legacy
+        const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode)) || localStorage.getItem('workflow-molecules');
+          if (storedWorkflowMolecules) {
+            try {
+              initialWorkflow = JSON.parse(storedWorkflowMolecules);
+            } catch (e) {
+              console.error('Failed to parse stored workflow molecules during layout load', e);
             }
+          }
+        }
+        applyInitialCards(initialCards, initialWorkflow);
+      }
     }
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [subMode]); // CRITICAL: Add subMode as dependency to reload data when switching modes
 
 
   useEffect(() => {
@@ -2795,7 +2847,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
   // Persist workflowMolecules to localStorage only when we have cards with molecule info
   useEffect(() => {
-    const hasCardsWithMoleculeId = Array.isArray(layoutCards) && 
+    const hasCardsWithMoleculeId = Array.isArray(layoutCards) &&
       layoutCards.some(card => card.moleculeId);
 
     if (workflowMolecules.length > 0 && hasCardsWithMoleculeId) {
@@ -2812,7 +2864,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     if (isCanvasLoading) return;
 
     // Check if we have layout cards with molecule info
-    const hasCardsWithMoleculeId = Array.isArray(layoutCards) && 
+    const hasCardsWithMoleculeId = Array.isArray(layoutCards) &&
       layoutCards.some(card => card.moleculeId);
 
     if (hasCardsWithMoleculeId) {
@@ -2886,7 +2938,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     if (isCanvasLoading) return;
 
     // Check if we have layout cards but no workflow molecules
-    const hasCardsWithMoleculeId = Array.isArray(layoutCards) && 
+    const hasCardsWithMoleculeId = Array.isArray(layoutCards) &&
       layoutCards.some(card => card.moleculeId);
 
     if (hasCardsWithMoleculeId && workflowMolecules.length === 0) {
@@ -2908,7 +2960,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             const initialCollapsedState: Record<string, boolean> = {};
             moleculesWithActiveFlag.forEach((molecule: any) => {
               if (molecule.isActive !== false) {
-              initialCollapsedState[molecule.moleculeId] = true; // collapsed by default
+                initialCollapsedState[molecule.moleculeId] = true; // collapsed by default
               }
             });
             setCollapsedMolecules(initialCollapsedState);
@@ -2961,22 +3013,22 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           atom.id === 'text-box'
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
             : atom.id === 'data-upload-validate'
-            ? createDefaultDataUploadSettings()
-            : atom.id === 'feature-overview'
-            ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-            : atom.id === 'explore'
-            ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
-            : atom.id === 'chart-maker'
-            ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-            : atom.id === 'pivot-table'
-            ? { ...DEFAULT_PIVOT_TABLE_SETTINGS }
-            : atom.id === 'dataframe-operations'
-            ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
-            : atom.id === 'select-models-feature'
-            ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
-            : atom.id === 'auto-regressive-models'
-            ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
-            : undefined,
+              ? createDefaultDataUploadSettings()
+              : atom.id === 'feature-overview'
+                ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+                : atom.id === 'explore'
+                  ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
+                  : atom.id === 'chart-maker'
+                    ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+                    : atom.id === 'pivot-table'
+                      ? { ...DEFAULT_PIVOT_TABLE_SETTINGS }
+                      : atom.id === 'dataframe-operations'
+                        ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+                        : atom.id === 'select-models-feature'
+                          ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
+                          : atom.id === 'auto-regressive-models'
+                            ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
+                            : undefined,
       };
 
       // Calculate position accounting for existing workflow molecule atoms
@@ -2994,14 +3046,14 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           const allMoleculeAtomIds: string[] = [];
           moleculeCards.forEach(moleculeCard => {
             if (Array.isArray(moleculeCard.atoms)) {
-            moleculeCard.atoms.forEach(atom => {
-              allMoleculeAtomIds.push(atom.atomId);
-            });
+              moleculeCard.atoms.forEach(atom => {
+                allMoleculeAtomIds.push(atom.atomId);
+              });
             }
           });
 
           // Get workflow molecule atom IDs
-          const workflowAtomIds = Array.isArray(workflowMolecule.atoms) 
+          const workflowAtomIds = Array.isArray(workflowMolecule.atoms)
             ? workflowMolecule.atoms.map(a => typeof a === 'string' ? a : a.atomName)
             : [];
 
@@ -3012,7 +3064,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               break;
             }
             if (Array.isArray(moleculeCards[i].atoms)) {
-            cardStartIndex += moleculeCards[i].atoms.length;
+              cardStartIndex += moleculeCards[i].atoms.length;
             }
           }
 
@@ -3042,8 +3094,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       if (card?.moleculeId) {
         setPendingChanges(prev => ({
           ...prev,
-          addedAtoms: [...prev.addedAtoms, { 
-            moleculeId: card.moleculeId, 
+          addedAtoms: [...prev.addedAtoms, {
+            moleculeId: card.moleculeId,
             atomId: newAtom.atomId,
             position: atomPosition
           }]
@@ -3069,250 +3121,56 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
   };
 
-const addNewCard = (moleculeId?: string, position?: number) => {
-  const info = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
-  const newCard: LayoutCard = {
-    id: generateClientId('card'),
-    atoms: [],
-    isExhibited: false,
-    moleculeId,
-    moleculeTitle: info?.title,
-    variables: [],
-  };
-  if (position === undefined || position >= (Array.isArray(layoutCards) ? layoutCards.length : 0)) {
-    setLayoutCards([...(Array.isArray(layoutCards) ? layoutCards : []), newCard]);
-  } else {
-    const arr = Array.isArray(layoutCards) ? layoutCards : [];
-    setLayoutCards([
-      ...arr.slice(0, position),
-      newCard,
-      ...arr.slice(position),
-    ]);
-  }
-  setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
-
-  // Scroll to the newly created card after a short delay to ensure it's rendered
-  setTimeout(() => {
-    const cardElement = document.querySelector(`[data-card-id="${newCard.id}"]`);
-    if (cardElement) {
-      cardElement.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    }
-  }, 100);
-};
-
-// Workflow-specific addNewCard function that handles molecules and standalone cards
-const addNewCardWorkflow = (moleculeId?: string, position?: number, targetMoleculeIndex?: number, insertAfterSubOrder?: number) => {
-  // Use workflowMolecules to get title (includes custom molecules) instead of molecules list
-  const workflowMolecule = moleculeId ? workflowMolecules.find(m => m.moleculeId === moleculeId) : undefined;
-  const newCard: LayoutCard = {
-    id: generateClientId('card'),
-    atoms: [],
-    isExhibited: false,
-    moleculeId,
-    moleculeTitle: workflowMolecule?.moleculeTitle,
-    variables: [],
-  };
-
-  // If adding to a molecule, insert at specific position within molecule
-  if (moleculeId) {
-    const arr = Array.isArray(layoutCards) ? layoutCards : [];
-    const moleculeCards = arr.filter(card => card.moleculeId === moleculeId);
-
-    if (moleculeCards.length === 0) {
-      // No cards in molecule yet, just append
-      setLayoutCards([...arr, newCard]);
-    } else if (position !== undefined && position < moleculeCards.length) {
-      // Insert AFTER the card at position within molecule
-      const targetCard = moleculeCards[position];
-      const targetIndex = arr.findIndex(card => card.id === targetCard.id);
-      if (targetIndex >= 0) {
-        setLayoutCards([
-          ...arr.slice(0, targetIndex + 1),
-          newCard,
-          ...arr.slice(targetIndex + 1),
-        ]);
-      } else {
-        // Fallback to end
-        const lastIndex = arr.findIndex(card => card.id === moleculeCards[moleculeCards.length - 1]?.id);
-        setLayoutCards([
-          ...arr.slice(0, lastIndex + 1),
-          newCard,
-          ...arr.slice(lastIndex + 1),
-        ]);
-      }
+  const addNewCard = (moleculeId?: string, position?: number) => {
+    const info = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
+    const newCard: LayoutCard = {
+      id: generateClientId('card'),
+      atoms: [],
+      isExhibited: false,
+      moleculeId,
+      moleculeTitle: info?.title,
+      variables: [],
+    };
+    if (position === undefined || position >= (Array.isArray(layoutCards) ? layoutCards.length : 0)) {
+      setLayoutCards([...(Array.isArray(layoutCards) ? layoutCards : []), newCard]);
     } else {
-      // Append to end of molecule
-      const lastMoleculeCardIndex = arr.findIndex(card => 
-        card.id === moleculeCards[moleculeCards.length - 1]?.id
-      );
+      const arr = Array.isArray(layoutCards) ? layoutCards : [];
       setLayoutCards([
-        ...arr.slice(0, lastMoleculeCardIndex + 1),
+        ...arr.slice(0, position),
         newCard,
-        ...arr.slice(lastMoleculeCardIndex + 1),
+        ...arr.slice(position),
       ]);
     }
-  } else {
-    // Standalone card
-    const arr = Array.isArray(layoutCards) ? layoutCards : [];
-    const activeMolecules = workflowMolecules.filter(m => m.isActive !== false);
+    setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
 
-    // Calculate order based on targetMoleculeIndex and set molecule references
-    if (targetMoleculeIndex !== undefined && targetMoleculeIndex >= 0 && targetMoleculeIndex < workflowMolecules.length) {
-      // Get the molecule at targetMoleculeIndex (might be inactive)
-      const targetMolecule = workflowMolecules[targetMoleculeIndex];
-      const targetIsActive = targetMolecule && targetMolecule.isActive !== false;
-
-      // Find the active molecule at or before this position
-      let afterMolecule = null;
-      let beforeMolecule = null;
-
-      if (targetIsActive) {
-        // Target molecule is active - use it as afterMoleculeId
-        afterMolecule = targetMolecule;
-        // Find next active molecule for beforeMoleculeId
-        for (let i = targetMoleculeIndex + 1; i < workflowMolecules.length; i++) {
-          if (workflowMolecules[i].isActive !== false) {
-            beforeMolecule = workflowMolecules[i];
-            break;
-          }
-        }
-      } else {
-        // Target molecule is inactive - find previous active molecule
-        for (let i = targetMoleculeIndex; i >= 0; i--) {
-          if (workflowMolecules[i].isActive !== false) {
-            afterMolecule = workflowMolecules[i];
-            break;
-          }
-        }
-        // Find next active molecule for beforeMoleculeId
-        for (let i = targetMoleculeIndex + 1; i < workflowMolecules.length; i++) {
-          if (workflowMolecules[i].isActive !== false) {
-            beforeMolecule = workflowMolecules[i];
-            break;
-          }
-        }
-      }
-
-      // Set molecule references
-      if (afterMolecule) {
-        newCard.afterMoleculeId = afterMolecule.moleculeId;
-      }
-      if (beforeMolecule) {
-        newCard.beforeMoleculeId = beforeMolecule.moleculeId;
-      }
-
-      if (insertAfterSubOrder !== undefined) {
-        // Insert at specific position - need to shift all cards after this position
-        const targetSubOrder = insertAfterSubOrder + 1;
-        const updatedCards = arr.map(card => {
-          if (card.order !== undefined) {
-            const cardMoleculeIndex = Math.floor(card.order / 1000);
-            const cardSubOrder = card.order % 1000;
-            // If card is after insertion point, shift it
-            if (cardMoleculeIndex === targetMoleculeIndex && cardSubOrder >= targetSubOrder) {
-              return { ...card, order: (cardMoleculeIndex * 1000) + (cardSubOrder + 1) };
-            }
-          }
-          return card;
-        });
-
-        newCard.order = (targetMoleculeIndex * 1000) + targetSubOrder;
-        setLayoutCards([...updatedCards, newCard]);
-      } else {
-        // Find existing standalone cards after this molecule to determine subOrder
-        const existingStandaloneAfterMolecule = arr.filter(card => {
-          if (card.order !== undefined) {
-            const cardMoleculeIndex = Math.floor(card.order / 1000);
-            return cardMoleculeIndex === targetMoleculeIndex;
-          }
-          return false;
-        });
-
-        // Get the highest subOrder for cards after this molecule, default to 0
-        const maxSubOrder = existingStandaloneAfterMolecule.reduce((max, card) => {
-          const subOrder = card.order !== undefined ? card.order % 1000 : 0;
-          return Math.max(max, subOrder);
-        }, 0);
-
-        // Set order as (moleculeIndex * 1000) + (maxSubOrder + 1)
-        newCard.order = (targetMoleculeIndex * 1000) + (maxSubOrder + 1);
-        setLayoutCards([...arr, newCard]);
-      }
-    } else {
-      // No target molecule - append to end, set afterMoleculeId to last active molecule
-      if (activeMolecules.length > 0) {
-        const lastActiveMolecule = activeMolecules[activeMolecules.length - 1];
-        newCard.afterMoleculeId = lastActiveMolecule.moleculeId;
-      }
-      setLayoutCards([...arr, newCard]);
-    }
-  }
-
-  setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
-
-  // Scroll to the newly created card after a short delay to ensure it's rendered
-  setTimeout(() => {
-    const cardElement = document.querySelector(`[data-card-id="${newCard.id}"]`);
-    if (cardElement) {
-      cardElement.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    }
-  }, 100);
-};
-
-// Workflow-specific addNewCardWithAtom function that handles molecules and standalone cards
-const addNewCardWithAtomWorkflow = async (
-  atomId: string,
-  moleculeId?: string,
-  position?: number,
-  targetMoleculeIndex?: number,
-  insertAfterSubOrder?: number
-) => {
-  const arr = Array.isArray(layoutCards) ? layoutCards : [];
-
-  try {
-    if (typeof window !== 'undefined') {
-      console.info('[Laboratory API] Creating card', {
-        endpoint: `${LABORATORY_API}/cards`,
-        origin: window.location.origin,
-        payload: { atomId, moleculeId },
-      });
-    }
-
-    const response = await fetch(`${LABORATORY_API}/cards`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ atomId, moleculeId }),
-    });
-    if (!response.ok) {
-      if (typeof window !== 'undefined') {
-        console.error('[Laboratory API] Create card request failed', {
-          endpoint: `${LABORATORY_API}/cards`,
-          status: response.status,
-          statusText: response.statusText,
+    // Scroll to the newly created card after a short delay to ensure it's rendered
+    setTimeout(() => {
+      const cardElement = document.querySelector(`[data-card-id="${newCard.id}"]`);
+      if (cardElement) {
+        cardElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
         });
       }
-      throw new Error(`Request failed with status ${response.status}`);
-    }
-    const payload = (await response.json()) as CardPayload;
-    const newCard = buildCardFromApiPayload(payload, atomId, moleculeId);
+    }, 100);
+  };
 
-    // If moleculeTitle is not set, try to get it from workflowMolecules (for custom molecules)
-    if (!newCard.moleculeTitle && moleculeId) {
-      const workflowMolecule = workflowMolecules.find(m => m.moleculeId === moleculeId);
-      if (workflowMolecule) {
-        newCard.moleculeTitle = workflowMolecule.moleculeTitle;
-      }
-    }
+  // Workflow-specific addNewCard function that handles molecules and standalone cards
+  const addNewCardWorkflow = (moleculeId?: string, position?: number, targetMoleculeIndex?: number, insertAfterSubOrder?: number) => {
+    // Use workflowMolecules to get title (includes custom molecules) instead of molecules list
+    const workflowMolecule = moleculeId ? workflowMolecules.find(m => m.moleculeId === moleculeId) : undefined;
+    const newCard: LayoutCard = {
+      id: generateClientId('card'),
+      atoms: [],
+      isExhibited: false,
+      moleculeId,
+      moleculeTitle: workflowMolecule?.moleculeTitle,
+      variables: [],
+    };
 
     // If adding to a molecule, insert at specific position within molecule
     if (moleculeId) {
+      const arr = Array.isArray(layoutCards) ? layoutCards : [];
       const moleculeCards = arr.filter(card => card.moleculeId === moleculeId);
 
       if (moleculeCards.length === 0) {
@@ -3339,7 +3197,7 @@ const addNewCardWithAtomWorkflow = async (
         }
       } else {
         // Append to end of molecule
-        const lastMoleculeCardIndex = arr.findIndex(card => 
+        const lastMoleculeCardIndex = arr.findIndex(card =>
           card.id === moleculeCards[moleculeCards.length - 1]?.id
         );
         setLayoutCards([
@@ -3350,19 +3208,13 @@ const addNewCardWithAtomWorkflow = async (
       }
     } else {
       // Standalone card
+      const arr = Array.isArray(layoutCards) ? layoutCards : [];
       const activeMolecules = workflowMolecules.filter(m => m.isActive !== false);
 
       // Calculate order based on targetMoleculeIndex and set molecule references
-      // FIX: Ensure targetMoleculeIndex is valid (0 to workflowMolecules.length - 1)
-      if (targetMoleculeIndex !== undefined && targetMoleculeIndex >= 0) {
-        // Clamp targetMoleculeIndex to valid range
-        const validMoleculeIndex = Math.min(targetMoleculeIndex, workflowMolecules.length - 1);
-
-        if (validMoleculeIndex < 0) {
-          console.warn(`[addNewCardWithAtomWorkflow] Invalid targetMoleculeIndex: ${targetMoleculeIndex}, falling back to append to end`);
-        } else {
-          // Get the molecule at validMoleculeIndex (might be inactive)
-          const targetMolecule = workflowMolecules[validMoleculeIndex];
+      if (targetMoleculeIndex !== undefined && targetMoleculeIndex >= 0 && targetMoleculeIndex < workflowMolecules.length) {
+        // Get the molecule at targetMoleculeIndex (might be inactive)
+        const targetMolecule = workflowMolecules[targetMoleculeIndex];
         const targetIsActive = targetMolecule && targetMolecule.isActive !== false;
 
         // Find the active molecule at or before this position
@@ -3373,7 +3225,7 @@ const addNewCardWithAtomWorkflow = async (
           // Target molecule is active - use it as afterMoleculeId
           afterMolecule = targetMolecule;
           // Find next active molecule for beforeMoleculeId
-            for (let i = validMoleculeIndex + 1; i < workflowMolecules.length; i++) {
+          for (let i = targetMoleculeIndex + 1; i < workflowMolecules.length; i++) {
             if (workflowMolecules[i].isActive !== false) {
               beforeMolecule = workflowMolecules[i];
               break;
@@ -3381,14 +3233,14 @@ const addNewCardWithAtomWorkflow = async (
           }
         } else {
           // Target molecule is inactive - find previous active molecule
-            for (let i = validMoleculeIndex; i >= 0; i--) {
+          for (let i = targetMoleculeIndex; i >= 0; i--) {
             if (workflowMolecules[i].isActive !== false) {
               afterMolecule = workflowMolecules[i];
               break;
             }
           }
           // Find next active molecule for beforeMoleculeId
-            for (let i = validMoleculeIndex + 1; i < workflowMolecules.length; i++) {
+          for (let i = targetMoleculeIndex + 1; i < workflowMolecules.length; i++) {
             if (workflowMolecules[i].isActive !== false) {
               beforeMolecule = workflowMolecules[i];
               break;
@@ -3402,9 +3254,6 @@ const addNewCardWithAtomWorkflow = async (
         }
         if (beforeMolecule) {
           newCard.beforeMoleculeId = beforeMolecule.moleculeId;
-          } else if (validMoleculeIndex === workflowMolecules.length - 1 || !beforeMolecule) {
-            // If this is after the last molecule or no beforeMolecule found, mark as afterLastMolecule
-            newCard.afterLastMolecule = true;
         }
 
         if (insertAfterSubOrder !== undefined) {
@@ -3415,32 +3264,21 @@ const addNewCardWithAtomWorkflow = async (
               const cardMoleculeIndex = Math.floor(card.order / 1000);
               const cardSubOrder = card.order % 1000;
               // If card is after insertion point, shift it
-                if (cardMoleculeIndex === validMoleculeIndex && cardSubOrder >= targetSubOrder) {
+              if (cardMoleculeIndex === targetMoleculeIndex && cardSubOrder >= targetSubOrder) {
                 return { ...card, order: (cardMoleculeIndex * 1000) + (cardSubOrder + 1) };
               }
             }
             return card;
           });
 
-            newCard.order = (validMoleculeIndex * 1000) + targetSubOrder;
-
-            console.log(`📝 [addNewCardWithAtomWorkflow] Inserted standalone card at position:`, {
-              targetMoleculeIndex,
-              validMoleculeIndex,
-              insertAfterSubOrder,
-              targetSubOrder,
-              order: newCard.order,
-              afterMoleculeId: newCard.afterMoleculeId,
-              beforeMoleculeId: newCard.beforeMoleculeId
-            });
-
+          newCard.order = (targetMoleculeIndex * 1000) + targetSubOrder;
           setLayoutCards([...updatedCards, newCard]);
         } else {
           // Find existing standalone cards after this molecule to determine subOrder
           const existingStandaloneAfterMolecule = arr.filter(card => {
             if (card.order !== undefined) {
               const cardMoleculeIndex = Math.floor(card.order / 1000);
-                return cardMoleculeIndex === validMoleculeIndex;
+              return cardMoleculeIndex === targetMoleculeIndex;
             }
             return false;
           });
@@ -3451,504 +3289,718 @@ const addNewCardWithAtomWorkflow = async (
             return Math.max(max, subOrder);
           }, 0);
 
-            // Set order as (validMoleculeIndex * 1000) + (maxSubOrder + 1)
-            newCard.order = (validMoleculeIndex * 1000) + (maxSubOrder + 1);
-
-            console.log(`📝 [addNewCardWithAtomWorkflow] Added standalone card after molecule:`, {
-              targetMoleculeIndex,
-              validMoleculeIndex,
-              moleculeId: targetMolecule?.moleculeId,
-              order: newCard.order,
-              maxSubOrder,
-              subOrder: maxSubOrder + 1,
-              afterMoleculeId: newCard.afterMoleculeId,
-              beforeMoleculeId: newCard.beforeMoleculeId,
-              afterLastMolecule: newCard.afterLastMolecule
-            });
-
+          // Set order as (moleculeIndex * 1000) + (maxSubOrder + 1)
+          newCard.order = (targetMoleculeIndex * 1000) + (maxSubOrder + 1);
           setLayoutCards([...arr, newCard]);
-          }
         }
       } else {
         // No target molecule - append to end, set afterMoleculeId to last active molecule
-        // FIX: Calculate order based on last molecule index (not workflowMolecules.length)
         if (activeMolecules.length > 0) {
           const lastActiveMolecule = activeMolecules[activeMolecules.length - 1];
           newCard.afterMoleculeId = lastActiveMolecule.moleculeId;
-
-          // Find the index of the last active molecule in the full workflowMolecules array
-          const lastActiveMoleculeIndex = workflowMolecules.findIndex(m => m.moleculeId === lastActiveMolecule.moleculeId);
-
-          if (lastActiveMoleculeIndex >= 0) {
-            // Find existing standalone cards after this molecule to determine subOrder
-            const existingStandaloneAfterMolecule = arr.filter(card => {
-              if (card.order !== undefined) {
-                const cardMoleculeIndex = Math.floor(card.order / 1000);
-                return cardMoleculeIndex === lastActiveMoleculeIndex;
-              }
-              return false;
-            });
-
-            // Get the highest subOrder for cards after this molecule, default to 0
-            const maxSubOrder = existingStandaloneAfterMolecule.reduce((max, card) => {
-              const subOrder = card.order !== undefined ? card.order % 1000 : 0;
-              return Math.max(max, subOrder);
-            }, 0);
-
-            // Set order as (lastActiveMoleculeIndex * 1000) + (maxSubOrder + 1)
-            newCard.order = (lastActiveMoleculeIndex * 1000) + (maxSubOrder + 1);
-            newCard.afterLastMolecule = true;
-
-            console.log(`📝 [addNewCardWithAtomWorkflow] Added standalone card after last molecule:`, {
-              moleculeId: lastActiveMolecule.moleculeId,
-              moleculeIndex: lastActiveMoleculeIndex,
-              order: newCard.order,
-              maxSubOrder,
-              subOrder: maxSubOrder + 1
-            });
-          }
         }
         setLayoutCards([...arr, newCard]);
       }
     }
 
     setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
-    if (Array.isArray(newCard.atoms)) {
-    newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
-    }
 
-    // Track atom addition for cross-collection sync if card belongs to a molecule
-    if (moleculeId && Array.isArray(newCard.atoms) && newCard.atoms.length > 0) {
-      setPendingChanges(prev => ({
-        ...prev,
-        addedAtoms: [...prev.addedAtoms, { 
-          moleculeId: moleculeId, 
-          atomId: newCard.atoms[0].atomId,
-          position: 0
-        }]
-      }));
-      console.log(`📝 Tracked atom addition: ${newCard.atoms[0].atomId} to molecule ${moleculeId} (will sync on save)`);
-    }
-    
-    // Automatically open properties panel and select the atom
-    if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onAtomSelect) {
-      onAtomSelect(newCard.atoms[0].id);
-    }
-    if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onOpenSettingsPanel) {
-      onOpenSettingsPanel();
-    }
-  } catch (err) {
-    console.error('⚠️ Failed to create laboratory card via API, using fallback', err);
-    toast({
-      title: 'Unable to reach laboratory service',
-      description: 'Using local defaults for the new card. Please verify your network connection.',
-      variant: 'destructive',
-    });
-    const fallbackCard = createFallbackCard(atomId, moleculeId);
-
-    // If moleculeTitle is not set, try to get it from workflowMolecules (for custom molecules)
-    if (!fallbackCard.moleculeTitle && moleculeId) {
-      const workflowMolecule = workflowMolecules.find(m => m.moleculeId === moleculeId);
-      if (workflowMolecule) {
-        fallbackCard.moleculeTitle = workflowMolecule.moleculeTitle;
+    // Scroll to the newly created card after a short delay to ensure it's rendered
+    setTimeout(() => {
+      const cardElement = document.querySelector(`[data-card-id="${newCard.id}"]`);
+      if (cardElement) {
+        cardElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
       }
-    }
+    }, 100);
+  };
 
-    // If adding to a molecule, insert at specific position within molecule
-    if (moleculeId) {
-      const moleculeCards = arr.filter(card => card.moleculeId === moleculeId);
+  // Workflow-specific addNewCardWithAtom function that handles molecules and standalone cards
+  const addNewCardWithAtomWorkflow = async (
+    atomId: string,
+    moleculeId?: string,
+    position?: number,
+    targetMoleculeIndex?: number,
+    insertAfterSubOrder?: number
+  ) => {
+    const arr = Array.isArray(layoutCards) ? layoutCards : [];
 
-      if (moleculeCards.length === 0) {
-        // No cards in molecule yet, just append
-        setLayoutCards([...arr, fallbackCard]);
-      } else if (position !== undefined && position < moleculeCards.length) {
-        // Insert AFTER the card at position within molecule
-        const targetCard = moleculeCards[position];
-        const targetIndex = arr.findIndex(card => card.id === targetCard.id);
-        if (targetIndex >= 0) {
-          setLayoutCards([
-            ...arr.slice(0, targetIndex + 1),
-            fallbackCard,
-            ...arr.slice(targetIndex + 1),
-          ]);
+    try {
+      if (typeof window !== 'undefined') {
+        console.info('[Laboratory API] Creating card', {
+          endpoint: `${LABORATORY_API}/cards`,
+          origin: window.location.origin,
+          payload: { atomId, moleculeId },
+        });
+      }
+
+      const response = await fetch(`${LABORATORY_API}/cards`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ atomId, moleculeId }),
+      });
+      if (!response.ok) {
+        if (typeof window !== 'undefined') {
+          console.error('[Laboratory API] Create card request failed', {
+            endpoint: `${LABORATORY_API}/cards`,
+            status: response.status,
+            statusText: response.statusText,
+          });
+        }
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+      const payload = (await response.json()) as CardPayload;
+      const newCard = buildCardFromApiPayload(payload, atomId, moleculeId);
+
+      // If moleculeTitle is not set, try to get it from workflowMolecules (for custom molecules)
+      if (!newCard.moleculeTitle && moleculeId) {
+        const workflowMolecule = workflowMolecules.find(m => m.moleculeId === moleculeId);
+        if (workflowMolecule) {
+          newCard.moleculeTitle = workflowMolecule.moleculeTitle;
+        }
+      }
+
+      // If adding to a molecule, insert at specific position within molecule
+      if (moleculeId) {
+        const moleculeCards = arr.filter(card => card.moleculeId === moleculeId);
+
+        if (moleculeCards.length === 0) {
+          // No cards in molecule yet, just append
+          setLayoutCards([...arr, newCard]);
+        } else if (position !== undefined && position < moleculeCards.length) {
+          // Insert AFTER the card at position within molecule
+          const targetCard = moleculeCards[position];
+          const targetIndex = arr.findIndex(card => card.id === targetCard.id);
+          if (targetIndex >= 0) {
+            setLayoutCards([
+              ...arr.slice(0, targetIndex + 1),
+              newCard,
+              ...arr.slice(targetIndex + 1),
+            ]);
+          } else {
+            // Fallback to end
+            const lastIndex = arr.findIndex(card => card.id === moleculeCards[moleculeCards.length - 1]?.id);
+            setLayoutCards([
+              ...arr.slice(0, lastIndex + 1),
+              newCard,
+              ...arr.slice(lastIndex + 1),
+            ]);
+          }
         } else {
-          // Fallback to end
-          const lastIndex = arr.findIndex(card => card.id === moleculeCards[moleculeCards.length - 1]?.id);
+          // Append to end of molecule
+          const lastMoleculeCardIndex = arr.findIndex(card =>
+            card.id === moleculeCards[moleculeCards.length - 1]?.id
+          );
           setLayoutCards([
-            ...arr.slice(0, lastIndex + 1),
-            fallbackCard,
-            ...arr.slice(lastIndex + 1),
+            ...arr.slice(0, lastMoleculeCardIndex + 1),
+            newCard,
+            ...arr.slice(lastMoleculeCardIndex + 1),
           ]);
         }
       } else {
-        // Append to end of molecule
-        const lastMoleculeCardIndex = arr.findIndex(card => 
-          card.id === moleculeCards[moleculeCards.length - 1]?.id
-        );
+        // Standalone card
+        const activeMolecules = workflowMolecules.filter(m => m.isActive !== false);
+
+        // Calculate order based on targetMoleculeIndex and set molecule references
+        // FIX: Ensure targetMoleculeIndex is valid (0 to workflowMolecules.length - 1)
+        if (targetMoleculeIndex !== undefined && targetMoleculeIndex >= 0) {
+          // Clamp targetMoleculeIndex to valid range
+          const validMoleculeIndex = Math.min(targetMoleculeIndex, workflowMolecules.length - 1);
+
+          if (validMoleculeIndex < 0) {
+            console.warn(`[addNewCardWithAtomWorkflow] Invalid targetMoleculeIndex: ${targetMoleculeIndex}, falling back to append to end`);
+          } else {
+            // Get the molecule at validMoleculeIndex (might be inactive)
+            const targetMolecule = workflowMolecules[validMoleculeIndex];
+            const targetIsActive = targetMolecule && targetMolecule.isActive !== false;
+
+            // Find the active molecule at or before this position
+            let afterMolecule = null;
+            let beforeMolecule = null;
+
+            if (targetIsActive) {
+              // Target molecule is active - use it as afterMoleculeId
+              afterMolecule = targetMolecule;
+              // Find next active molecule for beforeMoleculeId
+              for (let i = validMoleculeIndex + 1; i < workflowMolecules.length; i++) {
+                if (workflowMolecules[i].isActive !== false) {
+                  beforeMolecule = workflowMolecules[i];
+                  break;
+                }
+              }
+            } else {
+              // Target molecule is inactive - find previous active molecule
+              for (let i = validMoleculeIndex; i >= 0; i--) {
+                if (workflowMolecules[i].isActive !== false) {
+                  afterMolecule = workflowMolecules[i];
+                  break;
+                }
+              }
+              // Find next active molecule for beforeMoleculeId
+              for (let i = validMoleculeIndex + 1; i < workflowMolecules.length; i++) {
+                if (workflowMolecules[i].isActive !== false) {
+                  beforeMolecule = workflowMolecules[i];
+                  break;
+                }
+              }
+            }
+
+            // Set molecule references
+            if (afterMolecule) {
+              newCard.afterMoleculeId = afterMolecule.moleculeId;
+            }
+            if (beforeMolecule) {
+              newCard.beforeMoleculeId = beforeMolecule.moleculeId;
+            } else if (validMoleculeIndex === workflowMolecules.length - 1 || !beforeMolecule) {
+              // If this is after the last molecule or no beforeMolecule found, mark as afterLastMolecule
+              newCard.afterLastMolecule = true;
+            }
+
+            if (insertAfterSubOrder !== undefined) {
+              // Insert at specific position - need to shift all cards after this position
+              const targetSubOrder = insertAfterSubOrder + 1;
+              const updatedCards = arr.map(card => {
+                if (card.order !== undefined) {
+                  const cardMoleculeIndex = Math.floor(card.order / 1000);
+                  const cardSubOrder = card.order % 1000;
+                  // If card is after insertion point, shift it
+                  if (cardMoleculeIndex === validMoleculeIndex && cardSubOrder >= targetSubOrder) {
+                    return { ...card, order: (cardMoleculeIndex * 1000) + (cardSubOrder + 1) };
+                  }
+                }
+                return card;
+              });
+
+              newCard.order = (validMoleculeIndex * 1000) + targetSubOrder;
+
+              console.log(`📝 [addNewCardWithAtomWorkflow] Inserted standalone card at position:`, {
+                targetMoleculeIndex,
+                validMoleculeIndex,
+                insertAfterSubOrder,
+                targetSubOrder,
+                order: newCard.order,
+                afterMoleculeId: newCard.afterMoleculeId,
+                beforeMoleculeId: newCard.beforeMoleculeId
+              });
+
+              setLayoutCards([...updatedCards, newCard]);
+            } else {
+              // Find existing standalone cards after this molecule to determine subOrder
+              const existingStandaloneAfterMolecule = arr.filter(card => {
+                if (card.order !== undefined) {
+                  const cardMoleculeIndex = Math.floor(card.order / 1000);
+                  return cardMoleculeIndex === validMoleculeIndex;
+                }
+                return false;
+              });
+
+              // Get the highest subOrder for cards after this molecule, default to 0
+              const maxSubOrder = existingStandaloneAfterMolecule.reduce((max, card) => {
+                const subOrder = card.order !== undefined ? card.order % 1000 : 0;
+                return Math.max(max, subOrder);
+              }, 0);
+
+              // Set order as (validMoleculeIndex * 1000) + (maxSubOrder + 1)
+              newCard.order = (validMoleculeIndex * 1000) + (maxSubOrder + 1);
+
+              console.log(`📝 [addNewCardWithAtomWorkflow] Added standalone card after molecule:`, {
+                targetMoleculeIndex,
+                validMoleculeIndex,
+                moleculeId: targetMolecule?.moleculeId,
+                order: newCard.order,
+                maxSubOrder,
+                subOrder: maxSubOrder + 1,
+                afterMoleculeId: newCard.afterMoleculeId,
+                beforeMoleculeId: newCard.beforeMoleculeId,
+                afterLastMolecule: newCard.afterLastMolecule
+              });
+
+              setLayoutCards([...arr, newCard]);
+            }
+          }
+        } else {
+          // No target molecule - append to end, set afterMoleculeId to last active molecule
+          // FIX: Calculate order based on last molecule index (not workflowMolecules.length)
+          if (activeMolecules.length > 0) {
+            const lastActiveMolecule = activeMolecules[activeMolecules.length - 1];
+            newCard.afterMoleculeId = lastActiveMolecule.moleculeId;
+
+            // Find the index of the last active molecule in the full workflowMolecules array
+            const lastActiveMoleculeIndex = workflowMolecules.findIndex(m => m.moleculeId === lastActiveMolecule.moleculeId);
+
+            if (lastActiveMoleculeIndex >= 0) {
+              // Find existing standalone cards after this molecule to determine subOrder
+              const existingStandaloneAfterMolecule = arr.filter(card => {
+                if (card.order !== undefined) {
+                  const cardMoleculeIndex = Math.floor(card.order / 1000);
+                  return cardMoleculeIndex === lastActiveMoleculeIndex;
+                }
+                return false;
+              });
+
+              // Get the highest subOrder for cards after this molecule, default to 0
+              const maxSubOrder = existingStandaloneAfterMolecule.reduce((max, card) => {
+                const subOrder = card.order !== undefined ? card.order % 1000 : 0;
+                return Math.max(max, subOrder);
+              }, 0);
+
+              // Set order as (lastActiveMoleculeIndex * 1000) + (maxSubOrder + 1)
+              newCard.order = (lastActiveMoleculeIndex * 1000) + (maxSubOrder + 1);
+              newCard.afterLastMolecule = true;
+
+              console.log(`📝 [addNewCardWithAtomWorkflow] Added standalone card after last molecule:`, {
+                moleculeId: lastActiveMolecule.moleculeId,
+                moleculeIndex: lastActiveMoleculeIndex,
+                order: newCard.order,
+                maxSubOrder,
+                subOrder: maxSubOrder + 1
+              });
+            }
+          }
+          setLayoutCards([...arr, newCard]);
+        }
+      }
+
+      setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+      if (Array.isArray(newCard.atoms)) {
+        newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
+      }
+
+      // Track atom addition for cross-collection sync if card belongs to a molecule
+      if (moleculeId && Array.isArray(newCard.atoms) && newCard.atoms.length > 0) {
+        setPendingChanges(prev => ({
+          ...prev,
+          addedAtoms: [...prev.addedAtoms, {
+            moleculeId: moleculeId,
+            atomId: newCard.atoms[0].atomId,
+            position: 0
+          }]
+        }));
+        console.log(`📝 Tracked atom addition: ${newCard.atoms[0].atomId} to molecule ${moleculeId} (will sync on save)`);
+      }
+
+      // Automatically open properties panel and select the atom
+      if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onAtomSelect) {
+        onAtomSelect(newCard.atoms[0].id);
+      }
+      if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onOpenSettingsPanel) {
+        onOpenSettingsPanel();
+      }
+    } catch (err) {
+      console.error('⚠️ Failed to create laboratory card via API, using fallback', err);
+      toast({
+        title: 'Unable to reach laboratory service',
+        description: 'Using local defaults for the new card. Please verify your network connection.',
+        variant: 'destructive',
+      });
+      const fallbackCard = createFallbackCard(atomId, moleculeId);
+
+      // If moleculeTitle is not set, try to get it from workflowMolecules (for custom molecules)
+      if (!fallbackCard.moleculeTitle && moleculeId) {
+        const workflowMolecule = workflowMolecules.find(m => m.moleculeId === moleculeId);
+        if (workflowMolecule) {
+          fallbackCard.moleculeTitle = workflowMolecule.moleculeTitle;
+        }
+      }
+
+      // If adding to a molecule, insert at specific position within molecule
+      if (moleculeId) {
+        const moleculeCards = arr.filter(card => card.moleculeId === moleculeId);
+
+        if (moleculeCards.length === 0) {
+          // No cards in molecule yet, just append
+          setLayoutCards([...arr, fallbackCard]);
+        } else if (position !== undefined && position < moleculeCards.length) {
+          // Insert AFTER the card at position within molecule
+          const targetCard = moleculeCards[position];
+          const targetIndex = arr.findIndex(card => card.id === targetCard.id);
+          if (targetIndex >= 0) {
+            setLayoutCards([
+              ...arr.slice(0, targetIndex + 1),
+              fallbackCard,
+              ...arr.slice(targetIndex + 1),
+            ]);
+          } else {
+            // Fallback to end
+            const lastIndex = arr.findIndex(card => card.id === moleculeCards[moleculeCards.length - 1]?.id);
+            setLayoutCards([
+              ...arr.slice(0, lastIndex + 1),
+              fallbackCard,
+              ...arr.slice(lastIndex + 1),
+            ]);
+          }
+        } else {
+          // Append to end of molecule
+          const lastMoleculeCardIndex = arr.findIndex(card =>
+            card.id === moleculeCards[moleculeCards.length - 1]?.id
+          );
+          setLayoutCards([
+            ...arr.slice(0, lastMoleculeCardIndex + 1),
+            fallbackCard,
+            ...arr.slice(lastMoleculeCardIndex + 1),
+          ]);
+        }
+      } else {
+        // Standalone card - insert at position
+        const insertIndex = position === undefined || position >= arr.length ? arr.length : position;
         setLayoutCards([
-          ...arr.slice(0, lastMoleculeCardIndex + 1),
+          ...arr.slice(0, insertIndex),
           fallbackCard,
-          ...arr.slice(lastMoleculeCardIndex + 1),
+          ...arr.slice(insertIndex),
         ]);
       }
-    } else {
-      // Standalone card - insert at position
-      const insertIndex = position === undefined || position >= arr.length ? arr.length : position;
+
+      setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
+      if (Array.isArray(fallbackCard.atoms)) {
+        fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
+      }
+
+      // Automatically open properties panel and select the atom
+      if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onAtomSelect) {
+        onAtomSelect(fallbackCard.atoms[0].id);
+      }
+      if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
+        onOpenSettingsPanel();
+      }
+    }
+  };
+
+  type AtomPayload = Partial<DroppedAtom> & {
+    atomId?: string;
+    settings?: any;
+    source?: 'ai' | 'manual';
+    llm?: string;
+  };
+
+  type CardPayload = Partial<Omit<LayoutCard, 'atoms'>> & {
+    atoms?: AtomPayload[];
+  };
+
+  function generateClientId(prefix: string) {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return `${prefix}-${crypto.randomUUID()}`;
+    }
+    const random = Math.random().toString(36).slice(2);
+    return `${prefix}-${Date.now()}-${random}`;
+  }
+
+  const getDefaultSettingsForAtom = (atomId: string) => {
+    switch (atomId) {
+      case 'text-box':
+        return { ...DEFAULT_TEXTBOX_SETTINGS };
+      case 'data-upload-validate':
+        return createDefaultDataUploadSettings();
+      case 'feature-overview':
+        return { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
+      case 'explore':
+        return { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } };
+      case 'chart-maker':
+        return { ...DEFAULT_CHART_MAKER_SETTINGS };
+      case 'pivot-table':
+        return { ...DEFAULT_PIVOT_TABLE_SETTINGS };
+      case 'unpivot':
+        return { ...DEFAULT_UNPIVOT_SETTINGS };
+      case 'dataframe-operations':
+        return { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS };
+      case 'select-models-feature':
+        return { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS };
+      case 'auto-regressive-models':
+        return {
+          data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA },
+          settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS },
+        };
+      default:
+        return undefined;
+    }
+  };
+
+  const buildAtomFromApiPayload = (fallbackAtomId: string, payload?: AtomPayload): DroppedAtom => {
+    const resolvedAtomId = payload?.atomId ?? fallbackAtomId;
+    const atomInfo = allAtoms.find(a => a.id === resolvedAtomId);
+    return {
+      id: payload?.id ?? generateClientId(resolvedAtomId),
+      atomId: resolvedAtomId,
+      title: payload?.title ?? atomInfo?.title ?? resolvedAtomId,
+      category: payload?.category ?? atomInfo?.category ?? 'Atom',
+      color: payload?.color ?? atomInfo?.color ?? 'bg-gray-400',
+      source: payload?.source ?? 'manual',
+      llm: payload?.llm ?? LLM_MAP[resolvedAtomId],
+      settings: payload?.settings ?? getDefaultSettingsForAtom(resolvedAtomId),
+    };
+  };
+
+  const buildCardFromApiPayload = (
+    payload: CardPayload | null | undefined,
+    fallbackAtomId: string,
+    fallbackMoleculeId?: string,
+  ): LayoutCard => {
+    const cardId = payload?.id ?? generateClientId('card');
+    const atomsPayload =
+      payload?.atoms && Array.isArray(payload.atoms) && payload.atoms.length > 0
+        ? payload.atoms
+        : [{ atomId: fallbackAtomId }];
+  const atoms = atomsPayload.map(atom => buildAtomFromApiPayload(atom.atomId ?? fallbackAtomId, atom));
+    const moleculeId = payload?.moleculeId ?? fallbackMoleculeId;
+    const moleculeInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
+
+    return {
+      id: cardId,
+      atoms,
+      isExhibited: Boolean(payload?.isExhibited),
+      moleculeId,
+      moleculeTitle: payload?.moleculeTitle ?? moleculeInfo?.title,
+      variables: normalizeCardVariables(payload?.variables, cardId),
+    };
+  };
+
+  const prefillAtomIfRequired = (cardId: string, atom: DroppedAtom) => {
+    if (atom.atomId === 'feature-overview') {
+      void prefillFeatureOverview(cardId, atom.id);
+    } else if (atom.atomId === 'column-classifier') {
+      void prefillColumnClassifier(atom.id);
+    } else if (atom.atomId === 'scope-selector') {
+      void prefillScopeSelector(atom.id);
+    }
+  };
+
+  const createFallbackCard = (atomId: string, moleculeId?: string): LayoutCard => {
+    const cardInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
+    const fallbackAtom = buildAtomFromApiPayload(atomId, {
+      atomId,
+      source: 'manual',
+    });
+    return {
+      id: generateClientId('card'),
+      atoms: [fallbackAtom],
+      isExhibited: false,
+      moleculeId,
+      moleculeTitle: cardInfo?.title,
+      variables: [],
+    };
+  };
+
+  const addNewCardWithAtom = async (
+    atomId: string,
+    moleculeId?: string,
+    position?: number
+  ) => {
+    const arr = Array.isArray(layoutCards) ? layoutCards : [];
+    const insertIndex =
+      position === undefined || position >= arr.length ? arr.length : position;
+
+    try {
+      if (typeof window !== 'undefined') {
+        console.info('[Laboratory API] Creating card', {
+          endpoint: `${LABORATORY_API}/cards`,
+          origin: window.location.origin,
+          payload: { atomId, moleculeId },
+        });
+      }
+
+      const response = await fetch(`${LABORATORY_API}/cards`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ atomId, moleculeId }),
+      });
+      if (!response.ok) {
+        if (typeof window !== 'undefined') {
+          console.error('[Laboratory API] Create card request failed', {
+            endpoint: `${LABORATORY_API}/cards`,
+            status: response.status,
+            statusText: response.statusText,
+          });
+        }
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+      const payload = (await response.json()) as CardPayload;
+      const newCard = buildCardFromApiPayload(payload, atomId, moleculeId);
+      setLayoutCards([
+        ...arr.slice(0, insertIndex),
+        newCard,
+        ...arr.slice(insertIndex),
+      ]);
+      setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+      if (Array.isArray(newCard.atoms)) {
+        newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
+      }
+
+      // Automatically open properties panel and select the atom
+      if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onAtomSelect) {
+        onAtomSelect(newCard.atoms[0].id);
+      }
+      if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onOpenSettingsPanel) {
+        onOpenSettingsPanel();
+      }
+    } catch (err) {
+      console.error('⚠️ Failed to create laboratory card via API, using fallback', err);
+      toast({
+        title: 'Unable to reach laboratory service',
+        description: 'Using local defaults for the new card. Please verify your network connection.',
+        variant: 'destructive',
+      });
+      const fallbackCard = createFallbackCard(atomId, moleculeId);
       setLayoutCards([
         ...arr.slice(0, insertIndex),
         fallbackCard,
         ...arr.slice(insertIndex),
       ]);
-    }
-
-    setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
-    if (Array.isArray(fallbackCard.atoms)) {
-    fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
-    }
-    
-    // Automatically open properties panel and select the atom
-    if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onAtomSelect) {
-      onAtomSelect(fallbackCard.atoms[0].id);
-    }
-    if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
-      onOpenSettingsPanel();
-    }
-  }
-};
-
-type AtomPayload = Partial<DroppedAtom> & {
-  atomId?: string;
-  settings?: any;
-  source?: 'ai' | 'manual';
-  llm?: string;
-};
-
-type CardPayload = Partial<Omit<LayoutCard, 'atoms'>> & {
-  atoms?: AtomPayload[];
-};
-
-function generateClientId(prefix: string) {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  const random = Math.random().toString(36).slice(2);
-  return `${prefix}-${Date.now()}-${random}`;
-}
-
-const getDefaultSettingsForAtom = (atomId: string) => {
-  switch (atomId) {
-    case 'text-box':
-      return { ...DEFAULT_TEXTBOX_SETTINGS };
-    case 'data-upload-validate':
-      return createDefaultDataUploadSettings();
-    case 'feature-overview':
-      return { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
-    case 'explore':
-      return { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } };
-    case 'chart-maker':
-      return { ...DEFAULT_CHART_MAKER_SETTINGS };
-    case 'pivot-table':
-      return { ...DEFAULT_PIVOT_TABLE_SETTINGS };
-    case 'unpivot':
-      return { ...DEFAULT_UNPIVOT_SETTINGS };
-    case 'dataframe-operations':
-      return { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS };
-    case 'select-models-feature':
-      return { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS };
-    case 'auto-regressive-models':
-      return {
-        data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA },
-        settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS },
-      };
-    default:
-      return undefined;
-  }
-};
-
-const buildAtomFromApiPayload = (fallbackAtomId: string, payload?: AtomPayload): DroppedAtom => {
-  const resolvedAtomId = payload?.atomId ?? fallbackAtomId;
-  const atomInfo = allAtoms.find(a => a.id === resolvedAtomId);
-  return {
-    id: payload?.id ?? generateClientId(resolvedAtomId),
-    atomId: resolvedAtomId,
-    title: payload?.title ?? atomInfo?.title ?? resolvedAtomId,
-    category: payload?.category ?? atomInfo?.category ?? 'Atom',
-    color: payload?.color ?? atomInfo?.color ?? 'bg-gray-400',
-    source: payload?.source ?? 'manual',
-    llm: payload?.llm ?? LLM_MAP[resolvedAtomId],
-    settings: payload?.settings ?? getDefaultSettingsForAtom(resolvedAtomId),
-  };
-};
-
-const buildCardFromApiPayload = (
-  payload: CardPayload | null | undefined,
-  fallbackAtomId: string,
-  fallbackMoleculeId?: string,
-): LayoutCard => {
-  const cardId = payload?.id ?? generateClientId('card');
-  const atomsPayload =
-    payload?.atoms && Array.isArray(payload.atoms) && payload.atoms.length > 0
-      ? payload.atoms
-      : [{ atomId: fallbackAtomId }];
-  const atoms = atomsPayload.map(atom => buildAtomFromApiPayload(atom.atomId ?? fallbackAtomId, atom));
-  const moleculeId = payload?.moleculeId ?? fallbackMoleculeId;
-  const moleculeInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
-
-  return {
-    id: cardId,
-    atoms,
-    isExhibited: Boolean(payload?.isExhibited),
-    moleculeId,
-    moleculeTitle: payload?.moleculeTitle ?? moleculeInfo?.title,
-    variables: normalizeCardVariables(payload?.variables, cardId),
-  };
-};
-
-const prefillAtomIfRequired = (cardId: string, atom: DroppedAtom) => {
-  if (atom.atomId === 'feature-overview') {
-    void prefillFeatureOverview(cardId, atom.id);
-  } else if (atom.atomId === 'column-classifier') {
-    void prefillColumnClassifier(atom.id);
-  } else if (atom.atomId === 'scope-selector') {
-    void prefillScopeSelector(atom.id);
-  }
-};
-
-const createFallbackCard = (atomId: string, moleculeId?: string): LayoutCard => {
-  const cardInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
-  const fallbackAtom = buildAtomFromApiPayload(atomId, {
-    atomId,
-    source: 'manual',
-  });
-  return {
-    id: generateClientId('card'),
-    atoms: [fallbackAtom],
-    isExhibited: false,
-    moleculeId,
-    moleculeTitle: cardInfo?.title,
-    variables: [],
-  };
-};
-
-const addNewCardWithAtom = async (
-  atomId: string,
-  moleculeId?: string,
-  position?: number
-) => {
-  const arr = Array.isArray(layoutCards) ? layoutCards : [];
-  const insertIndex =
-    position === undefined || position >= arr.length ? arr.length : position;
-
-  try {
-    if (typeof window !== 'undefined') {
-      console.info('[Laboratory API] Creating card', {
-        endpoint: `${LABORATORY_API}/cards`,
-        origin: window.location.origin,
-        payload: { atomId, moleculeId },
-      });
-    }
-
-    const response = await fetch(`${LABORATORY_API}/cards`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ atomId, moleculeId }),
-    });
-    if (!response.ok) {
-      if (typeof window !== 'undefined') {
-        console.error('[Laboratory API] Create card request failed', {
-          endpoint: `${LABORATORY_API}/cards`,
-          status: response.status,
-          statusText: response.statusText,
-        });
+      setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
+      if (Array.isArray(fallbackCard.atoms)) {
+        fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
       }
-      throw new Error(`Request failed with status ${response.status}`);
+
+      // Automatically open properties panel and select the atom
+      if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onAtomSelect) {
+        onAtomSelect(fallbackCard.atoms[0].id);
+      }
+      if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
+        onOpenSettingsPanel();
+      }
     }
-    const payload = (await response.json()) as CardPayload;
-    const newCard = buildCardFromApiPayload(payload, atomId, moleculeId);
-    setLayoutCards([
-      ...arr.slice(0, insertIndex),
-      newCard,
-      ...arr.slice(insertIndex),
-    ]);
-    setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
-    if (Array.isArray(newCard.atoms)) {
-    newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
+  };
+
+  const handleDropNewCard = async (
+    e: React.DragEvent,
+    moleculeId?: string,
+    position?: number
+  ) => {
+    e.preventDefault();
+    setDragOver(null);
+    setAddDragTarget(null);
+    const atomData = e.dataTransfer.getData('application/json');
+    if (!atomData) return;
+    const atom = JSON.parse(atomData);
+    if (!atom?.id) return;
+    await addNewCardWithAtom(atom.id, moleculeId, position);
+  };
+
+  // Workflow-specific handleDropNewCard that uses addNewCardWithAtomWorkflow
+  const handleDropNewCardWorkflow = async (
+    e: React.DragEvent,
+    moleculeId?: string,
+    position?: number,
+    targetMoleculeIndex?: number,
+    insertAfterSubOrder?: number
+  ) => {
+    e.preventDefault();
+    setDragOver(null);
+    setAddDragTarget(null);
+    const atomData = e.dataTransfer.getData('application/json');
+    if (!atomData) return;
+    const atom = JSON.parse(atomData);
+    if (!atom?.id) return;
+    await addNewCardWithAtomWorkflow(atom.id, moleculeId, position, targetMoleculeIndex, insertAfterSubOrder);
+  };
+
+
+  const handleAddDragEnter = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    setAddDragTarget(targetId);
+  };
+
+  const handleAddDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setAddDragTarget(null);
+  };
+
+  // Card reordering handlers
+  const handleCardDragStart = (e: React.DragEvent, cardId: string) => {
+    if (!canEdit) return;
+    setDraggedCardId(cardId);
+    e.dataTransfer.setData('text/plain', ''); // Required for drag to work
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleCardDragOver = (e: React.DragEvent, targetCardId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverCardId(targetCardId);
+  };
+
+  const handleCardDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverCardId(null);
+  };
+
+  const handleCardDrop = (e: React.DragEvent, targetCardId: string) => {
+    e.preventDefault();
+    setDragOverCardId(null);
+
+    if (!draggedCardId || draggedCardId === targetCardId) {
+      setDraggedCardId(null);
+      return;
     }
-    
-    // Automatically open properties panel and select the atom
-    if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onAtomSelect) {
-      onAtomSelect(newCard.atoms[0].id);
+
+    const arr = Array.isArray(layoutCards) ? layoutCards : [];
+    const draggedIndex = arr.findIndex(card => card.id === draggedCardId);
+    const targetIndex = arr.findIndex(card => card.id === targetCardId);
+
+    if (draggedIndex === -1 || targetIndex === -1) {
+      setDraggedCardId(null);
+      return;
     }
-    if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onOpenSettingsPanel) {
-      onOpenSettingsPanel();
-    }
-  } catch (err) {
-    console.error('⚠️ Failed to create laboratory card via API, using fallback', err);
-    toast({
-      title: 'Unable to reach laboratory service',
-      description: 'Using local defaults for the new card. Please verify your network connection.',
-      variant: 'destructive',
-    });
-    const fallbackCard = createFallbackCard(atomId, moleculeId);
-    setLayoutCards([
-      ...arr.slice(0, insertIndex),
-      fallbackCard,
-      ...arr.slice(insertIndex),
-    ]);
-    setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
-    if (Array.isArray(fallbackCard.atoms)) {
-    fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
-    }
-    
-    // Automatically open properties panel and select the atom
-    if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onAtomSelect) {
-      onAtomSelect(fallbackCard.atoms[0].id);
-    }
-    if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
-      onOpenSettingsPanel();
-    }
-  }
-};
 
-const handleDropNewCard = async (
-  e: React.DragEvent,
-  moleculeId?: string,
-  position?: number
-) => {
-  e.preventDefault();
-  setDragOver(null);
-  setAddDragTarget(null);
-  const atomData = e.dataTransfer.getData('application/json');
-  if (!atomData) return;
-  const atom = JSON.parse(atomData);
-  if (!atom?.id) return;
-  await addNewCardWithAtom(atom.id, moleculeId, position);
-};
+    // Reorder cards
+    const newCards = [...arr];
+    const [draggedCard] = newCards.splice(draggedIndex, 1);
+    newCards.splice(targetIndex, 0, draggedCard);
 
-// Workflow-specific handleDropNewCard that uses addNewCardWithAtomWorkflow
-const handleDropNewCardWorkflow = async (
-  e: React.DragEvent,
-  moleculeId?: string,
-  position?: number,
-  targetMoleculeIndex?: number,
-  insertAfterSubOrder?: number
-) => {
-  e.preventDefault();
-  setDragOver(null);
-  setAddDragTarget(null);
-  const atomData = e.dataTransfer.getData('application/json');
-  if (!atomData) return;
-  const atom = JSON.parse(atomData);
-  if (!atom?.id) return;
-  await addNewCardWithAtomWorkflow(atom.id, moleculeId, position, targetMoleculeIndex, insertAfterSubOrder);
-};
-
-
-const handleAddDragEnter = (e: React.DragEvent, targetId: string) => {
-  e.preventDefault();
-  setAddDragTarget(targetId);
-};
-
-const handleAddDragLeave = (e: React.DragEvent) => {
-  e.preventDefault();
-  setAddDragTarget(null);
-};
-
-// Card reordering handlers
-const handleCardDragStart = (e: React.DragEvent, cardId: string) => {
-  if (!canEdit) return;
-  setDraggedCardId(cardId);
-  e.dataTransfer.setData('text/plain', ''); // Required for drag to work
-  e.dataTransfer.effectAllowed = 'move';
-};
-
-const handleCardDragOver = (e: React.DragEvent, targetCardId: string) => {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  setDragOverCardId(targetCardId);
-};
-
-const handleCardDragLeave = (e: React.DragEvent) => {
-  e.preventDefault();
-  setDragOverCardId(null);
-};
-
-const handleCardDrop = (e: React.DragEvent, targetCardId: string) => {
-  e.preventDefault();
-  setDragOverCardId(null);
-
-  if (!draggedCardId || draggedCardId === targetCardId) {
+    setLayoutCards(newCards);
+    setCards(newCards);
     setDraggedCardId(null);
-    return;
-  }
+  };
 
-  const arr = Array.isArray(layoutCards) ? layoutCards : [];
-  const draggedIndex = arr.findIndex(card => card.id === draggedCardId);
-  const targetIndex = arr.findIndex(card => card.id === targetCardId);
+  // Molecule reordering handlers
+  const handleMoleculeDragStart = (e: React.DragEvent, moleculeId: string) => {
+    if (!canEdit) return;
+    setDraggedMoleculeId(moleculeId);
+    e.dataTransfer.setData('text/plain', ''); // Required for drag to work
+    e.dataTransfer.effectAllowed = 'move';
+  };
 
-  if (draggedIndex === -1 || targetIndex === -1) {
-    setDraggedCardId(null);
-    return;
-  }
+  const handleMoleculeDragOver = (e: React.DragEvent, targetMoleculeId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverMoleculeId(targetMoleculeId);
+  };
 
-  // Reorder cards
-  const newCards = [...arr];
-  const [draggedCard] = newCards.splice(draggedIndex, 1);
-  newCards.splice(targetIndex, 0, draggedCard);
+  const handleMoleculeDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverMoleculeId(null);
+  };
 
-  setLayoutCards(newCards);
-  setCards(newCards);
-  setDraggedCardId(null);
-};
+  const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
+    e.preventDefault();
+    setDragOverMoleculeId(null);
 
-// Molecule reordering handlers
-const handleMoleculeDragStart = (e: React.DragEvent, moleculeId: string) => {
-  if (!canEdit) return;
-  setDraggedMoleculeId(moleculeId);
-  e.dataTransfer.setData('text/plain', ''); // Required for drag to work
-  e.dataTransfer.effectAllowed = 'move';
-};
+    if (!draggedMoleculeId || draggedMoleculeId === targetMoleculeId) {
+      setDraggedMoleculeId(null);
+      return;
+    }
 
-const handleMoleculeDragOver = (e: React.DragEvent, targetMoleculeId: string) => {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  setDragOverMoleculeId(targetMoleculeId);
-};
+    const arr = [...workflowMolecules];
+    const draggedIndex = arr.findIndex(mol => mol.moleculeId === draggedMoleculeId);
+    const targetIndex = arr.findIndex(mol => mol.moleculeId === targetMoleculeId);
 
-const handleMoleculeDragLeave = (e: React.DragEvent) => {
-  e.preventDefault();
-  setDragOverMoleculeId(null);
-};
+    if (draggedIndex === -1 || targetIndex === -1) {
+      setDraggedMoleculeId(null);
+      return;
+    }
 
-const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
-  e.preventDefault();
-  setDragOverMoleculeId(null);
+    // Reorder molecules
+    const newMolecules = [...arr];
+    const [draggedMolecule] = newMolecules.splice(draggedIndex, 1);
+    newMolecules.splice(targetIndex, 0, draggedMolecule);
 
-  if (!draggedMoleculeId || draggedMoleculeId === targetMoleculeId) {
-    setDraggedMoleculeId(null);
-    return;
-  }
-
-  const arr = [...workflowMolecules];
-  const draggedIndex = arr.findIndex(mol => mol.moleculeId === draggedMoleculeId);
-  const targetIndex = arr.findIndex(mol => mol.moleculeId === targetMoleculeId);
-
-  if (draggedIndex === -1 || targetIndex === -1) {
-    setDraggedMoleculeId(null);
-    return;
-  }
-
-  // Reorder molecules
-  const newMolecules = [...arr];
-  const [draggedMolecule] = newMolecules.splice(draggedIndex, 1);
-  newMolecules.splice(targetIndex, 0, draggedMolecule);
-
-  setWorkflowMolecules(newMolecules);
+    setWorkflowMolecules(newMolecules);
   // Update localStorage
   localStorage.setItem('workflow-molecules', JSON.stringify(newMolecules));
-  setDraggedMoleculeId(null);
-};
+    setDraggedMoleculeId(null);
+  };
 
   const removeAtom = (cardId: string, atomId: string) => {
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
@@ -3968,8 +4020,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
     // Track atom deletion for cross-collection sync
     if (card?.moleculeId && atom) {
-      const deletionRecord = { 
-        moleculeId: card.moleculeId, 
+      const deletionRecord = {
+        moleculeId: card.moleculeId,
         atomId: atom.atomId
       };
 
@@ -4026,14 +4078,14 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         const allMoleculeAtomIds: string[] = [];
         moleculeCards.forEach(moleculeCard => {
           if (Array.isArray(moleculeCard.atoms)) {
-          moleculeCard.atoms.forEach(atom => {
-            allMoleculeAtomIds.push(atom.atomId);
-          });
+            moleculeCard.atoms.forEach(atom => {
+              allMoleculeAtomIds.push(atom.atomId);
+            });
           }
         });
 
         // Get workflow molecule atom IDs
-        const workflowAtomIds = Array.isArray(workflowMolecule.atoms) 
+        const workflowAtomIds = Array.isArray(workflowMolecule.atoms)
           ? workflowMolecule.atoms.map(a => typeof a === 'string' ? a : a.atomName)
           : [];
 
@@ -4044,7 +4096,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             break;
           }
           if (Array.isArray(moleculeCards[i].atoms)) {
-          cardStartIndex += moleculeCards[i].atoms.length;
+            cardStartIndex += moleculeCards[i].atoms.length;
           }
         }
 
@@ -4072,8 +4124,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     if (card?.moleculeId) {
       setPendingChanges(prev => ({
         ...prev,
-        addedAtoms: [...prev.addedAtoms, { 
-          moleculeId: card.moleculeId, 
+        addedAtoms: [...prev.addedAtoms, {
+          moleculeId: card.moleculeId,
           atomId: newAtom.atomId,
           position: atomPosition
         }]
@@ -4122,9 +4174,9 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         card.atoms.forEach(atom => {
           setPendingChanges(prev => ({
             ...prev,
-            deletedAtoms: [...prev.deletedAtoms, { 
-              moleculeId: card.moleculeId, 
-              atomId: atom.atomId 
+            deletedAtoms: [...prev.deletedAtoms, {
+              moleculeId: card.moleculeId,
+              atomId: atom.atomId
             }]
           }));
         });
@@ -4134,9 +4186,9 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         card.atoms.forEach(atom => {
           setPendingChanges(prev => ({
             ...prev,
-            deletedAtoms: [...prev.deletedAtoms, { 
+            deletedAtoms: [...prev.deletedAtoms, {
               moleculeId: 'standalone',
-              atomId: atom.atomId 
+              atomId: atom.atomId
             }]
           }));
         });
@@ -4351,8 +4403,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     setWorkflowMolecules(prev => {
       // Mark molecule as inactive instead of removing it
       // This preserves the order of standalone cards without recalculation
-      const updatedMolecules = prev.map(mol => 
-        mol.moleculeId === moleculeId 
+      const updatedMolecules = prev.map(mol =>
+        mol.moleculeId === moleculeId
           ? { ...mol, isActive: false }
           : mol
       );
@@ -4461,18 +4513,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       console.log('🔄 [SYNC] Function called with pendingChanges:', pendingChanges);
       console.log('🔄 [SYNC] Current layoutCards count:', Array.isArray(layoutCards) ? layoutCards.length : 0);
 
-      const hasPendingChanges = pendingChanges.deletedMolecules.length > 0 || 
-                                pendingChanges.deletedAtoms.length > 0 || 
-                                pendingChanges.addedAtoms.length > 0;
+      const hasPendingChanges = pendingChanges.deletedMolecules.length > 0 ||
+        pendingChanges.deletedAtoms.length > 0 ||
+        pendingChanges.addedAtoms.length > 0;
       console.log('🔄 [SYNC] hasPendingChanges:', hasPendingChanges);
 
       // Get current workflow configuration
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
-      console.log('🔄 [SYNC] Environment config:', { 
-        CLIENT_NAME: env.CLIENT_NAME, 
-        APP_NAME: env.APP_NAME, 
-        PROJECT_NAME: env.PROJECT_NAME 
+      console.log('🔄 [SYNC] Environment config:', {
+        CLIENT_NAME: env.CLIENT_NAME,
+        APP_NAME: env.APP_NAME,
+        PROJECT_NAME: env.PROJECT_NAME
       });
 
       console.log('🔄 [SYNC] Fetching workflow data from:', `${MOLECULES_API}/workflow/get`);
@@ -4489,14 +4541,14 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       });
 
       console.log('🔄 [SYNC] Fetch response status:', response.status, response.ok);
-      
+
       if (response.ok) {
         const result = await response.json();
-        console.log('🔄 [SYNC] Fetch result:', { 
+        console.log('🔄 [SYNC] Fetch result:', {
           hasWorkflowData: !!result.workflow_data,
           moleculesCount: result.workflow_data?.canvas_molecules?.length || 0
         });
-        
+
         if (result.workflow_data) {
           // Fetch all molecules from MongoDB (workflow_model_molecule_configuration)
           let updatedCanvasMolecules = [...(result.workflow_data.canvas_molecules || [])];
@@ -4661,7 +4713,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           });
 
           // Log initial grouping to verify card order
-          console.log(`🔄 [Sync] Grouped cards by molecule:`, 
+          console.log(`🔄 [Sync] Grouped cards by molecule:`,
             Array.from(cardsByMolecule.entries()).map(([molId, cards]) => ({
               moleculeId: molId,
               cardCount: cards.length,
@@ -4689,28 +4741,28 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               // This is the PRIMARY source of truth - it reflects the exact visual order in Laboratory Mode
               const indexA = cardPositionMap.get(a.id) ?? -1;
               const indexB = cardPositionMap.get(b.id) ?? -1;
-              
+
               // If both have valid positions, sort by position (this is the correct order)
               if (indexA >= 0 && indexB >= 0) {
                 return indexA - indexB;
               }
-              
+
               // Priority 2: If only one has position, prioritize it
               if (indexA >= 0) return -1;
               if (indexB >= 0) return 1;
-              
+
               // Priority 3: Fallback to order field if positions are not available
               // This should rarely happen, but provides a fallback
               const orderA = typeof a.order === 'number' ? a.order : Infinity;
               const orderB = typeof b.order === 'number' ? b.order : Infinity;
-              
+
               if (orderA !== Infinity && orderB !== Infinity) {
                 return orderA - orderB;
               }
-              
+
               if (orderA !== Infinity) return -1;
               if (orderB !== Infinity) return 1;
-              
+
               // Both not found (shouldn't happen), maintain relative order
               return 0;
             });
@@ -4720,11 +4772,11 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             // This index is used to build atomPositions with correct order values
             const orderedAtomIds: string[] = [];
             const cardIndexMap = new Map<string, number>(); // Map card.id -> moleculeCardIndex
-            
+
             sortedCards.forEach((card, moleculeCardIndex) => {
               // Store the molecule card index for this card (0, 1, 2, ...)
               cardIndexMap.set(card.id, moleculeCardIndex);
-              
+
               card.atoms.forEach(atom => {
                 // Preserve every occurrence (allow duplicate atoms)
                 // The order in orderedAtomIds array will be used to build atomPositions
@@ -4792,7 +4844,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 : [];
 
             const atomPositions = buildAtomPositions(orderSource);
-            
+
             // Log the final atomPositions to verify order
             if (atomPositions.length > 0) {
               console.log(`✅ [Sync] Final atomPositions for molecule ${molecule.id}:`, {
@@ -4815,7 +4867,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               atom_positions: atomPositions,
             };
           });
-          
+
           // Build standalone cards array from Laboratory Mode cards
           // IMPORTANT: Preserve existing molecule references from MongoDB when possible
           // Only recalculate if referenced molecules were deleted (became inactive)
@@ -4831,155 +4883,155 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
           const standaloneCardsForWorkflow = Array.isArray(layoutCards)
             ? layoutCards
-                .filter(card => !card.moleculeId && Array.isArray(card.atoms) && card.atoms.length > 0)
-                .map(card => {
-                  const cardData: any = {
-                    id: card.id,
-                    atomId: (Array.isArray(card.atoms) && card.atoms.length > 0) ? card.atoms[0]?.atomId : '',
-                    title: (Array.isArray(card.atoms) && card.atoms.length > 0) ? card.atoms[0]?.title : 'Atom'
-                  };
+              .filter(card => !card.moleculeId && Array.isArray(card.atoms) && card.atoms.length > 0)
+              .map(card => {
+                const cardData: any = {
+                  id: card.id,
+                  atomId: (Array.isArray(card.atoms) && card.atoms.length > 0) ? card.atoms[0]?.atomId : '',
+                  title: (Array.isArray(card.atoms) && card.atoms.length > 0) ? card.atoms[0]?.title : 'Atom'
+                };
 
-                  // FIX: Use references directly from Laboratory Mode cards (they're already correct)
-                  // Only update if referenced molecule no longer exists
+                // FIX: Use references directly from Laboratory Mode cards (they're already correct)
+                // Only update if referenced molecule no longer exists
 
-                  // Get references from Laboratory card
-                  const labAfterMoleculeId = card.afterMoleculeId;
-                  const labBeforeMoleculeId = card.beforeMoleculeId;
+                // Get references from Laboratory card
+                const labAfterMoleculeId = card.afterMoleculeId;
+                const labBeforeMoleculeId = card.beforeMoleculeId;
 
-                  // Check if referenced molecules still exist
-                  const afterExists = labAfterMoleculeId ? allMoleculeIds.has(labAfterMoleculeId) : false;
-                  const beforeExists = labBeforeMoleculeId ? allMoleculeIds.has(labBeforeMoleculeId) : false;
-                  const afterActive = labAfterMoleculeId ? activeMoleculeIds.has(labAfterMoleculeId) : false;
-                  const beforeActive = labBeforeMoleculeId ? activeMoleculeIds.has(labBeforeMoleculeId) : false;
+                // Check if referenced molecules still exist
+                const afterExists = labAfterMoleculeId ? allMoleculeIds.has(labAfterMoleculeId) : false;
+                const beforeExists = labBeforeMoleculeId ? allMoleculeIds.has(labBeforeMoleculeId) : false;
+                const afterActive = labAfterMoleculeId ? activeMoleculeIds.has(labAfterMoleculeId) : false;
+                const beforeActive = labBeforeMoleculeId ? activeMoleculeIds.has(labBeforeMoleculeId) : false;
 
-                  // Use Laboratory card references if they're valid
-                  if (labAfterMoleculeId && labBeforeMoleculeId && afterExists && beforeExists && afterActive && beforeActive) {
-                    // Between two molecules - use directly from Laboratory card
-                    cardData.betweenMolecules = [labAfterMoleculeId, labBeforeMoleculeId];
+                // Use Laboratory card references if they're valid
+                if (labAfterMoleculeId && labBeforeMoleculeId && afterExists && beforeExists && afterActive && beforeActive) {
+                  // Between two molecules - use directly from Laboratory card
+                  cardData.betweenMolecules = [labAfterMoleculeId, labBeforeMoleculeId];
+                  cardData.afterMoleculeId = labAfterMoleculeId;
+                  cardData.beforeMoleculeId = labBeforeMoleculeId;
+
+                  // Calculate order based on afterMoleculeId index
+                  const afterIndex = updatedCanvasMolecules.findIndex(m => m.id === labAfterMoleculeId);
+                  if (afterIndex >= 0 && typeof card.order === 'number') {
+                    const subOrder = card.order % 1000;
+                    cardData.order = (afterIndex * 1000) + subOrder;
+                  } else if (typeof card.order === 'number') {
+                    cardData.order = card.order;
+                  }
+
+                  console.log(`✅ Using Laboratory card reference for ${card.id}: between ${labAfterMoleculeId} and ${labBeforeMoleculeId}`);
+                } else if (labAfterMoleculeId && afterExists && afterActive) {
+                  // After a molecule - check if it's the last one
+                  const afterIndex = updatedCanvasMolecules.findIndex(m => m.id === labAfterMoleculeId);
+                  const isLastActive = afterIndex >= 0 && activeCanvasMolecules[activeCanvasMolecules.length - 1]?.id === labAfterMoleculeId;
+
+                  if (isLastActive || card.afterLastMolecule) {
+                    cardData.afterLastMolecule = true;
                     cardData.afterMoleculeId = labAfterMoleculeId;
-                    cardData.beforeMoleculeId = labBeforeMoleculeId;
-
-                    // Calculate order based on afterMoleculeId index
-                    const afterIndex = updatedCanvasMolecules.findIndex(m => m.id === labAfterMoleculeId);
-                    if (afterIndex >= 0 && typeof card.order === 'number') {
-                      const subOrder = card.order % 1000;
-                      cardData.order = (afterIndex * 1000) + subOrder;
-                    } else if (typeof card.order === 'number') {
-                      cardData.order = card.order;
-                    }
-
-                    console.log(`✅ Using Laboratory card reference for ${card.id}: between ${labAfterMoleculeId} and ${labBeforeMoleculeId}`);
-                  } else if (labAfterMoleculeId && afterExists && afterActive) {
-                    // After a molecule - check if it's the last one
-                    const afterIndex = updatedCanvasMolecules.findIndex(m => m.id === labAfterMoleculeId);
-                    const isLastActive = afterIndex >= 0 && activeCanvasMolecules[activeCanvasMolecules.length - 1]?.id === labAfterMoleculeId;
-
-                    if (isLastActive || card.afterLastMolecule) {
-                          cardData.afterLastMolecule = true;
-                      cardData.afterMoleculeId = labAfterMoleculeId;
-                        } else {
-                      // Not last - find next active molecule for betweenMolecules
-                      let nextActiveMolecule = null;
-                            for (let i = afterIndex + 1; i < updatedCanvasMolecules.length; i++) {
-                              if (updatedCanvasMolecules[i].isActive !== false) {
-                          nextActiveMolecule = updatedCanvasMolecules[i];
-                                break;
-                              }
-                            }
-
-                      if (nextActiveMolecule) {
-                        cardData.betweenMolecules = [labAfterMoleculeId, nextActiveMolecule.id];
-                        cardData.afterMoleculeId = labAfterMoleculeId;
-                              cardData.beforeMoleculeId = nextActiveMolecule.id;
-                            } else {
-                              cardData.afterLastMolecule = true;
-                        cardData.afterMoleculeId = labAfterMoleculeId;
-                      }
-                    }
-
-                    // Calculate order based on afterMoleculeId index
-                    if (afterIndex >= 0 && typeof card.order === 'number') {
-                      const subOrder = card.order % 1000;
-                      cardData.order = (afterIndex * 1000) + subOrder;
-                    } else if (typeof card.order === 'number') {
-                      cardData.order = card.order;
-                    }
-
-                    console.log(`✅ Using Laboratory card reference for ${card.id}: after ${labAfterMoleculeId}`);
-                  } else if (labBeforeMoleculeId && beforeExists && beforeActive) {
-                    // Before a molecule
-                    const beforeIndex = updatedCanvasMolecules.findIndex(m => m.id === labBeforeMoleculeId);
-                    const isFirstActive = beforeIndex >= 0 && activeCanvasMolecules[0]?.id === labBeforeMoleculeId;
-
-                    cardData.beforeMoleculeId = labBeforeMoleculeId;
-                    cardData.beforeFirstMolecule = isFirstActive;
-
-                    // Find previous active molecule for afterMoleculeId
-                    if (beforeIndex > 0) {
-                      for (let i = beforeIndex - 1; i >= 0; i--) {
-                        if (updatedCanvasMolecules[i].isActive !== false) {
-                          cardData.afterMoleculeId = updatedCanvasMolecules[i].id;
-                          cardData.betweenMolecules = [updatedCanvasMolecules[i].id, labBeforeMoleculeId];
-                          break;
-                        }
-                      }
-                    }
-
-                    // Calculate order based on previous molecule index (or beforeMoleculeId - 1)
-                    if (beforeIndex > 0 && typeof card.order === 'number') {
-                      // Find previous active molecule index
-                      let prevActiveIndex = -1;
-                      for (let i = beforeIndex - 1; i >= 0; i--) {
-                        if (updatedCanvasMolecules[i].isActive !== false) {
-                          prevActiveIndex = i;
-                          break;
-                        }
-                      }
-                      if (prevActiveIndex >= 0) {
-                        const subOrder = card.order % 1000;
-                        cardData.order = (prevActiveIndex * 1000) + subOrder;
-                      } else {
-                        cardData.order = card.order;
-                      }
-                    } else if (typeof card.order === 'number') {
-                      cardData.order = card.order;
-                    }
-
-                    console.log(`✅ Using Laboratory card reference for ${card.id}: before ${labBeforeMoleculeId}`);
                   } else {
-                    // References invalid - fallback to recalculating from order
-                    console.log(`⚠️ Laboratory card references invalid for ${card.id}, recalculating from order`);
+                    // Not last - find next active molecule for betweenMolecules
+                    let nextActiveMolecule = null;
+                    for (let i = afterIndex + 1; i < updatedCanvasMolecules.length; i++) {
+                      if (updatedCanvasMolecules[i].isActive !== false) {
+                        nextActiveMolecule = updatedCanvasMolecules[i];
+                        break;
+                      }
+                    }
+
+                    if (nextActiveMolecule) {
+                      cardData.betweenMolecules = [labAfterMoleculeId, nextActiveMolecule.id];
+                      cardData.afterMoleculeId = labAfterMoleculeId;
+                      cardData.beforeMoleculeId = nextActiveMolecule.id;
+                    } else {
+                      cardData.afterLastMolecule = true;
+                      cardData.afterMoleculeId = labAfterMoleculeId;
+                    }
+                  }
+
+                  // Calculate order based on afterMoleculeId index
+                  if (afterIndex >= 0 && typeof card.order === 'number') {
+                    const subOrder = card.order % 1000;
+                    cardData.order = (afterIndex * 1000) + subOrder;
+                  } else if (typeof card.order === 'number') {
+                    cardData.order = card.order;
+                  }
+
+                  console.log(`✅ Using Laboratory card reference for ${card.id}: after ${labAfterMoleculeId}`);
+                } else if (labBeforeMoleculeId && beforeExists && beforeActive) {
+                  // Before a molecule
+                  const beforeIndex = updatedCanvasMolecules.findIndex(m => m.id === labBeforeMoleculeId);
+                  const isFirstActive = beforeIndex >= 0 && activeCanvasMolecules[0]?.id === labBeforeMoleculeId;
+
+                  cardData.beforeMoleculeId = labBeforeMoleculeId;
+                  cardData.beforeFirstMolecule = isFirstActive;
+
+                  // Find previous active molecule for afterMoleculeId
+                  if (beforeIndex > 0) {
+                    for (let i = beforeIndex - 1; i >= 0; i--) {
+                      if (updatedCanvasMolecules[i].isActive !== false) {
+                        cardData.afterMoleculeId = updatedCanvasMolecules[i].id;
+                        cardData.betweenMolecules = [updatedCanvasMolecules[i].id, labBeforeMoleculeId];
+                        break;
+                      }
+                    }
+                  }
+
+                  // Calculate order based on previous molecule index (or beforeMoleculeId - 1)
+                  if (beforeIndex > 0 && typeof card.order === 'number') {
+                    // Find previous active molecule index
+                    let prevActiveIndex = -1;
+                    for (let i = beforeIndex - 1; i >= 0; i--) {
+                      if (updatedCanvasMolecules[i].isActive !== false) {
+                        prevActiveIndex = i;
+                        break;
+                      }
+                    }
+                    if (prevActiveIndex >= 0) {
+                      const subOrder = card.order % 1000;
+                      cardData.order = (prevActiveIndex * 1000) + subOrder;
+                    } else {
+                      cardData.order = card.order;
+                    }
+                  } else if (typeof card.order === 'number') {
+                    cardData.order = card.order;
+                  }
+
+                  console.log(`✅ Using Laboratory card reference for ${card.id}: before ${labBeforeMoleculeId}`);
+                } else {
+                  // References invalid - fallback to recalculating from order
+                  console.log(`⚠️ Laboratory card references invalid for ${card.id}, recalculating from order`);
 
                   if (typeof card.order === 'number') {
-                      const order = card.order;
-                      const moleculeIndex = Math.floor(order / 1000);
-                      const subOrder = order % 1000;
+                    const order = card.order;
+                    const moleculeIndex = Math.floor(order / 1000);
+                    const subOrder = order % 1000;
 
-                      // Find the molecule at this index (might be inactive)
-                      if (moleculeIndex >= 0 && moleculeIndex < updatedCanvasMolecules.length) {
-                        const targetMolecule = updatedCanvasMolecules[moleculeIndex];
+                    // Find the molecule at this index (might be inactive)
+                    if (moleculeIndex >= 0 && moleculeIndex < updatedCanvasMolecules.length) {
+                      const targetMolecule = updatedCanvasMolecules[moleculeIndex];
 
-                        if (targetMolecule && targetMolecule.isActive !== false) {
-                          // Molecule is active - use it
-                          cardData.afterMoleculeId = targetMolecule.id;
-                          cardData.order = order;
+                      if (targetMolecule && targetMolecule.isActive !== false) {
+                        // Molecule is active - use it
+                        cardData.afterMoleculeId = targetMolecule.id;
+                        cardData.order = order;
 
-                          // Check if it's the last active molecule
-                          const isLastActive = activeCanvasMolecules[activeCanvasMolecules.length - 1]?.id === targetMolecule.id;
-                          if (isLastActive) {
-                            cardData.afterLastMolecule = true;
-                          } else {
-                            // Find next active molecule
-                        for (let i = moleculeIndex + 1; i < updatedCanvasMolecules.length; i++) {
-                          if (updatedCanvasMolecules[i].isActive !== false) {
-                                cardData.beforeMoleculeId = updatedCanvasMolecules[i].id;
-                                cardData.betweenMolecules = [targetMolecule.id, updatedCanvasMolecules[i].id];
-                            break;
+                        // Check if it's the last active molecule
+                        const isLastActive = activeCanvasMolecules[activeCanvasMolecules.length - 1]?.id === targetMolecule.id;
+                        if (isLastActive) {
+                          cardData.afterLastMolecule = true;
+                        } else {
+                          // Find next active molecule
+                          for (let i = moleculeIndex + 1; i < updatedCanvasMolecules.length; i++) {
+                            if (updatedCanvasMolecules[i].isActive !== false) {
+                              cardData.beforeMoleculeId = updatedCanvasMolecules[i].id;
+                              cardData.betweenMolecules = [targetMolecule.id, updatedCanvasMolecules[i].id];
+                              break;
+                            }
                           }
                         }
-                          }
-                        } else {
-                          // Molecule is inactive - find previous and next active molecules
+                      } else {
+                        // Molecule is inactive - find previous and next active molecules
                         let previousActiveMolecule = null;
                         for (let i = moleculeIndex; i >= 0; i--) {
                           if (updatedCanvasMolecules[i].isActive !== false) {
@@ -4988,10 +5040,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           }
                         }
 
-                          let nextActiveMolecule = null;
-                          for (let i = moleculeIndex + 1; i < updatedCanvasMolecules.length; i++) {
-                            if (updatedCanvasMolecules[i].isActive !== false) {
-                              nextActiveMolecule = updatedCanvasMolecules[i];
+                        let nextActiveMolecule = null;
+                        for (let i = moleculeIndex + 1; i < updatedCanvasMolecules.length; i++) {
+                          if (updatedCanvasMolecules[i].isActive !== false) {
+                            nextActiveMolecule = updatedCanvasMolecules[i];
                             break;
                           }
                         }
@@ -5000,48 +5052,48 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           cardData.betweenMolecules = [previousActiveMolecule.id, nextActiveMolecule.id];
                           cardData.afterMoleculeId = previousActiveMolecule.id;
                           cardData.beforeMoleculeId = nextActiveMolecule.id;
-                            // Recalculate order based on previous active molecule
-                            const prevIndex = updatedCanvasMolecules.findIndex(m => m.id === previousActiveMolecule.id);
-                            cardData.order = (prevIndex * 1000) + subOrder;
+                          // Recalculate order based on previous active molecule
+                          const prevIndex = updatedCanvasMolecules.findIndex(m => m.id === previousActiveMolecule.id);
+                          cardData.order = (prevIndex * 1000) + subOrder;
                         } else if (previousActiveMolecule) {
                           cardData.afterLastMolecule = true;
                           cardData.afterMoleculeId = previousActiveMolecule.id;
-                            const prevIndex = updatedCanvasMolecules.findIndex(m => m.id === previousActiveMolecule.id);
-                            cardData.order = (prevIndex * 1000) + subOrder;
+                          const prevIndex = updatedCanvasMolecules.findIndex(m => m.id === previousActiveMolecule.id);
+                          cardData.order = (prevIndex * 1000) + subOrder;
                         } else if (nextActiveMolecule) {
-                      cardData.beforeFirstMolecule = true;
+                          cardData.beforeFirstMolecule = true;
                           cardData.beforeMoleculeId = nextActiveMolecule.id;
-                            cardData.order = order; // Keep original order
+                          cardData.order = order; // Keep original order
                         } else {
-                            // Fallback to last active molecule
+                          // Fallback to last active molecule
                           if (activeCanvasMolecules.length > 0) {
-                      cardData.afterLastMolecule = true;
+                            cardData.afterLastMolecule = true;
                             cardData.afterMoleculeId = activeCanvasMolecules[activeCanvasMolecules.length - 1].id;
-                              const lastIndex = updatedCanvasMolecules.findIndex(m => m.id === activeCanvasMolecules[activeCanvasMolecules.length - 1].id);
-                              cardData.order = (lastIndex * 1000) + subOrder;
-                            }
+                            const lastIndex = updatedCanvasMolecules.findIndex(m => m.id === activeCanvasMolecules[activeCanvasMolecules.length - 1].id);
+                            cardData.order = (lastIndex * 1000) + subOrder;
                           }
+                        }
                       }
                     } else {
-                        // Order out of bounds - append to end
-                        if (activeCanvasMolecules.length > 0) {
+                      // Order out of bounds - append to end
+                      if (activeCanvasMolecules.length > 0) {
                         cardData.afterLastMolecule = true;
-                          cardData.afterMoleculeId = activeCanvasMolecules[activeCanvasMolecules.length - 1].id;
-                          const lastIndex = updatedCanvasMolecules.findIndex(m => m.id === activeCanvasMolecules[activeCanvasMolecules.length - 1].id);
-                          cardData.order = (lastIndex * 1000) + (card.order % 1000);
+                        cardData.afterMoleculeId = activeCanvasMolecules[activeCanvasMolecules.length - 1].id;
+                        const lastIndex = updatedCanvasMolecules.findIndex(m => m.id === activeCanvasMolecules[activeCanvasMolecules.length - 1].id);
+                        cardData.order = (lastIndex * 1000) + (card.order % 1000);
                       }
                     }
                   } else {
-                      // No order - append to end
-                      if (activeCanvasMolecules.length > 0) {
+                    // No order - append to end
+                    if (activeCanvasMolecules.length > 0) {
                       cardData.afterLastMolecule = true;
-                        cardData.afterMoleculeId = activeCanvasMolecules[activeCanvasMolecules.length - 1].id;
-                      }
+                      cardData.afterMoleculeId = activeCanvasMolecules[activeCanvasMolecules.length - 1].id;
                     }
                   }
+                }
 
-                  return cardData;
-                })
+                return cardData;
+              })
             : [];
 
           console.log('📦 Syncing standalone cards to Workflow with molecule references:', {
@@ -5064,11 +5116,11 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             total_molecules: updatedCanvasMolecules.length,
             active_molecules: updatedCanvasMolecules.filter(m => m.isActive !== false).length,
             inactive_molecules: updatedCanvasMolecules.filter(m => m.isActive === false).length,
-            canvas_molecules: updatedCanvasMolecules.map(m => ({ 
-              id: m.id, 
+            canvas_molecules: updatedCanvasMolecules.map(m => ({
+              id: m.id,
               title: m.title || 'untitled',
               atoms: m.atoms?.length || 0,
-              isActive: m.isActive !== false 
+              isActive: m.isActive !== false
             })),
             standalone_cards: standaloneCardsForWorkflow.length
           });
@@ -5126,7 +5178,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
   }
 
   // Build unified render array for workflow mode
-  const unifiedRenderItems = workflowMolecules.length > 0 
+  const unifiedRenderItems = workflowMolecules.length > 0
     ? buildUnifiedRenderArray(workflowMolecules, Array.isArray(layoutCards) ? layoutCards : [])
     : [];
 
@@ -5172,176 +5224,176 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           cancelLabel="Cancel"
           confirmButtonClass="bg-red-500 hover:bg-red-600"
         />
-      <div 
-        className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto"
-        onClick={(e) => {
-          // Only handle canvas background clicks (not clicks on cards/atoms)
-          // Check if the click target is the container itself or the inner padding div
-          const target = e.target as HTMLElement;
-          if (target === e.currentTarget || 
+        <div
+          className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto"
+          onClick={(e) => {
+            // Only handle canvas background clicks (not clicks on cards/atoms)
+            // Check if the click target is the container itself or the inner padding div
+            const target = e.target as HTMLElement;
+            if (target === e.currentTarget ||
               (target.classList.contains('p-6') && target.classList.contains('space-y-6')) ||
               target.closest('.p-6.space-y-6') === e.currentTarget.querySelector('.p-6.space-y-6')) {
-            if (onOpenSettingsPanel) {
-              onOpenSettingsPanel();
-            }
-          }
-        }}
-      >
-        <div className={canEdit ? '' : 'pointer-events-none'}>
-          <div data-lab-cards-container="true" className="p-2 space-y-6" onClick={(e) => {
-            // Handle clicks on the empty space in the canvas
-            if (e.target === e.currentTarget) {
               if (onOpenSettingsPanel) {
                 onOpenSettingsPanel();
               }
             }
-          }}>
-            {unifiedRenderItems.map((item) => {
-              if (item.type === 'molecule-container') {
-                const molecule = workflowMolecules.find(m => m.moleculeId === item.moleculeId);
-                if (!molecule) return null;
-                const isCollapsed = collapsedMolecules[molecule.moleculeId];
-                const moleculeCards = Array.isArray(layoutCards) 
-                  ? layoutCards.filter(card => card.moleculeId === molecule.moleculeId)
-                  : [];
-                const atomCount = moleculeCards.reduce((sum, card) => sum + (card.atoms?.length || 0), 0);
+          }}
+        >
+          <div className={canEdit ? '' : 'pointer-events-none'}>
+            <div data-lab-cards-container="true" className="p-2 space-y-6" onClick={(e) => {
+              // Handle clicks on the empty space in the canvas
+              if (e.target === e.currentTarget) {
+                if (onOpenSettingsPanel) {
+                  onOpenSettingsPanel();
+                }
+              }
+            }}>
+              {unifiedRenderItems.map((item) => {
+                if (item.type === 'molecule-container') {
+                  const molecule = workflowMolecules.find(m => m.moleculeId === item.moleculeId);
+                  if (!molecule) return null;
+                  const isCollapsed = collapsedMolecules[molecule.moleculeId];
+                  const moleculeCards = Array.isArray(layoutCards)
+                    ? layoutCards.filter(card => card.moleculeId === molecule.moleculeId)
+                    : [];
+                  const atomCount = moleculeCards.reduce((sum, card) => sum + (card.atoms?.length || 0), 0);
 
-                return (
-                  <React.Fragment key={molecule.moleculeId}>
-                    <Card 
+                  return (
+                    <React.Fragment key={molecule.moleculeId}>
+                      <Card
                       className={`bg-white border-2 shadow-lg rounded-xl overflow-hidden transition-all duration-200 ${
                         dragOverMoleculeId === molecule.moleculeId 
-                          ? 'border-blue-500 bg-blue-50' 
-                          : draggedMoleculeId === molecule.moleculeId
-                          ? 'opacity-50'
-                          : 'border-gray-200'
-                      }`}
-                      draggable={canEdit}
-                      onDragStart={(e) => handleMoleculeDragStart(e, molecule.moleculeId)}
-                      onDragOver={(e) => handleMoleculeDragOver(e, molecule.moleculeId)}
-                      onDragLeave={handleMoleculeDragLeave}
-                      onDrop={(e) => handleMoleculeDrop(e, molecule.moleculeId)}
-                    >
-                {/* Collapsible Molecule Header */}
-                <div 
-                  className="flex items-center justify-between p-3 bg-white border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-all duration-200"
-                  onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
-                >
-                  <div className="flex items-center space-x-3">
-                    {canEdit && (
-                      <div 
-                        className="cursor-move p-1 hover:bg-gray-100 rounded"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        title="Drag to reorder"
+                            ? 'border-blue-500 bg-blue-50'
+                            : draggedMoleculeId === molecule.moleculeId
+                              ? 'opacity-50'
+                              : 'border-gray-200'
+                          }`}
+                        draggable={canEdit}
+                        onDragStart={(e) => handleMoleculeDragStart(e, molecule.moleculeId)}
+                        onDragOver={(e) => handleMoleculeDragOver(e, molecule.moleculeId)}
+                        onDragLeave={handleMoleculeDragLeave}
+                        onDrop={(e) => handleMoleculeDrop(e, molecule.moleculeId)}
                       >
-                        <GripVertical className="w-4 h-4 text-gray-400" />
-                      </div>
-                    )}
-                    <div className="flex items-center space-x-2">
-                      <div className="w-2 h-8 bg-yellow-400 rounded-full shadow-sm"></div>
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-gray-900 tracking-tight">
-                        {molecule.moleculeTitle}
-                      </h3>
-                      <div className="flex items-center space-x-3 mt-1">
-                        <div className="flex items-center space-x-1">
-                          <span className="text-xs font-medium text-black">
-                            {atomCount} atom{atomCount !== 1 ? 's' : ''}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        requestDeleteMoleculeContainer(molecule.moleculeId, molecule.moleculeTitle);
-                      }}
-                      className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 hover:shadow-sm"
-                      title="Delete Container"
-                    >
-                      <Trash2 className="w-4 h-4 text-gray-600 hover:text-red-600" />
-                    </button>
-                  <button 
-                    className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm"
-                    onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
-                    title={isCollapsed ? 'Expand molecule' : 'Collapse molecule'}
-                  >
-                    <ChevronDown 
+                        {/* Collapsible Molecule Header */}
+                        <div
+                          className="flex items-center justify-between p-3 bg-white border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-all duration-200"
+                          onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
+                        >
+                          <div className="flex items-center space-x-3">
+                            {canEdit && (
+                              <div
+                                className="cursor-move p-1 hover:bg-gray-100 rounded"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                title="Drag to reorder"
+                              >
+                                <GripVertical className="w-4 h-4 text-gray-400" />
+                              </div>
+                            )}
+                            <div className="flex items-center space-x-2">
+                              <div className="w-2 h-8 bg-yellow-400 rounded-full shadow-sm"></div>
+                            </div>
+                            <div>
+                              <h3 className="text-lg font-bold text-gray-900 tracking-tight">
+                                {molecule.moleculeTitle}
+                              </h3>
+                              <div className="flex items-center space-x-3 mt-1">
+                                <div className="flex items-center space-x-1">
+                                  <span className="text-xs font-medium text-black">
+                                    {atomCount} atom{atomCount !== 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                requestDeleteMoleculeContainer(molecule.moleculeId, molecule.moleculeTitle);
+                              }}
+                              className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 hover:shadow-sm"
+                              title="Delete Container"
+                            >
+                              <Trash2 className="w-4 h-4 text-gray-600 hover:text-red-600" />
+                            </button>
+                            <button
+                              className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm"
+                              onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
+                              title={isCollapsed ? 'Expand molecule' : 'Collapse molecule'}
+                            >
+                              <ChevronDown
                       className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${
                         isCollapsed ? '-rotate-90' : 'rotate-0'
-                      }`}
-                    />
-                  </button>
-                  </div>
-                </div>
+                                  }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
 
-                {/* Molecule Content */}
-                {!isCollapsed && (
-                <div data-lab-cards-container="true" className="p-2 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
-                    {Array.isArray(layoutCards) &&
-                      layoutCards
-                        .filter(card => card.moleculeId === molecule.moleculeId)
-                        .map((card, index) => {
-                        const cardTitle = card.moleculeTitle
-                          ? (Array.isArray(card.atoms) && card.atoms.length > 0)
-                            ? `${card.moleculeTitle} - ${card.atoms[0].title}`
-                            : `${card.moleculeTitle} - Card`
-                          : (Array.isArray(card.atoms) && card.atoms.length > 0)
-                            ? card.atoms[0].title
-                            : 'Card';
-                        return (
-                        <React.Fragment key={card.id}>
-                        <Card
-                          data-card-id={card.id}
+                        {/* Molecule Content */}
+                        {!isCollapsed && (
+                          <div data-lab-cards-container="true" className="p-2 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
+                            {Array.isArray(layoutCards) &&
+                              layoutCards
+                                .filter(card => card.moleculeId === molecule.moleculeId)
+                                .map((card, index) => {
+                                  const cardTitle = card.moleculeTitle
+                                    ? (Array.isArray(card.atoms) && card.atoms.length > 0)
+                                      ? `${card.moleculeTitle} - ${card.atoms[0].title}`
+                                      : `${card.moleculeTitle} - Card`
+                                    : (Array.isArray(card.atoms) && card.atoms.length > 0)
+                                      ? card.atoms[0].title
+                                      : 'Card';
+                                  return (
+                                    <React.Fragment key={card.id}>
+                                      <Card
+                                        data-card-id={card.id}
                           className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
                             dragOverCardId === card.id
-                              ? 'border-blue-500 bg-blue-50 shadow-lg'
-                              : draggedCardId === card.id
-                              ? 'opacity-50'
-                              : dragOver === card.id
-                              ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
-                              : 'border-gray-200 shadow-sm hover:shadow-md'
-                          }`}
-                          draggable={canEdit}
-                          onDragStart={(e) => handleCardDragStart(e, card.id)}
-                          onDragOver={(e) => {
-                            handleCardDragOver(e, card.id);
-                            handleDragOver(e, card.id); // Keep existing functionality
-                          }}
-                          onDragLeave={(e) => {
-                            handleCardDragLeave(e);
-                            handleDragLeave(e); // Keep existing functionality
-                          }}
-                          onDrop={(e) => {
-                            handleCardDrop(e, card.id);
-                            handleDrop(e, card.id); // Keep existing functionality
-                          }}
-                        >
+                                            ? 'border-blue-500 bg-blue-50 shadow-lg'
+                                            : draggedCardId === card.id
+                                              ? 'opacity-50'
+                                              : dragOver === card.id
+                                                ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
+                                                : 'border-gray-200 shadow-sm hover:shadow-md'
+                                          }`}
+                                        draggable={canEdit}
+                                        onDragStart={(e) => handleCardDragStart(e, card.id)}
+                                        onDragOver={(e) => {
+                                          handleCardDragOver(e, card.id);
+                                          handleDragOver(e, card.id); // Keep existing functionality
+                                        }}
+                                        onDragLeave={(e) => {
+                                          handleCardDragLeave(e);
+                                          handleDragLeave(e); // Keep existing functionality
+                                        }}
+                                        onDrop={(e) => {
+                                          handleCardDrop(e, card.id);
+                                          handleDrop(e, card.id); // Keep existing functionality
+                                        }}
+                                      >
                           <div className="flex items-center justify-between py-1.5 px-2">
-                            <div className="flex items-center space-x-1.5">
-                              {canEdit && (
-                                <div 
-                                  className="cursor-move p-0.5 hover:bg-gray-100 rounded"
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  title="Drag to reorder"
-                                >
-                                  <GripVertical className="w-3 h-3 text-gray-400" />
-                                </div>
-                              )}
+                                          <div className="flex items-center space-x-1.5">
+                                            {canEdit && (
+                                              <div
+                                                className="cursor-move p-0.5 hover:bg-gray-100 rounded"
+                                                onMouseDown={(e) => e.stopPropagation()}
+                                                title="Drag to reorder"
+                                              >
+                                                <GripVertical className="w-3 h-3 text-gray-400" />
+                                              </div>
+                                            )}
                               {card.atoms.length > 0 && card.atoms[0].color && (
                                 <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
-                              )}
-                              <span className="text-xs font-medium text-gray-700">
-                                {cardTitle}
-                              </span>
+                                            )}
+                                            <span className="text-xs font-medium text-gray-700">
+                                              {cardTitle}
+                                            </span>
                               {card.atoms.length === 0 ? (
-                                <AIChatBot
-                                  cardId={card.id}
-                                  cardTitle={cardTitle}
-                                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                                            <AIChatBot
+                                              cardId={card.id}
+                                              cardTitle={cardTitle}
+                                              onAddAtom={(id, atom) => addAtomByName(id, atom)}
                                 />
                               ) : card.atoms.length > 0 && card.atoms[0] ? (
                                 <AtomAIChatBot
@@ -5352,24 +5404,24 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   className="transition-transform hover:scale-110"
                                 />
                               ) : null}
-                              <button
-                                onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                                className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                                title="Card Settings"
-                                disabled={!canEdit}
-                              >
-                                <Settings className="w-3.5 h-3.5 text-gray-400" />
-                              </button>
-                              <button
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  refreshCardAtoms(card.id);
-                                }}
-                                className="p-0.5 hover:bg-gray-100 rounded"
-                                title="Refresh Atom"
-                              >
-                                <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
-                              </button>
+                                            <button
+                                              onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                                              className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                                              title="Card Settings"
+                                              disabled={!canEdit}
+                                            >
+                                              <Settings className="w-3.5 h-3.5 text-gray-400" />
+                                            </button>
+                                            <button
+                                              onClick={e => {
+                                                e.stopPropagation();
+                                                refreshCardAtoms(card.id);
+                                              }}
+                                              className="p-0.5 hover:bg-gray-100 rounded"
+                                              title="Refresh Atom"
+                                            >
+                                              <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
+                                            </button>
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
@@ -5381,72 +5433,73 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
                               >
                                 <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
-                              </button>
-                            </div>
-                            <div className="flex items-center space-x-1.5">
-                              <button
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  handleDeleteCardClick(card.id, cardTitle);
-                                }}
-                                className="p-0.5 hover:bg-gray-100 rounded"
-                              >
-                                <Trash2 className="w-3.5 h-3.5 text-gray-400" />
-                              </button>
-                              <button
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  toggleCardExpand(card.id);
-                                }}
-                                className="p-0.5 hover:bg-gray-100 rounded"
-                                title="Expand Card"
-                              >
-                                <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
-                              </button>
-                              <button
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  toggleCardCollapse(card.id);
-                                }}
-                                className="p-0.5 hover:bg-gray-100 rounded"
-                                title="Toggle Card"
-                              >
-                                {collapsedCards[card.id] ? (
-                                  <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                                ) : (
-                                  <Minus className="w-3.5 h-3.5 text-gray-400" />
-                                )}
-                              </button>
-                            </div>
-                          </div>
+                                            </button>
+                                          </div>
+                                          <div className="flex items-center space-x-1.5">
+                                            <button
+                                              onClick={e => {
+                                                e.stopPropagation();
+                                                handleDeleteCardClick(card.id, cardTitle);
+                                              }}
+                                              className="p-0.5 hover:bg-gray-100 rounded"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5 text-gray-400" />
+                                            </button>
+                                            <button
+                                              onClick={e => {
+                                                e.stopPropagation();
+                                                toggleCardExpand(card.id);
+                                              }}
+                                              className="p-0.5 hover:bg-gray-100 rounded"
+                                              title="Expand Card"
+                                            >
+                                              <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
+                                            </button>
+                                            <button
+                                              onClick={e => {
+                                                e.stopPropagation();
+                                                toggleCardCollapse(card.id);
+                                              }}
+                                              className="p-0.5 hover:bg-gray-100 rounded"
+                                              title="Toggle Card"
+                                            >
+                                              {collapsedCards[card.id] ? (
+                                                <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                                              ) : (
+                                                <Minus className="w-3.5 h-3.5 text-gray-400" />
+                                              )}
+                                            </button>
+                                          </div>
+                                        </div>
 
                           <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
-                            {card.atoms.length === 0 ? (
-                              <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
-                                <AtomSuggestion
-                                  cardId={card.id}
-                                  isVisible={true}
-                                  onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
-                                  onAddAtom={handleAddAtomFromSuggestion}
-                                />
-                              </div>
-                            ) : (
-                              <div
+                                          {card.atoms.length === 0 ? (
+                                            <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
+                                              <AtomSuggestion
+                                                cardId={card.id}
+                                                isVisible={true}
+                                                onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
+                                                onAddAtom={handleAddAtomFromSuggestion}
+                                                allowedAtomIds={allowedAtomIds}
+                                              />
+                                            </div>
+                                          ) : (
+                                            <div
                                 className={`grid gap-4 w-full ${
                                   card.atoms.length === 1
-                                    ? 'grid-cols-1'
-                                    : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
-                                }`}
-                              >
-                                {card.atoms.map(atom => (
-                                  <AtomBox
-                                    key={atom.id}
-                                    className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
-                                    onClick={(e) => handleAtomClick(e, atom.id)}
-                                  >
+                                                  ? 'grid-cols-1'
+                                                  : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                                                }`}
+                                            >
+                                              {card.atoms.map(atom => (
+                                                <AtomBox
+                                                  key={atom.id}
+                                                  className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
+                                                  onClick={(e) => handleAtomClick(e, atom.id)}
+                                                >
                                     {/* <div className="flex items-center justify-between mb-3">
-                                      <div className="flex items-center space-x-1">
-                                        <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                                    <div className="flex items-center space-x-1">
+                                                      <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                                         {atom.atomId === 'correlation' && console.log('🎯 CANVAS AREA - Rendering AtomAIChatBot for correlation:', {
                                           atomId: atom.id,
                                           atomType: atom.atomId,
@@ -5456,191 +5509,193 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                           disabled: !LLM_MAP[atom.atomId],
                                           willPassDisabled: !LLM_MAP[atom.atomId]
                                         })}
-                                        <AtomAIChatBot
-                                          atomId={atom.id}
-                                          atomType={atom.atomId}
-                                          atomTitle={atom.title}
-                                          disabled={!LLM_MAP[atom.atomId]}
-                                          className="transition-transform hover:scale-110"
-                                        />
-                                        <button
-                                          onClick={e => handleAtomSettingsClick(e, atom.id)}
-                                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
-                                          title="Atom Settings"
-                                        >
-                                          <Settings className="w-4 h-4 text-gray-400" />
-                                        </button>
-                                      </div>
-                                      <button
-                                        onClick={e => {
-                                          e.stopPropagation();
-                                          handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                                        }}
-                                        className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
-                                      >
-                                        <Trash2 className="w-4 h-4 text-gray-400" />
-                                      </button>
+                                                      <AtomAIChatBot
+                                                        atomId={atom.id}
+                                                        atomType={atom.atomId}
+                                                        atomTitle={atom.title}
+                                                        disabled={!LLM_MAP[atom.atomId]}
+                                                        className="transition-transform hover:scale-110"
+                                                      />
+                                                      <button
+                                                        onClick={e => handleAtomSettingsClick(e, atom.id)}
+                                                        className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                                        title="Atom Settings"
+                                                      >
+                                                        <Settings className="w-4 h-4 text-gray-400" />
+                                                      </button>
+                                                    </div>
+                                                    <button
+                                                      onClick={e => {
+                                                        e.stopPropagation();
+                                                        handleDeleteAtomClick(card.id, atom.id, atom.title || '');
+                                                      }}
+                                                      className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                                    >
+                                                      <Trash2 className="w-4 h-4 text-gray-400" />
+                                                    </button>
                                     </div> */}
 
-                                    {atom.atomId === 'text-box' ? (
-                                      <TextBoxEditor textId={atom.id} />
-                                    ) : atom.atomId === 'data-upload-validate' ? (
-                                      <DataUploadValidateAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'feature-overview' ? (
-                                      <FeatureOverviewAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'explore' ? (
-                                      <ExploreAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'chart-maker' ? (
-                                      <ChartMakerAtom atomId={atom.id} />
-                              ) : atom.atomId === 'pivot-table' ? (
-                                <PivotTableAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'unpivot' ? (
-                                      <UnpivotAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'concat' ? (
-                                      <ConcatAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'merge' ? (
-                                      <MergeAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'column-classifier' ? (
-                                      <ColumnClassifierAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'dataframe-operations' ? (
-                                      <DataFrameOperationsAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'create-column' ? (
-                                      <CreateColumnAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'groupby-wtg-avg' ? (
-                                      <GroupByAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'build-model-feature-based' ? (
-                                      <BuildModelFeatureBasedAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'select-models-feature' ? (
-                                      <SelectModelsFeatureAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'evaluate-models-feature' ? (
-                                      <EvaluateModelsFeatureAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'scope-selector' ? (
-                                      <ScopeSelectorAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'correlation' ? (
-                                      <CorrelationAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'auto-regressive-models' ? (
-                                      <AutoRegressiveModelsAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'select-models-auto-regressive' ? (
-                                      <SelectModelsAutoRegressiveAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
-                                      <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'clustering' ? (
-                                      <ClusteringAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'scenario-planner' ? (
-                                      <ScenarioPlannerAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'kpi-dashboard' ? (
-                                      <KPIDashboardAtom atomId={atom.id} />
-                                    ) : (
-                                      <div>
-                                        <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
-                                        <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
-                                        <p className="text-xs text-gray-500">Configure this atom for your application</p>
-                                      </div>
-                                    )}
-                                  </AtomBox>
-                                ))}
-                              </div>
-                            )}
+                                                  {atom.atomId === 'text-box' ? (
+                                                    <TextBoxEditor textId={atom.id} />
+                                                  ) : atom.atomId === 'data-upload-validate' ? (
+                                                    <DataUploadValidateAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'feature-overview' ? (
+                                                    <FeatureOverviewAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'explore' ? (
+                                                    <ExploreAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'chart-maker' ? (
+                                                    <ChartMakerAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'pivot-table' ? (
+                                                    <PivotTableAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'unpivot' ? (
+                                                    <UnpivotAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'concat' ? (
+                                                    <ConcatAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'merge' ? (
+                                                    <MergeAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'column-classifier' ? (
+                                                    <ColumnClassifierAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'dataframe-operations' ? (
+                                                    <DataFrameOperationsAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'table' ? (
+                                                    <TableAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'create-column' ? (
+                                                    <CreateColumnAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                                    <GroupByAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'build-model-feature-based' ? (
+                                                    <BuildModelFeatureBasedAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'select-models-feature' ? (
+                                                    <SelectModelsFeatureAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'evaluate-models-feature' ? (
+                                                    <EvaluateModelsFeatureAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'scope-selector' ? (
+                                                    <ScopeSelectorAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'correlation' ? (
+                                                    <CorrelationAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'auto-regressive-models' ? (
+                                                    <AutoRegressiveModelsAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                                    <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                                    <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'clustering' ? (
+                                                    <ClusteringAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'scenario-planner' ? (
+                                                    <ScenarioPlannerAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'kpi-dashboard' ? (
+                                                    <KPIDashboardAtom atomId={atom.id} />
+                                                  ) : (
+                                                    <div>
+                                                      <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
+                                                      <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
+                                                      <p className="text-xs text-gray-500">Configure this atom for your application</p>
+                                                    </div>
+                                                  )}
+                                                </AtomBox>
+                                              ))}
+                                            </div>
+                                          )}
                             {renderCardTextBox(card)}
-                            {renderAppendedVariables(card)}
+                                          {renderAppendedVariables(card)}
+                                        </div>
+                                      </Card>
+
+                                      {/* Add New Card Button - Between cards within molecule */}
+                                      <div className="flex justify-center my-4">
+                                        <button
+                                          onClick={() => addNewCardWorkflow(molecule.moleculeId, index)}
+                                          onDragEnter={e => handleAddDragEnter(e, `molecule-${molecule.moleculeId}-after-${card.id}`)}
+                                          onDragLeave={handleAddDragLeave}
+                                          onDragOver={e => e.preventDefault()}
+                                          onDrop={e => {
+                                            void handleDropNewCardWorkflow(e, molecule.moleculeId, index);
+                                          }}
+                                          className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `molecule-${molecule.moleculeId}-after-${card.id}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                                          title="Add new card to molecule"
+                                        >
+                                          <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `molecule-${molecule.moleculeId}-after-${card.id}` ? 'scale-125 mb-2' : ''}`} />
+                                          <span
+                                            className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                                          >
+                                            Add New Card
+                                          </span>
+                                        </button>
+                                      </div>
+                                    </React.Fragment>
+                                  );
+                                })}
+
                           </div>
-                        </Card>
+                        )}
+                      </Card>
 
-                        {/* Add New Card Button - Between cards within molecule */}
-                        <div className="flex justify-center my-4">
-                          <button
-                            onClick={() => addNewCardWorkflow(molecule.moleculeId, index)}
-                            onDragEnter={e => handleAddDragEnter(e, `molecule-${molecule.moleculeId}-after-${card.id}`)}
-                            onDragLeave={handleAddDragLeave}
-                            onDragOver={e => e.preventDefault()}
-                            onDrop={e => {
-                              void handleDropNewCardWorkflow(e, molecule.moleculeId, index);
-                            }}
-                            className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `molecule-${molecule.moleculeId}-after-${card.id}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
-                            title="Add new card to molecule"
+                      {/* Add New Card Button - After molecule container */}
+                      <div className="flex justify-center my-4">
+                        <button
+                          onClick={() => {
+                            if (item.moleculeIndex !== undefined) {
+                              addNewCardWorkflow(undefined, undefined, item.moleculeIndex, 0);
+                            }
+                          }}
+                          onDragEnter={e => handleAddDragEnter(e, `after-molecule-${molecule.moleculeId}`)}
+                          onDragLeave={handleAddDragLeave}
+                          onDragOver={e => e.preventDefault()}
+                          onDrop={e => {
+                            if (item.moleculeIndex !== undefined) {
+                              void handleDropNewCardWorkflow(e, undefined, undefined, item.moleculeIndex, 0);
+                            }
+                          }}
+                          className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `after-molecule-${molecule.moleculeId}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                          title="Add standalone card after molecule"
+                        >
+                          <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `after-molecule-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
+                          <span
+                            className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                           >
-                            <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `molecule-${molecule.moleculeId}-after-${card.id}` ? 'scale-125 mb-2' : ''}`} />
-                            <span
-                              className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
-                            >
-                              Add New Card
-                            </span>
-                          </button>
-                        </div>
-                        </React.Fragment>
-                        );
-                      })}
+                            Add Standalone Card
+                          </span>
+                        </button>
+                      </div>
+                    </React.Fragment>
+                  );
+                } else if (item.type === 'standalone-card' && item.cardData) {
+                  // Render standalone card
+                  const card = item.cardData;
+                  const cardTitle = card.moleculeTitle
+                    ? (Array.isArray(card.atoms) && card.atoms.length > 0)
+                      ? `${card.moleculeTitle} - ${card.atoms[0].title}`
+                      : `${card.moleculeTitle} - Card`
+                    : (Array.isArray(card.atoms) && card.atoms.length > 0)
+                      ? card.atoms[0].title
+                      : 'Card';
 
-                </div>
-                )}
-              </Card>
-
-              {/* Add New Card Button - After molecule container */}
-              <div className="flex justify-center my-4">
-                <button
-                  onClick={() => {
-                    if (item.moleculeIndex !== undefined) {
-                      addNewCardWorkflow(undefined, undefined, item.moleculeIndex, 0);
-                    }
-                  }}
-                  onDragEnter={e => handleAddDragEnter(e, `after-molecule-${molecule.moleculeId}`)}
-                  onDragLeave={handleAddDragLeave}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={e => {
-                    if (item.moleculeIndex !== undefined) {
-                      void handleDropNewCardWorkflow(e, undefined, undefined, item.moleculeIndex, 0);
-                    }
-                  }}
-                  className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `after-molecule-${molecule.moleculeId}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
-                  title="Add standalone card after molecule"
-                >
-                  <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `after-molecule-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
-                  <span
-                    className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
-                  >
-                    Add Standalone Card
-                  </span>
-                </button>
-              </div>
-                  </React.Fragment>
-                );
-              } else if (item.type === 'standalone-card' && item.cardData) {
-                // Render standalone card
-                const card = item.cardData;
-                const cardTitle = card.moleculeTitle
-                  ? (Array.isArray(card.atoms) && card.atoms.length > 0)
-                    ? `${card.moleculeTitle} - ${card.atoms[0].title}`
-                    : `${card.moleculeTitle} - Card`
-                  : (Array.isArray(card.atoms) && card.atoms.length > 0)
-                    ? card.atoms[0].title
-                    : 'Card';
-
-                return (
-                  <React.Fragment key={card.id}>
-                    <Card
-                      data-card-id={card.id}
+                  return (
+                    <React.Fragment key={card.id}>
+                      <Card
+                        data-card-id={card.id}
                       className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
                         dragOverCardId === card.id
-                          ? 'border-blue-500 bg-blue-50 shadow-lg'
-                          : draggedCardId === card.id
-                          ? 'opacity-50'
-                          : dragOver === card.id
-                          ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
-                          : 'border-gray-200 shadow-sm hover:shadow-md'
-                      }`}
-                      onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
-                      onDragOver={(e) => handleDragOver(e, card.id)}
-                      onDragLeave={handleDragLeave}
-                      onDrop={(e) => handleDrop(e, card.id)}
-                    >
+                            ? 'border-blue-500 bg-blue-50 shadow-lg'
+                            : draggedCardId === card.id
+                              ? 'opacity-50'
+                              : dragOver === card.id
+                                ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
+                                : 'border-gray-200 shadow-sm hover:shadow-md'
+                          }`}
+                        onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
+                        onDragOver={(e) => handleDragOver(e, card.id)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, card.id)}
+                      >
                       <div className="flex items-center justify-between py-1.5 px-2">
-                        <div className="flex items-center space-x-1.5">
+                          <div className="flex items-center space-x-1.5">
                           {card.atoms.length > 0 && card.atoms[0].color && (
                             <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
                           )}
-                          <span className="text-xs font-medium text-gray-700">
-                            {cardTitle}
-                          </span>
+                            <span className="text-xs font-medium text-gray-700">
+                              {cardTitle}
+                            </span>
                           {card.atoms.length === 0 ? (
                             <AIChatBot
                               cardId={card.id}
@@ -5656,24 +5711,24 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               className="transition-transform hover:scale-110"
                             />
                           ) : null}
-                          <button
-                            onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                            className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="Card Settings"
-                            disabled={!canEdit}
-                          >
-                            <Settings className="w-3.5 h-3.5 text-gray-400" />
-                          </button>
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              refreshCardAtoms(card.id);
-                            }}
-                            className="p-0.5 hover:bg-gray-100 rounded"
-                            title="Refresh Atom"
-                          >
-                            <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
-                          </button>
+                            <button
+                              onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                              className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                              title="Card Settings"
+                              disabled={!canEdit}
+                            >
+                              <Settings className="w-3.5 h-3.5 text-gray-400" />
+                            </button>
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                refreshCardAtoms(card.id);
+                              }}
+                              className="p-0.5 hover:bg-gray-100 rounded"
+                              title="Refresh Atom"
+                            >
+                              <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
+                            </button>
                           <button
                             onClick={e => {
                               e.stopPropagation();
@@ -5685,208 +5740,211 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
                           >
                             <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
-                          </button>
+                            </button>
+                          </div>
+                          <div className="flex items-center space-x-1.5">
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleDeleteCardClick(card.id, cardTitle);
+                              }}
+                              className="p-0.5 hover:bg-gray-100 rounded"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-gray-400" />
+                            </button>
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                toggleCardExpand(card.id);
+                              }}
+                              className="p-0.5 hover:bg-gray-100 rounded"
+                              title="Expand Card"
+                            >
+                              <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
+                            </button>
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                toggleCardCollapse(card.id);
+                              }}
+                              className="p-0.5 hover:bg-gray-100 rounded"
+                              title="Toggle Card"
+                            >
+                              {collapsedCards[card.id] ? (
+                                <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                              ) : (
+                                <Minus className="w-3.5 h-3.5 text-gray-400" />
+                              )}
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center space-x-1.5">
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              handleDeleteCardClick(card.id, cardTitle);
-                            }}
-                            className="p-0.5 hover:bg-gray-100 rounded"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-gray-400" />
-                          </button>
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              toggleCardExpand(card.id);
-                            }}
-                            className="p-0.5 hover:bg-gray-100 rounded"
-                            title="Expand Card"
-                          >
-                            <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
-                          </button>
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              toggleCardCollapse(card.id);
-                            }}
-                            className="p-0.5 hover:bg-gray-100 rounded"
-                            title="Toggle Card"
-                          >
-                            {collapsedCards[card.id] ? (
-                              <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                            ) : (
-                              <Minus className="w-3.5 h-3.5 text-gray-400" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
 
                       <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
-                        {card.atoms.length === 0 ? (
-                          <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
-                            <AtomSuggestion
-                              cardId={card.id}
-                              isVisible={true}
-                              onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
-                              onAddAtom={handleAddAtomFromSuggestion}
-                            />
-                          </div>
-                        ) : (
-                          <div
+                          {card.atoms.length === 0 ? (
+                            <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
+                              <AtomSuggestion
+                                cardId={card.id}
+                                isVisible={true}
+                                onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
+                                onAddAtom={handleAddAtomFromSuggestion}
+                                allowedAtomIds={allowedAtomIds}
+                              />
+                            </div>
+                          ) : (
+                            <div
                             className={`grid gap-4 w-full ${
                               card.atoms.length === 1
-                                ? 'grid-cols-1'
-                                : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
-                            }`}
-                          >
-                            {card.atoms.map((atom) => (
-                              <AtomBox
-                                key={atom.id}
-                                className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
-                                onClick={(e) => handleAtomClick(e, atom.id)}
-                              >
+                                  ? 'grid-cols-1'
+                                  : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                                }`}
+                            >
+                              {card.atoms.map((atom) => (
+                                <AtomBox
+                                  key={atom.id}
+                                  className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
+                                  onClick={(e) => handleAtomClick(e, atom.id)}
+                                >
                                 {/* <div className="flex items-center justify-between mb-3">
-                                  <div className="flex items-center space-x-1">
-                                    <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                    <AtomAIChatBot
-                                      atomId={atom.id}
-                                      atomType={atom.atomId}
-                                      atomTitle={atom.title}
-                                      disabled={!LLM_MAP[atom.atomId]}
-                                      className="transition-transform hover:scale-110"
-                                    />
-                                    <button
-                                      onClick={e => handleAtomSettingsClick(e, atom.id)}
-                                      className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
-                                      title="Atom Settings"
-                                    >
-                                      <Settings className="w-4 h-4 text-gray-400" />
-                                    </button>
+                                    <div className="flex items-center space-x-1">
+                                      <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                      <AtomAIChatBot
+                                        atomId={atom.id}
+                                        atomType={atom.atomId}
+                                        atomTitle={atom.title}
+                                        disabled={!LLM_MAP[atom.atomId]}
+                                        className="transition-transform hover:scale-110"
+                                      />
+                                      <button
+                                        onClick={e => handleAtomSettingsClick(e, atom.id)}
+                                        className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                        title="Atom Settings"
+                                      >
+                                        <Settings className="w-4 h-4 text-gray-400" />
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (onAtomSelect) {
+                                            onAtomSelect(atom.id);
+                                          }
+                                          onToggleHelpPanel?.();
+                                        }}
+                                        className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                        title="Help"
+                                      >
+                                        <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">?</span>
+                                      </button>
+                                    </div>
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        if (onAtomSelect) {
-                                          onAtomSelect(atom.id);
-                                        }
-                                        onToggleHelpPanel?.();
+                                        removeAtom(card.id, atom.id);
                                       }}
                                       className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
-                                      title="Help"
                                     >
-                                      <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">?</span>
+                                      <Trash2 className="w-4 h-4 text-gray-400" />
                                     </button>
-                                  </div>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      removeAtom(card.id, atom.id);
-                                    }}
-                                    className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
-                                  >
-                                    <Trash2 className="w-4 h-4 text-gray-400" />
-                                  </button>
                                 </div> */}
 
-                                {atom.atomId === 'text-box' ? (
-                                  <TextBoxEditor textId={atom.id} />
-                                ) : atom.atomId === 'data-upload-validate' ? (
-                                  <DataUploadValidateAtom atomId={atom.id} />
-                                ) : atom.atomId === 'feature-overview' ? (
-                                  <FeatureOverviewAtom atomId={atom.id} />
-                                ) : atom.atomId === 'clustering' ? (
-                                  <ClusteringAtom atomId={atom.id} />
-                                ) : atom.atomId === 'explore' ? (
-                                  <ExploreAtom atomId={atom.id} />
-                                ) : atom.atomId === 'chart-maker' ? (
-                                  <ChartMakerAtom atomId={atom.id} />
-              ) : atom.atomId === 'pivot-table' ? (
-                <PivotTableAtom atomId={atom.id} />
-                                ) : atom.atomId === 'unpivot' ? (
-                                  <UnpivotAtom atomId={atom.id} />
-                                ) : atom.atomId === 'concat' ? (
-                                  <ConcatAtom atomId={atom.id} />
-                                ) : atom.atomId === 'merge' ? (
-                                  <MergeAtom atomId={atom.id} />
-                                ) : atom.atomId === 'column-classifier' ? (
-                                  <ColumnClassifierAtom atomId={atom.id} />
-                                ) : atom.atomId === 'dataframe-operations' ? (
-                                  <DataFrameOperationsAtom atomId={atom.id} />
-                                ) : atom.atomId === 'create-column' ? (
-                                  <CreateColumnAtom atomId={atom.id} />
-                                ) : atom.atomId === 'groupby-wtg-avg' ? (
-                                  <GroupByAtom atomId={atom.id} />
-                                ) : atom.atomId === 'build-model-feature-based' ? (
-                                  <BuildModelFeatureBasedAtom atomId={atom.id} />
-                                ) : atom.atomId === 'scenario-planner' ? (
-                                  <ScenarioPlannerAtom atomId={atom.id} />
-                                ) : atom.atomId === 'kpi-dashboard' ? (
-                                  <KPIDashboardAtom atomId={atom.id} />
-                                ) : atom.atomId === 'select-models-feature' ? (
-                                  <SelectModelsFeatureAtom atomId={atom.id} />
-                                ) : atom.atomId === 'evaluate-models-feature' ? (
-                                  <EvaluateModelsFeatureAtom atomId={atom.id} />
-                                ) : atom.atomId === 'scope-selector' ? (
-                                  <ScopeSelectorAtom atomId={atom.id} />
-                                ) : atom.atomId === 'correlation' ? (
-                                  <CorrelationAtom atomId={atom.id} />
-                                ) : atom.atomId === 'auto-regressive-models' ? (
-                                  <AutoRegressiveModelsAtom atomId={atom.id} />
-                                ) : atom.atomId === 'select-models-auto-regressive' ? (
-                                  <SelectModelsAutoRegressiveAtom atomId={atom.id} />
-                                ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
-                                  <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
-                                ) : (
-                                  <div>
-                                    <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
-                                    <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
-                                    <p className="text-xs text-gray-500">Configure this atom for your application</p>
-                                  </div>
-                                )}
-                              </AtomBox>
-                            ))}
-                          </div>
-                        )}
+                                  {atom.atomId === 'text-box' ? (
+                                    <TextBoxEditor textId={atom.id} />
+                                  ) : atom.atomId === 'data-upload-validate' ? (
+                                    <DataUploadValidateAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'feature-overview' ? (
+                                    <FeatureOverviewAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'clustering' ? (
+                                    <ClusteringAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'explore' ? (
+                                    <ExploreAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'chart-maker' ? (
+                                    <ChartMakerAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'pivot-table' ? (
+                                    <PivotTableAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'unpivot' ? (
+                                    <UnpivotAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'concat' ? (
+                                    <ConcatAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'merge' ? (
+                                    <MergeAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'column-classifier' ? (
+                                    <ColumnClassifierAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'dataframe-operations' ? (
+                                    <DataFrameOperationsAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'table' ? (
+                                    <TableAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'create-column' ? (
+                                    <CreateColumnAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                    <GroupByAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'build-model-feature-based' ? (
+                                    <BuildModelFeatureBasedAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'scenario-planner' ? (
+                                    <ScenarioPlannerAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'kpi-dashboard' ? (
+                                    <KPIDashboardAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'select-models-feature' ? (
+                                    <SelectModelsFeatureAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'evaluate-models-feature' ? (
+                                    <EvaluateModelsFeatureAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'scope-selector' ? (
+                                    <ScopeSelectorAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'correlation' ? (
+                                    <CorrelationAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'auto-regressive-models' ? (
+                                    <AutoRegressiveModelsAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                    <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                    <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                                  ) : (
+                                    <div>
+                                      <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
+                                      <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
+                                      <p className="text-xs text-gray-500">Configure this atom for your application</p>
+                                    </div>
+                                  )}
+                                </AtomBox>
+                              ))}
+                            </div>
+                          )}
                         {renderCardTextBox(card)}
-                        {renderAppendedVariables(card)}
-                      </div>
-                    </Card>
+                          {renderAppendedVariables(card)}
+                        </div>
+                      </Card>
 
-                    {/* Add New Card Button - After standalone card */}
-                    <div className="flex justify-center my-4">
-                      <button
-                        onClick={() => {
-                          if (item.moleculeIndex !== undefined && item.subOrder !== undefined) {
-                            addNewCardWorkflow(undefined, undefined, item.moleculeIndex, item.subOrder);
-                          }
-                        }}
-                        onDragEnter={e => handleAddDragEnter(e, `after-standalone-${card.id}`)}
-                        onDragLeave={handleAddDragLeave}
-                        onDragOver={e => e.preventDefault()}
-                        onDrop={e => {
-                          if (item.moleculeIndex !== undefined && item.subOrder !== undefined) {
-                            void handleDropNewCardWorkflow(e, undefined, undefined, item.moleculeIndex, item.subOrder);
-                          }
-                        }}
-                        className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `after-standalone-${card.id}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
-                        title="Add standalone card"
-                      >
-                        <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `after-standalone-${card.id}` ? 'scale-125 mb-2' : ''}`} />
-                        <span
-                          className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                      {/* Add New Card Button - After standalone card */}
+                      <div className="flex justify-center my-4">
+                        <button
+                          onClick={() => {
+                            if (item.moleculeIndex !== undefined && item.subOrder !== undefined) {
+                              addNewCardWorkflow(undefined, undefined, item.moleculeIndex, item.subOrder);
+                            }
+                          }}
+                          onDragEnter={e => handleAddDragEnter(e, `after-standalone-${card.id}`)}
+                          onDragLeave={handleAddDragLeave}
+                          onDragOver={e => e.preventDefault()}
+                          onDrop={e => {
+                            if (item.moleculeIndex !== undefined && item.subOrder !== undefined) {
+                              void handleDropNewCardWorkflow(e, undefined, undefined, item.moleculeIndex, item.subOrder);
+                            }
+                          }}
+                          className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `after-standalone-${card.id}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                          title="Add standalone card"
                         >
-                          Add New Card
-                        </span>
-                      </button>
-                    </div>
-                  </React.Fragment>
-                );
-              }
-              return null;
-            })}
-                </div>
+                          <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `after-standalone-${card.id}` ? 'scale-125 mb-2' : ''}`} />
+                          <span
+                            className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                          >
+                            Add New Card
+                          </span>
+                        </button>
+                      </div>
+                    </React.Fragment>
+                  );
+                }
+                return null;
+              })}
+            </div>
           </div>
         </div>
 
@@ -5906,156 +5964,158 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
                 <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
                   <div className="flex items-center space-x-2">
-                  <span className="text-lg font-semibold text-gray-900">
-                    {(() => {
-                      // Look for the card in both layoutCards and workflowMolecules
-                      let card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
+                    <span className="text-lg font-semibold text-gray-900">
+                      {(() => {
+                        // Look for the card in both layoutCards and workflowMolecules
+                        let card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
 
-                      // If not found in layoutCards, look in workflowMolecules
-                      if (!card && Array.isArray(workflowMolecules)) {
-                        for (const molecule of workflowMolecules) {
-                          const moleculeCards = Array.isArray(layoutCards) ? 
-                            layoutCards.filter(c => c.moleculeId === molecule.moleculeId) : [];
-                          card = moleculeCards.find(c => c.id === expandedCard);
-                          if (card) break;
+                        // If not found in layoutCards, look in workflowMolecules
+                        if (!card && Array.isArray(workflowMolecules)) {
+                          for (const molecule of workflowMolecules) {
+                            const moleculeCards = Array.isArray(layoutCards) ?
+                              layoutCards.filter(c => c.moleculeId === molecule.moleculeId) : [];
+                            card = moleculeCards.find(c => c.id === expandedCard);
+                            if (card) break;
+                          }
                         }
-                      }
 
-                      if (!card) return 'Card';
-                      return card.moleculeTitle
-                        ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
-                        : (Array.isArray(card.atoms) && card.atoms.length > 0)
-                          ? card.atoms[0].title
-                          : 'Card';
-                    })()}
-                  </span>
+                        if (!card) return 'Card';
+                        return card.moleculeTitle
+                          ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+                          : (Array.isArray(card.atoms) && card.atoms.length > 0)
+                            ? card.atoms[0].title
+                            : 'Card';
+                      })()}
+                    </span>
                   </div>
                   <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => setExpandedCard(null)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                    title="Close Fullscreen"
-                  >
-                    <X className="w-5 h-5 text-gray-500" />
-                  </button>
+                    <button
+                      onClick={() => setExpandedCard(null)}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="Close Fullscreen"
+                    >
+                      <X className="w-5 h-5 text-gray-500" />
+                    </button>
                   </div>
                 </div>
 
                 {/* Fullscreen Content */}
                 <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
-                {(() => {
-                // Look for the card in both layoutCards and workflowMolecules
-                let card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
+                  {(() => {
+                    // Look for the card in both layoutCards and workflowMolecules
+                    let card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
 
-                // If not found in layoutCards, look in workflowMolecules
-                if (!card && Array.isArray(workflowMolecules)) {
-                  for (const molecule of workflowMolecules) {
-                    const moleculeCards = Array.isArray(layoutCards) ? 
-                      layoutCards.filter(c => c.moleculeId === molecule.moleculeId) : [];
-                    card = moleculeCards.find(c => c.id === expandedCard);
-                    if (card) break;
-                  }
-                }
+                    // If not found in layoutCards, look in workflowMolecules
+                    if (!card && Array.isArray(workflowMolecules)) {
+                      for (const molecule of workflowMolecules) {
+                        const moleculeCards = Array.isArray(layoutCards) ?
+                          layoutCards.filter(c => c.moleculeId === molecule.moleculeId) : [];
+                        card = moleculeCards.find(c => c.id === expandedCard);
+                        if (card) break;
+                      }
+                    }
 
-                if (!card) return null;
+                    if (!card) return null;
 
-                  return card.atoms.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[400px]">
-                      <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
-                        <Grid3X3 className="w-10 h-10 text-gray-400" />
+                    return card.atoms.length === 0 ? (
+                      <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[400px]">
+                        <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                          <Grid3X3 className="w-10 h-10 text-gray-400" />
+                        </div>
+                        <p className="text-gray-500 text-lg mb-2">No atoms in this section</p>
+                        <p className="text-sm text-gray-400">Configure this atom for your application</p>
                       </div>
-                      <p className="text-gray-500 text-lg mb-2">No atoms in this section</p>
-                      <p className="text-sm text-gray-400">Configure this atom for your application</p>
-                    </div>
-                  ) : (
-                    <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
-                      {card.atoms.map((atom) => (
-                        <AtomBox
-                          key={`${atom.id}-expanded`}
-                          className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
-                        >
-                          {/* Atom Header */}
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center space-x-2">
-                              <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                              <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
-                            </div>
-                            {/* <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                              }}
-                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4 text-gray-400" />
-                            </button> */}
-                          </div>
-
-                          {/* Atom Content */}
-                          <div className="w-full flex-1 overflow-visible">
-                            {atom.atomId === 'text-box' ? (
-                              <TextBoxEditor textId={atom.id} />
-                            ) : atom.atomId === 'data-upload-validate' ? (
-                              <DataUploadValidateAtom atomId={atom.id} />
-                            ) : atom.atomId === 'feature-overview' ? (
-                              <FeatureOverviewAtom atomId={atom.id} />
-                            ) : atom.atomId === 'clustering' ? (
-                              <ClusteringAtom atomId={atom.id} />
-                            ) : atom.atomId === 'explore' ? (
-                              <ExploreAtom atomId={atom.id} />
-                            ) : atom.atomId === 'chart-maker' ? (
-                              <ChartMakerAtom atomId={atom.id} />
-              ) : atom.atomId === 'pivot-table' ? (
-                <PivotTableAtom atomId={atom.id} />
-                            ) : atom.atomId === 'unpivot' ? (
-                              <UnpivotAtom atomId={atom.id} />
-                            ) : atom.atomId === 'concat' ? (
-                              <ConcatAtom atomId={atom.id} />
-                            ) : atom.atomId === 'merge' ? (
-                              <MergeAtom atomId={atom.id} />
-                            ) : atom.atomId === 'column-classifier' ? (
-                              <ColumnClassifierAtom atomId={atom.id} />
-                            ) : atom.atomId === 'dataframe-operations' ? (
-                              <DataFrameOperationsAtom atomId={atom.id} />
-                            ) : atom.atomId === 'create-column' ? (
-                              <CreateColumnAtom atomId={atom.id} />
-                            ) : atom.atomId === 'groupby-wtg-avg' ? (
-                              <GroupByAtom atomId={atom.id} />
-                            ) : atom.atomId === 'build-model-feature-based' ? (
-                              <BuildModelFeatureBasedAtom atomId={atom.id} />
-                            ) : atom.atomId === 'scenario-planner' ? (
-                              <ScenarioPlannerAtom atomId={atom.id} />
-                            ) : atom.atomId === 'kpi-dashboard' ? (
-                              <KPIDashboardAtom atomId={atom.id} />
-                            ) : atom.atomId === 'select-models-feature' ? (
-                              <SelectModelsFeatureAtom atomId={atom.id} />
-                            ) : atom.atomId === 'evaluate-models-feature' ? (
-                              <EvaluateModelsFeatureAtom atomId={atom.id} />
-                            ) : atom.atomId === 'scope-selector' ? (
-                              <ScopeSelectorAtom atomId={atom.id} />
-                            ) : atom.atomId === 'correlation' ? (
-                              <CorrelationAtom atomId={atom.id} />
-                            ) : atom.atomId === 'auto-regressive-models' ? (
-                              <AutoRegressiveModelsAtom atomId={atom.id} />
-                            ) : atom.atomId === 'select-models-auto-regressive' ? (
-                              <SelectModelsAutoRegressiveAtom atomId={atom.id} />
-                            ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
-                              <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
-                            ) : (
-                              <div>
-                                <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
-                                <p className="text-sm text-gray-600 mb-3">{atom.category}</p>
-                                <p className="text-sm text-gray-500">
-                                  Configure this atom for your application
-                                </p>
+                    ) : (
+                      <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
+                        {card.atoms.map((atom) => (
+                          <AtomBox
+                            key={`${atom.id}-expanded`}
+                            className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
+                          >
+                            {/* Atom Header */}
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center space-x-2">
+                                <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
                               </div>
-                            )}
-                          </div>
-                        </AtomBox>
-                      ))}
-                    </div>
-                  );
-                })()}
+                              {/* <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteAtomClick(card.id, atom.id, atom.title || '');
+                                }}
+                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4 text-gray-400" />
+                            </button> */}
+                            </div>
+
+                            {/* Atom Content */}
+                            <div className="w-full flex-1 overflow-visible">
+                              {atom.atomId === 'text-box' ? (
+                                <TextBoxEditor textId={atom.id} />
+                              ) : atom.atomId === 'data-upload-validate' ? (
+                                <DataUploadValidateAtom atomId={atom.id} />
+                              ) : atom.atomId === 'feature-overview' ? (
+                                <FeatureOverviewAtom atomId={atom.id} />
+                              ) : atom.atomId === 'clustering' ? (
+                                <ClusteringAtom atomId={atom.id} />
+                              ) : atom.atomId === 'explore' ? (
+                                <ExploreAtom atomId={atom.id} />
+                              ) : atom.atomId === 'chart-maker' ? (
+                                <ChartMakerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'pivot-table' ? (
+                                <PivotTableAtom atomId={atom.id} />
+                              ) : atom.atomId === 'unpivot' ? (
+                                <UnpivotAtom atomId={atom.id} />
+                              ) : atom.atomId === 'concat' ? (
+                                <ConcatAtom atomId={atom.id} />
+                              ) : atom.atomId === 'merge' ? (
+                                <MergeAtom atomId={atom.id} />
+                              ) : atom.atomId === 'column-classifier' ? (
+                                <ColumnClassifierAtom atomId={atom.id} />
+                              ) : atom.atomId === 'dataframe-operations' ? (
+                                <DataFrameOperationsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'table' ? (
+                                <TableAtom atomId={atom.id} />
+                              ) : atom.atomId === 'create-column' ? (
+                                <CreateColumnAtom atomId={atom.id} />
+                              ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                <GroupByAtom atomId={atom.id} />
+                              ) : atom.atomId === 'build-model-feature-based' ? (
+                                <BuildModelFeatureBasedAtom atomId={atom.id} />
+                              ) : atom.atomId === 'scenario-planner' ? (
+                                <ScenarioPlannerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'kpi-dashboard' ? (
+                                <KPIDashboardAtom atomId={atom.id} />
+                              ) : atom.atomId === 'select-models-feature' ? (
+                                <SelectModelsFeatureAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-feature' ? (
+                                <EvaluateModelsFeatureAtom atomId={atom.id} />
+                              ) : atom.atomId === 'scope-selector' ? (
+                                <ScopeSelectorAtom atomId={atom.id} />
+                              ) : atom.atomId === 'correlation' ? (
+                                <CorrelationAtom atomId={atom.id} />
+                              ) : atom.atomId === 'auto-regressive-models' ? (
+                                <AutoRegressiveModelsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : (
+                                <div>
+                                  <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
+                                  <p className="text-sm text-gray-600 mb-3">{atom.category}</p>
+                                  <p className="text-sm text-gray-500">
+                                    Configure this atom for your application
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </AtomBox>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>,
@@ -6095,70 +6155,70 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       />
       <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
-        {/* Layout Cards Container */}
-      <div data-lab-cards-container="true" className="p-2 space-y-6 w-full">
-        {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
-          const cardTitle = card.moleculeTitle
-            ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
-            : (Array.isArray(card.atoms) && card.atoms.length > 0)
-              ? card.atoms[0].title
-              : 'Card';
-          
-          // Check if someone is editing this card
-          const editor = cardEditors?.get(card.id);
-          const isBeingEdited = !!editor;
-          
-          return (
-          <React.Fragment key={card.id}>
-          <Card
-            data-card-id={card.id}
+          {/* Layout Cards Container */}
+          <div data-lab-cards-container="true" className="p-2 space-y-6 w-full">
+            {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
+              const cardTitle = card.moleculeTitle
+                ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+                : (Array.isArray(card.atoms) && card.atoms.length > 0)
+                  ? card.atoms[0].title
+                  : 'Card';
+
+              // Check if someone is editing this card
+              const editor = cardEditors?.get(card.id);
+              const isBeingEdited = !!editor;
+
+              return (
+                <React.Fragment key={card.id}>
+                  <Card
+                    data-card-id={card.id}
             className={`relative w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
               dragOver === card.id
-                ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
-                : isBeingEdited
-                ? `shadow-lg`
-                : 'border-gray-200 shadow-sm hover:shadow-md'
-            }`}
-            style={isBeingEdited ? {
-              borderColor: editor.user_color,
-              boxShadow: `0 0 0 2px ${editor.user_color}40`,
-            } : undefined}
-            onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
-            onDragOver={(e) => handleDragOver(e, card.id)}
-            onDragLeave={handleDragLeave}
-            onDrop={(e) => handleDrop(e, card.id)}
-            onMouseEnter={() => onCardFocus?.(card.id)}
-            onMouseLeave={() => onCardBlur?.(card.id)}
-          >
-            {/* Editor Badge - shows who's editing this card */}
-            {isBeingEdited && editor && (
-              <div 
-                className="absolute top-2 right-2 px-2 py-1 rounded-full text-xs font-medium text-white shadow-md z-10 flex items-center gap-1"
-                style={{ backgroundColor: editor.user_color }}
-              >
-                <div 
-                  className="w-2 h-2 rounded-full bg-white/80 animate-pulse"
-                  title={`${editor.user_name} is editing`}
-                />
-                <span className="max-w-[150px] truncate">
-                  {editor.user_email}
-                </span>
-              </div>
-            )}
-            
+                        ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
+                        : isBeingEdited
+                          ? `shadow-lg`
+                          : 'border-gray-200 shadow-sm hover:shadow-md'
+                      }`}
+                    style={isBeingEdited ? {
+                      borderColor: editor.user_color,
+                      boxShadow: `0 0 0 2px ${editor.user_color}40`,
+                    } : undefined}
+                    onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
+                    onDragOver={(e) => handleDragOver(e, card.id)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, card.id)}
+                    onMouseEnter={() => onCardFocus?.(card.id)}
+                    onMouseLeave={() => onCardBlur?.(card.id)}
+                  >
+                    {/* Editor Badge - shows who's editing this card */}
+                    {isBeingEdited && editor && (
+                      <div
+                        className="absolute top-2 right-2 px-2 py-1 rounded-full text-xs font-medium text-white shadow-md z-10 flex items-center gap-1"
+                        style={{ backgroundColor: editor.user_color }}
+                      >
+                        <div
+                          className="w-2 h-2 rounded-full bg-white/80 animate-pulse"
+                          title={`${editor.user_name} is editing`}
+                        />
+                        <span className="max-w-[150px] truncate">
+                          {editor.user_email}
+                        </span>
+                      </div>
+                    )}
+
             <div className="flex items-center justify-between py-1.5 px-2">
-              <div className="flex items-center space-x-1.5">
+                      <div className="flex items-center space-x-1.5">
                 {card.atoms.length > 0 && card.atoms[0].color && (
                   <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
                 )}
-                <span className="text-xs font-medium text-gray-700">
-                  {cardTitle}
-                </span>
+                        <span className="text-xs font-medium text-gray-700">
+                          {cardTitle}
+                        </span>
                 {card.atoms.length === 0 ? (
-                  <AIChatBot
-                    cardId={card.id}
-                    cardTitle={cardTitle}
-                    onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                        <AIChatBot
+                          cardId={card.id}
+                          cardTitle={cardTitle}
+                          onAddAtom={(id, atom) => addAtomByName(id, atom)}
                   />
                 ) : card.atoms.length > 0 && card.atoms[0] ? (
                   <AtomAIChatBot
@@ -6169,24 +6229,24 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                     className="transition-transform hover:scale-110"
                   />
                 ) : null}
-                          <button
-                            onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                            className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="Card Settings"
-                            disabled={!canEdit}
-                          >
-                  <Settings className="w-3.5 h-3.5 text-gray-400" />
-                </button>
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    refreshCardAtoms(card.id);
-                  }}
-                  className="p-0.5 hover:bg-gray-100 rounded"
-                  title="Refresh Atom"
-                >
-                  <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
-                </button>
+                        <button
+                          onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                          className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Card Settings"
+                          disabled={!canEdit}
+                        >
+                          <Settings className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            refreshCardAtoms(card.id);
+                          }}
+                          className="p-0.5 hover:bg-gray-100 rounded"
+                          title="Refresh Atom"
+                        >
+                          <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
                 <button
                   onClick={e => {
                     e.stopPropagation();
@@ -6198,112 +6258,113 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                   title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
                 >
                   <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
-                </button>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    const cardTitle = card.moleculeTitle || (Array.isArray(card.atoms) && card.atoms.length > 0 ? card.atoms[0]?.title : undefined) || 'Card';
-                    handleDeleteCardClick(card.id, cardTitle);
-                  }}
-                  className="p-0.5 hover:bg-gray-100 rounded"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-gray-400" />
-                </button>
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    toggleCardExpand(card.id);
-                  }}
-                  className="p-0.5 hover:bg-gray-100 rounded"
-                  title="Expand Card"
-                >
-                  <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
-                </button>
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    toggleCardCollapse(card.id);
-                  }}
-                  className="p-0.5 hover:bg-gray-100 rounded"
-                  title="Toggle Card"
-                >
-                  {collapsedCards[card.id] ? (
-                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                  ) : (
-                    <Minus className="w-3.5 h-3.5 text-gray-400" />
-                  )}
-                </button>
-              </div>
-            </div>
+                        </button>
+                      </div>
+                      <div className="flex items-center space-x-1.5">
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            const cardTitle = card.moleculeTitle || (Array.isArray(card.atoms) && card.atoms.length > 0 ? card.atoms[0]?.title : undefined) || 'Card';
+                            handleDeleteCardClick(card.id, cardTitle);
+                          }}
+                          className="p-0.5 hover:bg-gray-100 rounded"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            toggleCardExpand(card.id);
+                          }}
+                          className="p-0.5 hover:bg-gray-100 rounded"
+                          title="Expand Card"
+                        >
+                          <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            toggleCardCollapse(card.id);
+                          }}
+                          className="p-0.5 hover:bg-gray-100 rounded"
+                          title="Toggle Card"
+                        >
+                          {collapsedCards[card.id] ? (
+                            <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                          ) : (
+                            <Minus className="w-3.5 h-3.5 text-gray-400" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
 
-            {/* Card Content */}
+                    {/* Card Content */}
             <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
-              {card.atoms.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
-                  <AtomSuggestion
-                    cardId={card.id}
-                    isVisible={true}
-                    onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
-                    onAddAtom={handleAddAtomFromSuggestion}
-                  />
-                </div>
-              ) : (
-                <div
+                      {card.atoms.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
+                          <AtomSuggestion
+                            cardId={card.id}
+                            isVisible={true}
+                            onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
+                            onAddAtom={handleAddAtomFromSuggestion}
+                            allowedAtomIds={allowedAtomIds}
+                          />
+                        </div>
+                      ) : (
+                        <div
                   className={`grid gap-4 w-full ${
                     card.atoms.length === 1
-                      ? 'grid-cols-1'
-                      : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
-                  }`}
-                >
-                  {card.atoms.map((atom) => (
-                    <AtomBox
-                      key={atom.id}
-                      className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
-                      onClick={(e) => handleAtomClick(e, atom.id)}
-                    >
-                      {/* Atom Header */}
-                      {/* <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center space-x-1">
-                          <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                          <AtomAIChatBot
-                            atomId={atom.id}
-                            atomType={atom.atomId}
-                            atomTitle={atom.title}
-                            disabled={!LLM_MAP[atom.atomId]}
-                            className="transition-transform hover:scale-110"
-                          />
-                          <button
-                            onClick={e => handleAtomSettingsClick(e, atom.id)}
-                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110 hidden"
-                            title="Atom Settings"
-                          >
-                            <Settings className="w-4 h-4 text-gray-400" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (onAtomSelect) {
-                                onAtomSelect(atom.id);
-                              }
-                              onToggleHelpPanel?.();
-                            }}
-                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110 hidden"
-                            title="Help"
-                          >
-                            <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">?</span>
-                          </button>
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                          }}
-                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                              ? 'grid-cols-1'
+                              : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                            }`}
                         >
-                          <Trash2 className="w-4 h-4 text-gray-400" />
-                        </button>
+                          {card.atoms.map((atom) => (
+                            <AtomBox
+                              key={atom.id}
+                              className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
+                              onClick={(e) => handleAtomClick(e, atom.id)}
+                            >
+                              {/* Atom Header */}
+                      {/* <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center space-x-1">
+                                  <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                  <AtomAIChatBot
+                                    atomId={atom.id}
+                                    atomType={atom.atomId}
+                                    atomTitle={atom.title}
+                                    disabled={!LLM_MAP[atom.atomId]}
+                                    className="transition-transform hover:scale-110"
+                                  />
+                                  <button
+                                    onClick={e => handleAtomSettingsClick(e, atom.id)}
+                                    className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110 hidden"
+                                    title="Atom Settings"
+                                  >
+                                    <Settings className="w-4 h-4 text-gray-400" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (onAtomSelect) {
+                                        onAtomSelect(atom.id);
+                                      }
+                                      onToggleHelpPanel?.();
+                                    }}
+                                    className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110 hidden"
+                                    title="Help"
+                                  >
+                                    <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">?</span>
+                                  </button>
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteAtomClick(card.id, atom.id, atom.title || '');
+                                  }}
+                                  className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                >
+                                  <Trash2 className="w-4 h-4 text-gray-400" />
+                                </button>
                       </div> */}
 
                       {/* Atom Content */}
@@ -6319,8 +6380,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <ExploreAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
                         <ChartMakerAtom atomId={atom.id} />
-            ) : atom.atomId === 'pivot-table' ? (
-              <PivotTableAtom atomId={atom.id} />
+                      ) : atom.atomId === 'pivot-table' ? (
+                        <PivotTableAtom atomId={atom.id} />
                       ) : atom.atomId === 'unpivot' ? (
                         <UnpivotAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (
@@ -6331,21 +6392,23 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <ColumnClassifierAtom atomId={atom.id} />
                       ) : atom.atomId === 'dataframe-operations' ? (
                         <DataFrameOperationsAtom atomId={atom.id} />
+                      ) : atom.atomId === 'table' ? (
+                        <TableAtom atomId={atom.id} />
                       ) : atom.atomId === 'create-column' ? (
                         <CreateColumnAtom atomId={atom.id} />
                       ) : atom.atomId === 'groupby-wtg-avg' ? (
                         <GroupByAtom atomId={atom.id} />
                       ) : atom.atomId === 'build-model-feature-based' ? (
-                          <BuildModelFeatureBasedAtom atomId={atom.id} />
-                       ) : atom.atomId === 'scenario-planner' ? (
-                          <ScenarioPlannerAtom atomId={atom.id} />
-                       ) : atom.atomId === 'kpi-dashboard' ? (
-                          <KPIDashboardAtom atomId={atom.id} />
-                       ) : atom.atomId === 'select-models-feature' ? (
+                        <BuildModelFeatureBasedAtom atomId={atom.id} />
+                      ) : atom.atomId === 'scenario-planner' ? (
+                        <ScenarioPlannerAtom atomId={atom.id} />
+                      ) : atom.atomId === 'kpi-dashboard' ? (
+                        <KPIDashboardAtom atomId={atom.id} />
+                      ) : atom.atomId === 'select-models-feature' ? (
                         <SelectModelsFeatureAtom atomId={atom.id} />
-                       ) : atom.atomId === 'evaluate-models-feature' ? (
+                      ) : atom.atomId === 'evaluate-models-feature' ? (
                         <EvaluateModelsFeatureAtom atomId={atom.id} />
-                       ) : atom.atomId === 'scope-selector' ? (
+                      ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
                       ) : atom.atomId === 'correlation' ? (
                         <CorrelationAtom atomId={atom.id} />
@@ -6355,8 +6418,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                       ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                         <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
-                      ) : atom.atomId === 'kpi-dashboard' ? (
-                        <KPIDashboardAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -6367,27 +6428,52 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         </div>
                       )}
                     </AtomBox>
-              ))}
+                  ))}
+                </div>
+              )}
+              {renderCardTextBox(card)}
+              {renderAppendedVariables(card)}
             </div>
-          )}
-          {renderCardTextBox(card)}
-          {renderAppendedVariables(card)}
-        </div>
-      </Card>
-          {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
-            <div className="flex justify-center my-4">
+          </Card>
+                  {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
+                    <div className="flex justify-center my-4">
+                      <button
+                        onClick={() => addNewCard(undefined, index + 1)}
+                        onDragEnter={e => handleAddDragEnter(e, `p-${index}`)}
+                        onDragLeave={handleAddDragLeave}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={e => {
+                          void handleDropNewCard(e, undefined, index + 1);
+                        }}
+                        className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `p-${index}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                        title="Add new card"
+                      >
+                        <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `p-${index}` ? 'scale-125 mb-2' : ''}`} />
+                        <span
+                          className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                        >
+                          Add New Card
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
+
+            {/* Add New Card Button */}
+            <div className="flex justify-center">
               <button
-                onClick={() => addNewCard(undefined, index + 1)}
-                onDragEnter={e => handleAddDragEnter(e, `p-${index}`)}
+                onClick={() => addNewCard()}
+                onDragEnter={e => handleAddDragEnter(e, 'end')}
                 onDragLeave={handleAddDragLeave}
                 onDragOver={e => e.preventDefault()}
                 onDrop={e => {
-                  void handleDropNewCard(e, undefined, index + 1);
+                  void handleDropNewCard(e);
                 }}
-                className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `p-${index}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
-                title="Add new card"
+                className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === 'end' ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
               >
-                <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `p-${index}` ? 'scale-125 mb-2' : ''}`} />
+                <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === 'end' ? 'scale-125 mb-2' : ''}`} />
                 <span
                   className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                 >
@@ -6395,176 +6481,159 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 </span>
               </button>
             </div>
-          )}
-          </React.Fragment>
-          );
-        })}
-
-        {/* Add New Card Button */}
-        <div className="flex justify-center">
-          <button
-            onClick={() => addNewCard()}
-            onDragEnter={e => handleAddDragEnter(e, 'end')}
-            onDragLeave={handleAddDragLeave}
-            onDragOver={e => e.preventDefault()}
-            onDrop={e => {
-              void handleDropNewCard(e);
-            }}
-            className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === 'end' ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
-          >
-            <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === 'end' ? 'scale-125 mb-2' : ''}`} />
-            <span
-              className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
-            >
-              Add New Card
-            </span>
-          </button>
+          </div>
         </div>
-      </div>
-      </div>
 
-      {/* Fullscreen Card Modal */}
-      {expandedCard &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-40 pointer-events-none"
-            role="dialog"
-            aria-modal="true"
-          >
+        {/* Fullscreen Card Modal */}
+        {expandedCard &&
+          createPortal(
             <div
-              className="absolute inset-0 bg-black/40 pointer-events-auto"
-              aria-hidden="true"
-              onClick={() => setExpandedCard(null)}
-            />
-            <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
-              <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
-                <div className="flex items-center space-x-2">
-                <span className="text-lg font-semibold text-gray-900">
+              className="fixed inset-0 z-40 pointer-events-none"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div
+                className="absolute inset-0 bg-black/40 pointer-events-auto"
+                aria-hidden="true"
+                onClick={() => setExpandedCard(null)}
+              />
+              <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
+                <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-lg font-semibold text-gray-900">
+                      {(() => {
+                        const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
+                        if (!card) return 'Card';
+                        return card.moleculeTitle
+                          ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+                          : (Array.isArray(card.atoms) && card.atoms.length > 0)
+                            ? card.atoms[0].title
+                            : 'Card';
+                      })()}
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => setExpandedCard(null)}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="Close Fullscreen"
+                    >
+                      <X className="w-5 h-5 text-gray-500" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Fullscreen Content */}
+                <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
                   {(() => {
                     const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
-                    if (!card) return 'Card';
-                    return card.moleculeTitle
-                      ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
-                      : (Array.isArray(card.atoms) && card.atoms.length > 0)
-                        ? card.atoms[0].title
-                        : 'Card';
-                  })()}
-                </span>
-                </div>
-                <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setExpandedCard(null)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="Close Fullscreen"
-                >
-                  <X className="w-5 h-5 text-gray-500" />
-                </button>
-                </div>
-              </div>
+                    if (!card) return null;
 
-              {/* Fullscreen Content */}
-              <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
-                {(() => {
-                const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
-                if (!card) return null;
-
-                return card.atoms.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[400px]">
-                    <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
-                      <Grid3X3 className="w-10 h-10 text-gray-400" />
-                    </div>
-                    <p className="text-gray-500 text-lg mb-2">No atoms in this section</p>
-                    <p className="text-sm text-gray-400">Configure this atom for your application</p>
-                  </div>
-                ) : (
-                  <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
-                    {card.atoms.map((atom) => (
-                      <AtomBox
-                        key={`${atom.id}-expanded`}
-                        className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
-                      >
-                        {/* Atom Header */}
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center space-x-2">
-                            <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                            <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
-                          </div>
-                          {/* <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                            }}
-                            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    return card.atoms.length === 0 ? (
+                      <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[400px]">
+                        <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                          <Grid3X3 className="w-10 h-10 text-gray-400" />
+                        </div>
+                        <p className="text-gray-500 text-lg mb-2">No atoms in this section</p>
+                        <p className="text-sm text-gray-400">Configure this atom for your application</p>
+                      </div>
+                    ) : (
+                      <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
+                        {card.atoms.map((atom) => (
+                          <AtomBox
+                            key={`${atom.id}-expanded`}
+                            className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                           >
-                            <Trash2 className="w-4 h-4 text-gray-400" />
+                            {/* Atom Header */}
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center space-x-2">
+                                <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
+                              </div>
+                          {/* <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteAtomClick(card.id, atom.id, atom.title || '');
+                                }}
+                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4 text-gray-400" />
                           </button> */}
-                        </div>
-
-                        {/* Atom Content */}
-                        <div className="w-full flex-1 overflow-visible">
-                          {atom.atomId === 'text-box' ? (
-                            <TextBoxEditor textId={atom.id} />
-                          ) : atom.atomId === 'data-upload-validate' ? (
-                            <DataUploadValidateAtom atomId={atom.id} />
-                          ) : atom.atomId === 'feature-overview' ? (
-                            <FeatureOverviewAtom atomId={atom.id} />
-                          ) : atom.atomId === 'clustering' ? (
-                            <ClusteringAtom atomId={atom.id} />
-                          ) : atom.atomId === 'explore' ? (
-                            <ExploreAtom atomId={atom.id} />
-                          ) : atom.atomId === 'chart-maker' ? (
-                            <ChartMakerAtom atomId={atom.id} />
-              ) : atom.atomId === 'pivot-table' ? (
-                <PivotTableAtom atomId={atom.id} />
-                          ) : atom.atomId === 'unpivot' ? (
-                            <UnpivotAtom atomId={atom.id} />
-                          ) : atom.atomId === 'concat' ? (
-                            <ConcatAtom atomId={atom.id} />
-                          ) : atom.atomId === 'merge' ? (
-                            <MergeAtom atomId={atom.id} />
-                          ) : atom.atomId === 'column-classifier' ? (
-                            <ColumnClassifierAtom atomId={atom.id} />
-                          ) : atom.atomId === 'dataframe-operations' ? (
-                            <DataFrameOperationsAtom atomId={atom.id} />
-                          ) : atom.atomId === 'create-column' ? (
-                            <CreateColumnAtom atomId={atom.id} />
-                          ) : atom.atomId === 'groupby-wtg-avg' ? (
-                            <GroupByAtom atomId={atom.id} />
-                          ) : atom.atomId === 'build-model-feature-based' ? (
-                            <BuildModelFeatureBasedAtom atomId={atom.id} />
-                          ) : atom.atomId === 'scenario-planner' ? (
-                            <ScenarioPlannerAtom atomId={atom.id} />
-                          ) : atom.atomId === 'select-models-feature' ? (
-                            <SelectModelsFeatureAtom atomId={atom.id} />
-                          ) : atom.atomId === 'evaluate-models-feature' ? (
-                            <EvaluateModelsFeatureAtom atomId={atom.id} />
-                          ) : atom.atomId === 'scope-selector' ? (
-                            <ScopeSelectorAtom atomId={atom.id} />
-                          ) : atom.atomId === 'correlation' ? (
-                            <CorrelationAtom atomId={atom.id} />
-                          ) : atom.atomId === 'kpi-dashboard' ? (
-                            <KPIDashboardAtom atomId={atom.id} />
-                          ) : (
-                            <div>
-                              <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
-                              <p className="text-sm text-gray-600 mb-3">{atom.category}</p>
-                              <p className="text-sm text-gray-500">
-                                Configure this atom for your application
-                              </p>
                             </div>
-                          )}
-                        </div>
-                      </AtomBox>
-                    ))}
-                  </div>
-                );
-              })()}
+
+                            {/* Atom Content */}
+                            <div className="w-full flex-1 overflow-visible">
+                              {atom.atomId === 'text-box' ? (
+                                <TextBoxEditor textId={atom.id} />
+                              ) : atom.atomId === 'data-upload-validate' ? (
+                                <DataUploadValidateAtom atomId={atom.id} />
+                              ) : atom.atomId === 'feature-overview' ? (
+                                <FeatureOverviewAtom atomId={atom.id} />
+                              ) : atom.atomId === 'clustering' ? (
+                                <ClusteringAtom atomId={atom.id} />
+                              ) : atom.atomId === 'explore' ? (
+                                <ExploreAtom atomId={atom.id} />
+                              ) : atom.atomId === 'chart-maker' ? (
+                                <ChartMakerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'pivot-table' ? (
+                                <PivotTableAtom atomId={atom.id} />
+                              ) : atom.atomId === 'unpivot' ? (
+                                <UnpivotAtom atomId={atom.id} />
+                              ) : atom.atomId === 'concat' ? (
+                                <ConcatAtom atomId={atom.id} />
+                              ) : atom.atomId === 'merge' ? (
+                                <MergeAtom atomId={atom.id} />
+                              ) : atom.atomId === 'column-classifier' ? (
+                                <ColumnClassifierAtom atomId={atom.id} />
+                              ) : atom.atomId === 'dataframe-operations' ? (
+                                <DataFrameOperationsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'table' ? (
+                                <TableAtom atomId={atom.id} />
+                              ) : atom.atomId === 'create-column' ? (
+                                <CreateColumnAtom atomId={atom.id} />
+                              ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                <GroupByAtom atomId={atom.id} />
+                              ) : atom.atomId === 'build-model-feature-based' ? (
+                                <BuildModelFeatureBasedAtom atomId={atom.id} />
+                              ) : atom.atomId === 'scenario-planner' ? (
+                                <ScenarioPlannerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'kpi-dashboard' ? (
+                                <KPIDashboardAtom atomId={atom.id} />
+                              ) : atom.atomId === 'select-models-feature' ? (
+                                <SelectModelsFeatureAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-feature' ? (
+                                <EvaluateModelsFeatureAtom atomId={atom.id} />
+                              ) : atom.atomId === 'scope-selector' ? (
+                                <ScopeSelectorAtom atomId={atom.id} />
+                              ) : atom.atomId === 'correlation' ? (
+                                <CorrelationAtom atomId={atom.id} />
+                              ) : atom.atomId === 'auto-regressive-models' ? (
+                                <AutoRegressiveModelsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : (
+                                <div>
+                                  <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
+                                  <p className="text-sm text-gray-600 mb-3">{atom.category}</p>
+                                  <p className="text-sm text-gray-500">
+                                    Configure this atom for your application
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </AtomBox>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
-          </div>
-        </div>,
-        document.body,
-      )}
-    </div>
+            </div>,
+            document.body,
+          )}
+      </div>
     </>
   );
 });

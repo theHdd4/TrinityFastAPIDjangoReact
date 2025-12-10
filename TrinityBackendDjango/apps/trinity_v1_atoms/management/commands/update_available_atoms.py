@@ -33,6 +33,7 @@ class Command(BaseCommand):
             'pivot-table',
             'unpivot',
             'kpi-dashboard'  # KPI Dashboard atom
+            'table'  # Table atom - display and manipulate data in table format
         ]
         
         updated_count = 0

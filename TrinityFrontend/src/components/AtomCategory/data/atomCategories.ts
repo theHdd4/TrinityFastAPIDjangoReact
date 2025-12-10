@@ -64,6 +64,7 @@ import clustering from '@/components/AtomList/atoms/clustering';
 import pivotTable from '@/components/AtomList/atoms/pivot-table';
 import unpivot from '@/components/AtomList/atoms/unpivot';
 import kpiDashboard from '@/components/AtomList/atoms/kpi-dashboard';
+import table from '@/components/AtomList/atoms/table';
 
 export interface Atom {
   id: string;
@@ -107,7 +108,8 @@ export const atomCategories: AtomCategory[] = [
       rowOperations,
       columnClassifier,
       createColumn,
-      dataframeOperations
+      dataframeOperations,
+      table
     ]
   },
   {
@@ -118,7 +120,8 @@ export const atomCategories: AtomCategory[] = [
       correlation,
       explore,
       descriptiveStats,
-      trendAnalysis
+      trendAnalysis,
+      table
     ]
   },
   {
@@ -174,7 +177,8 @@ export const atomCategories: AtomCategory[] = [
       promoEstimator,
       pivotTable,
       unpivot,
-      kpiDashboard
+      kpiDashboard,
+      table
     ]
   }
 ];
