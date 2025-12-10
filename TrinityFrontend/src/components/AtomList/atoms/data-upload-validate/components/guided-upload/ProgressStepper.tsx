@@ -12,12 +12,12 @@ interface ProgressStepperProps {
 const STAGES: Array<{ id: UploadStage; label: string; shortLabel: string }> = [
   { id: 'U0', label: 'Upload Dataset', shortLabel: 'Upload' },
   { id: 'U1', label: 'Structural Scan', shortLabel: 'Scan' },
-  { id: 'U2', label: 'Understanding Files', shortLabel: 'Understand' },
-  { id: 'U3', label: 'Confirm Headers', shortLabel: 'Headers' },
-  { id: 'U4', label: 'Column Names', shortLabel: 'Columns' },
-  { id: 'U5', label: 'Data Types', shortLabel: 'Types' },
-  { id: 'U6', label: 'Missing Values', shortLabel: 'Missing' },
-  { id: 'U7', label: 'Summary', shortLabel: 'Summary' },
+  { id: 'U2', label: 'Confirm Headers', shortLabel: 'Headers' },
+  { id: 'U3', label: 'Column Names', shortLabel: 'Columns' },
+  { id: 'U4', label: 'Data Types', shortLabel: 'Types' },
+  { id: 'U5', label: 'Missing Values', shortLabel: 'Missing' },
+  { id: 'U6', label: 'Final Preview', shortLabel: 'Preview' },
+  { id: 'U7', label: 'Complete', shortLabel: 'Complete' },
 ];
 
 export const ProgressStepper: React.FC<ProgressStepperProps> = ({ currentStage, className, hideStages = [] }) => {

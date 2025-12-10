@@ -6,11 +6,11 @@ import { useGuidedUploadFlow, type UploadStage } from './useGuidedUploadFlow';
 import { U0FileUpload } from './stages/U0FileUpload';
 import { U1StructuralScan } from './stages/U1StructuralScan';
 import { U2UnderstandingFiles } from './stages/U2UnderstandingFiles';
-import { U3ConfirmHeaders } from './stages/U3ConfirmHeaders';
-import { U4ReviewColumnNames } from './stages/U4ReviewColumnNames';
-import { U5ReviewDataTypes } from './stages/U5ReviewDataTypes';
-import { U6MissingValues } from './stages/U6MissingValues';
-import { U7Summary } from './stages/U7Summary';
+import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
+import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
+import { U5MissingValues } from './stages/U5MissingValues';
+import { U6FinalPreview } from './stages/U6FinalPreview';
+import { U7Success } from './stages/U7Success';
 import { ArrowLeft, RotateCcw, X } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { getActiveProjectContext } from '@/utils/projectEnv';
@@ -41,22 +41,22 @@ const STAGE_COMPONENTS: Record<UploadStage, React.ComponentType<any>> = {
   U0: U0FileUpload,
   U1: U1StructuralScan,
   U2: U2UnderstandingFiles,
-  U3: U3ConfirmHeaders,
-  U4: U4ReviewColumnNames,
-  U5: U5ReviewDataTypes,
-  U6: U6MissingValues,
-  U7: U7Summary,
+  U3: U3ReviewColumnNames,
+  U4: U4ReviewDataTypes,
+  U5: U5MissingValues,   // U5: Missing Value Review
+  U6: U6FinalPreview,    // U6: Final Preview & Data Primed
+  U7: U7Success,         // U7: Priming Completed & Next Actions
 };
 
 const STAGE_TITLES: Record<UploadStage, string> = {
   U0: 'Upload Your Dataset',
   U1: 'Structural Scan',
-  U2: 'Understanding Your File(s)',
-  U3: 'Confirm Your Column Headers',
-  U4: 'Review Column Names',
-  U5: 'Confirm Data Types',
-  U6: 'How Should Trinity Handle Missing Values?',
-  U7: 'Upload Complete — Your Data Is Ready',
+  U2: 'Step 3: Confirm Your Column Headers',
+  U3: 'Step 4: Review Your Column Names',
+  U4: 'Step 5: Review Your Column Types',
+  U5: 'Step 6: Review Missing Values',
+  U6: 'Step 7: Final Preview Before Priming',
+  U7: 'Your Data Is Ready',
 };
 
 export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
@@ -121,7 +121,10 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
   }, [state.currentStage, state.uploadedFiles, markFileAsPrimed]);
 
   const handleNext = async () => {
-    if (state.currentStage === 'U7') {
+    if (state.currentStage === 'U6') {
+      // Move from U6 (Final Preview) to U7 (Success)
+      goToNextStage();
+    } else if (state.currentStage === 'U7') {
       // Flow complete - mark files as primed
       const projectContext = getActiveProjectContext();
       if (projectContext && state.uploadedFiles.length > 0) {
@@ -198,13 +201,26 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
               onRestart={handleRestart}
               onCancel={handleCancel}
             />
+          ) : state.currentStage === 'U6' ? (
+            <CurrentStageComponent 
+              flow={flow} 
+              onNext={handleNext} 
+              onBack={handleBack}
+              onGoToStage={goToStage}
+            />
+          ) : state.currentStage === 'U7' ? (
+            <CurrentStageComponent 
+              flow={flow}
+              onClose={handleCancel}
+              onRestart={handleRestart}
+            />
           ) : (
             <CurrentStageComponent flow={flow} onNext={handleNext} onBack={handleBack} />
           )}
         </div>
 
-        {/* Navigation Footer - Consistent across all stages (hidden for U1 and U2 as they have their own controls) */}
-        {state.currentStage !== 'U1' && state.currentStage !== 'U2' && (
+        {/* Navigation Footer - Consistent across all stages (hidden for U1, U2, U6, and U7 as they have their own controls) */}
+        {state.currentStage !== 'U1' && state.currentStage !== 'U2' && state.currentStage !== 'U6' && state.currentStage !== 'U7' && (
           <div className="flex items-center justify-between pt-4 border-t">
             <div className="flex gap-2">
               {canGoBack && (

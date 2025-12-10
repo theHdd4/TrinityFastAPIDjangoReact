@@ -23,6 +23,7 @@ export interface ColumnNameEdit {
   editedName: string;
   aiSuggested?: boolean;
   historicalMatch?: boolean;
+  keep?: boolean; // Keep/Delete toggle - true = keep, false = delete
 }
 
 export interface DataTypeSelection {
@@ -30,12 +31,13 @@ export interface DataTypeSelection {
   detectedType: string;
   selectedType: string;
   format?: string; // For date types
+  columnRole?: 'identifier' | 'measure'; // Identifier (dimension) or Measure (metric)
 }
 
 export interface MissingValueStrategy {
   columnName: string;
-  strategy: 'fill_zero' | 'fill_mean' | 'fill_median' | 'forward_fill' | 'replace_unknown' | 'leave_missing' | 'drop_rows';
-  value?: string | number;
+  strategy: 'drop' | 'mean' | 'median' | 'mode' | 'zero' | 'empty' | 'custom' | 'none';
+  value?: string | number; // Required for 'custom' strategy
 }
 
 export interface GuidedUploadFlowState {

@@ -26,6 +26,7 @@ interface PreviewRow {
   columnCount?: number;
   expectedColumnCount?: number;
   isDescriptionRow?: boolean; // Mark description/metadata rows
+  relativeIndex?: number; // 0-indexed relative to data rows (for header selection)
 }
 
 interface HeaderDetection {
@@ -65,6 +66,8 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
   const [descriptionRows, setDescriptionRows] = useState<PreviewRow[]>([]);
   const [dataRowsStart, setDataRowsStart] = useState<number>(0);
   const [applyingHeader, setApplyingHeader] = useState(false);
+  const [sheetMetadata, setSheetMetadata] = useState<{ rows: number; columns: number } | null>(null);
+  const [noHeader, setNoHeader] = useState(false);
 
   const currentFile = uploadedFiles[selectedFileIndex];
   const currentHeaderSelection = currentFile ? headerSelections[currentFile.name] : null;
@@ -306,6 +309,14 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           has_description_rows: !!data.description_rows && data.description_rows.length > 0,
         });
         
+        // Store sheet metadata (rows, columns)
+        if (data.total_rows !== undefined && data.column_count !== undefined) {
+          setSheetMetadata({
+            rows: data.total_rows,
+            columns: data.column_count,
+          });
+        }
+        
         // Check if we have data rows
         if (!data.data_rows || data.data_rows.length === 0) {
           if (data.error) {
@@ -386,9 +397,15 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
         
         // Load saved header selection if exists
         if (currentHeaderSelection) {
-          setSelectedHeaderRow(currentHeaderSelection.headerRowIndex + 1);
-          setHeaderRowCount(currentHeaderSelection.headerRowCount || 1);
-          setMultiRowHeader(currentHeaderSelection.headerRowCount > 1);
+          if (currentHeaderSelection.noHeader) {
+            setNoHeader(true);
+            setSelectedHeaderRow(0);
+          } else {
+            setNoHeader(false);
+            setSelectedHeaderRow(currentHeaderSelection.headerRowIndex + 1);
+            setHeaderRowCount(currentHeaderSelection.headerRowCount || 1);
+            setMultiRowHeader(currentHeaderSelection.headerRowCount > 1);
+          }
         }
       } catch (err: any) {
         setError(err.message || 'Failed to load preview');
@@ -404,7 +421,21 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
 
   // Save header selection - rowIndex is absolute (1-indexed) for display
   // CRITICAL: Only data rows can be selected as headers (description rows are excluded)
-  const handleHeaderSelectionChange = (rowIndex: number) => {
+  const handleHeaderSelectionChange = (rowIndex: number | 'none') => {
+    if (rowIndex === 'none') {
+      setNoHeader(true);
+      setSelectedHeaderRow(0);
+      if (currentFile) {
+        setHeaderSelection(currentFile.name, {
+          headerRowIndex: -1, // -1 indicates no header
+          headerRowCount: 0,
+          noHeader: true,
+        });
+      }
+      return;
+    }
+    
+    setNoHeader(false);
     // Find the data row - previewData only contains data rows now (description rows are separate)
     const dataRow = previewData.find(r => r.rowIndex === rowIndex);
     if (!dataRow || dataRow.isDescriptionRow) {
@@ -455,32 +486,56 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
     }
   };
 
+  // Helper to append env fields to FormData
+  const appendEnvFields = (form: FormData) => {
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        form.append('client_id', env.CLIENT_ID || '');
+        form.append('app_id', env.APP_ID || '');
+        form.append('project_id', env.PROJECT_ID || '');
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
   // Handle Continue - apply header selection and process file
   const handleContinue = async () => {
     if (!currentFile) return;
+    
+    // If no header selected, warn user or proceed with no header
+    if (noHeader) {
+      // TODO: Handle no header case - may need backend support
+      setError('Please select a header row or contact support for files without headers.');
+      return;
+    }
     
     setApplyingHeader(true);
     setError('');
     
     try {
       // Get relative index from the selected data row
-      // CRITICAL: header_row_index must be relative to data rows (0-indexed), not absolute
+      // CRITICAL: header_row must be relative to data rows (0-indexed), not absolute
       const selectedDataRow = previewData.find(r => r.rowIndex === selectedHeaderRow);
       const relativeHeaderIndex = selectedDataRow?.relativeIndex !== undefined
         ? selectedDataRow.relativeIndex
         : Math.max(0, (selectedHeaderRow - 1) - dataRowsStart); // Fallback calculation
       
-      // Call /apply-header-selection endpoint
+      // Call /apply-header-selection endpoint with FormData (backend expects Form, not JSON)
+      const form = new FormData();
+      form.append('object_name', currentFile.path);
+      form.append('header_row', relativeHeaderIndex.toString()); // Backend expects 'header_row', not 'header_row_index'
+      if (currentFile.selectedSheet) {
+        form.append('sheet_name', currentFile.selectedSheet);
+      }
+      appendEnvFields(form);
+      
       const res = await fetch(`${VALIDATE_API}/apply-header-selection`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          object_name: currentFile.path,
-          header_row_index: relativeHeaderIndex, // Relative to data rows (after description separation)
-          header_row_count: headerRowCount,
-          sheet_name: currentFile.selectedSheet,
-        }),
+        body: form, // FormData - don't set Content-Type header, browser will set it with boundary
       });
 
       if (!res.ok) {
@@ -491,9 +546,9 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       const result = await res.json();
       
       // Update flow state with processed file path
-      if (result.processed_file_path && currentFile) {
+      if (result.file_path && currentFile) {
         // Update the uploaded file with processed path
-        updateUploadedFilePath(currentFile.name, result.processed_file_path);
+        updateUploadedFilePath(currentFile.name, result.file_path);
         
         // Save header selection
         setHeaderSelection(currentFile.name, {
@@ -578,6 +633,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
               {currentFile.sheetNames?.map((sheet, idx) => {
                 const isSelected = currentFile.selectedSheet === sheet || 
                   (!currentFile.selectedSheet && idx === 0);
+                const isRecommended = idx === 0; // First sheet is recommended
                 return (
                   <button
                     key={idx}
@@ -589,7 +645,12 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                     }`}
                   >
                     {sheet}
-                    {idx === 0 && (
+                    {sheetMetadata && (
+                      <span className="ml-1 text-xs opacity-75">
+                        ({sheetMetadata.rows.toLocaleString()} rows, {sheetMetadata.columns} cols)
+                      </span>
+                    )}
+                    {isRecommended && (
                       <span className="ml-1 text-xs">⭐</span>
                     )}
                   </button>
@@ -599,16 +660,22 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           </div>
         )}
 
-      {loading ? (
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#458EE2]"></div>
+      {/* Data Preview - MANDATORY - Always shown */}
+      <div className="space-y-6">
+        {loading && (
+          <div className="text-center py-8 border border-gray-200 rounded-lg bg-gray-50">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#458EE2]"></div>
             <p className="mt-4 text-sm text-gray-600">Loading file preview...</p>
           </div>
-        ) : error ? (
+        )}
+        
+        {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <p className="text-sm text-red-600">{error}</p>
-        </div>
-      ) : (
+          </div>
+        )}
+        
+        {!loading && !error && (
           <div className="space-y-6">
             {/* Description Rows Section */}
             {descriptionRows.length > 0 && (
@@ -649,7 +716,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-900">File Preview</h3>
                   <span className="text-xs text-gray-500">
-                    Showing first {previewData.length} rows (all raw rows)
+                    Showing first {Math.min(previewData.length, 15)} rows
                   </span>
                 </div>
               
@@ -845,7 +912,9 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                             : 'Header Detection'}
                         </p>
                         <p className="text-xs text-gray-700">
-                          {headerDetection.reason || `Row ${headerDetection.suggestedRow} looks like your header.`}
+                          {headerDetection.confidence === 'high' 
+                            ? `This row looks like your header based on similar files uploaded earlier.`
+                            : headerDetection.reason || `This row might be your header.`}
                         </p>
                       </div>
                     </div>
@@ -853,8 +922,8 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                       )}
 
                 <RadioGroup
-                  value={selectedHeaderRow.toString()}
-                  onValueChange={(value) => handleHeaderSelectionChange(parseInt(value, 10))}
+                  value={noHeader ? 'none' : selectedHeaderRow.toString()}
+                  onValueChange={(value) => handleHeaderSelectionChange(value === 'none' ? 'none' : parseInt(value, 10))}
                 >
                   {previewData.slice(0, Math.min(15, previewData.length)).map((row) => {
                     const isDescRow = row.isDescriptionRow || false;
@@ -882,6 +951,19 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                       </div>
                     );
                   })}
+                  {/* None of these are headers option */}
+                  <div className="flex items-center space-x-2 mb-2 mt-4 pt-4 border-t border-gray-200">
+                    <RadioGroupItem 
+                      value="none" 
+                      id="row-none"
+                    />
+                    <Label
+                      htmlFor="row-none"
+                      className="text-sm cursor-pointer flex-1 text-gray-700"
+                    >
+                      None of these are headers
+                    </Label>
+                  </div>
                 </RadioGroup>
 
                 <div className="mt-4 pt-4 border-t border-gray-200">
@@ -901,9 +983,9 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
 
                   {multiRowHeader && (
                     <div className="mt-3">
-                      <Label className="text-xs text-gray-600 mb-2 block">
-                        Select how many header rows you want to include:
-                      </Label>
+                      <p className="text-xs text-gray-700 mb-2">
+                        Your selected header row seems to span multiple rows. Select how many header rows you want to include.
+                      </p>
                       <Select
                         value={headerRowCount.toString()}
                         onValueChange={(value) => handleHeaderRowCountChange(parseInt(value, 10))}
@@ -926,7 +1008,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
               </div>
 
               {/* Warnings */}
-              {headerDetection?.confidence === 'low' && (
+              {headerDetection?.confidence === 'low' && !noHeader && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <div className="flex items-start gap-2">
                     <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
@@ -936,18 +1018,43 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                   </div>
                 </div>
               )}
+              
+              {/* Multiple likely rows warning */}
+              {headerDetection && headerDetection.confidence === 'medium' && !noHeader && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-yellow-800">
+                      Two rows look like they could be your header. Please choose the correct one.
+                    </p>
+                  </div>
+                </div>
+              )}
+              
+              {/* Row alignment warning */}
+              {rowAlignmentIssues.length > 0 && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-yellow-800">
+                      Some rows appear misaligned. Once headers are confirmed, I'll help you fix any formatting issues.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Next Steps Info */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-sm text-gray-700">
-                  <strong>What's next:</strong> Once headers are confirmed, we'll review your column names and give you a chance to rename them if needed.
+                  Next, we'll review your column names and give you a chance to rename them if needed.
                 </p>
               </div>
             </div>
           </div>
         )}
+      </div>
 
-        {/* Controls */}
+      {/* Controls */}
         <div className="flex items-center justify-between gap-4 pt-4 border-t border-gray-200">
           <div className="flex items-center gap-2">
             <Button
@@ -982,7 +1089,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
             )}
             <Button
               onClick={handleContinue}
-              disabled={loading || applyingHeader || !currentFile}
+              disabled={loading || applyingHeader || !currentFile || noHeader}
               className="flex items-center gap-2 bg-[#458EE2] hover:bg-[#3a7bc7]"
             >
               {applyingHeader ? (

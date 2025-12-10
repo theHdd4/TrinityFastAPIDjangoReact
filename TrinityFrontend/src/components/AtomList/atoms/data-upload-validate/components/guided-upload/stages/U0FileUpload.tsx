@@ -584,88 +584,78 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
   return (
     <StageLayout
       title="Upload Your Dataset"
-      explanation="What Trinity needs: Select your dataset file to begin the priming process."
-      helpText="Supported formats: CSV, XLSX, TSV. You can upload multiple files at once."
+      explanation="Choose a CSV or Excel file from your computer."
     >
-
-      {/* Single Key Action: Select File */}
-      <div
-        className={`border-2 border-dashed rounded-lg p-12 text-center transition-all duration-300 ${
-          isDragging
-            ? 'border-[#458EE2] bg-blue-50'
-            : 'border-gray-300 hover:border-[#458EE2] hover:bg-gray-50'
-        } ${isUploading ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}
+      <div 
+        className="space-y-6"
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
       >
+        {/* Single Key Action: Select File */}
         <div className="flex flex-col items-center gap-4">
-          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#458EE2] to-[#3a7bc7] flex items-center justify-center shadow-lg">
-            <Upload className="w-8 h-8 text-white" />
-          </div>
-          {isUploading ? (
-            <div className="space-y-2">
-              <p className="text-gray-700 font-medium">Uploading files...</p>
-              <div className="w-48 h-1 bg-gray-200 rounded-full overflow-hidden">
+          <Button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white px-8 py-6 text-base"
+          >
+            <FileText className="w-5 h-5 mr-2" />
+            Select File
+          </Button>
+          
+          {isUploading && (
+            <div className="space-y-2 w-full max-w-xs">
+              <p className="text-gray-700 font-medium text-center">Uploading files...</p>
+              <div className="w-full h-1 bg-gray-200 rounded-full overflow-hidden">
                 <div className="h-full bg-[#458EE2] animate-pulse" style={{ width: '60%' }} />
               </div>
             </div>
-          ) : (
-            <>
-              <div>
-                <p className="text-gray-700 font-medium mb-1">Click to select files</p>
-                <p className="text-sm text-gray-500">or drag and drop files here</p>
-              </div>
-              <Button
-                variant="outline"
-                className="mt-2"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  fileInputRef.current?.click();
-                }}
-              >
-                <FileText className="w-4 h-4 mr-2" />
-                Select File
-              </Button>
-            </>
           )}
         </div>
-      </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept=".csv,.xlsx,.xls,.tsv"
-        onChange={(e) => {
-          handleFileSelect(e.target.files);
-          e.target.value = ''; // Reset input
-        }}
-        className="hidden"
-      />
-
-      {uploadError && (
-        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-600">{uploadError}</p>
-        </div>
-      )}
-
-      <div className="text-center">
-        <button
-          type="button"
-          className="text-sm text-gray-500 hover:text-[#458EE2] hover:underline"
-          onClick={(e) => {
-            e.preventDefault();
-            // TODO: Implement sample dataset loading
-            toast({
-              title: 'Coming soon',
-              description: 'Sample dataset feature will be available soon.',
-            });
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".csv,.xlsx,.xls,.tsv"
+          onChange={(e) => {
+            handleFileSelect(e.target.files);
+            e.target.value = ''; // Reset input
           }}
-        >
-          Optional: Use Sample Dataset
-        </button>
+          className="hidden"
+        />
+
+        {uploadError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-600">{uploadError}</p>
+          </div>
+        )}
+
+        {/* Secondary link: Supported formats */}
+        <div className="text-center">
+          <p className="text-sm text-gray-500">
+            Supported formats: <span className="font-medium">CSV, XLSX, TSV</span>
+          </p>
+        </div>
+
+        {/* Optional: Use Sample Dataset */}
+        <div className="text-center">
+          <button
+            type="button"
+            className="text-sm text-gray-500 hover:text-[#458EE2] hover:underline"
+            onClick={(e) => {
+              e.preventDefault();
+              // TODO: Implement sample dataset loading
+              toast({
+                title: 'Coming soon',
+                description: 'Sample dataset feature will be available soon.',
+              });
+            }}
+          >
+            Optional: Use Sample Dataset
+          </button>
+        </div>
       </div>
 
       {/* Sheet Selection Modal - Same as SavedDataFramesPanel */}

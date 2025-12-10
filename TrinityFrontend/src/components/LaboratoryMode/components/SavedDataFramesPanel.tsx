@@ -1816,6 +1816,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                     let currentStage: string | undefined;
                     let completedSteps: string[] = [];
                     let missingSteps: string[] = [];
+                    let isInProgressFromBackend = false;
 
                     if (primingRes.ok) {
                       const primingData = await primingRes.json();
@@ -1823,6 +1824,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                       currentStage = primingData?.current_stage;
                       completedSteps = Array.isArray(primingData?.completed_steps) ? primingData.completed_steps : [];
                       missingSteps = Array.isArray(primingData?.missing_steps) ? primingData.missing_steps : [];
+                      // Use backend's is_in_progress value directly
+                      isInProgressFromBackend = primingData?.is_in_progress === true;
                     }
 
                     // Also check classifier config
@@ -1865,7 +1868,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                     const allSteps = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
                     missingSteps = allSteps.filter(s => !completedSteps.includes(s));
 
-                    const isInProgress = currentStage && currentStage !== 'U7' && currentStage !== 'U0' && !isPrimed;
+                    // Use backend's is_in_progress value directly
+                    // Backend logic: Red (U0/U1), Yellow (U2-U6), Green (U7)
+                    // If backend didn't provide is_in_progress, calculate it: U2-U6 are in progress
+                    const isInProgress = isInProgressFromBackend || 
+                      (currentStage && currentStage !== 'U7' && currentStage !== 'U0' && currentStage !== 'U1' && !isPrimed);
 
                     primingStatusChecks[f.object_name] = {
                       isPrimed,
@@ -2549,7 +2556,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                   ? 'text-green-600 font-medium'
                                   : sheetStatus?.isInProgress
                                   ? 'text-yellow-600 font-medium'
-                                  : 'text-gray-700'
+                                  : 'text-red-600 font-medium'
                               }`}
                             >
                               <FileText className="w-3 h-3 text-gray-400 flex-shrink-0" />

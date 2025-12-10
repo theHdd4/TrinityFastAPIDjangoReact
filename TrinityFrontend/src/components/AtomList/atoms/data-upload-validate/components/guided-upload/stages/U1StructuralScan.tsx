@@ -101,16 +101,19 @@ export const U1StructuralScan: React.FC<U1StructuralScanProps> = ({
       return {
         mainMessage: `You have uploaded ${caseData.filename}.`,
         subMessage: "Let's make sure it is interpreted correctly.",
+        reassurance: undefined,
       };
     } else if (caseType === 'multiSheet') {
       return {
         mainMessage: `You have uploaded ${caseData.filename} containing ${caseData.sheetCount} sheets.`,
         subMessage: "Let's take a moment to make sure each sheet is interpreted correctly.",
+        reassurance: "Don't worry — if some sheets are irrelevant, you can delete or ignore them later.",
       };
     } else {
       return {
         mainMessage: `You have uploaded ${caseData.fileCount} files and a total of ${caseData.totalSheets} sheets.`,
         subMessage: "Let's make sure they are interpreted correctly.",
+        reassurance: "Trinity will process them one at a time. You can delete irrelevant files later.",
       };
     }
   };
@@ -136,15 +139,9 @@ export const U1StructuralScan: React.FC<U1StructuralScanProps> = ({
 
   return (
     <StageLayout
-      title="Structural Scan"
+      title="Upload Your Dataset"
       explanation={message.mainMessage}
-      helpText={
-        caseType === 'multiSheet' 
-          ? "Don't worry — if some sheets are irrelevant, you can delete or ignore them later."
-          : caseType === 'multiple'
-          ? "Trinity will process them one at a time. You can delete irrelevant files later."
-          : undefined
-      }
+      helpText={message.reassurance}
     >
       <div className="space-y-6">
         {/* Main Message */}
@@ -207,7 +204,7 @@ export const U1StructuralScan: React.FC<U1StructuralScanProps> = ({
               </SelectContent>
             </Select>
             <p className="text-xs text-gray-500 mt-2">
-              You can change this selection later if needed.
+              Sheets you don't need can be removed later.
             </p>
           </div>
         )}

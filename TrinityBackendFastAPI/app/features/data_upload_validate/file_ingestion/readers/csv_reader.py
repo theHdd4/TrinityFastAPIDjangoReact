@@ -59,6 +59,11 @@ class CSVReader:
             delimiter = CSVReader._detect_delimiter(content, encoding)
         metadata["delimiter"] = delimiter
         
+        # CRITICAL FIX: Find maximum column count across all rows first
+        # This prevents truncation when description rows have fewer columns than data rows
+        max_cols = CSVReader._find_max_columns(content, encoding, delimiter)
+        logger.debug(f"Detected maximum columns: {max_cols}")
+        
         # Try reading with detected encoding
         try:
             # First, read without header to allow header detection
@@ -79,6 +84,11 @@ class CSVReader:
                 read_kwargs["error_bad_lines"] = False
                 read_kwargs["warn_bad_lines"] = False
             
+            # CRITICAL: Use names parameter to ensure all columns are preserved
+            # Create column names for all columns up to max_cols
+            if max_cols > 0:
+                read_kwargs["names"] = [f"col_{i}" for i in range(max_cols)]
+            
             df_raw = pd.read_csv(io.BytesIO(content), **read_kwargs)
         except Exception as e:
             logger.warning(f"Failed to read CSV with {encoding}: {e}, trying fallback encodings")
@@ -97,6 +107,10 @@ class CSVReader:
                     else:
                         read_kwargs["error_bad_lines"] = False
                         read_kwargs["warn_bad_lines"] = False
+                    
+                    # CRITICAL: Use names parameter to ensure all columns are preserved
+                    if max_cols > 0:
+                        read_kwargs["names"] = [f"col_{i}" for i in range(max_cols)]
                     
                     df_raw = pd.read_csv(io.BytesIO(content), **read_kwargs)
                     metadata["encoding"] = fallback_enc
@@ -119,6 +133,10 @@ class CSVReader:
                 else:
                     read_kwargs["error_bad_lines"] = False
                     read_kwargs["warn_bad_lines"] = False
+                
+                # CRITICAL: Use names parameter to ensure all columns are preserved
+                if max_cols > 0:
+                    read_kwargs["names"] = [f"col_{i}" for i in range(max_cols)]
                 
                 df_raw = pd.read_csv(io.BytesIO(content), **read_kwargs)
                 metadata["encoding"] = "utf-8"
@@ -193,4 +211,55 @@ class CSVReader:
             return best_delimiter
         except Exception:
             return ','  # Default to comma
+    
+    @staticmethod
+    def _find_max_columns(content: bytes, encoding: str, delimiter: str, sample_rows: int = 0) -> int:
+        """
+        Find the maximum number of columns across all rows in the CSV file.
+        This prevents truncation when description rows have fewer columns than data rows.
+        
+        Args:
+            content: File content bytes
+            encoding: File encoding
+            delimiter: CSV delimiter
+            sample_rows: Number of rows to sample (0 = all rows, default: scan all)
+        
+        Returns:
+            Maximum column count found
+        """
+        try:
+            import csv as csv_module
+            
+            # Decode content
+            text_content = content.decode(encoding, errors='ignore')
+            
+            # Use csv module to parse and count columns per row
+            max_cols = 0
+            row_count = 0
+            
+            # Create a StringIO object for csv reader
+            csv_reader = csv_module.reader(
+                io.StringIO(text_content),
+                delimiter=delimiter,
+                quoting=csv_module.QUOTE_MINIMAL
+            )
+            
+            # CRITICAL: Scan ALL rows (or sample_rows if specified) to find true maximum
+            # This is essential because description rows at the start may have fewer columns
+            # than data rows that come later
+            for row in csv_reader:
+                if sample_rows > 0 and row_count >= sample_rows:
+                    break
+                col_count = len(row)
+                if col_count > max_cols:
+                    max_cols = col_count
+                row_count += 1
+            
+            logger.debug(f"Scanned {row_count} rows, found max columns: {max_cols}")
+            return max_cols if max_cols > 0 else 1  # At least 1 column
+            
+        except Exception as e:
+            logger.warning(f"Error finding max columns: {e}, defaulting to 100")
+            # Fallback: return a reasonable default
+            return 100
 

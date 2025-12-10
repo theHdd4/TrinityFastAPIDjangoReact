@@ -120,6 +120,8 @@ def _smart_csv_parse(content: bytes, csv_kwargs: dict) -> tuple[pl.DataFrame, li
     return data_upload_service._smart_csv_parse(content, csv_kwargs)
 
 
+
+
 # app/routes.py - Add MinIO imports and configuration
 
 from minio import Minio
@@ -738,16 +740,24 @@ async def create_new(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error reading file {file.filename}: {str(e)}")
 
-        # Parse file to DataFrame using Polars for efficient serialization
+        # Parse file to DataFrame using RobustFileReader (uses fixed CSVReader/ExcelReader)
         try:
-            if file.filename.lower().endswith(".csv"):
-                df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
-            elif file.filename.lower().endswith((".xls", ".xlsx")):
-                df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, file_metadata = RobustFileReader.read_file_to_pandas(
+                content=content,
+                filename=file.filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
             else:
-                raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-
-            df = df_pl.to_pandas()
+                df = df_result
+            
+            # Convert to Polars for consistency with existing code
+            df_pl = pl.from_pandas(df)
 
             # Attempt to convert object columns that look like dates or datetimes
             date_pat = re.compile(
@@ -2042,8 +2052,29 @@ async def save_dataframes(
         if filename.lower().endswith(".csv"):
             csv_path = getattr(fileobj, "name", None)
             if csv_path and os.path.exists(csv_path):
+                # CRITICAL: For batched reading, we need to scan first to find max columns
+                # Read first batch to determine schema, then use that schema for all batches
+                from app.features.data_upload_validate.file_ingestion.readers.csv_reader import CSVReader
+                from app.features.data_upload_validate.file_ingestion.detectors.encoding_detector import EncodingDetector
+                
+                # Read file content to find max columns
+                with open(csv_path, 'rb') as f:
+                    content = f.read()
+                encoding = EncodingDetector.detect(content)
+                delimiter = CSVReader._detect_delimiter(content, encoding)
+                max_cols = CSVReader._find_max_columns(content, encoding, delimiter, sample_rows=0)
+                
+                # Create schema with all columns
+                if max_cols > 0:
+                    schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
+                    batched_kwargs = CSV_READ_KWARGS.copy()
+                    batched_kwargs["schema"] = schema
+                    batched_kwargs["truncate_ragged_lines"] = False
+                else:
+                    batched_kwargs = CSV_READ_KWARGS.copy()
+                
                 reader = pl.read_csv_batched(
-                    csv_path, batch_size=1_000_000, **CSV_READ_KWARGS
+                    csv_path, batch_size=1_000_000, **batched_kwargs
                 )
                 try:
                     first_chunk = next(reader)
@@ -2080,7 +2111,18 @@ async def save_dataframes(
                 df_pl = None
             else:
                 data_bytes = fileobj.read()
-                df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
+                # Use RobustFileReader which handles column preservation automatically
+                df_result, _ = RobustFileReader.read_file_to_polars(
+                    content=data_bytes,
+                    filename=filename,
+                    auto_detect_header=True,
+                    return_raw=False,
+                )
+                # Handle both single DataFrame and dict (multiple sheets)
+                if isinstance(df_result, dict):
+                    df_pl = list(df_result.values())[0]  # Use first sheet
+                else:
+                    df_pl = df_result
                 df_pl = data_upload_service._normalize_column_names(df_pl)
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)
@@ -3093,7 +3135,19 @@ async def export_csv(object_name: str):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
         else:
-            df = pd.read_csv(io.BytesIO(content))
+            # Use RobustFileReader to preserve all columns
+            filename = Path(object_name).name
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=content,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         
         # Convert to CSV bytes
         csv_bytes = df.to_csv(index=False).encode("utf-8")
@@ -3146,7 +3200,19 @@ async def export_excel(object_name: str):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
         else:
-            df = pd.read_csv(io.BytesIO(content))
+            # Use RobustFileReader to preserve all columns
+            filename = Path(object_name).name
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=content,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         
         # Convert to Excel bytes
         excel_buffer = io.BytesIO()
@@ -3382,16 +3448,25 @@ async def change_workbook_sheet(
         raise HTTPException(status_code=400, detail=f"Failed to read workbook: {exc}")
 
     try:
-        excel_file = pd.ExcelFile(io.BytesIO(workbook_bytes))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Failed to open workbook: {exc}")
-
-    sheet_names = excel_file.sheet_names or []
-    if sheet_name_clean not in sheet_names:
-        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name_clean}' not found")
-
-    try:
-        df = excel_file.parse(sheet_name_clean)
+        # Use ExcelReader to preserve all columns (single approach, no duplication)
+        from app.features.data_upload_validate.file_ingestion.readers.excel_reader import ExcelReader
+        dfs_dict, excel_metadata = ExcelReader.read(
+            content=workbook_bytes,
+            sheet_name=sheet_name_clean,
+            auto_detect_header=True,
+            return_raw=False,
+        )
+        
+        # Get sheet names from metadata
+        sheet_names = excel_metadata.get("sheet_names", [])
+        if sheet_name_clean not in sheet_names:
+            raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name_clean}' not found")
+        
+        # Handle both single DataFrame and dict (multiple sheets)
+        if isinstance(dfs_dict, dict):
+            df = dfs_dict[sheet_name_clean]
+        else:
+            df = dfs_dict
         df_pl = pl.from_pandas(df)
         arrow_buf = io.BytesIO()
         df_pl.write_ipc(arrow_buf)
@@ -3424,7 +3499,18 @@ def _load_dataframe_for_processing(object_name: str, content: bytes) -> pd.DataF
         table = reader.read_all()
         return table.to_pandas()
     if object_name.lower().endswith(".csv"):
-        return pd.read_csv(io.BytesIO(content))
+        # Use RobustFileReader to preserve all columns
+        filename = Path(object_name).name
+        df_result, _ = RobustFileReader.read_file_to_pandas(
+            content=content,
+            filename=filename,
+            auto_detect_header=True,
+            return_raw=False,
+        )
+        # Handle both single DataFrame and dict (multiple sheets)
+        if isinstance(df_result, dict):
+            return list(df_result.values())[0]  # Use first sheet
+        return df_result
     if object_name.lower().endswith(".parquet"):
         return pd.read_parquet(io.BytesIO(content))
     raise ValueError("Unsupported file format for processing")
@@ -3611,17 +3697,25 @@ async def get_file_metadata(request: Request):
         data = read_minio_object(file_path)
         filename = Path(file_path).name
         
-        # Parse based on file type
-        if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-        elif filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        # Parse based on file type using RobustFileReader
+        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         elif filename.lower().endswith(".arrow"):
             df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
-        
-        df = df_pl.to_pandas()
         
         # Collect column metadata
         columns_info = []
@@ -3671,40 +3765,37 @@ async def get_file_preview(
         data = read_minio_object(object_name)
         filename = Path(object_name).name
         
-        # Use robust file reader in raw mode (no header detection)
-        try:
-            df_result, file_metadata = RobustFileReader.read_file_to_pandas(
-                content=data,
-                filename=filename,
-                sheet_name=sheet_name,
-                return_raw=True,  # Return raw rows without header detection
-            )
-            
-            # Handle both single DataFrame and dict (multiple sheets)
-            if isinstance(df_result, dict):
-                df = list(df_result.values())[0]  # Use first sheet
-            else:
-                df = df_result
-        except Exception as e:
-            logger.warning(f"Robust reader failed, using legacy parser: {e}")
-            # Fallback to legacy parser - read without headers
-            if filename.lower().endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(data), header=None, low_memory=False)
-            elif filename.lower().endswith((".xls", ".xlsx")):
-                df = pd.read_excel(io.BytesIO(data), sheet_name=sheet_name or 0, header=None)
-            elif filename.lower().endswith(".arrow"):
-                # For arrow files, convert to raw format: columns become first row
-                df_pl = pl.read_ipc(io.BytesIO(data))
-                df = df_pl.to_pandas()
-                # Extract column names as first row
-                column_names = df.columns.tolist()
-                # Reset columns to numeric indices
-                df.columns = range(len(df.columns))
-                # Prepend column names as first row
-                first_row_df = pd.DataFrame([column_names], columns=df.columns)
-                df = pd.concat([first_row_df, df], ignore_index=True)
-            else:
-                raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        # Handle Arrow files first (not supported by RobustFileReader)
+        if filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
+            # Extract column names as first row
+            column_names = df.columns.tolist()
+            # Reset columns to numeric indices
+            df.columns = range(len(df.columns))
+            # Prepend column names as first row
+            first_row_df = pd.DataFrame([column_names], columns=df.columns)
+            df = pd.concat([first_row_df, df], ignore_index=True)
+        elif filename.lower().endswith((".csv", ".xls", ".xlsx")):
+            # Use RobustFileReader for CSV/Excel files
+            try:
+                df_result, file_metadata = RobustFileReader.read_file_to_pandas(
+                    content=data,
+                    filename=filename,
+                    sheet_name=sheet_name,
+                    return_raw=True,  # Return raw rows without header detection
+                )
+                
+                # Handle both single DataFrame and dict (multiple sheets)
+                if isinstance(df_result, dict):
+                    df = list(df_result.values())[0]  # Use first sheet
+                else:
+                    df = df_result
+            except Exception as e:
+                logger.error(f"RobustFileReader failed: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
         
         # Separate description rows from data rows
         description_rows, df_data = DescriptionSeparator.separate_description_rows(df)
@@ -3790,40 +3881,37 @@ async def apply_header_selection(
         data = read_minio_object(object_name)
         filename = Path(object_name).name
         
-        # Use robust file reader in raw mode
-        try:
-            df_result, file_metadata = RobustFileReader.read_file_to_pandas(
-                content=data,
-                filename=filename,
-                sheet_name=sheet_name,
-                return_raw=True,
-            )
-            
-            # Handle both single DataFrame and dict (multiple sheets)
-            if isinstance(df_result, dict):
-                df_raw = list(df_result.values())[0]  # Use first sheet
-            else:
-                df_raw = df_result
-        except Exception as e:
-            logger.warning(f"Robust reader failed, using legacy parser: {e}")
-            # Fallback to legacy parser - read without headers
-            if filename.lower().endswith(".csv"):
-                df_raw = pd.read_csv(io.BytesIO(data), header=None, low_memory=False)
-            elif filename.lower().endswith((".xls", ".xlsx")):
-                df_raw = pd.read_excel(io.BytesIO(data), sheet_name=sheet_name or 0, header=None)
-            elif filename.lower().endswith(".arrow"):
-                # For arrow files, convert to raw format: columns become first row
-                df_pl = pl.read_ipc(io.BytesIO(data))
-                df_raw = df_pl.to_pandas()
-                # Extract column names as first row
-                column_names = df_raw.columns.tolist()
-                # Reset columns to numeric indices
-                df_raw.columns = range(len(df_raw.columns))
-                # Prepend column names as first row
-                first_row_df = pd.DataFrame([column_names], columns=df_raw.columns)
-                df_raw = pd.concat([first_row_df, df_raw], ignore_index=True)
-            else:
-                raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        # Handle Arrow files first (not supported by RobustFileReader)
+        if filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+            df_raw = df_pl.to_pandas()
+            # Extract column names as first row
+            column_names = df_raw.columns.tolist()
+            # Reset columns to numeric indices
+            df_raw.columns = range(len(df_raw.columns))
+            # Prepend column names as first row
+            first_row_df = pd.DataFrame([column_names], columns=df_raw.columns)
+            df_raw = pd.concat([first_row_df, df_raw], ignore_index=True)
+        elif filename.lower().endswith((".csv", ".xls", ".xlsx")):
+            # Use RobustFileReader for CSV/Excel files
+            try:
+                df_result, file_metadata = RobustFileReader.read_file_to_pandas(
+                    content=data,
+                    filename=filename,
+                    sheet_name=sheet_name,
+                    return_raw=True,
+                )
+                
+                # Handle both single DataFrame and dict (multiple sheets)
+                if isinstance(df_result, dict):
+                    df_raw = list(df_result.values())[0]  # Use first sheet
+                else:
+                    df_raw = df_result
+            except Exception as e:
+                logger.error(f"RobustFileReader failed: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
         
         # Separate description rows if any
         description_rows, df_data = DescriptionSeparator.separate_description_rows(df_raw)
@@ -3847,8 +3935,30 @@ async def apply_header_selection(
         df_processed = DataCleaner.remove_empty_columns(df_processed)
         df_processed = df_processed.reset_index(drop=True)
         
+        # CRITICAL FIX: Replace empty strings with NaN before converting to Polars
+        # Polars will fail if it tries to convert empty strings to numeric types
+        # Replace empty strings and whitespace-only strings with NaN for all object columns
+        for col in df_processed.columns:
+            if df_processed[col].dtype == 'object':
+                # Replace empty strings, whitespace-only strings, and null-like strings with NaN
+                df_processed[col] = df_processed[col].replace(['', ' ', '  ', 'None', 'null', 'NULL', 'nan', 'NaN', 'N/A', 'n/a'], pd.NA)
+        
         # Convert to Polars and save as Arrow
-        df_pl = pl.from_pandas(df_processed)
+        # Use nan_to_null=True to convert pandas NaN to Polars null
+        # This prevents Polars from trying to convert empty strings to numeric types
+        try:
+            df_pl = pl.from_pandas(df_processed, nan_to_null=True)
+        except Exception as e:
+            # If conversion fails due to type inference issues, convert all to string first
+            logger.warning(f"Direct Polars conversion failed: {e}. Converting all columns to string first, then inferring types.")
+            # Convert all columns to string first (this prevents type inference errors)
+            df_processed_str = df_processed.astype(str)
+            # Replace string representations of NaN/None/empty with None
+            df_processed_str = df_processed_str.replace(['nan', 'None', 'null', 'NULL', 'NaN', '<NA>', 'NaT', ''], None)
+            # Convert to Polars with all columns as string
+            df_pl = pl.from_pandas(df_processed_str, nan_to_null=True)
+            # Now let Polars infer proper types - it will handle None/null values gracefully
+            # Polars can infer types from string data when null values are properly set
         
         # Save to MinIO
         arrow_buf = io.BytesIO()
@@ -3900,17 +4010,25 @@ async def get_file_columns(
         data = read_minio_object(object_name)
         filename = Path(object_name).name
         
-        # Parse based on file type
-        if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-        elif filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        # Parse based on file type using RobustFileReader
+        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         elif filename.lower().endswith(".arrow"):
             df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
-        
-        df = df_pl.to_pandas()
         
         # Get column names and sample values
         columns = list(df.columns)
@@ -3976,17 +4094,25 @@ async def detect_datetime_format(request: Request):
         data = read_minio_object(file_path)
         filename = Path(file_path).name
         
-        # Parse based on file type
-        if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-        elif filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        # Parse based on file type using RobustFileReader
+        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         elif filename.lower().endswith(".arrow"):
             df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
-        
-        df = df_pl.to_pandas()
         
         if column_name not in df.columns:
             raise HTTPException(status_code=400, detail=f"Column '{column_name}' not found")
@@ -4155,17 +4281,25 @@ async def apply_data_transformations(request: Request):
         data = read_minio_object(file_path)
         filename = Path(file_path).name
         
-        # Parse based on file type
-        if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-        elif filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        # Parse based on file type using RobustFileReader
+        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         elif filename.lower().endswith(".arrow"):
             df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
-        
-        df = df_pl.to_pandas()
         
         # Apply missing value strategies first
         for col_name, strategy_config in missing_value_strategies.items():
@@ -4400,7 +4534,11 @@ async def check_priming_status(
         # Determine completion status
         completed = bool(is_primed) or (current_stage == "U7")
         missing_steps = [s for s in all_steps if s not in completed_steps]
-        is_in_progress = bool(current_stage) and current_stage != "U7" and current_stage != "U0"
+        # Status colors:
+        # - Red: U0 or U1 (step 1 or earlier) - not in progress
+        # - Yellow: U2-U6 (step 2 to step 7) - in progress
+        # - Green: U7 (step 8 - completed) - primed
+        is_in_progress = bool(current_stage) and current_stage not in ["U0", "U1", "U7"]
         
         return {
             "completed": completed,
