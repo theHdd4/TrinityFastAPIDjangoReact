@@ -52,7 +52,7 @@ from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
 from .laboratory_retriever import LaboratoryRetrievalPipeline
 from STREAMAI.lab_context_builder import LabContextBuilder
-from STREAMAI.lab_memory_models import WorkflowStepRecord
+from STREAMAI.lab_memory_models import LaboratoryEnvelope, WorkflowStepRecord
 from STREAMAI.lab_memory_store import LabMemoryStore
 # Import workflow_insight_agent - try both paths for Docker and local development
 try:
@@ -2849,6 +2849,11 @@ WORKFLOW PLANNING:
         if self.lab_memory_store:
             try:
                 self.lab_memory_store.apply_context(project_context)
+                request_id = self.lab_memory_store.get_or_create_request_id(
+                    session_id=sequence_id,
+                    incoming_request_id=request_id,
+                    project_context=project_context,
+                )
             except Exception as ctx_exc:
                 logger.warning("⚠️ Failed to apply project context to lab memory store: %s", ctx_exc)
         if intent_route:
@@ -3448,8 +3453,10 @@ WORKFLOW PLANNING:
                                 available_files=available_files,
                                 frontend_chat_id=frontend_chat_id,
                                 react_state=react_state,
-                              dependency_tokens=dependency_tokens,
-                          )
+                                lab_envelope=lab_envelope,
+                                lab_request_id=lab_envelope.request_id if lab_envelope else None,
+                                dependency_tokens=dependency_tokens,
+                            )
                             if replayed_previous:
                                 logger.info("🔄 ReAct: Previous step re-executed to produce materialized output; retrying current step plan")
                         
@@ -3491,16 +3498,18 @@ WORKFLOW PLANNING:
                     logger.info(f"📁 ReAct: Using {len(current_available_files_for_exec)} available files for step {current_step_number} execution")
                     try:
                         execution_result = await self._execute_step_with_events(
-                            websocket=websocket,
-                            step=next_step,
-                            plan=plan,
-                            sequence_id=sequence_id,
-                            original_prompt=effective_user_prompt,
-                            project_context=project_context,
-                            user_id=user_id,
-                            available_files=current_available_files_for_exec,  # Use updated file list with newly created files
-                            frontend_chat_id=frontend_chat_id  # Pass chat_id for cache isolation
-                        )
+                              websocket=websocket,
+                              step=next_step,
+                              plan=plan,
+                              sequence_id=sequence_id,
+                              original_prompt=effective_user_prompt,
+                              project_context=project_context,
+                              user_id=user_id,
+                              available_files=current_available_files_for_exec,  # Use updated file list with newly created files
+                              frontend_chat_id=frontend_chat_id,  # Pass chat_id for cache isolation
+                              lab_envelope=lab_envelope,
+                              lab_request_id=lab_envelope.request_id if lab_envelope else None,
+                          )
                     except Exception as e:
                         logger.error(f"❌ ReAct: Step execution failed: {e}")
                         execution_result = {
@@ -3942,7 +3951,9 @@ WORKFLOW PLANNING:
         project_context: Dict[str, Any],
         user_id: str,
         available_files: List[str],
-        frontend_chat_id: Optional[str] = None
+        frontend_chat_id: Optional[str] = None,
+        lab_envelope: Optional[LaboratoryEnvelope] = None,
+        lab_request_id: Optional[str] = None,
     ):
         """
         Execute a single step with WebSocket events (SuperAgent pattern).
@@ -4043,47 +4054,92 @@ WORKFLOW PLANNING:
             )
             
             logger.info(f"✅ Parameters: {json.dumps(parameters, indent=2)[:150]}...")
-            
+
+            reuse_entry = None
+            try:
+                reuse_entry = self._find_reusable_atom_metadata(
+                    sequence_id=sequence_id,
+                    request_id=lab_request_id,
+                    step=step,
+                    parameters=parameters,
+                    project_context=project_context,
+                )
+            except Exception as reuse_exc:
+                logger.warning("⚠️ Failed to check atom_execution_metadata reuse: %s", reuse_exc)
+
+            execution_result: Dict[str, Any] = {}
+            atom_insights: List[Dict[str, str]] = []
+
             # ================================================================
             # PHASE B: CREATE EMPTY CARD (Like SuperAgent)
             # ================================================================
-            logger.info(f"🎴 Creating empty card for {atom_id}...")
-            
-            # Create card via FastAPI
-            card_id = f"card-{uuid.uuid4().hex}"
-            
-            # EVENT 2: CARD_CREATED
-            await self._send_event(
-                websocket,
-                WebSocketEvent(
-                    "card_created",
-                    {
-                        "step": step_number,
-                        "card_id": card_id,
-                        "atom_id": atom_id,
-                        "sequence_id": sequence_id,
-                        "action": "CARD_CREATION"
-                    }
-                ),
-                f"card_created event (step {step_number})"
-            )
-            
-            logger.info(f"✅ Card created: {card_id}")
-            
-            # ================================================================
-            # PHASE C: EXECUTE ATOM TO GET RESULTS
-            # ================================================================
-            logger.info(f"⚙️ Executing atom {atom_id}...")
-            
-            execution_result = await self._execute_atom_with_retry(
-                atom_id=atom_id,
-                parameters=parameters,
-                session_id=sequence_id,
-                step_number=step_number,
-                sequence_id=sequence_id,
-                websocket=websocket,
-                frontend_chat_id=frontend_chat_id
-            )
+            if reuse_entry:
+                card_id = reuse_entry.get("outputs", {}).get("card_id") or step.output_alias or f"card-reuse-{step_number}"
+                logger.info(
+                    "♻️ Reusing atom_execution_metadata for step %s (atom=%s); skipping duplicate execution",
+                    step_number,
+                    atom_id,
+                )
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "atom_reused",
+                        {
+                            "step": step_number,
+                            "atom_id": atom_id,
+                            "sequence_id": sequence_id,
+                            "message": "Atom execution reused from persisted history; no duplicate run.",
+                        },
+                    ),
+                    f"atom_reused event (step {step_number})",
+                )
+                execution_result = reuse_entry.get("outputs") or {"success": True}
+                execution_result.setdefault("success", True)
+                execution_result["reused"] = True
+                execution_result.setdefault(
+                    "message",
+                    "Reused prior atom execution based on atom_execution_metadata.",
+                )
+            else:
+                logger.info(f"🎴 Creating empty card for {atom_id}...")
+
+                # Create card via FastAPI
+                card_id = f"card-{uuid.uuid4().hex}"
+
+                # EVENT 2: CARD_CREATED
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "card_created",
+                        {
+                            "step": step_number,
+                            "card_id": card_id,
+                            "atom_id": atom_id,
+                            "sequence_id": sequence_id,
+                            "action": "CARD_CREATION"
+                        }
+                    ),
+                    f"card_created event (step {step_number})",
+                )
+
+                logger.info(f"✅ Card created: {card_id}")
+
+                # ================================================================
+                # PHASE C: EXECUTE ATOM TO GET RESULTS
+                # ================================================================
+                logger.info(f"⚙️ Executing atom {atom_id}...")
+
+                self._enforce_dataframe_guard(atom_id, parameters, sequence_id)
+
+                execution_result = await self._execute_atom_with_retry(
+                    atom_id=atom_id,
+                    parameters=parameters,
+                    session_id=sequence_id,
+                    step_number=step_number,
+                    sequence_id=sequence_id,
+                    websocket=websocket,
+                    frontend_chat_id=frontend_chat_id
+                )
 
             # Log atom result details for debugging
             logger.info(f"📊 Atom {atom_id} execution result keys: {list(execution_result.keys())}")
@@ -4116,6 +4172,26 @@ WORKFLOW PLANNING:
                 step=step,
                 execution_result=execution_result,
             )
+
+            if lab_envelope and self.lab_memory_store:
+                try:
+                    step_record = WorkflowStepRecord(
+                        step_number=step_number,
+                        atom_id=atom_id,
+                        inputs=parameters or {},
+                        outputs=execution_result or {},
+                        tool_calls=execution_result.get("tool_calls")
+                        if isinstance(execution_result.get("tool_calls"), list)
+                        else [],
+                        decision_rationale=step.description,
+                    )
+                    self.lab_memory_store.append_atom_execution_metadata(
+                        envelope=lab_envelope,
+                        step_record=step_record,
+                        project_context=project_context,
+                    )
+                except Exception as meta_exc:
+                    logger.warning("⚠️ Failed to append atom execution metadata: %s", meta_exc)
 
             logger.info(f"✅ Atom executed: {json.dumps(execution_result, indent=2)[:150]}...")
             self._record_step_execution_result(
@@ -4373,6 +4449,91 @@ WORKFLOW PLANNING:
 
         return True, ""
 
+    @staticmethod
+    def _normalize_inputs_for_compare(inputs: Any) -> Any:
+        if not isinstance(inputs, dict):
+            return inputs
+        return {key: value for key, value in inputs.items() if key != "prompt"}
+
+    def _find_reusable_atom_metadata(
+        self,
+        *,
+        sequence_id: str,
+        request_id: Optional[str],
+        step: WorkflowStepPlan,
+        parameters: Dict[str, Any],
+        project_context: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Return matching metadata entry if this atom/input was already executed."""
+
+        if not self.lab_memory_store or not request_id:
+            return None
+
+        history = self.lab_memory_store.get_atom_execution_metadata(
+            session_id=sequence_id,
+            request_id=request_id,
+            project_context=project_context,
+        )
+        normalized_parameters = self._normalize_inputs_for_compare(parameters)
+
+        for entry in history:
+            if entry.get("atom_id") != step.atom_id:
+                continue
+
+            if entry.get("step_number") == step.step_number:
+                return entry
+
+            normalized_entry_inputs = self._normalize_inputs_for_compare(entry.get("inputs"))
+            if normalized_entry_inputs and normalized_entry_inputs == normalized_parameters:
+                return entry
+
+        return None
+
+    def _enforce_dataframe_guard(
+        self, atom_id: str, parameters: Dict[str, Any], session_id: str
+    ) -> None:
+        """Ensure a prepared dataframe exists before executing dataframe atoms."""
+
+        dataframe_atoms = {
+            "dataframe-operations",
+            "create-column",
+            "create-transform",
+            "merge",
+            "concat",
+            "groupby-wtg-avg",
+            "pivot-table",
+        }
+
+        if atom_id not in dataframe_atoms:
+            return
+
+        available_files = self._sequence_available_files.get(session_id, []) or []
+        explicit_files: List[str] = []
+        for key in ("file", "file_path", "input_file", "output_file", "result_file", "base_file"):
+            value = parameters.get(key)
+            if isinstance(value, str):
+                explicit_files.append(value)
+
+        dataframe_config = parameters.get("dataframe_config")
+        if isinstance(dataframe_config, dict):
+            operations = dataframe_config.get("operations") or []
+            if not operations:
+                raise RuntimeError(
+                    "dataframe_config.operations is empty; run df_ops/filters to prepare the dataset before executing atoms."
+                )
+
+        if not available_files and not explicit_files:
+            raise RuntimeError(
+                "No dataframe available for execution; ensure df_ops/filters prepared the correct dataset before running this atom."
+            )
+
+        if available_files and explicit_files:
+            for path in explicit_files:
+                if path not in available_files:
+                    raise RuntimeError(
+                        f"Requested dataframe '{path}' is not in the prepared set; refresh df_ops context before executing {atom_id}."
+                    )
+
     async def _replay_previous_step_for_output(
         self,
         websocket,
@@ -4385,6 +4546,8 @@ WORKFLOW PLANNING:
         frontend_chat_id: Optional[str],
         react_state: Optional[ReActState],
         dependency_tokens: Optional[List[str]] = None,
+        lab_envelope: Optional[LaboratoryEnvelope] = None,
+        lab_request_id: Optional[str] = None,
     ) -> bool:
         """Re-execute the prior step when chaining fails due to missing materialized output."""
 
@@ -4482,6 +4645,8 @@ WORKFLOW PLANNING:
                 user_id=user_id,
                 available_files=current_available_files,
                 frontend_chat_id=frontend_chat_id,
+                lab_envelope=lab_envelope,
+                lab_request_id=lab_request_id,
             )
         except Exception as exec_exc:
             logger.error(f"❌ ReAct: Replay of step {step_number} failed: {exec_exc}")

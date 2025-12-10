@@ -98,6 +98,104 @@ class LabMemoryStore:
             logger.warning("Failed to create MongoDB indices for lab context: %s", exc)
         return collection
 
+    def _load_existing_context(
+        self,
+        *,
+        session_id: str,
+        request_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the latest persisted context document for a session/request.
+
+        Atom snapshots are excluded because they are stored separately with
+        ``record_type="atom_snapshot"`` and should not be merged with the
+        primary request document.
+        """
+
+        query: Dict[str, Any] = {
+            "client_name": self.client_name,
+            "app_name": self.app_name,
+            "project_name": self.project_name,
+            "session_id": session_id,
+            "record_type": {"$ne": "atom_snapshot"},
+        }
+        if request_id:
+            query["request_id"] = request_id
+
+        try:
+            return self.mongo_collection.find_one(query, sort=[("timestamp", -1)])
+        except PyMongoError as exc:  # pragma: no cover - defensive read guard
+            logger.warning("Failed to load existing lab context: %s", exc)
+            return None
+
+    @staticmethod
+    def _merge_atom_execution_metadata(
+        existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Merge atom execution metadata lists while deduplicating entries.
+
+        Entries are keyed by (step_number, atom_id, normalized inputs) to avoid
+        duplicate cards or repeated execution history rows.
+        """
+
+        def _metadata_key(entry: Dict[str, Any]) -> Tuple[Any, Any, str]:
+            try:
+                inputs_serialized = json.dumps(entry.get("inputs") or {}, sort_keys=True, default=str)
+            except Exception:
+                inputs_serialized = str(entry.get("inputs"))
+            return (
+                entry.get("step_number"),
+                entry.get("atom_id"),
+                inputs_serialized,
+            )
+
+        merged: Dict[Tuple[Any, Any, str], Dict[str, Any]] = {}
+        for source in (existing or []) + (incoming or []):
+            key = _metadata_key(source)
+            merged[key] = {**source}
+
+        # Stable ordering by step number then timestamp if available
+        def _sort_key(entry: Dict[str, Any]) -> Tuple[int, datetime]:
+            step_num = entry.get("step_number") or 0
+            timestamp = entry.get("timestamp")
+            if isinstance(timestamp, datetime):
+                return step_num, timestamp
+            return step_num, datetime.utcnow()
+
+        merged_list = list(merged.values())
+        merged_list.sort(key=_sort_key)
+        return merged_list
+
+    def get_or_create_request_id(
+        self, session_id: str, incoming_request_id: Optional[str], project_context: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Return a stable request ID for a session/project combination.
+
+        If a context document already exists for the session, reuse its
+        ``request_id`` to keep a single Mongo row per project/session. When no
+        record exists, the provided ``incoming_request_id`` is returned.
+        """
+
+        self.apply_context(project_context)
+        existing = self._load_existing_context(session_id=session_id)
+        if existing and existing.get("request_id"):
+            return str(existing["request_id"])
+        return incoming_request_id or f"req-{session_id}"
+
+    def get_atom_execution_metadata(
+        self,
+        *,
+        session_id: str,
+        request_id: Optional[str] = None,
+        project_context: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Load atom execution metadata for the given session/request."""
+
+        self.apply_context(project_context)
+        existing = self._load_existing_context(session_id=session_id, request_id=request_id)
+        if not existing:
+            return []
+        return existing.get("atom_execution_metadata") or []
+
     def _resolve_context_from_env(self) -> Tuple[str, str, str]:
         """Resolve client/app/project from environment and settings overrides."""
 
@@ -212,6 +310,10 @@ class LabMemoryStore:
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
         data = serialized.encode("utf-8")
         key = self._object_key(document.envelope.session_id, document.envelope.request_id)
+        existing_doc = self._load_existing_context(
+            session_id=document.envelope.session_id,
+            request_id=document.envelope.request_id,
+        )
 
         try:
             self.minio_client.put_object(
@@ -225,6 +327,23 @@ class LabMemoryStore:
             logger.warning("Failed to store laboratory memory in MinIO: %s", exc)
 
         try:
+            new_atom_metadata = [
+                {
+                    "step_number": step.step_number,
+                    "atom_id": step.atom_id,
+                    "tool_calls": step.tool_calls,
+                    "inputs": step.inputs,
+                    "outputs": step.outputs,
+                    "timestamp": step.timestamp,
+                }
+                for step in document.workflow_state.steps
+            ]
+
+            merged_metadata = self._merge_atom_execution_metadata(
+                existing_doc.get("atom_execution_metadata") if existing_doc else [],
+                new_atom_metadata,
+            )
+
             mongo_payload = {
                 **payload,
                 "memory_type": "Trinity AI Persistent JSON Memory",
@@ -249,17 +368,7 @@ class LabMemoryStore:
                     "user_id": document.envelope.user_id,
                     "feature_flags": document.envelope.feature_flags,
                 },
-                "atom_execution_metadata": [
-                    {
-                        "step_number": step.step_number,
-                        "atom_id": step.atom_id,
-                        "tool_calls": step.tool_calls,
-                        "inputs": step.inputs,
-                        "outputs": step.outputs,
-                        "timestamp": step.timestamp,
-                    }
-                    for step in document.workflow_state.steps
-                ],
+                "atom_execution_metadata": merged_metadata,
             }
             self.mongo_collection.replace_one(
                 {
@@ -346,13 +455,82 @@ class LabMemoryStore:
         workflow_state: WorkflowState,
         business_goals: BusinessGoals,
         analysis_insights: AnalysisInsights,
-    ) -> LaboratoryMemoryDocument:
+        ) -> LaboratoryMemoryDocument:
         return LaboratoryMemoryDocument(
             envelope=envelope,
             workflow_state=workflow_state,
             business_goals=business_goals,
             analysis_insights=analysis_insights,
         )
+
+    def append_atom_execution_metadata(
+        self,
+        *,
+        envelope: LaboratoryEnvelope,
+        step_record: WorkflowStepRecord,
+        project_context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Upsert atom execution metadata into the primary context document."""
+
+        self.apply_context(project_context)
+
+        incoming_entry = {
+            "step_number": step_record.step_number,
+            "atom_id": step_record.atom_id,
+            "tool_calls": step_record.tool_calls,
+            "inputs": step_record.inputs,
+            "outputs": step_record.outputs,
+            "timestamp": step_record.timestamp,
+            "decision_rationale": step_record.decision_rationale,
+            "edge_cases": step_record.edge_cases,
+        }
+
+        existing_doc = self._load_existing_context(
+            session_id=envelope.session_id, request_id=envelope.request_id
+        ) or {}
+        merged_metadata = self._merge_atom_execution_metadata(
+            existing_doc.get("atom_execution_metadata") or [], [incoming_entry]
+        )
+
+        base_filter = {
+            "client_name": self.client_name,
+            "app_name": self.app_name,
+            "project_name": self.project_name,
+            "session_id": envelope.session_id,
+            "request_id": envelope.request_id,
+        }
+
+        try:
+            self.mongo_collection.update_one(
+                base_filter,
+                {
+                    "$set": {
+                        "atom_execution_metadata": merged_metadata,
+                        "memory_type": "Trinity AI Persistent JSON Memory",
+                        "model_version": envelope.model_version,
+                        "prompt_template_version": envelope.prompt_template_version,
+                        "prompt_template_hash": envelope.prompt_template_hash,
+                        "input_hash": envelope.input_hash,
+                        "freshness_state": {
+                            "template_hash": envelope.prompt_template_hash,
+                            "input_hash": envelope.input_hash,
+                            "deterministic_params": envelope.deterministic_params,
+                            "retrieved_at": datetime.utcnow(),
+                        },
+                    },
+                    "$setOnInsert": {
+                        "app_name": self.app_name,
+                        "client_name": self.client_name,
+                        "project_name": self.project_name,
+                        "session_id": envelope.session_id,
+                        "request_id": envelope.request_id,
+                        "timestamp": envelope.timestamp,
+                    },
+                },
+                upsert=True,
+            )
+        except PyMongoError as exc:  # pragma: no cover - database guard
+            logger.warning("Failed to append atom execution metadata: %s", exc)
 
     def save_atom_snapshot(
         self,
