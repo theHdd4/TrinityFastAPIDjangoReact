@@ -1,10 +1,10 @@
 """
 Legacy entrypoint for the Stream AI WebSocket orchestrator.
 
-The implementation now lives in ``TrinityAgent.STREAMAI.WebsocketOrchestrator``
-for improved modularity and readability.
+The implementation now lives in ``.WebsocketOrchestrator`` for improved
+modularity and readability.
 """
-from TrinityAgent.STREAMAI.WebsocketOrchestrator import (
+from .WebsocketOrchestrator import (
     ReActState,
     RetryableJSONGenerationError,
     StepEvaluation,
