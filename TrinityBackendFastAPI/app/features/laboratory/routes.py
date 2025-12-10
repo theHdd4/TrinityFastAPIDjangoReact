@@ -19,10 +19,10 @@ from .models import (
     VariableAssignRequest,
     VariableAssignResponse,
 )
-from .mongodb_saver import save_variable_definition, save_variable_to_project, get_config_variable_collection
-from fastapi import APIRouter, HTTPException, WebSocket
+from fastapi import WebSocket
 
-from .models import LaboratoryAtomResponse, LaboratoryCardRequest, LaboratoryCardResponse
+from app.features.project_state.routes import get_atom_list_configuration, save_atom_list_configuration
+from .mongodb_saver import save_variable_definition, save_variable_to_project, get_config_variable_collection
 from .websocket import handle_laboratory_sync
 
 router = APIRouter()
@@ -56,6 +56,56 @@ async def create_laboratory_card(payload: LaboratoryCardRequest) -> LaboratoryCa
         molecule_id=payload.molecule_id,
         molecule_title=None,
     )
+
+
+@router.delete("/cards/{client_name}/{app_name}/{project_name}/{card_id}")
+async def delete_laboratory_card(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    card_id: str,
+    mode: str = Query("laboratory"),
+):
+    """Delete a laboratory card and its atoms without prompting the UI."""
+
+    if not all([client_name, app_name, project_name, card_id]):
+        raise HTTPException(status_code=400, detail="client_name, app_name, project_name, and card_id are required")
+
+    current_state = await get_atom_list_configuration(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        mode=mode,
+    )
+
+    if current_state.get("status") != "success":
+        raise HTTPException(status_code=500, detail=current_state.get("error", "Unable to load current state"))
+
+    cards = current_state.get("cards", [])
+    filtered_cards = [card for card in cards if card.get("id") != card_id]
+
+    if len(filtered_cards) == len(cards):
+        return {"status": "noop", "message": "Card not found"}
+
+    save_payload = {
+        "cards": filtered_cards,
+        "workflow_molecules": current_state.get("workflow_molecules", []),
+        "auxiliaryMenuLeftOpen": current_state.get("auxiliaryMenuLeftOpen", True),
+        "autosaveEnabled": current_state.get("autosaveEnabled", True),
+        "mode": mode,
+    }
+
+    result = await save_atom_list_configuration(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        atom_config_data=save_payload,
+    )
+
+    if result.get("status") != "success":
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to delete card"))
+
+    return {"status": "deleted", "card_id": card_id, "mode": mode}
 
 
 @router.post("/variables/compute", response_model=VariableComputeResponse)
