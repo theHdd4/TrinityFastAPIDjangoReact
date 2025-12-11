@@ -187,6 +187,69 @@ def _compute_prerequisite_scores(prompt: str) -> dict:
         "card_prerequisite_score": card_prerequisite_score,
     }
 
+
+def _summarize_known_data(
+    atom_ai_context: dict, available_files: list[str] | None, initial_prompt: str
+) -> str:
+    """Generate a short summary of what is already known from the user."""
+
+    summaries: list[str] = []
+
+    if initial_prompt:
+        summaries.append(f"Initial intent: {initial_prompt.strip()[:120]}")
+
+    clarification_notes = atom_ai_context.get("clarifications") or []
+    if clarification_notes:
+        last_focus = clarification_notes[-1].get("focus") or clarification_notes[-1].get(
+            "type"
+        )
+        summaries.append(
+            f"Recent clarification ({last_focus}): {clarification_notes[-1].get('response', '')}".strip()
+        )
+
+    if available_files:
+        file_list = ", ".join(available_files[:3])
+        remaining = len(available_files) - min(3, len(available_files))
+        if remaining > 0:
+            file_list = f"{file_list} (+{remaining} more)"
+        summaries.append(f"Files shared: {file_list}")
+
+    return "; ".join(summaries) if summaries else "your latest request"
+
+
+def _build_conversational_clarification(
+    weakest_dimension: str,
+    card_score: float,
+    threshold: float,
+    atom_ai_context: dict,
+    available_files: list[str] | None,
+    initial_prompt: str,
+) -> str:
+    """Craft a conversational clarification prompt that cites known context."""
+
+    known_summary = _summarize_known_data(atom_ai_context, available_files, initial_prompt)
+
+    required_details = {
+        "intent clarity": (
+            "what success looks like, the exact deliverable (chart, table, cleaned file), and any must-have fields or metrics"
+        ),
+        "scope detectability": (
+            "which file or dataset to use, column names, and any filters or joins you want me to apply"
+        ),
+    }
+
+    request_detail = required_details.get(
+        weakest_dimension,
+        "the specific goal and the data or filters you want me to focus on",
+    )
+
+    return (
+        "I want to make sure I’m working with the right portion of your data. "
+        f"Here’s what I have so far: {known_summary}. "
+        f"Could you share {request_detail}? Once I have that, I’ll take care of the rest. "
+        f"(card_prerequisite_score={card_score:.2f}, threshold={threshold:.2f})"
+    )
+
 # Initialize components (will be set by main_api.py)
 rag_engine = None
 parameter_generator = None
@@ -677,13 +740,15 @@ async def execute_workflow_websocket(websocket: WebSocket):
         mentioned_files = message.get("mentioned_files") or []
 
         # Laboratory prerequisite scoring for atom execution
-        card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.7))
+        card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.6))
         prerequisite_scores = _compute_prerequisite_scores(user_prompt)
         card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
         atom_ai_context = project_context.get("ATOM_AI_Context") or {}
         if not isinstance(atom_ai_context, dict):
             atom_ai_context = {}
         atom_ai_context.setdefault("clarifications", [])
+        atom_ai_context["available_files"] = available_files
+        atom_ai_context["initial_prompt"] = user_prompt
 
         await _safe_send_json(
             websocket,
@@ -715,31 +780,25 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 key=lambda item: item[1],
             )[0]
 
-            clarification_prompts = {
-                "intent clarity": (
-                    "Describe the exact outcome and action you want (e.g., 'Create a bar chart of monthly revenue' or "
-                    "'Clean missing values and summarize averages'). Include the target format or file path if relevant."
-                ),
-                "scope detectability": (
-                    "List the exact dataset/file names and key fields or filters (e.g., "
-                    "'Use data/sales.csv with columns date, revenue; filter region=EU'). Mention any joins or groupings."
-                ),
-            }
-            clarification_message = clarification_prompts.get(
+            current_known_summary = _summarize_known_data(
+                atom_ai_context, available_files, user_prompt
+            )
+            atom_ai_context["latest_known_summary"] = current_known_summary
+
+            clarification_message = _build_conversational_clarification(
                 weakest_dimension,
-                "Please provide more detail so I can execute the next atom correctly. Include the goal, data sources, and any limits.",
+                card_prerequisite_score,
+                card_prerequisite_threshold,
+                atom_ai_context,
+                available_files,
+                user_prompt,
             )
 
             await _safe_send_json(
                 websocket,
                 {
                     "type": "clarification_required",
-                    "message": (
-                        f"I need more details to proceed with {weakest_dimension}. "
-                        f"Please respond with the specifics outlined: {clarification_message} "
-                        f"(card_prerequisite_score={card_prerequisite_score:.2f}, "
-                        f"threshold={card_prerequisite_threshold:.2f})"
-                    ),
+                    "message": clarification_message,
                     "focus": weakest_dimension,
                     "prerequisite_scores": prerequisite_scores,
                     "card_prerequisite_threshold": card_prerequisite_threshold,
