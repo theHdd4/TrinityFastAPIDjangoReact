@@ -139,7 +139,7 @@ def _compute_prerequisite_scores(prompt: str) -> dict:
     """Return prerequisite readiness scores for laboratory atom execution.
 
     The heuristic mirrors the lightweight vagueness detector while adding
-    signals for scope detectability and feasibility so Trinity AI can decide
+    signals for scope detectability so Trinity AI can decide
     whether to execute a laboratory atom or keep the human in the loop.
     """
 
@@ -147,7 +147,6 @@ def _compute_prerequisite_scores(prompt: str) -> dict:
         return {
             "intent_clarity_score": 0.0,
             "scope_detectability_score": 0.0,
-            "task_feasibility_score": 0.0,
             "card_prerequisite_score": 0.0,
         }
 
@@ -178,22 +177,13 @@ def _compute_prerequisite_scores(prompt: str) -> dict:
     scope_hits = sum(1 for kw in scope_keywords if kw in normalized)
     scope_detectability_score = min(1.0, vagueness_score * 0.5 + min(0.5, scope_hits * 0.08))
 
-    # Task feasibility rewards actionable verbs and numerical constraints
-    feasibility_signals = len(re.findall(r"\b(save|export|predict|evaluate|train|clean|aggregate|group|visualize)\b", normalized))
-    numeric_signals = len(re.findall(r"\d", normalized))
-    task_feasibility_score = min(
-        1.0,
-        vagueness_score * 0.4 + min(0.6, feasibility_signals * 0.1 + numeric_signals * 0.05),
-    )
-
     card_prerequisite_score = round(
-        (intent_clarity_score + scope_detectability_score + task_feasibility_score) / 3, 4
+        (intent_clarity_score + scope_detectability_score) / 2, 4
     )
 
     return {
         "intent_clarity_score": round(intent_clarity_score, 4),
         "scope_detectability_score": round(scope_detectability_score, 4),
-        "task_feasibility_score": round(task_feasibility_score, 4),
         "card_prerequisite_score": card_prerequisite_score,
     }
 
@@ -721,7 +711,6 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 (
                     ("intent clarity", prerequisite_scores.get("intent_clarity_score", 0.0)),
                     ("scope detectability", prerequisite_scores.get("scope_detectability_score", 0.0)),
-                    ("task feasibility", prerequisite_scores.get("task_feasibility_score", 0.0)),
                 ),
                 key=lambda item: item[1],
             )[0]
@@ -734,10 +723,6 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "scope detectability": (
                     "List the exact dataset/file names and key fields or filters (e.g., "
                     "'Use data/sales.csv with columns date, revenue; filter region=EU'). Mention any joins or groupings."
-                ),
-                "task feasibility": (
-                    "Share constraints that affect execution: data size, file formats, runtime/compute limits, "
-                    "or required output location (e.g., 'CSV is ~200MB; keep under 2 minutes; save output to reports/summary.csv')."
                 ),
             }
             clarification_message = clarification_prompts.get(
