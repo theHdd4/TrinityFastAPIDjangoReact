@@ -17,6 +17,7 @@ export interface TableTheme {
     hoverBg?: string;
     totalRowBg?: string;
     firstColumnBg?: string;
+    lastColumnBg?: string;
   };
 }
 

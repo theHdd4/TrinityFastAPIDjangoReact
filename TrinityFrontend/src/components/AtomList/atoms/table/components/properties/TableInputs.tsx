@@ -89,8 +89,9 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
   };
 
   const handleCreateBlankTable = async () => {
-    const rows = gridRows > 0 ? gridRows : manualRows;
-    const cols = gridCols > 0 ? gridCols : manualCols;
+    // Use manual dimensions when the manual input toggle is on; otherwise use grid selection
+    const rows = showManualInputs ? manualRows : gridRows;
+    const cols = showManualInputs ? manualCols : gridCols;
     
     if (rows < 1 || cols < 1) {
       setError('Please enter valid dimensions (minimum 1×1)');

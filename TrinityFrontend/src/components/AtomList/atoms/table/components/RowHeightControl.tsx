@@ -13,12 +13,12 @@ interface RowHeightControlProps {
 /**
  * Row Height Control with Unit System
  * 1 unit = 3px
- * Default: 1 unit (3px)
+ * Default: 10 units (30px) for blank tables
  */
 const RowHeightControl: React.FC<RowHeightControlProps> = ({
   value,
   onChange,
-  min = 1,
+  min = 10,
   max = 20,
 }) => {
   // Convert px to units (round to nearest)
@@ -27,8 +27,8 @@ const RowHeightControl: React.FC<RowHeightControlProps> = ({
   // Convert units to px
   const unitsToPx = (units: number): number => units * 3;
 
-  // Get current units from px value, default to 1 if no value or invalid
-  const currentUnits = value && value >= 3 ? pxToUnits(value) : 1;
+  // Get current units from px value, default to 10 if no value or invalid
+  const currentUnits = value && value >= 30 ? pxToUnits(value) : 10;
 
   const handleIncrease = () => {
     const newUnits = Math.min(currentUnits + 1, max);

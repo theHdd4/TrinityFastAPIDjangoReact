@@ -21,10 +21,10 @@ import {
 } from '../services/tableApi';
 import { toast } from '@/components/ui/use-toast';
 import { ArrowUp, ArrowDown, Info, X } from 'lucide-react';
-import RichTextCellEditor from './RichTextCellEditor';
 import CellRenderer from './CellRenderer';
-import TextBoxToolbar from '@/components/LaboratoryMode/components/CanvasArea/text-box/TextBoxToolbar';
-import type { TextAlignOption } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
+// import { TableRichTextToolbar } from './rich-text';
+import type { TableCellFormatting } from './rich-text/types';
+import { htmlMatchesValue, getPlainTextFromHtml } from './rich-text/utils/formattingUtils';
 import NumberFilterComponent from './filters/NumberFilterComponent';
 import TextFilterComponent from './filters/TextFilterComponent';
 
@@ -50,19 +50,28 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   const editingCellRef = useRef<{row: number, col: string} | null>(null);
   const editingCellValueRef = useRef<string>('');
   const editingCellHtmlRef = useRef<string>('');
+
+  // Helper to clear editing state safely
+  const clearEditingState = useCallback(() => {
+    setEditingCell(null);
+    setEditingCellValue('');
+    setEditingCellHtml('');
+    setShowToolbar(false);
+    editingCellRef.current = null;
+    editingCellValueRef.current = '';
+    editingCellHtmlRef.current = '';
+  }, []);
+
+  // Clear editing state when data/ordering changes (sort/filter/page) to avoid stale refs
+  useEffect(() => {
+    // Only clear if an edit was in progress
+    if (editingCellRef.current) {
+      clearEditingState();
+    }
+  }, [clearEditingState, settings.sortConfig, settings.filters, settings.currentPage]);
   
   // Rich text formatting state for current editing cell
-  const [cellFormatting, setCellFormatting] = useState<{
-    fontFamily: string;
-    fontSize: number;
-    bold: boolean;
-    italic: boolean;
-    underline: boolean;
-    strikethrough: boolean;
-    textColor: string;
-    backgroundColor: string;
-    textAlign: TextAlignOption;
-  }>({
+  const [cellFormatting, setCellFormatting] = useState<TableCellFormatting>({
     fontFamily: 'Arial',
     fontSize: 12,
     bold: false,
@@ -193,6 +202,16 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     return settings.columnWidths[column] || 112.5;
   };
 
+  // Calculate row height from font size
+  const calculateRowHeightFromFontSize = useCallback((fontSize: number): number => {
+    // Formula: fontSize * lineHeightMultiplier + padding
+    // Line height multiplier: 1.5 (standard)
+    // Padding: 8px (top + bottom)
+    const calculatedHeight = fontSize * 1.5 + 8;
+    // Minimum height: 24px, maximum: 200px
+    return Math.max(24, Math.min(200, Math.ceil(calculatedHeight)));
+  }, []);
+
   // Get row height (per-row or global default)
   const getRowHeight = (rowIndex: number) => {
     return settings.rowHeights?.[rowIndex] || settings.rowHeight || 24;
@@ -282,17 +301,51 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     };
   }, [resizingCol, resizingRow, settings.columnWidths, settings.rowHeights, onSettingsChange]);
 
+  // Shared sort updater - fetch sorted data from backend and persist sortConfig
+  const applySort = async (newSortConfig: Array<{ column: string; direction: 'asc' | 'desc' }>) => {
+    // If no table session yet, just update local config
+    if (!settings.tableId) {
+      onSettingsChange({ sortConfig: newSortConfig });
+      return;
+    }
+
+    try {
+      const resp = await updateTable(settings.tableId, {
+        ...settings,
+        sort_config: newSortConfig,
+      });
+
+      onSettingsChange({
+        sortConfig: newSortConfig,
+        tableData: {
+          table_id: resp.table_id,
+          columns: resp.columns,
+          rows: resp.rows,
+          row_count: resp.row_count,
+          column_types: resp.column_types,
+          object_name: resp.object_name || data.object_name,
+        },
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Sort failed',
+        description: error?.message || 'Failed to sort table',
+        variant: 'destructive',
+      });
+    }
+  };
+
   // Handle sort (for context menu - no click sorting)
   const handleSortAsc = (column: string) => {
-    onSettingsChange({ sortConfig: [{ column, direction: 'asc' as const }] });
+    applySort([{ column, direction: 'asc' }]);
   };
 
   const handleSortDesc = (column: string) => {
-    onSettingsChange({ sortConfig: [{ column, direction: 'desc' as const }] });
+    applySort([{ column, direction: 'desc' }]);
   };
 
   const handleClearSort = () => {
-    onSettingsChange({ sortConfig: [] });
+    applySort([]);
   };
 
   // Get sort indicator (for display only)
@@ -1055,7 +1108,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         strikethrough: cellFormat.strikethrough || false,
         textColor: cellFormat.textColor || '#000000',
         backgroundColor: cellFormat.backgroundColor || 'transparent',
-        textAlign: (cellFormat.textAlign || 'left') as TextAlignOption,
+        textAlign: (cellFormat.textAlign || 'left') as 'left' | 'center' | 'right',
       };
     }
     return {
@@ -1067,8 +1120,18 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       strikethrough: false,
       textColor: '#000000',
       backgroundColor: 'transparent',
-      textAlign: 'left' as TextAlignOption,
+      textAlign: 'left' as 'left' | 'center' | 'right',
     };
+  }, [settings.cellFormatting]);
+
+  // Get background color from formatting (not conditional formatting)
+  const getCellBackgroundColor = useCallback((rowIdx: number, column: string): string | undefined => {
+    const rowKey = String(rowIdx);
+    const cellFormat = settings.cellFormatting?.[rowKey]?.[column];
+    if (cellFormat?.backgroundColor && cellFormat.backgroundColor !== 'transparent') {
+      return cellFormat.backgroundColor;
+    }
+    return undefined; // Use default/CF background
   }, [settings.cellFormatting]);
 
   // Handle cell click to start editing
@@ -1096,6 +1159,19 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     // Load formatting for this cell
     const formatting = getCellFormatting(actualRowIdx, column);
     setCellFormatting(formatting);
+    
+    // If row height not set, calculate from font size
+    if (!settings.rowHeights?.[actualRowIdx]) {
+      const calculatedHeight = calculateRowHeightFromFontSize(formatting.fontSize);
+      const currentRowHeights = settings.rowHeights || {};
+      onSettingsChange({
+        rowHeights: {
+          ...currentRowHeights,
+          [actualRowIdx]: calculatedHeight,
+        },
+      });
+    }
+    
     setShowToolbar(true);
   };
 
@@ -1245,7 +1321,15 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     
     // Save the value and HTML from refs (more reliable than state during async operations)
     const valueToSave = editingCellValueRef.current || editingCellValue;
-    const htmlToSave = htmlValue || editingCellHtmlRef.current || editingCellHtml || valueToSave;
+    let htmlToSave = htmlValue || editingCellHtmlRef.current || editingCellHtml || valueToSave;
+    
+    // CRITICAL FIX: Ensure HTML matches plain text value
+    // If HTML doesn't match, regenerate it from plain text
+    const plainTextFromHtml = htmlToSave ? getPlainTextFromHtml(htmlToSave) : '';
+    if (plainTextFromHtml !== valueToSave) {
+      // HTML doesn't match plain text - use plain text as HTML (will preserve formatting via CSS)
+      htmlToSave = valueToSave;
+    }
     
     // Save formatting to settings
     const rowKey = String(globalRowIdx);
@@ -1266,7 +1350,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           strikethrough: cellFormatting.strikethrough,
           textColor: cellFormatting.textColor,
           backgroundColor: cellFormatting.backgroundColor,
-          textAlign: cellFormatting.textAlign,
+          // textAlign removed - not supported in table cells
         },
       },
     };
@@ -1290,16 +1374,23 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // Single atomic update with both formatting and tableData
       onSettingsChange(updatesToApply);
       
-      // Only clear editing state AFTER successful save
-      setEditingCell(null);
-      setEditingCellValue('');
-      setEditingCellHtml('');
-      setShowToolbar(false);
-      
-      // Clear refs as well
-      editingCellRef.current = null;
-      editingCellValueRef.current = '';
-      editingCellHtmlRef.current = '';
+  // Only clear editing state AFTER successful save
+  // CRITICAL: Check if the cell being committed still matches the current editing cell
+  // This prevents race conditions where user clicks to edit again before commit finishes
+  const stillEditingCell = editingCellRef.current;
+  if (stillEditingCell && stillEditingCell.row === globalRowIdx && stillEditingCell.col === column) {
+    // Cell still matches - safe to clear editing state
+    setEditingCell(null);
+    setEditingCellValue('');
+    setEditingCellHtml('');
+    setShowToolbar(false);
+    
+    // Clear refs as well
+    editingCellRef.current = null;
+    editingCellValueRef.current = '';
+    editingCellHtmlRef.current = '';
+  }
+  // If cell doesn't match, user has already clicked to edit again - don't clear state
     } catch (error) {
       // If save fails, restore editing state so user can try again
       setEditingCell({ row: globalRowIdx, col: column });
@@ -1317,10 +1408,12 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
   // Toolbar positioning - position near editing cell
   const [toolbarPosition, setToolbarPosition] = useState<{ top: number; left: number } | null>(null);
+  const [toolbarCellRect, setToolbarCellRect] = useState<{ top: number; left: number; width: number } | null>(null);
   
   useEffect(() => {
     if (!editingCell || !showToolbar) {
       setToolbarPosition(null);
+      setToolbarCellRect(null);
       return;
     }
 
@@ -1329,6 +1422,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // Double-check editingCell still exists (might have been cleared)
       if (!editingCell) {
         setToolbarPosition(null);
+        setToolbarCellRect(null);
         return;
       }
 
@@ -1344,8 +1438,14 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             top: Math.max(10, rect.top - 60), // Position above the cell, but not off-screen
             left: rect.left + rect.width / 2, // Center horizontally
           });
+          setToolbarCellRect({
+            top: rect.top + window.scrollY,
+            left: rect.left + window.scrollX,
+            width: rect.width,
+          });
         } catch (error) {
           setToolbarPosition(null);
+          setToolbarCellRect(null);
         }
       } else {
         // Cell element not found - might be scrolled out of view or re-rendered
@@ -1362,8 +1462,14 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                   top: Math.max(10, rect.top - 60),
                   left: rect.left + rect.width / 2,
                 });
+                setToolbarCellRect({
+                  top: rect.top + window.scrollY,
+                  left: rect.left + window.scrollX,
+                  width: rect.width,
+                });
               } catch (error) {
                 setToolbarPosition(null);
+                setToolbarCellRect(null);
               }
             }
           }
@@ -1723,6 +1829,12 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                           const dataColumnKey = columnKeyMap[column] || column;
                           const cellValue = row[dataColumnKey];
                           
+                        // Get background color from formatting (prioritize CF, then formatting, then theme)
+                        // During editing, use local cellFormatting state; otherwise use saved formatting
+                        const formattingBgColor = isEditing && editingCell?.row === actualRowIdx && editingCell?.col === column
+                          ? (cellFormatting.backgroundColor !== 'transparent' ? cellFormatting.backgroundColor : undefined)
+                          : getCellBackgroundColor(actualRowIdx, column);
+                        
                         return (
                           <TableCell
                             key={column}
@@ -1739,8 +1851,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                               height: `${getRowHeight(actualRowIdx)}px`,  // Use per-row height
                               borderColor: theme.colors.borderColor,
                               ...cellStyle, // Spread CF styles (includes backgroundColor, color, etc.)
-                              // CRITICAL: Re-apply CF colors AFTER to ensure they override everything
-                              backgroundColor: cellStyle.backgroundColor || undefined,
+                              // CRITICAL: Priority order: CF > Formatting > Theme
+                              // CF styles override everything (already in cellStyle)
+                              backgroundColor: cellStyle.backgroundColor || formattingBgColor || undefined,
                               color: cellStyle.color || undefined,
                             }}
                             data-table-cell-row={actualRowIdx}
@@ -1750,7 +1863,19 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                               value={isEditing ? editingCellValue : String(cellValue ?? '')}
                               html={(() => {
                                 const rowKey = String(actualRowIdx);
-                                return settings.cellFormatting?.[rowKey]?.[column]?.html;
+                                const cellFormat = settings.cellFormatting?.[rowKey]?.[column];
+                                const storedHtml = cellFormat?.html;
+                                const currentValue = String(cellValue ?? '');
+                                
+                                // CRITICAL FIX: If HTML exists, verify it matches current value
+                                // If HTML doesn't match current value, don't use HTML (will fallback to value)
+                                if (storedHtml) {
+                                  if (!htmlMatchesValue(storedHtml, currentValue)) {
+                                    return undefined; // Force fallback to plain text value
+                                  }
+                                }
+                                
+                                return storedHtml;
                               })()}
                               formatting={(() => {
                                 const rowKey = String(actualRowIdx);
@@ -1779,6 +1904,10 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                                   editingCellHtmlRef.current = htmlText; // Update ref immediately
                                 }
                               }}
+              onFormattingChange={(fmt) => {
+                if (!isEditing) return;
+                setCellFormatting(prev => ({ ...prev, ...fmt }));
+              }}
                               onCommit={(plainText, htmlText) => {
                                 commitCellEdit(actualRowIdx, column, htmlText);
                               }}
@@ -2231,94 +2360,15 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           portalTarget
         )}
 
-      {/* Rich Text Formatting Toolbar */}
-      {showToolbar && editingCell && toolbarPosition && portalTarget &&
+      {/* Rich Text Formatting Toolbar (temporarily disabled) */}
+      {false && showToolbar && editingCell && toolbarCellRect && portalTarget &&
         createPortal(
-          <div
-            ref={toolbarRef}
-            className="fixed z-[2000]"
-            style={{
-              top: `${toolbarPosition.top}px`,
-              left: `${toolbarPosition.left}px`,
-              transform: 'translateX(-50%)',
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <TextBoxToolbar
-              fontFamily={cellFormatting.fontFamily}
-              onFontFamilyChange={(font) => {
-                setCellFormatting(prev => ({ ...prev, fontFamily: font }));
-                // Apply formatting to contentEditable
-                document.execCommand('fontName', false, font);
-              }}
-              fontSize={cellFormatting.fontSize}
-              onIncreaseFontSize={() => {
-                const newSize = Math.min(cellFormatting.fontSize + 1, 72);
-                setCellFormatting(prev => ({ ...prev, fontSize: newSize }));
-                document.execCommand('fontSize', false, '3');
-              }}
-              onDecreaseFontSize={() => {
-                const newSize = Math.max(cellFormatting.fontSize - 1, 8);
-                setCellFormatting(prev => ({ ...prev, fontSize: newSize }));
-                document.execCommand('fontSize', false, '1');
-              }}
-              onApplyTextStyle={(preset) => {
-                setCellFormatting(prev => ({
-                  ...prev,
-                  fontSize: preset.fontSize,
-                  bold: preset.bold ?? false,
-                  italic: preset.italic ?? false,
-                  underline: preset.underline ?? false,
-                  strikethrough: preset.strikethrough ?? false,
-                }));
-                if (preset.bold) document.execCommand('bold', false);
-                if (preset.italic) document.execCommand('italic', false);
-                if (preset.underline) document.execCommand('underline', false);
-                if (preset.strikethrough) document.execCommand('strikeThrough', false);
-              }}
-              bold={cellFormatting.bold}
-              italic={cellFormatting.italic}
-              underline={cellFormatting.underline}
-              strikethrough={cellFormatting.strikethrough}
-              onToggleBold={() => {
-                const newBold = !cellFormatting.bold;
-                setCellFormatting(prev => ({ ...prev, bold: newBold }));
-                document.execCommand('bold', false);
-              }}
-              onToggleItalic={() => {
-                const newItalic = !cellFormatting.italic;
-                setCellFormatting(prev => ({ ...prev, italic: newItalic }));
-                document.execCommand('italic', false);
-              }}
-              onToggleUnderline={() => {
-                const newUnderline = !cellFormatting.underline;
-                setCellFormatting(prev => ({ ...prev, underline: newUnderline }));
-                document.execCommand('underline', false);
-              }}
-              onToggleStrikethrough={() => {
-                const newStrikethrough = !cellFormatting.strikethrough;
-                setCellFormatting(prev => ({ ...prev, strikethrough: newStrikethrough }));
-                document.execCommand('strikeThrough', false);
-              }}
-              align={cellFormatting.textAlign}
-              onAlign={(align) => {
-                setCellFormatting(prev => ({ ...prev, textAlign: align }));
-                document.execCommand('justifyLeft', false);
-                if (align === 'center') document.execCommand('justifyCenter', false);
-                if (align === 'right') document.execCommand('justifyRight', false);
-              }}
-              color={cellFormatting.textColor}
-              onColorChange={(color) => {
-                setCellFormatting(prev => ({ ...prev, textColor: color }));
-                document.execCommand('foreColor', false, color);
-              }}
-              backgroundColor={cellFormatting.backgroundColor}
-              onBackgroundColorChange={(color) => {
-                setCellFormatting(prev => ({ ...prev, backgroundColor: color }));
-                document.execCommand('backColor', false, color === 'transparent' ? '#ffffff' : color);
-              }}
-            />
-          </div>,
+          <TableRichTextToolbar
+            formatting={cellFormatting}
+            onFormattingChange={(fmt) => setCellFormatting(prev => ({ ...prev, ...fmt }))}
+            cellPosition={toolbarCellRect}
+            isVisible={true}
+          />,
           portalTarget
         )}
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -61,15 +61,42 @@ const TableSettingsTab: React.FC<Props> = ({ atomId }) => {
     });
   };
 
+  // Track previous theme to detect changes
+  const prevThemeRef = useRef<string>(design.theme);
+
   // Handle design change
   const handleDesignChange = (key: string, value: any) => {
+    const newDesign = {
+      ...design,
+      [key]: value,
+    };
+    
     updateSettings(atomId, {
-      design: {
-        ...design,
-        [key]: value,
-      }
+      design: newDesign
     });
+
+    // Auto-enable banded rows when theme changes from 'plain' to any other theme
+    if (key === 'theme' && prevThemeRef.current === 'plain' && value !== 'plain') {
+      if (!layout.bandedRows) {
+        updateSettings(atomId, {
+          layout: {
+            ...layout,
+            bandedRows: true,
+          }
+        });
+      }
+    }
+    
+    // Update ref for next comparison
+    if (key === 'theme') {
+      prevThemeRef.current = value;
+    }
   };
+
+  // Update ref when design.theme changes externally
+  useEffect(() => {
+    prevThemeRef.current = design.theme;
+  }, [design.theme]);
 
 
   // Handle total row config change with API call
@@ -169,23 +196,9 @@ const TableSettingsTab: React.FC<Props> = ({ atomId }) => {
       <Card className="p-4 space-y-4">
         <h3 className="text-sm font-semibold text-gray-800">Display Options</h3>
 
-        {/* Blank Table Mode: Show Row Numbers */}
-        {isBlankTableMode && (
-          <div className="flex items-center justify-between">
-            <Label htmlFor="showRowNumbers" className="text-sm">
-              Show Row Numbers
-            </Label>
-            <Switch
-              id="showRowNumbers"
-              checked={settings.showRowNumbers ?? true}
-              onCheckedChange={(checked) => handleSettingChange('showRowNumbers', checked)}
-            />
-          </div>
-        )}
-
-        {/* Both Modes: Row Height */}
+        {/* Row Height */}
         <RowHeightControl
-          value={settings.rowHeight || 3} // Default to 3px (1 unit)
+          value={settings.rowHeight || (isBlankTableMode ? 30 : 24)} // Default to 30px (10 units) for blank table, 24px for load mode
           onChange={(value) => handleSettingChange('rowHeight', value)}
         />
       </Card>
@@ -313,20 +326,36 @@ const TableSettingsTab: React.FC<Props> = ({ atomId }) => {
               Aggregations are calculated using all rows in the table
             </p>
             <div className="space-y-2 max-h-48 overflow-y-auto">
-              {visibleColumns.map((column) => {
-                const isNumeric = tableData.rows.length > 0 
-                  ? isNumericColumn(tableData.rows, column)
+              {visibleColumns.map((column, colIdx) => {
+                // When header row is ON, use first row cell value as display name and config key
+                // Otherwise use column ID (col_0, col_1, etc.)
+                const headerRowValue = layout.headerRow && tableData.rows?.[0]?.[column] 
+                  ? String(tableData.rows[0][column]).trim() 
+                  : null;
+                const displayName = headerRowValue && headerRowValue !== '' 
+                  ? headerRowValue 
+                  : column;
+                const configKey = layout.headerRow && headerRowValue && headerRowValue !== ''
+                  ? headerRowValue
+                  : column;
+                
+                // For numeric check, use data rows (skip header row if present)
+                const dataRows = layout.headerRow && tableData.rows.length > 0
+                  ? tableData.rows.slice(1)
+                  : (tableData.rows || []);
+                const isNumeric = dataRows.length > 0 
+                  ? isNumericColumn(dataRows, column)
                   : false;
-                const currentAgg = totalRowConfig[column] || 'none';
+                const currentAgg = totalRowConfig[configKey] || 'none';
                 
                 return (
                   <div key={column} className="flex items-center justify-between">
-                    <Label className="text-xs text-gray-600 flex-1 truncate mr-2">
-                      {column}
+                    <Label className="text-xs text-gray-600 flex-1 truncate mr-2" title={column}>
+                      {displayName}
                     </Label>
                     <select
                       value={currentAgg}
-                      onChange={(e) => handleTotalRowConfigChange(column, e.target.value)}
+                      onChange={(e) => handleTotalRowConfigChange(configKey, e.target.value)}
                       className="text-xs px-2 py-1 border border-gray-300 rounded focus:ring-teal-500 focus:border-teal-500"
                       disabled={!isNumeric && currentAgg !== 'none' && currentAgg !== 'count'}
                     >

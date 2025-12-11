@@ -202,9 +202,9 @@ const DEFAULT_SETTINGS: TableSettings = {
   visibleColumns: [],
   columnOrder: [],
   columnWidths: {},
-  rowHeight: 24,  // Reduced by 25%: 32px → 24px
+  rowHeight: 30,  // Default: 10 units (30px) for blank tables
   rowHeights: {},  // NEW: Empty by default, populated as rows are resized
-  showRowNumbers: true,
+  showRowNumbers: false,  // OFF by default for blank tables (out of theme)
   showSummaryRow: false,
   frozenColumns: 0,
   filters: {},
@@ -869,7 +869,9 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
     updateSettings(atomId, newSettings);
 
     // If we have a table ID, update backend and refresh data
-    if (settings.tableId && settings.tableData) {
+    // BUT: Skip updateTable call if tableData is being updated (cell edits, etc.)
+    // This prevents overwriting the updated tableData with stale data from updateTable
+    if (settings.tableId && settings.tableData && !newSettings.tableData) {
       try {
         const updatedData = await updateTable(settings.tableId, {
           visible_columns: newSettings.visibleColumns || settings.visibleColumns,
@@ -882,7 +884,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           row_height: newSettings.rowHeight || settings.rowHeight
         });
         
-        // ✅ Update tableData in settings
+        // ✅ Update tableData in settings (only if we didn't already update it above)
         updateSettings(atomId, { tableData: updatedData });
         
       } catch (err: any) {
