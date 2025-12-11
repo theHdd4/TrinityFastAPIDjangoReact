@@ -134,6 +134,69 @@ def _compute_vagueness_score(prompt: str) -> float:
     score = min(1.0, score * (1 + min(0.2, sentence_count * 0.05)))
     return score
 
+
+def _compute_prerequisite_scores(prompt: str) -> dict:
+    """Return prerequisite readiness scores for laboratory atom execution.
+
+    The heuristic mirrors the lightweight vagueness detector while adding
+    signals for scope detectability and feasibility so Trinity AI can decide
+    whether to execute a laboratory atom or keep the human in the loop.
+    """
+
+    if not prompt:
+        return {
+            "intent_clarity_score": 0.0,
+            "scope_detectability_score": 0.0,
+            "task_feasibility_score": 0.0,
+            "card_prerequisite_score": 0.0,
+        }
+
+    normalized = prompt.strip().lower()
+    vagueness_score = _compute_vagueness_score(prompt)
+
+    # Intent clarity mirrors vagueness score but rewards explicit objectives
+    intent_signals = len(re.findall(r"\b(analyze|build|create|train|summarize|compare)\b", normalized))
+    intent_clarity_score = min(1.0, vagueness_score * 0.7 + min(0.3, intent_signals * 0.1))
+
+    # Scope detectability favors dataset/file mentions and structural hints
+    scope_keywords = (
+        "dataset",
+        "dataframe",
+        "table",
+        "column",
+        "file",
+        "csv",
+        "json",
+        "parquet",
+        "chart",
+        "plot",
+        "model",
+        "merge",
+        "join",
+        "filter",
+    )
+    scope_hits = sum(1 for kw in scope_keywords if kw in normalized)
+    scope_detectability_score = min(1.0, vagueness_score * 0.5 + min(0.5, scope_hits * 0.08))
+
+    # Task feasibility rewards actionable verbs and numerical constraints
+    feasibility_signals = len(re.findall(r"\b(save|export|predict|evaluate|train|clean|aggregate|group|visualize)\b", normalized))
+    numeric_signals = len(re.findall(r"\d", normalized))
+    task_feasibility_score = min(
+        1.0,
+        vagueness_score * 0.4 + min(0.6, feasibility_signals * 0.1 + numeric_signals * 0.05),
+    )
+
+    card_prerequisite_score = round(
+        (intent_clarity_score + scope_detectability_score + task_feasibility_score) / 3, 4
+    )
+
+    return {
+        "intent_clarity_score": round(intent_clarity_score, 4),
+        "scope_detectability_score": round(scope_detectability_score, 4),
+        "task_feasibility_score": round(task_feasibility_score, 4),
+        "card_prerequisite_score": card_prerequisite_score,
+    }
+
 # Initialize components (will be set by main_api.py)
 rag_engine = None
 parameter_generator = None
@@ -615,6 +678,188 @@ async def execute_workflow_websocket(websocket: WebSocket):
             },
         )
 
+        # Extract remaining parameters for workflow
+        # Note: session_id and chat_id already extracted above for intent caching
+        available_files = message.get("available_files", [])
+        project_context = message.get("project_context", {}) or {}
+        user_id = message.get("user_id", "default_user")
+        history_summary = message.get("history_summary")
+        mentioned_files = message.get("mentioned_files") or []
+
+        # Laboratory prerequisite scoring for atom execution
+        card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.7))
+        prerequisite_scores = _compute_prerequisite_scores(user_prompt)
+        card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
+        atom_ai_context = project_context.get("ATOM_AI_Context") or {}
+        if not isinstance(atom_ai_context, dict):
+            atom_ai_context = {}
+        atom_ai_context.setdefault("clarifications", [])
+
+        await _safe_send_json(
+            websocket,
+            {
+                "type": "status",
+                "status": "prerequisite_check",
+                "message": (
+                    "Evaluating laboratory readiness for atom execution: "
+                    f"score={card_prerequisite_score:.2f}, threshold={card_prerequisite_threshold:.2f}"
+                ),
+                "prerequisite_scores": prerequisite_scores,
+                "card_prerequisite_threshold": card_prerequisite_threshold,
+            },
+        )
+
+        clarification_vagueness = vagueness_score
+        max_prerequisite_iterations = 6
+        iterations = 0
+        while (
+            card_prerequisite_score < card_prerequisite_threshold
+            or clarification_vagueness < vagueness_threshold
+        ):
+            iterations += 1
+            weakest_dimension = min(
+                (
+                    ("intent clarity", prerequisite_scores.get("intent_clarity_score", 0.0)),
+                    ("scope detectability", prerequisite_scores.get("scope_detectability_score", 0.0)),
+                    ("task feasibility", prerequisite_scores.get("task_feasibility_score", 0.0)),
+                ),
+                key=lambda item: item[1],
+            )[0]
+
+            clarification_prompts = {
+                "intent clarity": "What is the specific outcome you expect from this atom?",
+                "scope detectability": "Which dataset, file, or columns should this atom operate on?",
+                "task feasibility": "Are there constraints, sizes, or formats I should respect while executing this atom?",
+            }
+            clarification_message = clarification_prompts.get(
+                weakest_dimension, "Please provide more detail so I can execute the next atom correctly."
+            )
+
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "clarification_required",
+                    "message": (
+                        f"I need more details to proceed with {weakest_dimension}. "
+                        f"(card_prerequisite_score={card_prerequisite_score:.2f}, "
+                        f"threshold={card_prerequisite_threshold:.2f})"
+                    ),
+                    "focus": weakest_dimension,
+                    "prerequisite_scores": prerequisite_scores,
+                    "card_prerequisite_threshold": card_prerequisite_threshold,
+                    "vagueness_threshold": vagueness_threshold,
+                },
+            )
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "awaiting_clarification",
+                    "message": clarification_message,
+                    "focus": weakest_dimension,
+                },
+            )
+
+            clarification_response = await _wait_for_clarification_response(websocket)
+            if not clarification_response:
+                close_code = 1001
+                close_reason = "clarification_aborted"
+                return
+
+            response_message = clarification_response.get("message", "")
+            response_values = clarification_response.get("values") or {}
+            clarification_history.append(
+                {
+                    "message": response_message,
+                    "values": response_values,
+                    "focus": weakest_dimension,
+                    "type": "card_prerequisite",
+                }
+            )
+            atom_ai_context["clarifications"].append(
+                {
+                    "prompt": clarification_message,
+                    "response": response_message,
+                    "values": response_values,
+                    "focus": weakest_dimension,
+                }
+            )
+
+            clarification_parts = []
+            if response_message:
+                clarification_parts.append(response_message)
+            if response_values:
+                clarification_parts.append(" | ".join(f"{k}: {v}" for k, v in response_values.items()))
+
+            clarified_text = "; ".join(clarification_parts)
+            if clarified_text:
+                user_prompt = f"{user_prompt}\n\n{weakest_dimension.title()} clarification: {clarified_text}"
+
+            clarification_vagueness = _compute_vagueness_score(clarified_text or response_message)
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "vagueness_check",
+                    "message": (
+                        "Evaluating clarification quality: "
+                        f"score={clarification_vagueness:.2f}, threshold={vagueness_threshold:.2f}"
+                    ),
+                    "vagueness_score": clarification_vagueness,
+                    "vagueness_threshold": vagueness_threshold,
+                },
+            )
+
+            prerequisite_scores = _compute_prerequisite_scores(user_prompt)
+            card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "prerequisite_check",
+                    "message": (
+                        "Re-evaluated laboratory readiness: "
+                        f"score={card_prerequisite_score:.2f}, threshold={card_prerequisite_threshold:.2f}"
+                    ),
+                    "prerequisite_scores": prerequisite_scores,
+                    "card_prerequisite_threshold": card_prerequisite_threshold,
+                },
+            )
+
+            if iterations >= max_prerequisite_iterations and (
+                card_prerequisite_score < card_prerequisite_threshold
+                or clarification_vagueness < vagueness_threshold
+            ):
+                await _safe_send_json(
+                    websocket,
+                    {
+                        "type": "clarification_required",
+                        "message": (
+                            "I'm still missing enough detail to execute atoms reliably after multiple attempts. "
+                            "Please provide a concise, specific description so we can continue."
+                        ),
+                        "prerequisite_scores": prerequisite_scores,
+                        "card_prerequisite_threshold": card_prerequisite_threshold,
+                    },
+                )
+                close_code = 1001
+                close_reason = "prerequisite_threshold_not_met"
+                return
+
+        await _safe_send_json(
+            websocket,
+            {
+                "type": "status",
+                "status": "prerequisite_complete",
+                "message": "Card prerequisites satisfied. Proceeding to atom execution.",
+                "prerequisite_scores": prerequisite_scores,
+                "card_prerequisite_threshold": card_prerequisite_threshold,
+            },
+        )
+
+        atom_ai_context["latest_prerequisite_scores"] = prerequisite_scores
+        atom_ai_context["card_prerequisite_score"] = card_prerequisite_score
+
         # Step 4: Handle as workflow (intent already detected above - no need to detect again)
         logger.info("🔄 Routing to workflow handler")
         logger.info("ℹ️ Intent detection already done - proceeding with workflow execution (will NOT detect intent again)")
@@ -628,20 +873,18 @@ async def execute_workflow_websocket(websocket: WebSocket):
             close_code = 1001
             close_reason = "client_disconnected"
             return
-        
-        # Extract remaining parameters for workflow
-        # Note: session_id and chat_id already extracted above for intent caching
-        available_files = message.get("available_files", [])
-        project_context = message.get("project_context", {})
-        user_id = message.get("user_id", "default_user")
-        history_summary = message.get("history_summary")
-        mentioned_files = message.get("mentioned_files") or []
 
         # Persist vagueness metadata for downstream execution
-        project_context = project_context or {}
-        project_context["vagueness_score"] = vagueness_score
-        project_context["vagueness_threshold"] = vagueness_threshold
-        project_context["clarification_history"] = clarification_history
+        prerequisite_metadata = {
+            "vagueness_score": vagueness_score,
+            "vagueness_threshold": vagueness_threshold,
+            "clarification_history": clarification_history,
+            "card_prerequisite_score": card_prerequisite_score,
+            "card_prerequisite_threshold": card_prerequisite_threshold,
+            "prerequisite_scores": prerequisite_scores,
+            "ATOM_AI_Context": atom_ai_context,
+        }
+        project_context.update(prerequisite_metadata)
         
         # 🔧 CRITICAL FIX: Extract project context from file paths if not provided or contains 'default' values
         # Check if project_context is missing, empty, or contains 'default' values
@@ -687,7 +930,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         break
             
             if extracted_context:
-                project_context = extracted_context
+                project_context = {**extracted_context, **prerequisite_metadata}
             else:
                 # If still empty or contains 'default', try environment variables
                 import os
@@ -699,7 +942,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         "client_name": env_client,
                         "app_name": env_app,
                         "project_name": env_project,
-                        "available_files": available_files
+                        "available_files": available_files,
+                        **prerequisite_metadata,
                     }
                     logger.info(f"✅ Using project context from environment variables: client={env_client}, app={env_app}, project={env_project}")
                 else:
@@ -711,7 +955,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         "client_name": "",
                         "app_name": "",
                         "project_name": "",
-                        "available_files": available_files
+                        "available_files": available_files,
+                        **prerequisite_metadata,
                     }
         
         # Ensure available_files is included in project_context
