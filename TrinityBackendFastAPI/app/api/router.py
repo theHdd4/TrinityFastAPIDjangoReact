@@ -31,6 +31,7 @@ from app.features.laboratory.endpoint import router as laboratory_router
 from app.features.pivot_table.endpoint import router as pivot_table_router
 from app.features.unpivot.endpoint import router as unpivot_router
 from app.features.task_queue.endpoint import router as task_queue_router
+from app.features.pipeline.endpoint import router as pipeline_router
 
 api_router = APIRouter()
 text_router = APIRouter()
@@ -87,3 +88,13 @@ api_router.include_router(
 
 # Text router for text-based features
 text_router.include_router(textbox_router)
+
+# Pipeline execution router
+api_router.include_router(
+    pipeline_router,
+    prefix="/pipeline",
+    tags=["Pipeline Execution"]
+)
+
+
+

@@ -839,11 +839,25 @@ const renderChart = (
       updateSettings(atomId, { charts: updatedCharts });
     },
     onTitleChange: (newTitle: string) => {
-      const updatedCharts = charts.map(c => 
-        c.id === chart.id 
-          ? { ...c, title: newTitle }
-          : c
-      );
+      // 🔧 CRITICAL FIX: Get fresh charts from store to avoid stale state and prevent duplicates
+      const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+      const currentSettings = (currentAtom?.settings as any) || {};
+      const currentCharts = currentSettings.charts || charts;
+      
+      // Find the exact chart by ID to ensure we're updating the right one
+      const chartIndex = currentCharts.findIndex(c => c.id === chart.id);
+      if (chartIndex === -1) {
+        console.warn('⚠️ [TITLE-CHANGE] Chart not found, skipping title update', { chartId: chart.id });
+        return;
+      }
+      
+      // Update by index to prevent duplicates
+      const updatedCharts = [...currentCharts];
+      updatedCharts[chartIndex] = {
+        ...currentCharts[chartIndex], // Preserve all properties
+        title: newTitle // Only update title
+      };
+      
       updateSettings(atomId, { charts: updatedCharts });
     },
     forceSingleAxis: chart.dualAxisMode === 'single',
@@ -1458,7 +1472,7 @@ const renderChart = (
                           );
                         } else {
                           // Simple mode: Original filter controls
-                          if (Object.keys(chart.filters).length === 0) return null;
+                          if (!chart.filters || Object.keys(chart.filters).length === 0) return null;
                           
                           const isCollapsed = filtersCollapsed[chart.id] || false;
                           

@@ -796,12 +796,69 @@ def generate_chart_task(*, payload: Dict[str, Any]) -> Dict[str, Any]:
     request.file_id = resolved_id
 
     df = chart_service.get_file(request.file_id)
+    
+    # 🔧 CRITICAL: Create case-insensitive column mapping
+    # Map lowercase column names to actual column names in dataframe
+    column_mapping = {col.lower(): col for col in df.columns}
+    
+    # 🔧 CRITICAL: Map trace columns to actual dataframe columns (case-insensitive)
+    # Create new trace objects with mapped column names (Pydantic models are immutable)
     missing_columns = []
+    mapped_traces = []
     for trace in request.traces:
-        if trace.x_column not in df.columns:
-            missing_columns.append(trace.x_column)
-        if trace.y_column not in df.columns:
-            missing_columns.append(trace.y_column)
+        # Map x_column case-insensitively
+        x_column = trace.x_column
+        if x_column:
+            x_col_lower = x_column.lower()
+            if x_col_lower in column_mapping:
+                x_column = column_mapping[x_col_lower]
+            elif x_column not in df.columns:
+                missing_columns.append(trace.x_column)
+        
+        # Map y_column case-insensitively
+        y_column = trace.y_column
+        if y_column:
+            y_col_lower = y_column.lower()
+            if y_col_lower in column_mapping:
+                y_column = column_mapping[y_col_lower]
+            elif y_column not in df.columns:
+                missing_columns.append(trace.y_column)
+        
+        # Map legend_field case-insensitively
+        legend_field = trace.legend_field
+        if legend_field:
+            legend_col_lower = legend_field.lower()
+            if legend_col_lower in column_mapping:
+                legend_field = column_mapping[legend_col_lower]
+        
+        # Create new trace with mapped column names
+        mapped_trace = ChartTrace(
+            x_column=x_column,
+            y_column=y_column,
+            name=trace.name,
+            chart_type=trace.chart_type,
+            aggregation=trace.aggregation,
+            style=trace.style,
+            filters=trace.filters,
+            color=trace.color,
+            legend_field=legend_field
+        )
+        mapped_traces.append(mapped_trace)
+    
+    # Update request with mapped traces
+    request.traces = mapped_traces
+    
+    # Also map filters case-insensitively
+    if request.filters:
+        mapped_filters = {}
+        for key, value in request.filters.items():
+            key_lower = key.lower()
+            if key_lower in column_mapping:
+                mapped_filters[column_mapping[key_lower]] = value
+            else:
+                mapped_filters[key] = value
+        request.filters = mapped_filters
+    
     if missing_columns:
         raise ValueError(
             "Columns not found in dataframe: " + ", ".join(sorted(set(missing_columns)))

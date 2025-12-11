@@ -674,10 +674,24 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
     setSaveSuccess(false);
     try {
       const filename = saveFileName.trim() || `concat_${file1?.split('/')?.pop() || 'file1'}_${file2?.split('/')?.pop() || 'file2'}_${Date.now()}`;
+      
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
       const response = await fetch(`${CONCAT_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv_data: csvToSave, filename }),
+        body: JSON.stringify({ 
+          csv_data: csvToSave, 
+          filename,
+          // Pipeline tracking parameters
+          validator_atom_id: atomId,
+          card_id: cardId,
+          canvas_position: canvasPosition,
+        }),
       });
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, AlertCircle, Database } from 'lucide-react';
-import { ChartData } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { ChartData, useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { chartMakerApi } from '../services/chartMakerApi';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -21,6 +21,7 @@ interface ChartMakerSettingsProps {
   error?: string;
   dataSource?: string;
   hasExistingUpdates?: boolean;
+  atomId?: string; // For pipeline tracking
 }
 
 interface Frame {
@@ -39,7 +40,8 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
   },
   error,
   dataSource,
-  hasExistingUpdates = false
+  hasExistingUpdates = false,
+  atomId
 }) => {
   const [frames, setFrames] = useState<Frame[]>([]);
   const [selectedDataSource, setSelectedDataSource] = useState<string>(dataSource || '');
@@ -140,7 +142,17 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
       let uploadResponse;
 
       try {
-        uploadResponse = await chartMakerApi.loadSavedDataframe(processedObjectName);
+        // Get card_id and canvas_position for pipeline tracking if atomId is provided
+        let cardId = '';
+        let canvasPosition = 0;
+        if (atomId) {
+          const cards = useLaboratoryStore.getState().cards;
+          const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+          cardId = card?.id || '';
+          canvasPosition = card?.canvas_position ?? 0;
+        }
+        
+        uploadResponse = await chartMakerApi.loadSavedDataframe(processedObjectName, atomId, cardId, canvasPosition);
       } catch (error) {
         const displayName =
           frames

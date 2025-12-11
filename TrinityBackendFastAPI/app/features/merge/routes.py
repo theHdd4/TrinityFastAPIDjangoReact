@@ -9,8 +9,13 @@ import pyarrow.ipc as ipc
 import numpy as np
 from minio.error import S3Error
 from ..data_upload_validate.app.routes import get_object_prefix
+from app.features.project_state.routes import get_atom_list_configuration
 from .merge.base import get_common_columns, merge_dataframes
 from .deps import get_minio_df, get_minio_content_with_flight_fallback, minio_client, MINIO_BUCKET, redis_client
+from app.features.pipeline.service import record_atom_execution
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -18,7 +23,11 @@ router = APIRouter()
 async def init_merge(
     file1: str = Form(...),
     file2: str = Form(...),
-    bucket_name: str = Form(...)
+    bucket_name: str = Form(...),
+    # Pipeline tracking (optional)
+    validator_atom_id: str = Form(None),
+    card_id: str = Form(None),
+    canvas_position: int = Form(0),
 ):
     try:
         # Get the current object prefix for proper path resolution
@@ -28,15 +37,7 @@ async def init_merge(
         full_path1 = f"{prefix}{file1}" if not file1.startswith(prefix) else file1
         full_path2 = f"{prefix}{file2}" if not file2.startswith(prefix) else file2
         
-        print(f"🔍 MERGE INIT - Path resolution:")
-        print(f"   Original file1: {file1}")
-        print(f"   Original file2: {file2}")
-        print(f"   Current prefix: {prefix}")
-        print(f"   Full path1: {full_path1}")
-        print(f"   Full path2: {full_path2}")
-        
         # Load dataframes using direct MinIO access (same as perform endpoint)
-        print(f"📁 Loading dataframe 1 for init: {full_path1}")
         try:
             response1 = minio_client.get_object(bucket_name, full_path1)
             content1 = response1.read()
@@ -52,7 +53,6 @@ async def init_merge(
         except Exception as e:
             raise RuntimeError(f"Failed to fetch file1 from MinIO: {e}")
             
-        print(f"📁 Loading dataframe 2 for init: {full_path2}")
         try:
             response2 = minio_client.get_object(bucket_name, full_path2)
             content2 = response2.read()
@@ -76,15 +76,98 @@ async def init_merge(
         df2 = df2.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
         common_cols = get_common_columns(df1, df2)
 
-        print(f"✅ MERGE INIT - Found {len(common_cols)} common columns: {common_cols}")
-
-        return {
+        result = {
             "common_columns": common_cols,
             "join_methods": ["inner", "outer", "left", "right"],
             "fillna_method":["mean", "median", "mode", "ffill", "bfill", "value"]
         }
+        
+        # Record pipeline execution if validator_atom_id is provided
+        if validator_atom_id:
+            try:
+                # Extract client/app/project from file paths
+                path_parts1 = full_path1.split("/")
+                client_name = path_parts1[0] if len(path_parts1) > 0 else ""
+                app_name = path_parts1[1] if len(path_parts1) > 1 else ""
+                project_name = path_parts1[2] if len(path_parts1) > 2 else ""
+                
+                # Get user_id from atom configuration
+                user_id = None
+                try:
+                    atom_config = await get_atom_list_configuration(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        mode="laboratory"
+                    )
+                    if atom_config.get("status") == "success":
+                        cards = atom_config.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            atom = next((a for a in atoms if a.get("id") == validator_atom_id), None)
+                            if atom:
+                                user_id = atom.get("user_id")
+                                break
+                except Exception:
+                    pass
+                
+                # Build configuration for pipeline tracking
+                configuration = {
+                    "file1": full_path1,
+                    "file2": full_path2,
+                    "bucket_name": bucket_name,
+                }
+                
+                # Build API calls
+                execution_started_at = datetime.datetime.utcnow()
+                api_calls = [
+                    {
+                        "endpoint": "/merge/init",
+                        "method": "POST",
+                        "timestamp": execution_started_at,
+                        "params": configuration.copy(),
+                        "response_status": 200,
+                        "response_data": result
+                    }
+                ]
+                
+                # No output files for init
+                output_files = []
+                
+                execution_completed_at = datetime.datetime.utcnow()
+                execution_status = "success"
+                execution_error = None
+                
+                # Record execution (async, don't wait for it)
+                try:
+                    await record_atom_execution(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        atom_instance_id=validator_atom_id,
+                        card_id=card_id or "",
+                        atom_type="merge",
+                        atom_title="Merge Data",
+                        input_files=[full_path1, full_path2],
+                        configuration=configuration,
+                        api_calls=api_calls,
+                        output_files=output_files,
+                        execution_started_at=execution_started_at,
+                        execution_completed_at=execution_completed_at,
+                        execution_status=execution_status,
+                        execution_error=execution_error,
+                        user_id=user_id or "unknown",
+                        mode="laboratory",
+                        canvas_position=canvas_position or 0
+                    )
+                except Exception as e:
+                    # Don't fail the request if pipeline recording fails
+                    logger.warning(f"⚠️ Failed to record merge init execution for pipeline: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Error during merge init pipeline tracking: {e}")
+        
+        return result
     except Exception as e:
-        print(f"❌ MERGE INIT - Error: {e}")
         raise HTTPException(status_code=400, detail=f"Init failed: {str(e)}")
 
 
@@ -163,16 +246,13 @@ async def perform_merge(
     file2: str = Form(...),
     bucket_name: str = Form(...),
     join_columns: str = Form(...),    
-    join_type: str = Form(...),          
+    join_type: str = Form(...),
+    # Pipeline tracking (optional)
+    validator_atom_id: str = Form(None),
+    card_id: str = Form(None),
+    canvas_position: int = Form(0),
 ):
     try:
-        print(f"🔍 MERGE PERFORM - Received data:")
-        print(f"   file1: {file1}")
-        print(f"   file2: {file2}")
-        print(f"   bucket_name: {bucket_name}")
-        print(f"   join_columns: {join_columns}")
-        print(f"   join_type: {join_type}")
-        
         # Validate inputs
         if not file1 or not file2:
             raise ValueError("file1 and file2 are required")
@@ -183,10 +263,7 @@ async def perform_merge(
         # Parse join_columns JSON
         try:
             join_cols = json.loads(join_columns)
-            print(f"✅ Parsed join_columns: {join_cols}")
         except json.JSONDecodeError as e:
-            print(f"❌ JSON decode error for join_columns: {e}")
-            print(f"   Raw join_columns: {join_columns}")
             raise ValueError(f"Invalid join_columns JSON: {e}")
         
         # Ensure files have .arrow extension (same as concat)
@@ -202,15 +279,7 @@ async def perform_merge(
         full_path1 = f"{prefix}{file1}" if not file1.startswith(prefix) else file1
         full_path2 = f"{prefix}{file2}" if not file2.startswith(prefix) else file2
         
-        print(f"🔍 MERGE PERFORM - Path resolution:")
-        print(f"   Original file1: {file1}")
-        print(f"   Original file2: {file2}")
-        print(f"   Current prefix: {prefix}")
-        print(f"   Full path1: {full_path1}")
-        print(f"   Full path2: {full_path2}")
-        
         # Load dataframes using direct MinIO access (same as cardinality endpoint)
-        print(f"📁 Loading dataframe 1: {full_path1}")
         try:
             response1 = minio_client.get_object(bucket_name, full_path1)
             content1 = response1.read()
@@ -226,7 +295,6 @@ async def perform_merge(
         except Exception as e:
             raise RuntimeError(f"Failed to fetch file1 from MinIO: {e}")
             
-        print(f"📁 Loading dataframe 2: {full_path2}")
         try:
             response2 = minio_client.get_object(bucket_name, full_path2)
             content2 = response2.read()
@@ -242,46 +310,119 @@ async def perform_merge(
         except Exception as e:
             raise RuntimeError(f"Failed to fetch file2 from MinIO: {e}")
         
-        print(f"📊 DataFrame shapes: df1={df1.shape}, df2={df2.shape}")
-        print(f"📊 DataFrame 1 columns: {list(df1.columns)}")
-        print(f"📊 DataFrame 2 columns: {list(df2.columns)}")
-        
         # Clean column names - convert to lowercase for consistent matching
         df1.columns = df1.columns.str.strip().str.lower()
         df2.columns = df2.columns.str.strip().str.lower()
         
         # Convert join columns to lowercase for case-insensitive matching
         join_cols_lower = [col.lower() for col in join_cols]
-        print(f"🔄 Join columns case conversion:")
-        print(f"   Original: {join_cols}")
-        print(f"   Lowercase: {join_cols_lower}")
         
         # Verify all join columns exist in both dataframes
         missing_in_df1 = [col for col in join_cols_lower if col not in df1.columns]
         missing_in_df2 = [col for col in join_cols_lower if col not in df2.columns]
         
         if missing_in_df1:
-            print(f"❌ Missing columns in df1: {missing_in_df1}")
-            print(f"   Available columns in df1: {list(df1.columns)}")
             raise ValueError(f"Join columns not found in first file: {missing_in_df1}")
             
         if missing_in_df2:
-            print(f"❌ Missing columns in df2: {missing_in_df2}")
-            print(f"   Available columns in df2: {list(df2.columns)}")
             raise ValueError(f"Join columns not found in second file: {missing_in_df2}")
-        
-        print(f"✅ All join columns found in both dataframes")
 
         # Clean string values (strip spaces and make lowercase)
         df1 = df1.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
         df2 = df2.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
 
-        print(f"🔗 Merging with join_columns: {join_cols_lower}, join_type: {join_type}")
         merged_df = merge_dataframes(df1, df2, join_cols_lower, join_type)
         
-        print(f"✅ Merge successful! Result shape: {merged_df.shape}")
-        
         suffix_columns = [c for c in merged_df.columns if c.endswith("_x") or c.endswith("_y")]
+        
+        # Record pipeline execution if validator_atom_id is provided
+        if validator_atom_id:
+            try:
+                # Extract client/app/project from file paths
+                path_parts1 = full_path1.split("/")
+                client_name = path_parts1[0] if len(path_parts1) > 0 else ""
+                app_name = path_parts1[1] if len(path_parts1) > 1 else ""
+                project_name = path_parts1[2] if len(path_parts1) > 2 else ""
+                
+                # Get user_id from atom configuration
+                user_id = None
+                try:
+                    atom_config = await get_atom_list_configuration(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        mode="laboratory"
+                    )
+                    if atom_config.get("status") == "success":
+                        cards = atom_config.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            atom = next((a for a in atoms if a.get("id") == validator_atom_id), None)
+                            if atom:
+                                user_id = atom.get("user_id")
+                                break
+                except Exception:
+                    pass
+                
+                # Build configuration for pipeline tracking
+                configuration = {
+                    "file1": full_path1,
+                    "file2": full_path2,
+                    "bucket_name": bucket_name,
+                    "join_columns": join_cols,
+                    "join_type": join_type,
+                }
+                
+                # Build API calls
+                execution_started_at = datetime.datetime.utcnow()
+                api_calls = [
+                    {
+                        "endpoint": "/merge/perform",
+                        "method": "POST",
+                        "timestamp": execution_started_at,
+                        "params": configuration.copy(),
+                        "response_status": 200,
+                        "response_data": {
+                            "row_count": len(merged_df),
+                            "columns": list(merged_df.columns),
+                        }
+                    }
+                ]
+                
+                # No output files yet (file is saved separately via /save endpoint)
+                output_files = []
+                
+                execution_completed_at = datetime.datetime.utcnow()
+                execution_status = "success"
+                execution_error = None
+                
+                # Record execution (async, don't wait for it)
+                try:
+                    await record_atom_execution(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        atom_instance_id=validator_atom_id,
+                        card_id=card_id or "",
+                        atom_type="merge",
+                        atom_title="Merge Data",
+                        input_files=[full_path1, full_path2],
+                        configuration=configuration,
+                        api_calls=api_calls,
+                        output_files=output_files,
+                        execution_started_at=execution_started_at,
+                        execution_completed_at=execution_completed_at,
+                        execution_status=execution_status,
+                        execution_error=execution_error,
+                        user_id=user_id or "unknown",
+                        mode="laboratory",
+                        canvas_position=canvas_position or 0
+                    )
+                except Exception as e:
+                    # Don't fail the request if pipeline recording fails
+                    logger.warning(f"⚠️ Failed to record merge atom execution for pipeline: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Error during merge pipeline tracking: {e}")
         
         # Return CSV as string (do NOT save)
         csv_text = merged_df.to_csv(index=False)
@@ -292,15 +433,16 @@ async def perform_merge(
             "note": f"Some overlapping columns were renamed: {suffix_columns}" if suffix_columns else None
         }
     except Exception as e:
-        print(f"❌ MERGE PERFORM ERROR: {e}")
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=400, detail=f"Merge failed: {str(e)}")
 
 @router.post("/save")
 async def save_merged_dataframe(
     csv_data: str = Body(..., embed=True),
-    filename: str = Body(..., embed=True)
+    filename: str = Body(..., embed=True),
+    # Pipeline tracking (optional)
+    validator_atom_id: str = Body(None),
+    card_id: str = Body(None),
+    canvas_position: int = Body(0),
 ):
     try:
         # ============================================================
@@ -381,6 +523,103 @@ async def save_merged_dataframe(
         # Cache in Redis
         redis_client.setex(full_path, 3600, arrow_bytes)
         
+        # Record save operation in pipeline (if atom_id is provided)
+        if validator_atom_id:
+            try:
+                # Extract client/app/project from file path
+                path_parts = full_path.split("/")
+                client_name = path_parts[0] if len(path_parts) > 0 else ""
+                app_name = path_parts[1] if len(path_parts) > 1 else ""
+                project_name = path_parts[2] if len(path_parts) > 2 else ""
+                
+                # Determine if it's a default name
+                is_default_name = not filename or filename.strip() == ""
+                save_as_name = filename if filename else "merge_result"
+                
+                # Build API call for save operation
+                save_started_at = datetime.datetime.utcnow()
+                save_api_call = {
+                    "endpoint": "/merge/save",
+                    "method": "POST",
+                    "timestamp": save_started_at,
+                    "params": {
+                        "filename": filename,
+                        "is_default_name": is_default_name,
+                    },
+                    "response_status": 200,
+                    "response_data": {
+                        "status": "SUCCESS",
+                        "result_file": full_path,
+                        "shape": df.shape,
+                        "columns": list(df.columns),
+                    }
+                }
+                
+                # Get existing execution step and update it with output file
+                from app.features.pipeline.service import get_pipeline_collection
+                coll = await get_pipeline_collection()
+                doc_id = f"{client_name}/{app_name}/{project_name}"
+                existing_doc = await coll.find_one({"_id": doc_id})
+                
+                if existing_doc:
+                    pipeline = existing_doc.get("pipeline", {})
+                    execution_graph = pipeline.get("execution_graph", [])
+                    
+                    # Find the step for this atom
+                    for step in execution_graph:
+                        if (step.get("atom_instance_id") == validator_atom_id and 
+                            step.get("card_id") == card_id):
+                            # Add save API call to the step
+                            if "api_calls" not in step:
+                                step["api_calls"] = []
+                            step["api_calls"].append(save_api_call)
+                            
+                            # Update output files to include the saved file
+                            if "outputs" not in step:
+                                step["outputs"] = []
+                            
+                            # Check if this saved file already exists in outputs
+                            existing_output = None
+                            for output in step["outputs"]:
+                                if output.get("file_key") == full_path:
+                                    existing_output = output
+                                    break
+                            
+                            if existing_output:
+                                # Update existing output with save_as_name
+                                existing_output["save_as_name"] = save_as_name
+                                existing_output["is_default_name"] = is_default_name
+                            else:
+                                # Add new output for saved file
+                                step["outputs"].append({
+                                    "file_key": full_path,
+                                    "file_path": full_path,
+                                    "flight_path": full_path,
+                                    "file_name": filename,
+                                    "file_type": "arrow",
+                                    "size": len(arrow_bytes),
+                                    "save_as_name": save_as_name,
+                                    "is_default_name": is_default_name,
+                                    "columns": list(df.columns),
+                                    "row_count": len(df)
+                                })
+                            
+                            # Update the document
+                            await coll.update_one(
+                                {"_id": doc_id},
+                                {
+                                    "$set": {
+                                        "pipeline.execution_graph": execution_graph,
+                                        "execution_timestamp": datetime.datetime.utcnow()
+                                    }
+                                }
+                            )
+                            logger.info(f"✅ Updated merge execution step with output file: {full_path}")
+                            break
+            except Exception as e:
+                # Don't fail the save if pipeline recording fails
+                logger.warning(f"⚠️ Failed to record merge save operation in pipeline: {e}")
+        
         return {
             "result_file": full_path,
             "shape": df.shape,
@@ -388,7 +627,6 @@ async def save_merged_dataframe(
             "message": "DataFrame saved successfully"
         }
     except Exception as e:
-        print(f"⚠️ save_merged_dataframe error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/cached_dataframe")
@@ -545,12 +783,6 @@ async def get_merge_cardinality_data(
         # Construct the full object path
         full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
         
-        print(f"🔍 Merge Cardinality file path resolution:")
-        print(f"  Original object_names: {object_names}")
-        print(f"  Current prefix: {prefix}")
-        print(f"  Full object path: {full_object_path}")
-        print(f"  Source type: {source_type}")
-        
         # Load the dataframe using direct MinIO access (like concat)
         try:
             response = minio_client.get_object(bucket_name, full_object_path)
@@ -567,8 +799,6 @@ async def get_merge_cardinality_data(
         except Exception as e:
             raise RuntimeError(f"Failed to fetch file from MinIO: {e}")
         df.columns = df.columns.str.strip().str.lower()
-        
-        print(f"✅ Successfully loaded {source_type} dataframe for cardinality with shape: {df.shape}")
         
         # Generate cardinality data
         cardinality_data = []
@@ -606,6 +836,5 @@ async def get_merge_cardinality_data(
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"❌ Error in Merge cardinality endpoint: {e}")
         raise HTTPException(status_code=400, detail=str(e))
  

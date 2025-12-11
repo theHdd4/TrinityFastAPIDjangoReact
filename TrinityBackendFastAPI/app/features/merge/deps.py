@@ -67,7 +67,6 @@ def resolve_file_path(file_key: str) -> str:
         return f"{current_prefix}{file_key}"
         
     except Exception as e:
-        print(f"⚠️ Failed to get dynamic path, using fallback: {e}")
         # Fallback to static prefix if dynamic path fails
         if "/" in file_key:
             if file_key.startswith(OBJECT_PREFIX):
@@ -91,11 +90,8 @@ def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
         # For Arrow Flight, we need just the filename without extension
         flight_path = filename_only.replace('.arrow', '').replace('.csv', '').replace('.xlsx', '')
         df = download_dataframe(flight_path)
-        print(f"✅ Loaded {filename_only} from Arrow Flight")
         return df
     except Exception as e:
-        print(f"⚠️ Arrow Flight download failed for {filename_only}: {e}, falling back to MinIO.")
-        
         # Fallback to MinIO using the resolved path
         try:
             response = minio_client.get_object(bucket, resolved_path)
@@ -113,12 +109,9 @@ def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
             else:
                 raise ValueError("Unsupported file type")
             
-            print(f"✅ Loaded {filename_only} from MinIO fallback using path: {resolved_path}")
             return df
             
         except Exception as minio_error:
-            print(f"❌ MinIO fallback also failed for {filename_only}: {minio_error}")
-            print(f"   Tried path: {resolved_path}")
             raise minio_error
 
 def get_minio_content_with_flight_fallback(bucket: str, object_name: str) -> bytes:
@@ -136,7 +129,6 @@ def get_minio_content_with_flight_fallback(bucket: str, object_name: str) -> byt
         # For Arrow Flight, we need just the filename without extension
         flight_path = filename_only.replace('.arrow', '').replace('.csv', '').replace('.xlsx', '')
         df = download_dataframe(flight_path)
-        print(f"✅ Loaded {filename_only} from Arrow Flight")
         # Convert DataFrame to Arrow format and return as bytes
         import pyarrow as pa
         import pyarrow.ipc as ipc
@@ -146,17 +138,12 @@ def get_minio_content_with_flight_fallback(bucket: str, object_name: str) -> byt
             writer.write_table(table)
         return arrow_buffer.getvalue().to_pybytes()
     except Exception as e:
-        print(f"⚠️ Arrow Flight download failed for {filename_only}: {e}, falling back to MinIO.")
-        
         # Fallback to MinIO using the resolved path
         try:
             response = minio_client.get_object(bucket, resolved_path)
             content = response.read()
-            print(f"✅ Loaded {filename_only} from MinIO fallback using path: {resolved_path}")
             return content
         except Exception as minio_error:
-            print(f"❌ MinIO fallback also failed for {filename_only}: {minio_error}")
-            print(f"   Tried path: {resolved_path}")
             raise minio_error
 
 __all__ = [

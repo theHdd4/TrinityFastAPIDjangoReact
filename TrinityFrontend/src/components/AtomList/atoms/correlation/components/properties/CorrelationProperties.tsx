@@ -15,6 +15,12 @@ const CorrelationProperties: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CORRELATION_SETTINGS };
+  
+  // Get card_id and canvas_position for pipeline tracking
+  const cards = useLaboratoryStore(state => state.cards);
+  const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+  const cardId = card?.id || '';
+  const canvasPosition = card?.canvas_position ?? 0;
 
   const handleChange = (newSettings: Partial<SettingsType>) => {
     updateSettings(atomId, newSettings);
@@ -39,10 +45,22 @@ const CorrelationProperties: React.FC<Props> = ({ atomId }) => {
         </TabsList>
 
         <TabsContent value="settings" className="flex-1 mt-0" forceMount>
-          <CorrelationSettings data={settings} onDataChange={handleChange} />
+          <CorrelationSettings 
+            atomId={atomId}
+            cardId={cardId}
+            canvasPosition={canvasPosition}
+            data={settings} 
+            onDataChange={handleChange} 
+          />
         </TabsContent>
         <TabsContent value="visualisation" className="flex-1 mt-0" forceMount>
-          <CorrelationVisualisation data={settings} onDataChange={handleChange} />
+          <CorrelationVisualisation 
+            atomId={atomId}
+            cardId={cardId}
+            canvasPosition={canvasPosition}
+            data={settings} 
+            onDataChange={handleChange} 
+          />
         </TabsContent>
         <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
           <CorrelationExhibition data={settings} />
