@@ -22,7 +22,7 @@ import {
 import { toast } from '@/components/ui/use-toast';
 import { ArrowUp, ArrowDown, Info, X } from 'lucide-react';
 import CellRenderer from './CellRenderer';
-// import { TableRichTextToolbar } from './rich-text';
+import { TableRichTextToolbar } from './rich-text';
 import type { TableCellFormatting } from './rich-text/types';
 import { htmlMatchesValue, getPlainTextFromHtml } from './rich-text/utils/formattingUtils';
 import NumberFilterComponent from './filters/NumberFilterComponent';
@@ -368,10 +368,11 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         newFilters[column] = filterValue;
       }
 
-      // Update table with new filters
+      // Update table with new filters while preserving current sort order
       const resp = await updateTable(settings.tableId, {
         ...settings,
-        filters: newFilters
+        filters: newFilters,
+        sort_config: settings.sortConfig, // keep current sort when filtering
       });
 
       // Update tableData from response
@@ -428,10 +429,11 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       const tempFilters = { ...settings.filters };
       delete tempFilters[column];
       
-      // Load data with all filters EXCEPT current column's filter
+      // Load data with all filters EXCEPT current column's filter, but preserve sort
       const resp = await updateTable(settings.tableId, {
         ...settings,
         filters: tempFilters,  // All filters EXCEPT current column
+        sort_config: settings.sortConfig, // preserve current sort while previewing filter options
       });
       
       // Store this data for filter component (shows all options for this column)
@@ -1199,6 +1201,29 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     }
   };
 
+  // Refresh table from backend with current filters/sort (to preserve view state after edits)
+  const refreshTableWithCurrentView = useCallback(async (): Promise<TableData | null> => {
+    if (!settings.tableId) return null;
+    try {
+      const resp = await updateTable(settings.tableId, {
+        ...settings,
+        filters: settings.filters,
+        sort_config: settings.sortConfig,
+      });
+      return {
+        table_id: resp.table_id,
+        columns: resp.columns,
+        rows: resp.rows,
+        row_count: resp.row_count,
+        column_types: resp.column_types,
+        object_name: resp.object_name || data.object_name,
+      };
+    } catch (error) {
+      console.error('Failed to refresh table with current view:', error);
+      return null;
+    }
+  }, [settings, data.object_name]);
+
   // Handle cell edit (internal function - called by commitCellEdit)
   // Like DataFrame Operations: uses API response to replace entire tableData
   // Includes session recovery if session is lost
@@ -1215,26 +1240,21 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       // globalRowIndex is the actual row index in the full dataset (already calculated)
       const resp = await editTableCell(activeTableId, globalRowIndex, column, newValue);
       
-      // Backend returns updated data (may be limited to first 100 rows for preview)
-      // Intelligently merge response with existing data:
-      // 1. Use response rows for the preview (first 100 rows)
-      // 2. Keep existing rows beyond preview, but update the edited cell
-      // 3. This ensures we have the complete dataset while using backend's authoritative data
-      
+      // After edit, refresh data with current filters/sort so view stays consistent
+      const refreshed = await refreshTableWithCurrentView();
+
+      if (refreshed) {
+        return refreshed;
+      }
+
+      // Fallback: use edit response merged with existing data (preview-safe)
       let updatedRows: Array<Record<string, any>>;
-      
       if (resp.rows.length === resp.row_count) {
-        // Backend returned ALL rows (ideal case - like DataFrame Operations)
         updatedRows = resp.rows;
       } else {
-        // Backend returned preview (first 100 rows) - merge intelligently
-        updatedRows = [...resp.rows]; // Start with response rows
-        
-        // If we have more rows in existing data, keep them but update the edited cell
+        updatedRows = [...resp.rows];
         if (data.rows.length > resp.rows.length) {
           const existingRowsBeyondPreview = data.rows.slice(resp.rows.length);
-          
-          // Update the edited cell in rows beyond preview if needed
           const rowsBeyondPreview = existingRowsBeyondPreview.map((row, idx) => {
             const actualIdx = resp.rows.length + idx;
             if (actualIdx === globalRowIndex) {
@@ -1242,17 +1262,14 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             }
             return row;
           });
-          
           updatedRows = [...resp.rows, ...rowsBeyondPreview];
         }
       }
-      
-      // Return updated tableData instead of updating immediately
-      // This allows commitCellEdit to combine with formatting updates
+
       return {
         table_id: resp.table_id,
         columns: resp.columns,
-        rows: updatedRows,  // Merged rows (response + existing beyond preview)
+        rows: updatedRows,
         row_count: resp.row_count,
         column_types: resp.column_types,
         object_name: resp.object_name || data.object_name,
@@ -1268,10 +1285,15 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           if (newTableId) {
             // Retry the edit with new session ID
             const resp = await editTableCell(newTableId, globalRowIndex, column, newValue);
-            
-            // Update with response (same logic as above)
+
+            // After recovery edit, refresh with current view to keep filters/sort
+            const refreshed = await refreshTableWithCurrentView();
+            if (refreshed) {
+              return refreshed;
+            }
+
+            // Fallback merge if refresh fails
             let updatedRows: Array<Record<string, any>>;
-            
             if (resp.rows.length === resp.row_count) {
               updatedRows = resp.rows;
             } else {
@@ -1858,7 +1880,12 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                             }}
                             data-table-cell-row={actualRowIdx}
                             data-table-cell-col={column}
-                          >
+                          onDoubleClick={() => {
+                            if (!isEditing) {
+                              handleCellClick(rowIdx, column);
+                            }
+                          }}
+                        >
                             <CellRenderer
                               value={isEditing ? editingCellValue : String(cellValue ?? '')}
                               html={(() => {
@@ -2360,8 +2387,8 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           portalTarget
         )}
 
-      {/* Rich Text Formatting Toolbar (temporarily disabled) */}
-      {false && showToolbar && editingCell && toolbarCellRect && portalTarget &&
+      {/* Rich Text Formatting Toolbar */}
+      {showToolbar && editingCell && toolbarCellRect && portalTarget &&
         createPortal(
           <TableRichTextToolbar
             formatting={cellFormatting}
