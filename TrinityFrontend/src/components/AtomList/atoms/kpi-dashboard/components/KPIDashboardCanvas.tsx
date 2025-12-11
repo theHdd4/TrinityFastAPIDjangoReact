@@ -12,13 +12,13 @@ import type { KPIDashboardData, KPIDashboardSettings } from '../KPIDashboardAtom
 import { ElementType } from './ElementDropdown';
 import ElementRenderer from './ElementRenderer';
 import ChartElement from './ChartElement';
+import TableElement from './TableElement';
 import { TextBoxToolbar } from '@/components/LaboratoryMode/components/CanvasArea/text-box/TextBoxToolbar';
 import { TEXT_STYLE_OPTIONS, getTextStyleProperties } from '@/components/LaboratoryMode/components/CanvasArea/text-box/constants';
 import type { TextStylePreset } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
 import { KPI_DASHBOARD_API, LABORATORY_API, IMAGES_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { TrendingUp } from 'lucide-react';
-import { ChartMakerMetadata } from '@/components/ExhibitionMode/components/atoms/ChartMaker/types';
 
 interface KPIDashboardCanvasProps {
   atomId: string;
@@ -115,22 +115,46 @@ interface LayoutBox {
   interactiveBlock2Content?: string; // HTML content with bullet points
   interactiveBlock2Background?: string;
   isInteractiveBlock2Saved?: boolean;
-  // Chart properties - supports ChartMaker metadata
-  chartMetadata?: any; // ChartMakerMetadata from chartmaker atom
-  chartId?: string; // ID of the chart from chartmaker
-  chartType?: 'bar' | 'line' | 'pie' | 'area' | 'scatter'; // Legacy support
-  chartData?: any[]; // Legacy support
-  chartTitle?: string; // Legacy support
-  chartXAxis?: string; // Legacy support
-  chartYAxis?: string; // Legacy support
-  chartColors?: string[]; // Legacy support
-  // Table properties (ready for implementation)
-  tableData?: any[];
-  tableColumns?: string[];
-  tableHeaders?: string[];
-  tableShowHeaders?: boolean;
-  tableStriped?: boolean;
-  tableBordered?: boolean;
+  // Chart properties - stores chart configuration
+  chartConfig?: any; // ChartMakerConfig with rendered chart data
+  // Table properties - stores table configuration and data
+  tableSettings?: {
+    mode?: 'load' | 'blank';
+    sourceFile?: string;
+    tableId?: string;
+    tableData?: any;
+    visibleColumns?: string[];
+    columnOrder?: string[];
+    columnWidths?: Record<string, number>;
+    rowHeight?: number;
+    showRowNumbers?: boolean;
+    showSummaryRow?: boolean;
+    frozenColumns?: number;
+    filters?: Record<string, any>;
+    sortConfig?: Array<{column: string; direction: 'asc' | 'desc'}>;
+    currentPage?: number;
+    pageSize?: number;
+    layout?: {
+      headerRow?: boolean;
+      totalRow?: boolean;
+      bandedRows?: boolean;
+      bandedColumns?: boolean;
+      firstColumn?: boolean;
+      lastColumn?: boolean;
+    };
+    design?: {
+      theme?: string;
+      borderStyle?: 'all' | 'none' | 'outside' | 'horizontal' | 'vertical' | 'header';
+    };
+    totalRowConfig?: Record<string, 'sum' | 'average' | 'count' | 'min' | 'max' | 'none'>;
+    blankTableConfig?: {
+      rows?: number;
+      columns?: number;
+      columnNames?: string[];
+      useHeaderRow?: boolean;
+      created?: boolean;
+    };
+  };
   // Image properties (ready for implementation)
   imageUrl?: string;
   imageAlt?: string;
@@ -497,17 +521,11 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                     interactiveBlock2Background: box.interactiveBlock2Background || 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 50%, #FDE68A 100%)',
                     isInteractiveBlock2Saved: box.isInteractiveBlock2Saved || false
                   } : elementType === 'chart' ? {
-                    // Chart properties - chartMetadata will be set when importing from chartmaker
-                    chartMetadata: box.chartMetadata || undefined,
-                    chartId: box.chartId || undefined
+                    // Chart properties - chartConfig contains the chart configuration
+                    chartConfig: box.chartConfig || undefined
                   } : elementType === 'table' ? {
-                    // Table properties (ready for implementation)
-                    tableData: box.tableData || [],
-                    tableColumns: box.tableColumns || [],
-                    tableHeaders: box.tableHeaders || [],
-                    tableShowHeaders: box.tableShowHeaders !== undefined ? box.tableShowHeaders : true,
-                    tableStriped: box.tableStriped !== undefined ? box.tableStriped : false,
-                    tableBordered: box.tableBordered !== undefined ? box.tableBordered : true
+                    // Table properties - use tableSettings
+                    tableSettings: box.tableSettings || undefined
                   } : elementType === 'image' ? {
                     // Image properties (ready for implementation)
                     imageUrl: box.imageUrl || '',
@@ -574,8 +592,8 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
   };
 
   return (
-    <div className="h-full w-full overflow-y-auto p-8 bg-gradient-to-br from-background via-muted/5 to-background">
-      <div className="w-full space-y-6">
+    <div className="h-full w-full overflow-y-auto p-8 bg-gradient-to-br from-background via-muted/5 to-background" style={{ minWidth: 0, minHeight: 0 }}>
+      <div className="w-full space-y-6" style={{ minWidth: 0, width: '100%' }}>
         {/* Empty State */}
         {layouts.length === 0 && (
           <div className="relative group">
@@ -637,7 +655,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                   </button>
 
                   {/* Row Content */}
-                  <div className="grid grid-cols-12 gap-2" style={{ height: 'calc(100% - 8px)', overflow: 'visible' }}>
+                  <div className="grid grid-cols-12 gap-2" style={{ height: 'calc(100% - 8px)', overflow: 'visible', minWidth: 0, width: '100%' }}>
                     {layout.boxes.map((box) => (
                       <ElementBox
                         key={box.id}
@@ -645,6 +663,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                         layoutId={layout.id}
                         boxId={box.id}
                         width={box.width || getDefaultWidth(layout.type)}
+                        layoutHeight={layout.height || 220}
                         elementTypes={elementTypes}
                         onSelectElement={(type) => handleElementSelect(layout.id, box.id, type)}
                         onTextBoxUpdate={handleTextBoxUpdate}
@@ -727,18 +746,22 @@ interface ElementBoxProps {
   layoutId: string;
   boxId: string;
   width: number;
+  layoutHeight: number;
   elementTypes: { value: ElementType; label: string; icon: React.ElementType; description: string }[];
   onSelectElement: (type: ElementType) => void;
   onTextBoxUpdate: (layoutId: string, boxId: string, updates: Partial<LayoutBox>) => void;
   variables?: ConfigVariable[];
   defaultValueFormat?: 'none' | 'thousands' | 'millions' | 'billions' | 'lakhs';
+  settings: KPIDashboardSettings;
+  onSettingsChange: (settings: Partial<KPIDashboardSettings>) => void;
 }
 
 const ElementBox: React.FC<ElementBoxProps> = ({ 
   box, 
   layoutId, 
   boxId, 
-  width, 
+  width,
+  layoutHeight,
   elementTypes, 
   onSelectElement, 
   onTextBoxUpdate,
@@ -3838,7 +3861,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           )}
 
           {/* Metric Card */}
-          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-yellow-200 shadow-lg p-6 flex flex-col justify-between relative">
+          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-yellow-200 shadow-lg p-6 flex flex-col justify-between relative" style={{ minWidth: 0, minHeight: 0 }}>
             {/* Variable Selection - Show inside the box */}
             {showVariableDialog && (
               <div className="absolute inset-0 z-30 bg-white rounded-xl p-4 flex flex-col">
@@ -3908,7 +3931,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     value={metricLabel}
                     onChange={(e) => handleLabelChange(e.target.value)}
                     className="w-full outline-none bg-transparent border-none text-yellow-600 font-bold text-lg mb-1"
-                    style={{ fontSize: '18px', fontWeight: 'bold' }}
+                    style={{ fontSize: '18px', fontWeight: 'bold', minWidth: 0, width: '100%' }}
                     placeholder="BRAND VALUE"
                   />
                   <input
@@ -3916,6 +3939,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     value={box.description || ''}
                     onChange={(e) => onTextBoxUpdate(layoutId, boxId, { description: e.target.value })}
                     className="w-full outline-none bg-transparent border-none text-xs text-gray-500"
+                    style={{ minWidth: 0, width: '100%' }}
                     placeholder="(In Cr)"
                     onClick={(e) => e.stopPropagation()}
                   />
@@ -3924,6 +3948,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     value={box.projectName || ''}
                     onChange={(e) => onTextBoxUpdate(layoutId, boxId, { projectName: e.target.value })}
                     className="w-full outline-none bg-transparent border-none text-xs text-gray-400 mt-1"
+                    style={{ minWidth: 0, width: '100%' }}
                     placeholder="MAT (Project Name)"
                     onClick={(e) => e.stopPropagation()}
                   />
@@ -4123,23 +4148,23 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         onSettingsChange({ selectedBoxId: boxId });
       };
 
-      // Parse chartMetadata if it's a string (from MongoDB)
-      let chartMetadata: ChartMakerMetadata | undefined = undefined;
-      if (box.chartMetadata) {
-        if (typeof box.chartMetadata === 'string') {
+      // Parse chartConfig if it's a string (from MongoDB)
+      let chartConfig: any = undefined;
+      if (box.chartConfig) {
+        if (typeof box.chartConfig === 'string') {
           try {
-            chartMetadata = JSON.parse(box.chartMetadata);
+            chartConfig = JSON.parse(box.chartConfig);
           } catch (e) {
-            console.error('Failed to parse chartMetadata:', e);
+            console.error('Failed to parse chartConfig:', e);
           }
         } else {
-          chartMetadata = box.chartMetadata as ChartMakerMetadata;
+          chartConfig = box.chartConfig;
         }
       }
 
-      // Calculate height based on box dimensions (approximate)
-      // Use a default height that works well in the dashboard context
-      const boxHeight = 300;
+      // Calculate height based on box dimensions - use layout height minus padding
+      // Calculate box height: layout height minus padding (about 20px total)
+      const boxHeight = Math.max(150, layoutHeight - 20);
 
       return (
         <div 
@@ -4156,11 +4181,87 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           </button>
 
           {/* Chart Container */}
-          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-blue-200 shadow-lg flex items-center justify-center">
+          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-blue-200 shadow-lg" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
             <ChartElement 
-              chartMetadata={chartMetadata}
-              width={width ? width * 100 : undefined}
+              chartConfig={chartConfig}
+              width={undefined}
               height={boxHeight}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    // Special handling for table element
+    if (box.elementType === 'table') {
+      const isSelected = settings.selectedBoxId === boxId;
+      
+      const handleTableClick = (e: React.MouseEvent) => {
+        if ((e.target as HTMLElement).closest('button')) {
+          return;
+        }
+        e.stopPropagation();
+        onSettingsChange({ selectedBoxId: boxId });
+      };
+
+      // Parse tableSettings if it's a string (from MongoDB)
+      let tableSettings: any = undefined;
+      if (box.tableSettings) {
+        if (typeof box.tableSettings === 'string') {
+          try {
+            tableSettings = JSON.parse(box.tableSettings);
+          } catch (e) {
+            console.error('Failed to parse tableSettings:', e);
+          }
+        } else {
+          tableSettings = box.tableSettings;
+        }
+      }
+
+      // Calculate height based on box dimensions
+      const boxHeight = Math.max(150, layoutHeight - 20);
+
+      // Handle table settings change (for pagination)
+      const handleTableSettingsChange = (newSettings: Partial<typeof tableSettings>) => {
+        const updatedLayouts = layouts.map(l => ({
+          ...l,
+          boxes: l.boxes.map(b =>
+            b.id === boxId
+              ? {
+                  ...b,
+                  tableSettings: {
+                    ...tableSettings,
+                    ...newSettings,
+                  }
+                }
+              : b
+          )
+        }));
+        setLayouts(updatedLayouts);
+        onSettingsChange({ layouts: updatedLayouts });
+      };
+
+      return (
+        <div 
+          className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
+          style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
+          onClick={handleTableClick}
+        >
+          {/* Change button - visible on hover */}
+          <button
+            onClick={handleDoubleClick}
+            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-yellow-600 hover:bg-yellow-50 transition-opacity opacity-0 group-hover/box:opacity-100"
+          >
+            Change
+          </button>
+
+          {/* Table Container */}
+          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-teal-200 shadow-lg" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+            <TableElement 
+              tableSettings={tableSettings}
+              width={undefined}
+              height={boxHeight}
+              onSettingsChange={handleTableSettingsChange}
             />
           </div>
         </div>

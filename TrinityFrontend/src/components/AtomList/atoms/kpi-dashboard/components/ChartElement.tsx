@@ -1,47 +1,43 @@
 import React, { useMemo } from 'react';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
-import { ChartMakerMetadata } from '@/components/ExhibitionMode/components/atoms/ChartMaker/types';
-import { getFilteredData } from '@/components/ExhibitionMode/components/atoms/ChartMaker/shared';
+import { ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BarChart3 } from 'lucide-react';
 
 interface ChartElementProps {
-  chartMetadata?: ChartMakerMetadata;
+  chartConfig?: ChartMakerConfig;
   width?: number;
   height?: number;
 }
 
 const ChartElement: React.FC<ChartElementProps> = ({ 
-  chartMetadata, 
+  chartConfig, 
   width, 
   height = 300 
 }) => {
-  // If no chart metadata, show placeholder
-  if (!chartMetadata || !chartMetadata.chartState) {
+  // If no chart config or chart not rendered, show placeholder
+  if (!chartConfig || !chartConfig.chartRendered || !chartConfig.chartConfig) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-4 space-y-3">
         <BarChart3 className="w-8 h-8 text-blue-500" />
         <p className="text-sm font-medium text-foreground">Chart</p>
         <p className="text-xs text-muted-foreground text-center px-4">
-          Import a chart from Chart Maker to visualize data
+          Configure and render a chart in the Charts tab to visualize data
         </p>
       </div>
     );
   }
 
-  const chartState = chartMetadata.chartState;
-  const chartContext = chartMetadata.chartContext;
-
-  // Prepare data for RechartsChartRenderer
+  // Get chart data from rendered chart config
   const chartData = useMemo(() => {
-    if (!chartState || !chartContext) {
+    if (!chartConfig.chartConfig || !chartConfig.chartConfig.data) {
       return [];
     }
-    return getFilteredData(chartState, chartContext);
-  }, [chartState, chartContext]);
+    return chartConfig.chartConfig.data;
+  }, [chartConfig.chartConfig]);
 
   // Convert chart type from laboratory format to RechartsChartRenderer format
   const chartType = useMemo(() => {
-    const type = chartState?.chartType || 'line';
+    const type = chartConfig.type || 'line';
     const typeMap: Record<string, 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart'> = {
       'bar': 'bar_chart',
       'line': 'line_chart',
@@ -51,35 +47,30 @@ const ChartElement: React.FC<ChartElementProps> = ({
       'stacked_bar': 'stacked_bar_chart',
     };
     return typeMap[type] || 'line_chart';
-  }, [chartState?.chartType]);
+  }, [chartConfig.type]);
 
   // Determine yFields for dual axis support
   let yFields: string[] | undefined = undefined;
   let yAxisLabels: string[] | undefined = undefined;
 
-  if (chartState) {
-    const traces = chartState.traces || [];
-    const isAdvancedMode = chartState.isAdvancedMode === true;
+  // PRIORITY: If secondYAxis exists, use dual-axis mode
+  if (chartConfig.secondYAxis) {
+    const yAxis = chartConfig.yAxis ? String(chartConfig.yAxis).trim() : '';
+    const secondYAxis = String(chartConfig.secondYAxis).trim();
     
-    // PRIORITY: If secondYAxis exists, use dual-axis mode
-    if (chartState.secondYAxis) {
-      const yAxis = chartState.yAxis ? String(chartState.yAxis).trim() : '';
-      const secondYAxis = String(chartState.secondYAxis).trim();
-      
-      if (yAxis && secondYAxis) {
-        yFields = [yAxis, secondYAxis];
-        yAxisLabels = [yAxis, secondYAxis];
-      }
+    if (yAxis && secondYAxis) {
+      yFields = [yAxis, secondYAxis];
+      yAxisLabels = [yAxis, secondYAxis];
     }
-    // Use traces if explicitly in advanced mode AND secondYAxis is NOT set
-    else if (isAdvancedMode && traces.length > 0) {
-      yFields = traces.map((t: any) => t.dataKey || t.yAxis);
-      yAxisLabels = traces.map((t: any) => t.name || t.dataKey || t.yAxis);
-    }
+  }
+  // Use traces if explicitly in advanced mode AND secondYAxis is NOT set
+  else if (chartConfig.isAdvancedMode && chartConfig.traces && chartConfig.traces.length > 0) {
+    yFields = chartConfig.traces.map((t: any) => t.dataKey || t.yAxis);
+    yAxisLabels = chartConfig.traces.map((t: any) => t.name || t.dataKey || t.yAxis);
   }
 
   // Determine if we should force single axis rendering
-  const shouldForceSingleAxis = chartState?.dualAxisMode === 'single' && chartState?.secondYAxis && String(chartState.secondYAxis || '').trim().length > 0;
+  const shouldForceSingleAxis = chartConfig.dualAxisMode === 'single' && chartConfig.secondYAxis && String(chartConfig.secondYAxis || '').trim().length > 0;
 
   if (!chartData || chartData.length === 0) {
     return (
@@ -93,8 +84,8 @@ const ChartElement: React.FC<ChartElementProps> = ({
     );
   }
 
-  // Get saved chart configuration from chartConfig
-  const chartConfig = chartContext?.chartConfig;
+  // Get saved chart configuration from rendered chart config
+  const renderedChartConfig = chartConfig.chartConfig;
   
   // Map yFields to actual column names in the data
   let mappedYFields = yFields;
@@ -115,41 +106,53 @@ const ChartElement: React.FC<ChartElementProps> = ({
   }
   
   const finalYFields = mappedYFields || yFields;
-  const finalYField = finalYFields && finalYFields.length > 0 ? finalYFields[0] : chartState.yAxis;
+  const finalYField = finalYFields && finalYFields.length > 0 ? finalYFields[0] : chartConfig.yAxis;
   
   const rendererProps = {
     type: chartType,
     data: chartData,
-    xField: chartState.xAxis,
+    xField: chartConfig.xAxis,
     yField: finalYField,
     yFields: finalYFields,
-    title: chartMetadata.chartTitle,
-    xAxisLabel: chartState.xAxis,
-    yAxisLabel: chartState.yAxis,
+    title: chartConfig.title,
+    xAxisLabel: chartConfig.xAxis,
+    yAxisLabel: chartConfig.yAxis,
     yAxisLabels: yAxisLabels,
-    legendField: chartState.legendField && chartState.legendField !== 'aggregate' ? chartState.legendField : undefined,
-    colors: chartConfig?.colors || ['#3b82f6', '#8b5cf6', '#10b981', '#f97316', '#ef4444'],
-    width: width || 0,
+    legendField: chartConfig.legendField && chartConfig.legendField !== 'aggregate' ? chartConfig.legendField : undefined,
+    colors: renderedChartConfig?.colors || ['#3b82f6', '#8b5cf6', '#10b981', '#f97316', '#ef4444'],
+    width: 0, // Use 0 to make chart responsive to container width
     height: height,
-    theme: chartConfig?.theme,
-    showLegend: chartConfig?.showLegend,
-    showXAxisLabels: chartConfig?.showXAxisLabels,
-    showYAxisLabels: chartConfig?.showYAxisLabels,
-    showDataLabels: chartConfig?.showDataLabels,
-    showGrid: chartConfig?.showGrid,
-    sortOrder: chartConfig?.sortOrder || null,
-    sortColumn: chartConfig?.sortColumn,
-    enableScroll: chartConfig?.enableScroll,
-    chartsPerRow: chartConfig?.chartsPerRow,
+    theme: renderedChartConfig?.theme,
+    showLegend: renderedChartConfig?.showLegend,
+    showXAxisLabels: renderedChartConfig?.showXAxisLabels,
+    showYAxisLabels: renderedChartConfig?.showYAxisLabels,
+    showDataLabels: renderedChartConfig?.showDataLabels,
+    showGrid: renderedChartConfig?.showGrid,
+    sortOrder: renderedChartConfig?.sortOrder || null,
+    sortColumn: renderedChartConfig?.sortColumn,
+    enableScroll: renderedChartConfig?.enableScroll,
+    chartsPerRow: renderedChartConfig?.chartsPerRow,
     forceSingleAxis: shouldForceSingleAxis,
-    seriesSettings: chartConfig?.seriesSettings,
+    seriesSettings: renderedChartConfig?.seriesSettings,
+    showNote: false, // Note box is rendered in ChartElement, not RechartsChartRenderer
   };
 
+  const showNote = chartConfig.showNote || false;
+  
   return (
-    <div className="w-full h-full flex items-center justify-center p-2">
-      <div style={{ width: '100%', height: `${height}px`, maxWidth: '100%' }}>
+    <div className={`w-full h-full ${showNote ? 'flex flex-col' : 'flex items-center justify-center'}`} style={{ maxHeight: '100%', maxWidth: '100%', padding: '8px', minWidth: 0, minHeight: 0 }}>
+      <div className={`w-full ${showNote ? 'flex-1 min-h-0' : 'h-full'}`} style={{ maxWidth: '100%', maxHeight: showNote ? '100%' : '100%', overflow: 'hidden', minWidth: 0, minHeight: 0, width: '100%' }}>
         <RechartsChartRenderer {...rendererProps} />
       </div>
+      {showNote && (
+        <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-lg flex-shrink-0">
+          <textarea
+            placeholder="Add your notes here..."
+            className="w-full min-h-[60px] p-2 text-xs border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{ fontFamily: 'inherit' }}
+          />
+        </div>
+      )}
     </div>
   );
 };

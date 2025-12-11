@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Eye, BarChart3 } from 'lucide-react';
+import { Settings, Eye, BarChart3, Table2 } from 'lucide-react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import KPIDashboardSettings from '../KPIDashboardSettings';
 import KPIDashboardExhibition from '../KPIDashboardExhibition';
 import KPIDashboardVisualisation from '../KPIDashboardVisualisation';
+import KPIDashboardTableConfig from '../KPIDashboardTableConfig';
 import type { KPIDashboardData, KPIDashboardSettings as KPISettings } from '../../KPIDashboardAtom';
 
 interface KPIDashboardPropertiesProps {
@@ -14,7 +15,7 @@ interface KPIDashboardPropertiesProps {
 const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const [tab, setTab] = useState<'settings' | 'visualisation' | 'exhibition'>('settings');
+  const [tab, setTab] = useState<'settings' | 'visualisation' | 'tables' | 'exhibition'>('settings');
 
   // Get settings with proper fallback
   const settings: KPISettings = React.useMemo(() => {
@@ -78,7 +79,7 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({ atomId 
   return (
     <div className="h-full flex flex-col">
       <Tabs value={tab} onValueChange={value => setTab(value as typeof tab)} className="flex-1 flex flex-col">
-        <TabsList className="grid w-full grid-cols-3 m-2">
+        <TabsList className="grid w-full grid-cols-4 m-2">
           <TabsTrigger value="settings" className="text-xs font-medium">
             <Settings className="w-3 h-3 mr-1" />
             Settings
@@ -86,6 +87,10 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({ atomId 
           <TabsTrigger value="visualisation" className="text-xs font-medium">
             <BarChart3 className="w-3 h-3 mr-1" />
             Charts
+          </TabsTrigger>
+          <TabsTrigger value="tables" className="text-xs font-medium">
+            <Table2 className="w-3 h-3 mr-1" />
+            Tables
           </TabsTrigger>
           <TabsTrigger value="exhibition" className="text-xs font-medium">
             <Eye className="w-3 h-3 mr-1" />
@@ -103,7 +108,19 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({ atomId 
         </TabsContent>
 
         <TabsContent value="visualisation" className="flex-1 mt-0 overflow-y-auto" forceMount>
-          <KPIDashboardVisualisation data={data} />
+          <KPIDashboardVisualisation 
+            data={data} 
+            settings={settings}
+            onSettingsChange={handleSettingsChange}
+          />
+        </TabsContent>
+
+        <TabsContent value="tables" className="flex-1 mt-0 overflow-y-auto" forceMount>
+          <KPIDashboardTableConfig
+            data={data}
+            settings={settings}
+            onSettingsChange={handleSettingsChange}
+          />
         </TabsContent>
 
         <TabsContent value="exhibition" className="flex-1 mt-0 overflow-y-auto" forceMount>
@@ -115,4 +132,5 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({ atomId 
 };
 
 export default KPIDashboardProperties;
+
 

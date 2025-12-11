@@ -1,9 +1,10 @@
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Eye, BarChart3 } from 'lucide-react';
+import { Settings, Eye, BarChart3, Table2 } from 'lucide-react';
 import KPIDashboardSettings from './KPIDashboardSettings';
 import KPIDashboardExhibition from './KPIDashboardExhibition';
 import KPIDashboardVisualisation from './KPIDashboardVisualisation';
+import KPIDashboardTableConfig from './KPIDashboardTableConfig';
 import type { KPIDashboardData, KPIDashboardSettings as KPISettings } from '../KPIDashboardAtom';
 
 interface KPIDashboardPropertiesProps {
@@ -29,12 +30,15 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({
       </div>
       <div className="flex-1 overflow-hidden">
         <Tabs defaultValue="settings" className="h-full">
-          <TabsList className="grid w-full grid-cols-3 m-2">
+          <TabsList className="grid w-full grid-cols-4 m-2">
             <TabsTrigger value="settings" className="text-xs">
               <Settings className="w-3 h-3 mr-1" /> Settings
             </TabsTrigger>
             <TabsTrigger value="visualisation" className="text-xs">
               <BarChart3 className="w-3 h-3 mr-1" /> Charts
+            </TabsTrigger>
+            <TabsTrigger value="tables" className="text-xs">
+              <Table2 className="w-3 h-3 mr-1" /> Tables
             </TabsTrigger>
             <TabsTrigger value="exhibition" className="text-xs">
               <Eye className="w-3 h-3 mr-1" /> Export
@@ -50,7 +54,18 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({
               />
             </TabsContent>
             <TabsContent value="visualisation" className="h-full m-0 p-2" forceMount>
-              <KPIDashboardVisualisation data={data} />
+              <KPIDashboardVisualisation 
+                data={data} 
+                settings={settings}
+                onSettingsChange={onSettingsChange}
+              />
+            </TabsContent>
+            <TabsContent value="tables" className="h-full m-0 p-2" forceMount>
+              <KPIDashboardTableConfig
+                data={data}
+                settings={settings}
+                onSettingsChange={onSettingsChange}
+              />
             </TabsContent>
             <TabsContent value="exhibition" className="h-full m-0 p-2" forceMount>
               <KPIDashboardExhibition data={data} />

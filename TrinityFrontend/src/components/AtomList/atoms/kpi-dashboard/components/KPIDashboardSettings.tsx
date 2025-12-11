@@ -11,7 +11,6 @@ import { VALIDATE_API, LABORATORY_API, IMAGES_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import type { KPIDashboardData, KPIDashboardSettings as KPISettings } from '../KPIDashboardAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { ChartMakerMetadata } from '@/components/ExhibitionMode/components/atoms/ChartMaker/types';
 
 interface KPIDashboardSettingsProps {
   settings: KPISettings;
@@ -117,83 +116,6 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
   const selectedImageBox = settings.layouts?.flatMap(layout => layout.boxes)
     .find(box => box.id === settings.selectedBoxId && box.elementType === 'image');
   
-  // Find the selected chart box specifically
-  const selectedChartBox = settings.layouts?.flatMap(layout => layout.boxes)
-    .find(box => box.id === settings.selectedBoxId && box.elementType === 'chart');
-  
-  // State for chart import
-  const [availableCharts, setAvailableCharts] = useState<any[]>([]);
-  const [loadingCharts, setLoadingCharts] = useState(false);
-  const cards = useLaboratoryStore((state) => state.cards);
-  
-  // Fetch available charts from chartmaker atoms
-  useEffect(() => {
-    if (!selectedChartBox) {
-      setAvailableCharts([]);
-      return;
-    }
-    
-    setLoadingCharts(true);
-    try {
-      // Get all chartmaker atoms and their exhibition selections
-      const chartEntries: any[] = [];
-      
-      cards.forEach((card) => {
-        card.atoms.forEach((atom) => {
-          if (atom.atomId === 'chart-maker') {
-            const selections = Array.isArray(atom.settings?.exhibitionSelections)
-              ? atom.settings.exhibitionSelections
-              : [];
-            
-            selections.forEach((selection: any) => {
-              const metadata: ChartMakerMetadata = {
-                chartId: selection.chartId,
-                chartTitle: selection.chartTitle,
-                chartState: selection.chartState,
-                chartContext: selection.chartContext,
-                capturedAt: selection.capturedAt,
-                sourceAtomTitle: atom.title || 'Chart Maker',
-              };
-              
-              chartEntries.push({
-                id: selection.chartId || selection.key,
-                title: selection.chartTitle || 'Untitled Chart',
-                metadata,
-                atomTitle: atom.title || 'Chart Maker',
-                atomId: atom.id,
-              });
-            });
-          }
-        });
-      });
-      
-      setAvailableCharts(chartEntries);
-    } catch (error) {
-      console.error('Error fetching charts:', error);
-    } finally {
-      setLoadingCharts(false);
-    }
-  }, [selectedChartBox, cards]);
-  
-  // Handle chart import
-  const handleChartImport = (chart: any) => {
-    if (!selectedChartBox) return;
-    
-    const updatedLayouts = settings.layouts?.map(layout => ({
-      ...layout,
-      boxes: layout.boxes.map(box =>
-        box.id === settings.selectedBoxId
-          ? {
-              ...box,
-              chartMetadata: chart.metadata,
-              chartId: chart.id,
-            }
-          : box
-      )
-    }));
-    
-    onSettingsChange({ layouts: updatedLayouts });
-  };
 
   // Fetch variable options when a metric card with variable is selected
   useEffect(() => {
@@ -274,9 +196,45 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
             
             setAvailableVariables(relatedVariables);
             
-            // Parse identifiers from variableNameKey
+            // First, parse identifiers ONLY from the current variable to determine which identifiers exist
+            // Use variableNameKey if available, otherwise use variableName
+            const currentVariableKey = selectedBox.variableNameKey || selectedBox.variableName;
+            const currentVariableIdentifiers: Set<string> = new Set();
+            
+            if (currentVariableKey) {
+              const parts = currentVariableKey.split('_');
+              const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+              
+              // Skip the first 2 parts (measure and aggregation method: salesvalue_sum)
+              let i = 2;
+              while (i < parts.length) {
+                const key = parts[i].toLowerCase();
+                
+                // Check if this is an identifier type
+                if (identifierTypes.includes(key) && i + 1 < parts.length) {
+                  currentVariableIdentifiers.add(key);
+                  
+                  // Skip the value and move to next identifier
+                  let nextIndex = i + 2;
+                  while (nextIndex < parts.length) {
+                    const nextPart = parts[nextIndex].toLowerCase();
+                    if (!identifierTypes.includes(nextPart)) {
+                      nextIndex++;
+                    } else {
+                      break;
+                    }
+                  }
+                  i = nextIndex;
+                } else {
+                  i++;
+                }
+              }
+            }
+            
+            console.log('🔍 Current variable identifiers:', Array.from(currentVariableIdentifiers));
+            
+            // Now parse identifier values from ALL related variables, but ONLY for identifiers that exist in current variable
             // Pattern: salesvalue_sum_brand_svelty_year_2024_channel_traditional trade
-            // We need to identify identifier types and their values
             const identifierMap: Record<string, Set<string>> = {};
             
             relatedVariables.forEach((v: any) => {
@@ -287,13 +245,12 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                 const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
                 
                 // Skip the first 2 parts (measure and aggregation method: salesvalue_sum)
-                // Then look for identifier patterns: brand_value, year_value, channel_value
                 let i = 2;
                 while (i < parts.length) {
                   const key = parts[i].toLowerCase();
                   
-                  // Check if this is an identifier type
-                  if (identifierTypes.includes(key) && i + 1 < parts.length) {
+                  // Only process identifiers that exist in the current variable
+                  if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
                     // Get the value - might be single word or multi-word
                     let value = parts[i + 1];
                     let nextIndex = i + 2;
@@ -322,14 +279,16 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
               }
             });
             
-            console.log('🔍 Parsed identifier map:', identifierMap);
+            console.log('🔍 Parsed identifier map (only for current variable identifiers):', identifierMap);
             console.log('🔍 Identifier map keys:', Object.keys(identifierMap));
             console.log('🔍 Identifier map values:', Object.entries(identifierMap).map(([k, v]) => [k, Array.from(v as Set<string>)]));
             
-            // Convert Sets to Arrays
+            // Convert Sets to Arrays - only include identifiers that exist in current variable
             const options: Record<string, string[]> = {};
-            Object.keys(identifierMap).forEach(key => {
-              options[key] = Array.from(identifierMap[key]).sort();
+            currentVariableIdentifiers.forEach(key => {
+              if (identifierMap[key]) {
+                options[key] = Array.from(identifierMap[key]).sort();
+              }
             });
             
             console.log('🔍 Extracted identifier options:', options);
@@ -339,8 +298,6 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
             setIdentifierOptions(options);
             
             // Set initial filter values from current variable
-            // Use variableNameKey if available, otherwise use variableName
-            const currentVariableKey = selectedBox.variableNameKey || selectedBox.variableName;
             if (currentVariableKey) {
               const parts = currentVariableKey.split('_');
               const currentFilters: Record<string, string> = {};
@@ -350,7 +307,7 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
               while (i < parts.length) {
                 const key = parts[i].toLowerCase();
                 
-                if (identifierTypes.includes(key) && i + 1 < parts.length) {
+                if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
                   let value = parts[i + 1];
                   let nextIndex = i + 2;
                   
@@ -1043,114 +1000,6 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
         </div>
       )}
 
-      {/* Chart Element Settings - Only show when a chart element is selected */}
-      {selectedChartBox && (
-        <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 className="w-5 h-5 text-blue-600" />
-            <Label className="text-sm font-semibold text-blue-900">
-              Chart Settings
-            </Label>
-          </div>
-
-          {/* Chart Import */}
-          <div className="space-y-3">
-            <Label className="text-sm font-medium">Import Chart from Chart Maker</Label>
-            {loadingCharts ? (
-              <div className="p-3 bg-white rounded-lg border border-blue-200">
-                <p className="text-xs text-muted-foreground text-center">Loading charts...</p>
-              </div>
-            ) : availableCharts.length === 0 ? (
-              <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                <p className="text-xs text-yellow-800 text-center">
-                  No charts available. Create charts in Chart Maker and stage them for exhibition.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {availableCharts.map((chart) => (
-                  <div
-                    key={chart.id}
-                    onClick={() => handleChartImport(chart)}
-                    className={`p-3 bg-white border rounded-lg cursor-pointer transition-colors ${
-                      selectedChartBox.chartId === chart.id
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/50'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="text-sm font-semibold text-gray-800">
-                          {chart.title}
-                        </p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          From: {chart.atomTitle}
-                        </p>
-                        {chart.metadata?.chartState?.chartType && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            Type: {chart.metadata.chartState.chartType}
-                          </p>
-                        )}
-                      </div>
-                      {selectedChartBox.chartId === chart.id && (
-                        <div className="ml-2 px-2 py-1 bg-blue-500 text-white text-xs rounded">
-                          Selected
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Select a chart from Chart Maker to display in this element. Charts must be staged for exhibition in Chart Maker first.
-            </p>
-          </div>
-
-          {/* Current Chart Info */}
-          {selectedChartBox.chartMetadata && (
-            <div className="mt-4 pt-4 border-t border-blue-200">
-              <Label className="text-sm font-medium">Current Chart</Label>
-              <div className="mt-2 p-3 bg-white rounded-lg border border-blue-200">
-                <p className="text-sm font-semibold text-gray-800">
-                  {typeof selectedChartBox.chartMetadata === 'object' && selectedChartBox.chartMetadata.chartTitle
-                    ? selectedChartBox.chartMetadata.chartTitle
-                    : 'Chart loaded'}
-                </p>
-                {typeof selectedChartBox.chartMetadata === 'object' && selectedChartBox.chartMetadata.sourceAtomTitle && (
-                  <p className="text-xs text-gray-600 mt-1">
-                    Source: {selectedChartBox.chartMetadata.sourceAtomTitle}
-                  </p>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const updatedLayouts = settings.layouts?.map(layout => ({
-                      ...layout,
-                      boxes: layout.boxes.map(box =>
-                        box.id === settings.selectedBoxId
-                          ? {
-                              ...box,
-                              chartMetadata: undefined,
-                              chartId: undefined,
-                            }
-                          : box
-                      )
-                    }));
-                    onSettingsChange({ layouts: updatedLayouts });
-                  }}
-                  className="mt-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-                >
-                  <X className="w-3 h-3 mr-1" />
-                  Remove Chart
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Image Element Settings - Only show when an image element is selected */}
       {selectedImageBox && (
@@ -1455,3 +1304,4 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
 };
 
 export default KPIDashboardSettings;
+
