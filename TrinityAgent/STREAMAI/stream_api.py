@@ -152,6 +152,7 @@ def _compute_prerequisite_scores(prompt: str) -> dict:
 
     normalized = prompt.strip().lower()
     vagueness_score = _compute_vagueness_score(prompt)
+    scope_detectability_threshold = 0.6
 
     # Intent clarity mirrors vagueness score but rewards explicit objectives
     intent_signals = len(re.findall(r"\b(analyze|build|create|train|summarize|compare)\b", normalized))
@@ -176,6 +177,18 @@ def _compute_prerequisite_scores(prompt: str) -> dict:
     )
     scope_hits = sum(1 for kw in scope_keywords if kw in normalized)
     scope_detectability_score = min(1.0, vagueness_score * 0.5 + min(0.5, scope_hits * 0.08))
+
+    data_references = _extract_data_references(prompt)
+    insistence_patterns = (
+        r"\b(use|using|only|must|specifically|required|exactly)\b[^.]{0,80}\b(dataset|file|table|columns?)\b",
+        r"\b(in this|for this)\s+(dataset|file|table)\b",
+    )
+    insisted_scope = any(re.search(pattern, normalized) for pattern in insistence_patterns)
+    if data_references and re.search(r"\b(use|using|only|must|specifically|required|exactly)\b", normalized):
+        insisted_scope = True
+
+    if insisted_scope:
+        scope_detectability_score = max(scope_detectability_score, scope_detectability_threshold + 0.05)
 
     card_prerequisite_score = round(
         (intent_clarity_score + scope_detectability_score) / 2, 4
@@ -444,7 +457,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         message = json.loads(message_data)
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
-        vagueness_threshold = float(message.get("vagueness_threshold", 0.75))
+        vagueness_threshold = float(message.get("vagueness_threshold", 0.6))
 
         # Start clarification response listener (non-blocking) so lab-mode clients can resume pauses
         orchestrator = ws_orchestrator
