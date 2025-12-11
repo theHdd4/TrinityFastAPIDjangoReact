@@ -218,3 +218,19 @@ class StreamWebSocketOrchestrator(WorkflowExecutionMixin, WorkflowPlanningMixin,
 
         self._paused_sequences.discard(session_id)
         return True
+
+    def find_resumable_sequence(self, *candidate_ids: str) -> Optional[str]:
+        """Return the first paused sequence that matches one of the candidates."""
+
+        for candidate in candidate_ids:
+            if not candidate:
+                continue
+
+            if candidate in self._paused_sequences:
+                return candidate
+
+            react_state = self._sequence_react_state.get(candidate)
+            if react_state and react_state.paused:
+                return candidate
+
+        return None

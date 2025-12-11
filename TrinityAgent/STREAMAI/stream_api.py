@@ -147,6 +147,9 @@ except ImportError:
     except Exception:
         intent_service = None  # type: ignore
 
+# Track prior workflow sessions to allow resumption when intent stays on workflows
+_previous_workflow_sessions: dict[str, str] = {}
+
 
 @router.get("/health")
 async def health_check():
@@ -298,8 +301,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
         if not session_id:
             session_id = f"ws_{uuid.uuid4().hex[:8]}"
         if not websocket_session_id:
-            websocket_session_id = f"ws_conn_{uuid.uuid4().hex[:12]}"
+            websocket_session_id = session_id or f"ws_conn_{uuid.uuid4().hex[:12]}"
         available_files = message.get("available_files", [])
+        prior_workflow_session = _previous_workflow_sessions.get(session_id) or _previous_workflow_sessions.get(chat_id or "")
 
         # Laboratory intent routing
         intent_record = None
@@ -479,6 +483,30 @@ async def execute_workflow_websocket(websocket: WebSocket):
             logger.info("✅ Text reply sent, closing connection")
             await _safe_close_websocket(websocket, code=1000, reason="text_reply_complete")
             return
+
+        # Determine whether we should resume an existing workflow sequence
+        resume_candidates = [
+            websocket_session_id,
+            session_id,
+            chat_id,
+            prior_workflow_session,
+        ]
+        resumable_session_id = ws_orchestrator.find_resumable_sequence(*resume_candidates)
+        if resumable_session_id and resumable_session_id != websocket_session_id:
+            logger.info(
+                "⏯️ Resuming existing workflow session: incoming=%s -> resumable=%s",
+                websocket_session_id,
+                resumable_session_id,
+            )
+            websocket_session_id = resumable_session_id
+        elif not resumable_session_id and prior_workflow_session and websocket_session_id != prior_workflow_session:
+            # Prefer continuing with the previously used workflow session ID to keep context aligned
+            logger.info(
+                "🔁 Continuing workflow context using previous session id %s (incoming=%s)",
+                prior_workflow_session,
+                websocket_session_id,
+            )
+            websocket_session_id = prior_workflow_session
 
         # Step 3b: Vagueness scoring only for workflow execution paths (after routing is fixed)
         vagueness_score = _compute_vagueness_score(user_prompt)
@@ -676,7 +704,13 @@ async def execute_workflow_websocket(websocket: WebSocket):
         project_context["websocket_session_id"] = websocket_session_id
 
         logger.info(f"🔑 Session ID: {session_id}, WebSocket Session: {websocket_session_id}, Chat ID: {chat_id}")
-        
+
+        # Remember the workflow session ids so future prompts can resume if intent stays on workflows
+        if session_id:
+            _previous_workflow_sessions[session_id] = websocket_session_id
+        if chat_id:
+            _previous_workflow_sessions[chat_id] = websocket_session_id
+
         # Execute workflow with real-time events (intent detection already done above - NOT called again)
         try:
             await ws_orchestrator.execute_workflow_with_websocket(
