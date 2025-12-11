@@ -425,11 +425,21 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         intent_result = await _detect_intent_simple(user_prompt, session_id=session_id, use_cache=False)
         intent = intent_result.get("intent", "workflow")
+        decision_path = decision.path if decision else None
+
+        # When the classifier explicitly says this is a text reply, honor it and do not
+        # force a workflow path based on any cached routing decision. This prevents
+        # previously paused workflows from being resumed for generic LLM Q&A turns.
         if decision:
-            intent = "text_reply" if decision.path == "llm_only" else "workflow"
+            if intent == "text_reply":
+                decision_path = "llm_only"
+            intent = "text_reply" if decision_path == "llm_only" else "workflow"
+            if routing_payload is not None:
+                routing_payload["path"] = decision_path
 
         if intent_service and decision:
-            intent_service.update_scratchpad(session_id, f"Routing via {decision.path}: {decision.rationale}")
+            path_for_log = decision_path or decision.path
+            intent_service.update_scratchpad(session_id, f"Routing via {path_for_log}: {decision.rationale}")
 
         logger.info("=" * 80)
         logger.info(f"✅ INTENT DETECTION RESULT (fresh run)")
