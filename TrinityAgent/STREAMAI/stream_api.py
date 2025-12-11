@@ -216,7 +216,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         message = json.loads(message_data)
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
-        vagueness_threshold = float(message.get("vagueness_threshold", 0.6))
+        vagueness_threshold = float(message.get("vagueness_threshold", 0.75))
 
         # Start clarification response listener (non-blocking) so lab-mode clients can resume pauses
         orchestrator = ws_orchestrator
