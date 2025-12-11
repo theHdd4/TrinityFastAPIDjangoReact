@@ -188,6 +188,48 @@ def _compute_prerequisite_scores(prompt: str) -> dict:
     }
 
 
+def _build_contextual_prompt(
+    latest_prompt: str,
+    atom_ai_context: dict | None = None,
+    history_summary: str | None = None,
+) -> str:
+    """Merge the latest prompt with previously captured context for scoring.
+
+    The contextual prompt pulls from Trinity AI context clarifications and any
+    available history summary so prerequisite and vagueness scores account for
+    the full conversation, not only the most recent user turn.
+    """
+
+    atom_ai_context = atom_ai_context or {}
+    clarifications = atom_ai_context.get("clarifications") or []
+
+    segments: list[str] = []
+    if history_summary:
+        segments.append(f"Conversation summary: {history_summary}")
+
+    initial_prompt = atom_ai_context.get("initial_prompt")
+    if initial_prompt and initial_prompt != latest_prompt:
+        segments.append(f"Initial request: {initial_prompt}")
+
+    if clarifications:
+        recent = clarifications[-3:]
+        formatted = []
+        for clarification in recent:
+            focus = clarification.get("focus") or clarification.get("type") or "context"
+            response = clarification.get("response") or clarification.get("message") or ""
+            values = clarification.get("values") or {}
+            if values:
+                response = f"{response} | " + " | ".join(
+                    f"{key}: {value}" for key, value in values.items()
+                )
+            formatted.append(f"{focus.title()} clarification: {response}".strip())
+
+        segments.append("; ".join(formatted))
+
+    segments.append(f"Latest prompt: {latest_prompt}")
+    return "\n\n".join(segment for segment in segments if segment).strip()
+
+
 def _summarize_known_data(
     atom_ai_context: dict, available_files: list[str] | None, initial_prompt: str
 ) -> str:
@@ -643,8 +685,29 @@ async def execute_workflow_websocket(websocket: WebSocket):
             )
             websocket_session_id = prior_workflow_session
 
+        project_context = message.get("project_context", {}) or {}
+        atom_ai_context = project_context.get("ATOM_AI_Context") or {}
+        if not isinstance(atom_ai_context, dict):
+            atom_ai_context = {}
+        atom_ai_context.setdefault("clarifications", [])
+        prompt_history = atom_ai_context.setdefault("prompt_history", [])
+        if user_prompt and (not prompt_history or prompt_history[-1] != user_prompt):
+            prompt_history.append(user_prompt)
+            atom_ai_context["prompt_history"] = prompt_history[-10:]
+        atom_ai_context.setdefault("initial_prompt", user_prompt)
+        history_summary = message.get("history_summary")
+        if history_summary:
+            atom_ai_context["history_summary"] = history_summary
+        atom_ai_context["available_files"] = available_files
+
+        contextual_prompt = _build_contextual_prompt(
+            user_prompt, atom_ai_context, history_summary
+        )
+        user_id = message.get("user_id", "default_user")
+        mentioned_files = message.get("mentioned_files") or []
+
         # Step 3b: Vagueness scoring only for workflow execution paths (after routing is fixed)
-        vagueness_score = _compute_vagueness_score(user_prompt)
+        vagueness_score = _compute_vagueness_score(contextual_prompt)
         logger.info(
             "🧭 Vagueness check -> score=%.2f threshold=%.2f (workflow path)",
             vagueness_score,
@@ -709,7 +772,23 @@ async def execute_workflow_websocket(websocket: WebSocket):
             if clarification_parts:
                 user_prompt = f"{user_prompt}\n\nUser clarification: {'; '.join(clarification_parts)}"
 
-            vagueness_score = _compute_vagueness_score(user_prompt)
+            atom_ai_context["clarifications"].append(
+                {
+                    "prompt": "initial_vagueness_clarification",
+                    "response": clarification_response.get("message", ""),
+                    "values": values,
+                    "focus": "vagueness",
+                }
+            )
+            prompt_history = atom_ai_context.setdefault("prompt_history", [])
+            prompt_history.append(user_prompt)
+            atom_ai_context["prompt_history"] = prompt_history[-10:]
+
+            contextual_prompt = _build_contextual_prompt(
+                user_prompt, atom_ai_context, history_summary
+            )
+
+            vagueness_score = _compute_vagueness_score(contextual_prompt)
             logger.info(
                 "🧭 Recomputed vagueness score after clarification -> %.2f (threshold=%.2f)",
                 vagueness_score,
@@ -742,23 +821,16 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         # Extract remaining parameters for workflow
         # Note: session_id and chat_id already extracted above for intent caching
-        available_files = message.get("available_files", [])
-        project_context = message.get("project_context", {}) or {}
-        user_id = message.get("user_id", "default_user")
-        history_summary = message.get("history_summary")
-        mentioned_files = message.get("mentioned_files") or []
 
         # Laboratory prerequisite scoring for atom execution
         card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.6))
         scope_detectability_threshold = float(message.get("scope_detectability_threshold", 0.7))
-        prerequisite_scores = _compute_prerequisite_scores(user_prompt)
+        contextual_prompt = _build_contextual_prompt(
+            user_prompt, atom_ai_context, history_summary
+        )
+        atom_ai_context["contextual_prompt"] = contextual_prompt
+        prerequisite_scores = _compute_prerequisite_scores(contextual_prompt)
         card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
-        atom_ai_context = project_context.get("ATOM_AI_Context") or {}
-        if not isinstance(atom_ai_context, dict):
-            atom_ai_context = {}
-        atom_ai_context.setdefault("clarifications", [])
-        atom_ai_context["available_files"] = available_files
-        atom_ai_context["initial_prompt"] = user_prompt
 
         await _safe_send_json(
             websocket,
@@ -865,6 +937,14 @@ async def execute_workflow_websocket(websocket: WebSocket):
             if clarified_text:
                 user_prompt = f"{user_prompt}\n\n{weakest_dimension.title()} clarification: {clarified_text}"
 
+            prompt_history = atom_ai_context.setdefault("prompt_history", [])
+            prompt_history.append(user_prompt)
+            atom_ai_context["prompt_history"] = prompt_history[-10:]
+            contextual_prompt = _build_contextual_prompt(
+                user_prompt, atom_ai_context, history_summary
+            )
+            atom_ai_context["contextual_prompt"] = contextual_prompt
+
             clarification_vagueness = _compute_vagueness_score(clarified_text or response_message)
             await _safe_send_json(
                 websocket,
@@ -880,7 +960,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 },
             )
 
-            prerequisite_scores = _compute_prerequisite_scores(user_prompt)
+            prerequisite_scores = _compute_prerequisite_scores(contextual_prompt)
             card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
             await _safe_send_json(
                 websocket,
@@ -1070,9 +1150,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         # Execute workflow with real-time events (intent detection already done above - NOT called again)
         try:
+            workflow_prompt = atom_ai_context.get("contextual_prompt", user_prompt)
             await ws_orchestrator.execute_workflow_with_websocket(
                 websocket=websocket,
-                user_prompt=user_prompt,
+                user_prompt=workflow_prompt,
                 available_files=available_files,
                 project_context=project_context,
                 user_id=user_id,
