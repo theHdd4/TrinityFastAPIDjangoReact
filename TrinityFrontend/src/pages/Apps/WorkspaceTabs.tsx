@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Calendar, ChevronRight, Plus, User, Building2 } from 'lucide-react';
+import { Calendar, ChevronRight, Plus, User, Building2, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import HorizontalScrollContainer from './HorizontalScrollContainer';
 
@@ -20,6 +20,7 @@ interface Project {
   relativeTime?: string;
   icon: any;
   modes: ModeStatus;
+  is_allowed?: boolean;
 }
 
 interface WorkspaceTabsProps {
@@ -178,7 +179,7 @@ const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
 
       {/* Your Workspace Section - Independent rendering */}
       {activeTab === 'my-projects' && (
-        <section className="bg-muted/30 animate-fade-in" style={animationStyle(0.3)}>
+        <section className="animate-fade-in" style={animationStyle(0.3)}>
           <div className="max-w-7xl mx-auto px-6 py-8">
             {/* Workspace Content with Uniform Background */}
             <div className="relative mb-6">
@@ -302,7 +303,7 @@ const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
 
       {/* Companies Workspace Section - Independent rendering */}
       {activeTab === 'workspace' && (
-        <section className="bg-muted/30 animate-fade-in" style={animationStyle(0.3)}>
+        <section className="animate-fade-in" style={animationStyle(0.3)}>
           <div className="max-w-7xl mx-auto px-6 py-8">
             {/* Workspace Content with Uniform Background */}
             <div className="relative mb-6">
@@ -357,17 +358,18 @@ const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                     {filteredRecentProjects.map((project) => {
                       const Icon = project.icon;
                       const appColorValue = getAppColorValue(project.appId);
+                      const isRestricted = project.is_allowed === false;
                       return (
                         <Card
                           key={project.id}
                           className={cn(
-                            "group bg-card cursor-pointer overflow-hidden",
+                            "group bg-card overflow-hidden",
                             "w-[280px] sm:w-[300px] lg:w-[320px]",
-                            "border border-border/50 hover:border-primary/40",
-                            "shadow-sm hover:shadow-[0_12px_28px_rgba(var(--color-primary-rgb, 59,130,246),0.12)]",
-                            "transition-all duration-300 hover:-translate-y-2"
+                            isRestricted
+                              ? "border border-border/50 opacity-40 cursor-not-allowed"
+                              : "border border-border/50 hover:border-primary/40 shadow-sm hover:shadow-[0_12px_28px_rgba(var(--color-primary-rgb, 59,130,246),0.12)] transition-all duration-300 hover:-translate-y-2 cursor-pointer"
                           )}
-                          onClick={() => onOpenProject(project)}
+                          onClick={isRestricted ? undefined : () => onOpenProject(project)}
                         >
                           <div className="p-4">
                             <div className="flex items-start gap-3 mb-4">
@@ -375,17 +377,21 @@ const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                                 className={cn(
                                   "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
                                   "text-white",
-                                  "transition-all duration-300",
-                                  "group-hover:scale-105"
+                                  !isRestricted && "transition-all duration-300 group-hover:scale-105"
                                 )}
                                 style={{
-                                  backgroundColor: appColorValue,
+                                  backgroundColor: isRestricted ? "#6b7280" : appColorValue, // bg-gray-500 (#6b7280) for restricted to match restricted apps
                                 }}
                               >
-                                <Icon className="w-5 h-5" />
+                                <Icon className="w-5 h-5 text-white" />
                               </div>
                               <div className="flex-1 min-w-0">
-                                <h4 className="font-medium text-foreground text-sm truncate group-hover:text-primary transition-colors duration-300">
+                                <h4 className={cn(
+                                  "font-medium text-sm truncate",
+                                  isRestricted
+                                    ? "text-muted-foreground"
+                                    : "text-foreground group-hover:text-primary transition-colors duration-300"
+                                )}>
                                   {project.name}
                                 </h4>
                                 <p className="text-[11px] text-muted-foreground truncate">
@@ -399,10 +405,17 @@ const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
                                 <Calendar className="w-3 h-3" />
                                     <span className="text-[10px] font-medium">{project.relativeTime || formatRelativeTime(project.lastModified)}</span>
                               </div>
-                              <div className="flex items-center gap-1 text-primary text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-all duration-300">
-                                <span>Open</span>
-                                <ChevronRight className="w-3 h-3" />
-                              </div>
+                              {isRestricted ? (
+                                <div className="flex items-center gap-1 text-muted-foreground text-[11px] font-medium">
+                                  <span>Restricted</span>
+                                  <Lock className="w-3 h-3" />
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1 text-primary text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-all duration-300">
+                                  <span>Open</span>
+                                  <ChevronRight className="w-3 h-3" />
+                                </div>
+                              )}
                             </div>
                           </div>
                         </Card>

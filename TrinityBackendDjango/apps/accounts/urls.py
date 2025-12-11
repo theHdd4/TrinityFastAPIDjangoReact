@@ -5,6 +5,7 @@ from .views import (
     UserProfileViewSet,
     LoginView,
     LogoutView,
+    OnboardCompleteView,
 )
 
 router = DefaultRouter()
@@ -14,5 +15,6 @@ router.register(r"profiles", UserProfileViewSet, basename="userprofile")
 urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
+    path("onboard/complete/", OnboardCompleteView.as_view(), name="onboard-complete"),
     path("", include(router.urls)),
 ]

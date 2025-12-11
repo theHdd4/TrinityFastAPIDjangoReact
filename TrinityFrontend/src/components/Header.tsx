@@ -86,8 +86,15 @@ const Header: React.FC<HeaderProps> = ({ projectCount = 0, sidebarOpen = false, 
   };
 
   const isProjects = location.pathname.startsWith('/projects');
+  // Normalize pathname to handle trailing slashes
+  const normalizedPath = location.pathname.replace(/\/$/, '');
+  const isClientsPage = normalizedPath === '/clients' || normalizedPath.startsWith('/clients/');
+  const isUsersPage = normalizedPath === '/users' || normalizedPath.startsWith('/users/');
   const simpleHeader =
-    location.pathname.startsWith('/apps') || isProjects;
+    location.pathname.startsWith('/apps') || 
+    isProjects ||
+    isClientsPage ||
+    isUsersPage;
 
   return (
     <header
