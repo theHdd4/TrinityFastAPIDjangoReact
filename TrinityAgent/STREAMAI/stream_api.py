@@ -525,6 +525,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
             vagueness_score,
             vagueness_threshold,
         )
+        await _safe_send_json(
+            websocket,
+            {
+                "type": "status",
+                "status": "vagueness_check",
+                "message": (
+                    "Calculating vagueness score for workflow routing: "
+                    f"score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f}"
+                ),
+                "vagueness_score": vagueness_score,
+                "vagueness_threshold": vagueness_threshold,
+            },
+        )
 
         while vagueness_score < vagueness_threshold:
             await _safe_send_json(
@@ -576,6 +589,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "🧭 Recomputed vagueness score after clarification -> %.2f (threshold=%.2f)",
                 vagueness_score,
                 vagueness_threshold,
+            )
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "vagueness_check",
+                    "message": (
+                        "Recomputed vagueness score after clarification: "
+                        f"score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f}"
+                    ),
+                    "vagueness_score": vagueness_score,
+                    "vagueness_threshold": vagueness_threshold,
+                },
             )
 
         await _safe_send_json(
