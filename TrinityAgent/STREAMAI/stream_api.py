@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import logging
 import json
+import re
 import uuid
 from dataclasses import asdict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -87,6 +88,52 @@ async def _wait_for_clarification_response(websocket: WebSocket) -> dict | None:
 
         logger.debug("Ignoring non-clarification message while waiting: %s", parsed)
 
+
+def _compute_vagueness_score(prompt: str) -> float:
+    """Compute a lightweight vagueness score between 0 and 1.
+
+    Heuristic factors:
+    - Longer prompts increase the score
+    - Presence of concrete signals (numbers, dates, file-like tokens)
+    - Penalize vague starter phrases and excessive interrogatives
+    """
+
+    if not prompt:
+        return 0.0
+
+    normalized = prompt.strip().lower()
+    word_count = len(re.findall(r"\b\w+\b", normalized))
+    sentence_count = max(1, normalized.count(".") + normalized.count("!") + normalized.count("?"))
+
+    # Base score from length (cap at ~25 words)
+    length_score = min(1.0, word_count / 25)
+
+    # Specificity indicators
+    has_numbers = bool(re.search(r"\d", normalized))
+    has_dates = bool(re.search(r"\b(\d{4}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b", normalized))
+    has_paths = bool(re.search(r"\w+/\w+", normalized))
+    specificity_bonus = 0.15 * sum([has_numbers, has_dates, has_paths])
+
+    # Penalize vague openers
+    vague_prefixes = (
+        "can you help",
+        "please assist",
+        "i need help",
+        "can you do",
+    )
+    vague_penalty = 0.2 if normalized.startswith(vague_prefixes) else 0.0
+
+    # Penalize question-only statements with few words
+    interrogative_penalty = 0.0
+    if normalized.endswith("?") and word_count < 8:
+        interrogative_penalty = 0.1
+
+    score = max(0.0, min(1.0, length_score + specificity_bonus - vague_penalty - interrogative_penalty))
+
+    # Smooth by sentence count to reward structured inputs
+    score = min(1.0, score * (1 + min(0.2, sentence_count * 0.05)))
+    return score
+
 # Initialize components (will be set by main_api.py)
 rag_engine = None
 parameter_generator = None
@@ -99,6 +146,9 @@ except ImportError:
         from .intent_service import intent_service
     except Exception:
         intent_service = None  # type: ignore
+
+# Track prior workflow sessions to allow resumption when intent stays on workflows
+_previous_workflow_sessions: dict[str, str] = {}
 
 
 @router.get("/health")
@@ -137,6 +187,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
     close_code = 1000
     close_reason = "workflow_complete"
     clarification_task = None
+    clarification_history: list[dict] = []
+    vagueness_score: float | None = None
+    vagueness_threshold: float | None = None
 
     try:
         # Import components
@@ -160,20 +213,17 @@ async def execute_workflow_websocket(websocket: WebSocket):
         logger.info("⏳ Waiting for message from client...")
         message_data = await websocket.receive_text()
         logger.info(f"📥 Raw message received (length: {len(message_data)} chars)")
-        
+
         message = json.loads(message_data)
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
+        vagueness_threshold = float(message.get("vagueness_threshold", 0.75))
 
         # Start clarification response listener (non-blocking) so lab-mode clients can resume pauses
-        from STREAMAI.main_app import get_orchestrator  # Lazy import to avoid circular deps
-
-        orchestrator = get_orchestrator()
+        orchestrator = ws_orchestrator
 
         async def handle_clarification_response(incoming: dict) -> bool:
             if incoming.get("type") != "clarification_response":
                 return False
-            if not orchestrator:
-                return True
             accepted = await orchestrator.resume_clarification(
                 session_id=incoming.get("session_id"),
                 request_id=incoming.get("requestId"),
@@ -219,7 +269,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
         logger.info(f"📨 NEW REQUEST RECEIVED: {user_prompt}")
         logger.info(f"📨 Full message: {json.dumps(message, indent=2)}")
         logger.info("=" * 80)
-        
+
         # Step 1: Send "Analyzing the query..." message immediately
         if not await _safe_send_json(websocket, {
             "type": "status",
@@ -251,8 +301,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
         if not session_id:
             session_id = f"ws_{uuid.uuid4().hex[:8]}"
         if not websocket_session_id:
-            websocket_session_id = f"ws_conn_{uuid.uuid4().hex[:12]}"
+            websocket_session_id = session_id or f"ws_conn_{uuid.uuid4().hex[:12]}"
         available_files = message.get("available_files", [])
+        prior_workflow_session = _previous_workflow_sessions.get(session_id) or _previous_workflow_sessions.get(chat_id or "")
 
         # Laboratory intent routing
         intent_record = None
@@ -362,29 +413,39 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 # Exit loop if no additional clarifications are required
                 break
 
-        # Step 2: Intent Detection (ONCE at the start - like 28_NOV)
-        # This is the ONLY place intent detection should happen for this WebSocket request
-        # Use session_id for caching to prevent repeated detection
+        # Step 2: Intent Detection (per prompt)
+        # Always re-run intent detection for each incoming prompt so laboratory mode
+        # correctly routes between workflow vs. direct LLM responses. Caching the
+        # result caused stale paths after websocket_orchestrator.py restructuring.
         logger.info("=" * 80)
-        logger.info(f"🔍 STARTING INTENT DETECTION (ONCE at start)")
+        logger.info(f"🔍 STARTING INTENT DETECTION (per prompt)")
         logger.info(f"   User prompt: {user_prompt}")
-        logger.info(f"   Session ID: {session_id} (for caching)")
+        logger.info(f"   Session ID: {session_id} (no cache)")
         logger.info("=" * 80)
 
-        intent_result = await _detect_intent_simple(user_prompt, session_id=session_id, use_cache=True)
+        intent_result = await _detect_intent_simple(user_prompt, session_id=session_id, use_cache=False)
         intent = intent_result.get("intent", "workflow")
+        decision_path = decision.path if decision else None
+
+        # When the classifier explicitly says this is a text reply, honor it and do not
+        # force a workflow path based on any cached routing decision. This prevents
+        # previously paused workflows from being resumed for generic LLM Q&A turns.
         if decision:
-            intent = "text_reply" if decision.path == "llm_only" else "workflow"
+            if intent == "text_reply":
+                decision_path = "llm_only"
+            intent = "text_reply" if decision_path == "llm_only" else "workflow"
+            if routing_payload is not None:
+                routing_payload["path"] = decision_path
 
         if intent_service and decision:
-            intent_service.update_scratchpad(session_id, f"Routing via {decision.path}: {decision.rationale}")
+            path_for_log = decision_path or decision.path
+            intent_service.update_scratchpad(session_id, f"Routing via {path_for_log}: {decision.rationale}")
 
         logger.info("=" * 80)
-        logger.info(f"✅ INTENT DETECTION RESULT (will NOT be called again):")
+        logger.info(f"✅ INTENT DETECTION RESULT (fresh run)")
         logger.info(f"   Intent: {intent}")
         logger.info(f"   Confidence: {intent_result.get('confidence', 0.5):.2f}")
         logger.info(f"   Reasoning: {intent_result.get('reasoning', 'N/A')}")
-        logger.info(f"🔒 Intent detection CACHED for session {session_id} - will NOT be called again")
         if intent_record:
             logger.info(
                 "📘 Intent record: goal=%s tools=%s output=%s", intent_record.goal_type, intent_record.required_tools, intent_record.output_format
@@ -432,7 +493,128 @@ async def execute_workflow_websocket(websocket: WebSocket):
             logger.info("✅ Text reply sent, closing connection")
             await _safe_close_websocket(websocket, code=1000, reason="text_reply_complete")
             return
-        
+
+        # Determine whether we should resume an existing workflow sequence
+        resume_candidates = [
+            websocket_session_id,
+            session_id,
+            chat_id,
+            prior_workflow_session,
+        ]
+        resumable_session_id = ws_orchestrator.find_resumable_sequence(*resume_candidates)
+        if resumable_session_id and resumable_session_id != websocket_session_id:
+            logger.info(
+                "⏯️ Resuming existing workflow session: incoming=%s -> resumable=%s",
+                websocket_session_id,
+                resumable_session_id,
+            )
+            websocket_session_id = resumable_session_id
+        elif not resumable_session_id and prior_workflow_session and websocket_session_id != prior_workflow_session:
+            # Prefer continuing with the previously used workflow session ID to keep context aligned
+            logger.info(
+                "🔁 Continuing workflow context using previous session id %s (incoming=%s)",
+                prior_workflow_session,
+                websocket_session_id,
+            )
+            websocket_session_id = prior_workflow_session
+
+        # Step 3b: Vagueness scoring only for workflow execution paths (after routing is fixed)
+        vagueness_score = _compute_vagueness_score(user_prompt)
+        logger.info(
+            "🧭 Vagueness check -> score=%.2f threshold=%.2f (workflow path)",
+            vagueness_score,
+            vagueness_threshold,
+        )
+        await _safe_send_json(
+            websocket,
+            {
+                "type": "status",
+                "status": "vagueness_check",
+                "message": (
+                    "Calculating vagueness score for workflow routing: "
+                    f"score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f}"
+                ),
+                "vagueness_score": vagueness_score,
+                "vagueness_threshold": vagueness_threshold,
+            },
+        )
+
+        while vagueness_score < vagueness_threshold:
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "clarification_required",
+                    "message": (
+                        "I need more details to proceed. Please provide additional context or specifics. "
+                        f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
+                    ),
+                    "vagueness_score": vagueness_score,
+                    "vagueness_threshold": vagueness_threshold,
+                },
+            )
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "awaiting_clarification",
+                    "message": "Awaiting more details to reduce vagueness.",
+                },
+            )
+
+            clarification_response = await _wait_for_clarification_response(websocket)
+            if not clarification_response:
+                close_code = 1001
+                close_reason = "clarification_aborted"
+                return
+
+            clarification_history.append(
+                {
+                    "message": clarification_response.get("message", ""),
+                    "values": clarification_response.get("values") or {},
+                }
+            )
+
+            clarification_parts = []
+            if clarification_response.get("message"):
+                clarification_parts.append(clarification_response["message"])
+            values = clarification_response.get("values") or {}
+            if values:
+                clarification_parts.append(" | ".join(f"{k}: {v}" for k, v in values.items()))
+
+            if clarification_parts:
+                user_prompt = f"{user_prompt}\n\nUser clarification: {'; '.join(clarification_parts)}"
+
+            vagueness_score = _compute_vagueness_score(user_prompt)
+            logger.info(
+                "🧭 Recomputed vagueness score after clarification -> %.2f (threshold=%.2f)",
+                vagueness_score,
+                vagueness_threshold,
+            )
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "vagueness_check",
+                    "message": (
+                        "Recomputed vagueness score after clarification: "
+                        f"score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f}"
+                    ),
+                    "vagueness_score": vagueness_score,
+                    "vagueness_threshold": vagueness_threshold,
+                },
+            )
+
+        await _safe_send_json(
+            websocket,
+            {
+                "type": "status",
+                "status": "clarification_complete",
+                "message": "Received enough details. Proceeding with execution.",
+                "vagueness_score": vagueness_score,
+                "vagueness_threshold": vagueness_threshold,
+            },
+        )
+
         # Step 4: Handle as workflow (intent already detected above - no need to detect again)
         logger.info("🔄 Routing to workflow handler")
         logger.info("ℹ️ Intent detection already done - proceeding with workflow execution (will NOT detect intent again)")
@@ -454,6 +636,12 @@ async def execute_workflow_websocket(websocket: WebSocket):
         user_id = message.get("user_id", "default_user")
         history_summary = message.get("history_summary")
         mentioned_files = message.get("mentioned_files") or []
+
+        # Persist vagueness metadata for downstream execution
+        project_context = project_context or {}
+        project_context["vagueness_score"] = vagueness_score
+        project_context["vagueness_threshold"] = vagueness_threshold
+        project_context["clarification_history"] = clarification_history
         
         # 🔧 CRITICAL FIX: Extract project context from file paths if not provided or contains 'default' values
         # Check if project_context is missing, empty, or contains 'default' values
@@ -552,7 +740,13 @@ async def execute_workflow_websocket(websocket: WebSocket):
         project_context["websocket_session_id"] = websocket_session_id
 
         logger.info(f"🔑 Session ID: {session_id}, WebSocket Session: {websocket_session_id}, Chat ID: {chat_id}")
-        
+
+        # Remember the workflow session ids so future prompts can resume if intent stays on workflows
+        if session_id:
+            _previous_workflow_sessions[session_id] = websocket_session_id
+        if chat_id:
+            _previous_workflow_sessions[chat_id] = websocket_session_id
+
         # Execute workflow with real-time events (intent detection already done above - NOT called again)
         try:
             await ws_orchestrator.execute_workflow_with_websocket(

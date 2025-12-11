@@ -491,6 +491,11 @@ class LaboratoryIntentService:
         return record
 
 
+# Backward-compatible alias expected by legacy import sites
+class IntentService(LaboratoryIntentService):
+    """Alias for :class:`LaboratoryIntentService` to preserve prior imports."""
+
+
 # Shared singleton
 intent_service = LaboratoryIntentService()
 

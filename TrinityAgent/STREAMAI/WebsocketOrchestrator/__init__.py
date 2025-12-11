@@ -1,14 +1,11 @@
 """
-Legacy entrypoint for the Stream AI WebSocket orchestrator.
-
-The implementation now lives in ``.WebsocketOrchestrator`` for improved
-modularity and readability.
+Modular WebSocket orchestrator package.
 """
-from .WebsocketOrchestrator import (
+from .orchestrator import StreamWebSocketOrchestrator
+from .types import (
     ReActState,
     RetryableJSONGenerationError,
     StepEvaluation,
-    StreamWebSocketOrchestrator,
     WebSocketEvent,
     WorkflowPlan,
     WorkflowStepPlan,
