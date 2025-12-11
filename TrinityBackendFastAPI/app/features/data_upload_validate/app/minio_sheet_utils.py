@@ -13,6 +13,13 @@ from minio.error import S3Error
 from fastapi import HTTPException
 from app.DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET, ensure_minio_bucket, upload_to_minio
 
+# Try to import openpyxl for direct Excel access
+try:
+    from openpyxl import load_workbook
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,37 +67,52 @@ def extract_all_sheets_from_excel(
     minio_client = get_client()
     
     try:
-        excel_bytes = io.BytesIO(excel_content)
-        excel_file = pd.ExcelFile(excel_bytes)
+        # Create ExcelFile object to get sheet names
+        excel_bytes_for_names = io.BytesIO(excel_content)
+        excel_file = pd.ExcelFile(excel_bytes_for_names, engine='openpyxl')
         sheet_names = excel_file.sheet_names
         
         if not sheet_names:
             raise ValueError("Excel file contains no sheets")
         
+        logger.info(f"Found {len(sheet_names)} sheets: {sheet_names}")
+        
         # Create folder structure: {prefix}uploads/{upload_session_id}/{filename}/
-        # Extract filename without extension for folder name
-        # For now, use upload_session_id as folder name (we'll get original filename from metadata)
         folder_name = upload_session_id
         folder_prefix = f"{prefix}uploads/{folder_name}/"
         
         # Store original Excel file in the folder
         original_path = f"{folder_prefix}original.xlsx"
-        excel_bytes.seek(0)
+        excel_bytes_for_storage = io.BytesIO(excel_content)
         minio_client.put_object(
             MINIO_BUCKET,
             original_path,
-            excel_bytes,
+            excel_bytes_for_storage,
             length=len(excel_content),
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         logger.info(f"Stored original Excel file: {original_path}")
         
         # Extract and store each sheet in the folder
+        # Create a fresh ExcelFile for each sheet to avoid stream consumption issues
         extracted_sheets = []
-        for sheet_name in sheet_names:
+        for idx, sheet_name in enumerate(sheet_names):
             try:
-                # Read sheet
-                df_pandas = excel_file.parse(sheet_name)
+                logger.info(f"Extracting sheet {idx + 1}/{len(sheet_names)}: '{sheet_name}' (type: {type(sheet_name).__name__})")
+                
+                # Ensure sheet_name is a string
+                if not isinstance(sheet_name, str):
+                    logger.warning(f"Sheet name is not a string: {sheet_name} (type: {type(sheet_name)}). Converting.")
+                    sheet_name = str(sheet_name)
+                
+                # Create a fresh BytesIO and ExcelFile for each sheet
+                # This ensures we have a clean stream for each read operation
+                excel_bytes_for_sheet = io.BytesIO(excel_content)
+                excel_file_for_sheet = pd.ExcelFile(excel_bytes_for_sheet, engine='openpyxl')
+                
+                # Parse the sheet by name - parse() accepts sheet name as first positional argument
+                # This should work correctly with string sheet names
+                df_pandas = excel_file_for_sheet.parse(sheet_name)
                 
                 # Skip empty sheets
                 if df_pandas.empty:

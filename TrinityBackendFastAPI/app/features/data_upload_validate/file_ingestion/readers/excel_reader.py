@@ -7,6 +7,7 @@ import pandas as pd
 
 from app.features.data_upload_validate.file_ingestion.processors.header_detector import HeaderDetector
 from app.features.data_upload_validate.file_ingestion.processors.cleaning import DataCleaner
+from app.features.data_upload_validate.file_ingestion.processors.description_separator import DescriptionSeparator
 
 logger = logging.getLogger(__name__)
 
@@ -128,26 +129,80 @@ class ExcelReader:
                         logger.info(f"Returning raw sheet '{sheet}': {len(dfs[sheet])} rows (including empty rows)")
                         continue
                     
-                    # Detect header row if requested
+                    # Use DescriptionSeparator to separate description rows from data rows
+                    # This matches the CSV reader logic and handles files with any kind of structure
+                    # Returns: (description_rows as list of lists, cleaned DataFrame with data rows)
+                    description_rows_list, df_data = DescriptionSeparator.separate_description_rows(
+                        df_raw, 
+                        max_description_rows=10
+                    )
+                    
+                    description_rows_count = len(description_rows_list)
+                    logger.info(
+                        f"Sheet '{sheet}': Separated {description_rows_count} description rows, "
+                        f"{len(df_data)} data rows"
+                    )
+                    
+                    # Detect header row if requested (from the data rows, not including description rows)
                     if auto_detect_header:
-                        header_row = HeaderDetector.find_header_row(df_raw)
-                        data_start = HeaderDetector.detect_table_start(df_raw, header_row)
-                        metadata["header_rows"][sheet] = header_row
-                        metadata["data_start_rows"][sheet] = data_start
+                        # Find header row within the data rows (df_data)
+                        header_row_relative = HeaderDetector.find_header_row(df_data)
+                        data_start_relative = HeaderDetector.detect_table_start(df_data, header_row_relative)
                         
-                        # Extract headers and data
-                        headers = df_raw.iloc[header_row].fillna("").astype(str).tolist()
-                        df = df_raw.iloc[data_start:].copy()
+                        # Calculate absolute row indices (accounting for description rows that were removed)
+                        # The description rows were removed from the beginning, so df_data starts at row description_rows_count
+                        header_row_absolute = description_rows_count + header_row_relative
+                        data_start_absolute = description_rows_count + data_start_relative
+                        
+                        metadata["header_rows"][sheet] = header_row_absolute
+                        metadata["data_start_rows"][sheet] = data_start_absolute
+                        
+                        # Extract headers and data from df_data (preserve numeric headers)
+                        header_row_raw = df_data.iloc[header_row_relative].tolist()
+                        headers = []
+                        for val in header_row_raw:
+                            if pd.isna(val) or val == "":
+                                headers.append("")
+                            else:
+                                # Preserve numeric headers (e.g., 2021.0)
+                                try:
+                                    float_val = float(val)
+                                    if float_val == int(float_val):
+                                        headers.append(str(int(float_val)))
+                                    else:
+                                        headers.append(str(float_val))
+                                except (ValueError, TypeError):
+                                    # Not numeric, convert to string normally
+                                    headers.append(str(val).strip())
+                        df = df_data.iloc[data_start_relative:].copy()
                         df.columns = headers
                     else:
-                        # Use first row as header
-                        headers = df_raw.iloc[0].fillna("").astype(str).tolist()
-                        df = df_raw.iloc[1:].copy()
+                        # Use first row of data as header (preserve numeric headers)
+                        header_row_raw = df_data.iloc[0].tolist()
+                        headers = []
+                        for val in header_row_raw:
+                            if pd.isna(val) or val == "":
+                                headers.append("")
+                            else:
+                                # Preserve numeric headers (e.g., 2021.0)
+                                try:
+                                    float_val = float(val)
+                                    if float_val == int(float_val):
+                                        headers.append(str(int(float_val)))
+                                    else:
+                                        headers.append(str(float_val))
+                                except (ValueError, TypeError):
+                                    # Not numeric, convert to string normally
+                                    headers.append(str(val).strip())
+                        df = df_data.iloc[1:].copy()
                         df.columns = headers
+                        # Set metadata
+                        metadata["header_rows"][sheet] = description_rows_count
+                        metadata["data_start_rows"][sheet] = description_rows_count + 1
                     
-                    # Clean headers
+                    # Clean headers (preserve numeric headers)
                     df = DataCleaner.normalize_column_names(df)
-                    df = DataCleaner.standardize_headers(df)
+                    df = DataCleaner.standardize_headers(df, preserve_numeric=True)
                     
                     # Remove empty rows/columns if requested
                     if skip_empty_rows:

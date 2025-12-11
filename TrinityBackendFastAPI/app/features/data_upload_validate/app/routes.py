@@ -20,6 +20,7 @@ from urllib.parse import unquote
 from datetime import datetime, timezone
 import logging
 import uuid
+from collections import Counter
 
 
 # app/routes.py - Add this import
@@ -68,6 +69,8 @@ from app.core.observability import timing_dependency_factory
 from app.core.task_queue import celery_task_client, format_task_response
 
 import re
+import csv
+from datetime import datetime
 
 # Allowed characters for file keys (alphanumeric, underscores, hyphens, periods)
 FILE_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -105,8 +108,6 @@ logger = logging.getLogger(__name__)
 from app.features.data_upload_validate.app.validators.custom_validator import perform_enhanced_validation
 from app.features.data_upload_validate import service as data_upload_service
 from app.features.data_upload_validate.file_ingestion import RobustFileReader
-from app.features.data_upload_validate.file_ingestion.processors.description_separator import DescriptionSeparator
-from app.features.data_upload_validate.file_ingestion.processors.header_detector import HeaderDetector
 
 # Config directory
 CUSTOM_CONFIG_DIR = data_upload_service.CUSTOM_CONFIG_DIR
@@ -2875,11 +2876,29 @@ async def list_saved_dataframes(
                         "sheets": []
                     }
                 
+                # Get original filename from flight registry to preserve original name
+                original_csv_name = get_original_csv(obj.object_name)
+                display_name = original_csv_name if original_csv_name else Path(obj.object_name).name
+                # If display_name ends with .arrow, try to get original from registry
+                if display_name.endswith('.arrow'):
+                    if original_csv_name:
+                        # We have original_csv_name from registry, use it
+                        display_name = Path(original_csv_name).name
+                    else:
+                        # Try to get original from FILEKEY_TO_CSV mapping
+                        from app.DataStorageRetrieval.flight_registry import FILEKEY_TO_CSV
+                        original_from_registry = FILEKEY_TO_CSV.get(obj.object_name)
+                        if original_from_registry:
+                            display_name = Path(original_from_registry).name
+                        else:
+                            # Remove .arrow extension for display as fallback
+                            display_name = Path(obj.object_name).stem
+                
                 sheet_entry = {
                     "object_name": obj.object_name,
                     "sheet_name": sheet_name,
                     "arrow_name": Path(obj.object_name).name,
-                    "csv_name": Path(obj.object_name).name,
+                    "csv_name": display_name,  # Use original filename for display
                 }
                 if modified_iso:
                     sheet_entry["last_modified"] = modified_iso
@@ -2890,10 +2909,28 @@ async def list_saved_dataframes(
                 excel_folders[excel_folder_name]["sheets"].append(sheet_entry)
             else:
                 # Regular file (not in Excel folder structure)
+                # Get original filename from flight registry to preserve original name
+                original_csv_name = get_original_csv(obj.object_name)
+                display_name = original_csv_name if original_csv_name else Path(obj.object_name).name
+                # If display_name ends with .arrow, try to get original from registry
+                if display_name.endswith('.arrow'):
+                    if original_csv_name:
+                        # We have original_csv_name from registry, use it
+                        display_name = Path(original_csv_name).name
+                    else:
+                        # Try to get original from FILEKEY_TO_CSV mapping
+                        from app.DataStorageRetrieval.flight_registry import FILEKEY_TO_CSV
+                        original_from_registry = FILEKEY_TO_CSV.get(obj.object_name)
+                        if original_from_registry:
+                            display_name = Path(original_from_registry).name
+                        else:
+                            # Remove .arrow extension for display as fallback
+                            display_name = Path(obj.object_name).stem
+                
                 entry = {
                     "object_name": obj.object_name,
                     "arrow_name": Path(obj.object_name).name,
-                    "csv_name": Path(obj.object_name).name,
+                    "csv_name": display_name,  # Use original filename for display
                 }
                 if modified_iso:
                     entry["last_modified"] = modified_iso
@@ -3747,6 +3784,397 @@ async def get_file_metadata(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _find_stable_column_count(rows: List[List[str]], min_consistency: int = 3) -> tuple[int, int]:
+    """
+    Find where column count stabilizes (becomes consistent).
+    Data rows typically have the same number of columns consistently.
+    
+    Example:
+        - Description rows: 5 columns each
+        - Data rows: 30 columns each (consistent)
+        - Returns: (30, index_where_30_columns_start)
+    
+    Args:
+        rows: List of rows, each row is a list of cell values
+        min_consistency: Minimum number of consecutive rows with same column count to consider it stable
+    
+    Returns:
+        Tuple of (stable_column_count, data_start_index)
+        - stable_column_count: The consistent column count in data rows
+        - data_start_index: Index where data rows start (after description rows)
+    """
+    if not rows:
+        return 0, 0
+    
+    # Count columns in each row (use actual length of row list, including empty cells)
+    # Also count non-empty cells for better detection
+    column_counts = []
+    non_empty_counts = []
+    for row in rows:
+        col_count = len(row)
+        column_counts.append(col_count)
+        # Count non-empty cells (cells that have actual content)
+        non_empty = sum(1 for cell in row if cell and str(cell).strip())
+        non_empty_counts.append(non_empty)
+    
+    if not column_counts:
+        return 0, 0
+    
+    logger.info(f"Column counts (first 20): {column_counts[:20]}")
+    logger.info(f"Non-empty counts (first 20): {non_empty_counts[:20]}")
+    
+    # Find the most common column count (excluding 0 and 1, which are likely empty/trivial rows)
+    non_trivial_counts = [c for c in column_counts if c > 1]
+    
+    if not non_trivial_counts:
+        # All rows have 0 or 1 columns, return first row as data start
+        max_count = max(column_counts) if column_counts else 0
+        logger.info(f"No non-trivial column counts found, using max_count={max_count}, data_start=0")
+        return max_count, 0
+    
+    # Find the stable column count (most common count that appears consistently)
+    count_freq = Counter(non_trivial_counts)
+    stable_count = count_freq.most_common(1)[0][0] if count_freq else max(non_trivial_counts)
+    
+    logger.info(f"Stable column count detected: {stable_count} (appears {count_freq[stable_count]} times out of {len(non_trivial_counts)} rows)")
+    
+    # Find where this stable count starts appearing consistently
+    # Look for first occurrence where we have min_consistency consecutive rows with stable_count
+    data_start_idx = 0
+    consecutive_count = 0
+    
+    for idx, col_count in enumerate(column_counts):
+        if col_count == stable_count:
+            consecutive_count += 1
+            if consecutive_count >= min_consistency:
+                # Found stable data block - data starts min_consistency rows back
+                data_start_idx = idx - min_consistency + 1
+                break
+        else:
+            consecutive_count = 0
+    
+    # If we didn't find a stable block with min_consistency, try to find where stable_count first appears
+    if data_start_idx == 0:
+        # Check if first few rows have the stable count
+        if column_counts[0] == stable_count:
+            # First row has stable count - might be header, data starts at row 0
+            data_start_idx = 0
+        else:
+            # Find first occurrence of stable_count
+            for idx, col_count in enumerate(column_counts):
+                if col_count == stable_count:
+                    data_start_idx = idx
+                    break
+    
+    # Ensure data_start_idx is valid
+    if data_start_idx < 0:
+        data_start_idx = 0
+    if data_start_idx >= len(rows):
+        data_start_idx = 0
+    
+    logger.info(f"Column count analysis: stable_count={stable_count}, data_start_idx={data_start_idx}, "
+                f"column_counts_sample={column_counts[:10]}")
+    
+    return stable_count, data_start_idx
+
+
+def _detect_delimiter(content: bytes) -> str:
+    """Detect CSV delimiter by sampling first few lines."""
+    try:
+        # Try to decode as UTF-8
+        text = content.decode('utf-8')
+    except UnicodeDecodeError:
+        try:
+            text = content.decode('latin-1')
+        except UnicodeDecodeError:
+            text = content.decode('utf-8', errors='ignore')
+    
+    # Sample first 5 lines
+    lines = text.split('\n')[:5]
+    if not lines:
+        return ','
+    
+    # Count occurrences of common delimiters
+    delimiter_counts = {',': 0, ';': 0, '\t': 0, '|': 0}
+    for line in lines:
+        if line.strip():
+            delimiter_counts[','] += line.count(',')
+            delimiter_counts[';'] += line.count(';')
+            delimiter_counts['\t'] += line.count('\t')
+            delimiter_counts['|'] += line.count('|')
+    
+    # Return delimiter with highest count
+    return max(delimiter_counts, key=delimiter_counts.get) if max(delimiter_counts.values()) > 0 else ','
+
+
+def _read_csv_rows_simple(content: bytes, pad_rows: bool = True) -> List[List[str]]:
+    """
+    Read CSV file row by row using Python's csv module.
+    This ensures we get ALL rows including headers as data (not column names).
+    Returns list of rows, each row is a list of cell values.
+    
+    Args:
+        content: File content as bytes
+        pad_rows: If True, pad all rows to same length. If False, keep original row lengths.
+    """
+    try:
+        # Try to decode as UTF-8
+        text = content.decode('utf-8')
+    except UnicodeDecodeError:
+        try:
+            text = content.decode('latin-1')
+        except UnicodeDecodeError:
+            text = content.decode('utf-8', errors='ignore')
+    
+    # Detect delimiter
+    delimiter = _detect_delimiter(content)
+    
+    # Read rows using csv module (this reads ALL rows including headers as data)
+    rows = []
+    csv_reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    
+    for row in csv_reader:
+        # Convert tuple to list
+        row_list = list(row)
+        
+        if pad_rows:
+            # Pad rows to have same length as max columns seen so far
+            if rows:
+                max_cols = max(len(r) for r in rows)
+                if len(row_list) < max_cols:
+                    row_list.extend([''] * (max_cols - len(row_list)))
+                elif len(row_list) > max_cols:
+                    # Pad previous rows
+                    for i, prev_row in enumerate(rows):
+                        if len(prev_row) < len(row_list):
+                            rows[i] = prev_row + [''] * (len(row_list) - len(prev_row))
+        
+        rows.append(row_list)
+    
+    return rows
+
+
+def _read_excel_rows_simple(content: bytes, sheet_name: Optional[str] = None) -> List[List[str]]:
+    """
+    Read Excel file row by row using pandas with header=None to get ALL rows as data.
+    This ensures we get actual column headers from the file, not pandas-generated names.
+    Returns list of rows, each row is a list of cell values.
+    
+    IMPORTANT: We preserve original dtypes during reading, then convert to strings only for
+    the row-by-row representation. This allows proper dtype detection later.
+    """
+    excel_file = io.BytesIO(content)
+    
+    # Use pandas with header=None to read ALL rows as data (including headers)
+    # This ensures we get the actual column names from the Excel file, not "col_0", "col_1", etc.
+    # CRITICAL: Don't use dtype=str here - let pandas infer types so we can preserve numeric/datetime types
+    try:
+        df = pd.read_excel(
+            excel_file,
+            sheet_name=sheet_name,
+            header=None,  # Read all rows as data, don't treat first row as column names
+            engine='openpyxl',
+            # REMOVED dtype=str - let pandas infer types naturally
+            # This preserves numeric types (int64, float64) and datetime types
+            na_filter=True,  # Convert empty cells to NaN (pandas default)
+        )
+        
+        # Convert DataFrame to list of lists
+        # Convert values to strings for row representation, but preserve type information
+        rows = []
+        for _, row in df.iterrows():
+            row_values = []
+            for val in row:
+                if pd.isna(val):
+                    row_values.append('')
+                else:
+                    # Convert to string but preserve the original value's type information
+                    # This allows downstream code to detect numeric/datetime types
+                    row_values.append(str(val))
+            rows.append(row_values)
+        
+        return rows
+    except Exception as e:
+        logger.error(f"Error reading Excel file with pandas: {e}")
+        # Fallback to openpyxl if pandas fails
+        excel_file.seek(0)  # Reset file pointer
+        workbook = openpyxl.load_workbook(excel_file, data_only=True, read_only=True)
+        
+        if sheet_name:
+            if sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+            else:
+                sheet = workbook.active
+                logger.warning(f"Sheet '{sheet_name}' not found, using active sheet")
+        else:
+            sheet = workbook.active
+        
+        rows = []
+        for row in sheet.iter_rows(values_only=True):
+            row_values = [str(cell) if cell is not None else '' for cell in row]
+            rows.append(row_values)
+        
+        workbook.close()
+        return rows
+
+
+def _separate_rows_simple(all_rows: List[List[str]]) -> tuple[List[List[str]], List[List[str]], int]:
+    """
+    Separate description rows from data rows using column count stability.
+    - Data rows have consistent column count (e.g., all have 30 columns)
+    - Description rows have different column count (e.g., 5 columns)
+    - Find where column count stabilizes - that's where data starts
+    
+    Returns: (description_rows, data_rows, data_start_index)
+    """
+    if not all_rows:
+        return [], [], 0
+    
+    # Find stable column count and where data starts
+    stable_column_count, data_start_idx = _find_stable_column_count(all_rows, min_consistency=3)
+    
+    # Ensure data_start_idx is valid
+    if data_start_idx < 0:
+        data_start_idx = 0
+    if data_start_idx >= len(all_rows):
+        data_start_idx = 0
+    
+    # Description rows are everything before data_start_idx
+    description_rows = all_rows[:data_start_idx]
+    data_rows = all_rows[data_start_idx:]
+    
+    logger.info(f"Separated rows: {len(description_rows)} description rows, {len(data_rows)} data rows, "
+                f"stable column count: {stable_column_count}, data starts at index: {data_start_idx}")
+    
+    return description_rows, data_rows, data_start_idx
+
+
+def _detect_header_row_simple(data_rows: List[List[str]], max_check: int = 20) -> tuple[int, str]:
+    """
+    Detect header row by comparing rows with each other.
+    The row that is most different/unmatched from other rows is likely the header.
+    
+    Logic:
+    1. Compare each row with all other rows
+    2. Calculate similarity/difference score for each row
+    3. The row with lowest similarity (most different) is the header
+    4. Header rows typically have:
+       - Text values (not numbers)
+       - Different patterns than data rows
+       - More consistent structure across columns
+    """
+    if not data_rows or len(data_rows) < 2:
+        return 0, 'low'
+    
+    # Check first few rows
+    check_rows = data_rows[:min(max_check, len(data_rows))]
+    
+    def _is_numeric(cell_value: str) -> bool:
+        """Check if a cell value is numeric."""
+        if not cell_value or not str(cell_value).strip():
+            return False
+        try:
+            float(str(cell_value).replace(',', '').replace('$', '').replace('%', ''))
+            return True
+        except ValueError:
+            return False
+    
+    def _row_similarity(row1: List[str], row2: List[str]) -> float:
+        """Calculate similarity between two rows (0-1, higher = more similar)."""
+        if not row1 or not row2:
+            return 0.0
+        
+        min_len = min(len(row1), len(row2))
+        if min_len == 0:
+            return 0.0
+        
+        matches = 0
+        total = 0
+        
+        for i in range(min_len):
+            val1 = str(row1[i]).strip() if row1[i] else ''
+            val2 = str(row2[i]).strip() if row2[i] else ''
+            
+            # Skip empty cells
+            if not val1 and not val2:
+                continue
+            
+            total += 1
+            
+            # Check if both are numeric (data rows often have numeric patterns)
+            if _is_numeric(val1) and _is_numeric(val2):
+                matches += 1
+            # Check if both are non-numeric (could be text data)
+            elif not _is_numeric(val1) and not _is_numeric(val2):
+                # Check if they have similar length/pattern
+                if abs(len(val1) - len(val2)) < 5:
+                    matches += 0.5
+        
+        return matches / total if total > 0 else 0.0
+    
+    # Calculate average similarity of each row with all other rows
+    row_similarities = []
+    for idx, row in enumerate(check_rows):
+        if not row:
+            row_similarities.append(1.0)  # Empty row = high similarity (not header)
+            continue
+        
+        similarities = []
+        # Compare with all other rows
+        for other_idx, other_row in enumerate(check_rows):
+            if idx != other_idx and other_row:
+                sim = _row_similarity(row, other_row)
+                similarities.append(sim)
+        
+        # Average similarity (lower = more different = more likely to be header)
+        avg_similarity = sum(similarities) / len(similarities) if similarities else 1.0
+        row_similarities.append(avg_similarity)
+    
+    # Find row with lowest similarity (most different from others)
+    min_similarity = min(row_similarities)
+    best_idx = row_similarities.index(min_similarity)
+    
+    # Additional checks to boost confidence
+    best_row = check_rows[best_idx]
+    
+    # Check if best row looks like headers (mostly text, not numbers)
+    text_count = 0
+    non_empty_count = 0
+    for cell in best_row[:min(20, len(best_row))]:  # Check first 20 columns
+        if cell and str(cell).strip():
+            non_empty_count += 1
+            if not _is_numeric(str(cell)):
+                text_count += 1
+    
+    text_ratio = text_count / non_empty_count if non_empty_count > 0 else 0
+    
+    # Calculate confidence based on:
+    # 1. How different it is from other rows (low similarity)
+    # 2. Whether it looks like headers (high text ratio)
+    # 3. Position (earlier rows more likely)
+    difference_score = 1.0 - min_similarity  # Higher = more different
+    header_likelihood = difference_score * 0.6 + text_ratio * 0.4
+    
+    # Adjust for position (earlier rows get slight boost)
+    if best_idx == 0:
+        header_likelihood += 0.1
+    elif best_idx < 3:
+        header_likelihood += 0.05
+    
+    # Determine confidence
+    if header_likelihood >= 0.7 and best_idx < 3:
+        confidence = 'high'
+    elif header_likelihood >= 0.5 and best_idx < 5:
+        confidence = 'medium'
+    else:
+        confidence = 'low'
+    
+    logger.info(f"Header detection: row {best_idx} selected (similarity={min_similarity:.3f}, "
+                f"text_ratio={text_ratio:.3f}, likelihood={header_likelihood:.3f}, confidence={confidence})")
+    
+    return best_idx, confidence
+
+
 @router.get("/file-preview")
 async def get_file_preview(
     object_name: str = Query(..., description="MinIO object name/path"),
@@ -3757,107 +4185,217 @@ async def get_file_preview(
 ):
     """
     Get preview of file with raw rows (no headers applied).
-    Separates description rows from data rows and suggests header row.
-    Returns all rows as data rows for user to select header.
+    Uses simple row-by-row reading with Python's csv module.
+    Separates description rows from data rows using column-count matching algorithm:
+    - Finds where column count stabilizes (becomes consistent)
+    - Rows before stable count = description rows
+    - Rows with stable count = data rows
+    Returns separated description_rows and data_rows for user to select header.
     """
     try:
-        # Read file from MinIO
-        data = read_minio_object(object_name)
-        filename = Path(object_name).name
+        # CRITICAL: If we receive an Arrow file path, try to find the original CSV/Excel file
+        # Arrow files are processed files with "col_0", "col_1" column names - we need the original!
+        original_object_name = object_name
+        if object_name.lower().endswith(".arrow"):
+            logger.warning(f"Received Arrow file path for preview: {object_name} - attempting to find original file")
+            path_parts = object_name.split("/")
+            
+            # Strategy 1: Check originals/ folder (for files uploaded via /upload-file)
+            # Path format: {prefix}tmp/{filename}.arrow -> {prefix}tmp/originals/{original_filename}
+            if "tmp" in path_parts:
+                tmp_idx = path_parts.index("tmp")
+                original_filename_base = path_parts[-1].replace(".arrow", "")
+                
+                # Try common extensions
+                for ext in [".csv", ".xlsx", ".xls"]:
+                    test_path = "/".join(path_parts[:tmp_idx+1]) + "/originals/" + original_filename_base + ext
+                    try:
+                        test_data = read_minio_object(test_path)
+                        original_object_name = test_path
+                        logger.info(f"✓ Found original file in originals/: {object_name} -> {original_object_name}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"  Tried {test_path}: {e}")
+                        continue
+            
+            # Strategy 2: Check uploads/ folder (for Excel multi-sheet uploads)
+            # Excel multi-sheet saves original as: {prefix}uploads/{session_id}/original.xlsx
+            if original_object_name == object_name and "tmp" in path_parts:
+                # Extract session ID from path (might be in different positions)
+                # Try to find uploads folder at same level as tmp
+                prefix_parts = path_parts[:tmp_idx] if tmp_idx > 0 else []
+                # Session ID might be the filename without extension
+                session_id = path_parts[-1].replace(".arrow", "")
+                test_path = "/".join(prefix_parts) + "/uploads/" + session_id + "/original.xlsx"
+                try:
+                    test_data = read_minio_object(test_path)
+                    original_object_name = test_path
+                    logger.info(f"✓ Found original Excel file in uploads/: {object_name} -> {original_object_name}")
+                except Exception as e:
+                    logger.debug(f"  Tried {test_path}: {e}")
+                    pass
+            
+            # If still no original found, log warning but proceed with Arrow file
+            if original_object_name == object_name:
+                logger.warning(f"⚠ Could not find original file for {object_name}, will read Arrow file (may show col_0, col_1)")
         
-        # Handle Arrow files first (not supported by RobustFileReader)
+        # Read file from MinIO (use original file if found, otherwise use provided path)
+        data = read_minio_object(original_object_name)
+        filename = Path(original_object_name).name
+        
+        logger.info(f"Reading file for preview: original_object_name={original_object_name}, filename: {filename}, size: {len(data)} bytes")
+        
+        # Read rows based on file type (WITHOUT padding to preserve original column counts)
+        # IMPORTANT: Always read original CSV/Excel files, not processed Arrow files
+        # Arrow files have column names like "col_0", "col_1" which we don't want
         if filename.lower().endswith(".arrow"):
+            # Handle Arrow files - convert to rows
+            # Arrow files are processed files, so extract column names as first row
             df_pl = pl.read_ipc(io.BytesIO(data))
             df = df_pl.to_pandas()
             # Extract column names as first row
             column_names = df.columns.tolist()
+            logger.info(f"Arrow file column names (first 10): {column_names[:10]}")
             # Reset columns to numeric indices
             df.columns = range(len(df.columns))
             # Prepend column names as first row
             first_row_df = pd.DataFrame([column_names], columns=df.columns)
             df = pd.concat([first_row_df, df], ignore_index=True)
-        elif filename.lower().endswith((".csv", ".xls", ".xlsx")):
-            # Use RobustFileReader for CSV/Excel files
-            try:
-                df_result, file_metadata = RobustFileReader.read_file_to_pandas(
-                    content=data,
-                    filename=filename,
-                    sheet_name=sheet_name,
-                    return_raw=True,  # Return raw rows without header detection
-                )
-                
-                # Handle both single DataFrame and dict (multiple sheets)
-                if isinstance(df_result, dict):
-                    df = list(df_result.values())[0]  # Use first sheet
-                else:
-                    df = df_result
-            except Exception as e:
-                logger.error(f"RobustFileReader failed: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+            # Convert DataFrame to list of lists (preserve original lengths)
+            all_rows = [list(row) for row in df.values]
+        elif filename.lower().endswith(".csv"):
+            # Use Python's csv module - reads ALL rows including headers as data
+            # This ensures we get actual column headers from CSV, not "col_0", "col_1"
+            logger.info("Reading CSV file with csv.reader() - will read all rows including headers")
+            all_rows = _read_csv_rows_simple(data, pad_rows=False)
+            if all_rows:
+                first_row_preview = all_rows[0][:10]
+                logger.info(f"CSV first row (headers): {first_row_preview}")
+                # Check if first row looks like pandas-generated column names (col_0, col_1, etc.)
+                if len(first_row_preview) > 0 and all(
+                    str(cell).strip().lower().startswith('col_') and 
+                    str(cell).strip().lower()[4:].isdigit() 
+                    for cell in first_row_preview if cell
+                ):
+                    logger.warning("CSV first row looks like pandas-generated column names (col_0, col_1, etc.) - file may have been processed incorrectly")
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            # Use pandas with header=None - reads ALL rows including headers as data
+            # This ensures we get actual column headers from Excel, not "col_0", "col_1"
+            logger.info(f"Reading Excel file with pandas (header=None) - will read all rows including headers")
+            all_rows = _read_excel_rows_simple(data, sheet_name)
+            if all_rows:
+                first_row_preview = all_rows[0][:10]
+                logger.info(f"Excel first row (headers): {first_row_preview}")
+                # Check if first row looks like pandas-generated column names (col_0, col_1, etc.)
+                if len(first_row_preview) > 0 and all(
+                    str(cell).strip().lower().startswith('col_') and 
+                    str(cell).strip().lower()[4:].isdigit() 
+                    for cell in first_row_preview if cell
+                ):
+                    logger.warning("Excel first row looks like pandas-generated column names (col_0, col_1, etc.) - file may have been processed incorrectly")
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
         
-        # Separate description rows from data rows
-        description_rows, df_data = DescriptionSeparator.separate_description_rows(df)
+        if not all_rows:
+            raise HTTPException(status_code=400, detail="File appears to be empty")
         
-        # Calculate data_rows_start (index where data rows begin, after description rows)
-        data_rows_start = len(description_rows)
+        # Separate description rows from data rows using simple column-count logic
+        # This works because rows have their original column counts (not padded)
+        description_rows, data_rows, data_start_idx = _separate_rows_simple(all_rows)
+        
+        # Log separation results for debugging
+        logger.info(f"File preview separation results:")
+        logger.info(f"  Total rows read: {len(all_rows)}")
+        logger.info(f"  Description rows: {len(description_rows)} (rows 0-{data_start_idx-1})")
+        logger.info(f"  Data rows: {len(data_rows)} (starting from row {data_start_idx})")
+        if all_rows:
+            logger.info(f"  Column counts sample (first 10 rows): {[len(row) for row in all_rows[:10]]}")
+        
+        # NOW pad rows for consistent structure (after separation)
+        if data_rows:
+            max_cols = max(len(row) for row in data_rows) if data_rows else 0
+            if max_cols > 0:
+                # Pad data rows to have same number of columns
+                padded_data_rows = []
+                for row in data_rows:
+                    padded_row = row + [''] * (max_cols - len(row))
+                    padded_data_rows.append(padded_row)
+                data_rows = padded_data_rows
+        
+        if description_rows:
+            max_desc_cols = max(len(row) for row in description_rows) if description_rows else 0
+            if max_desc_cols > 0:
+                # Pad description rows to have same number of columns
+                padded_desc_rows = []
+                for row in description_rows:
+                    padded_row = row + [''] * (max_desc_cols - len(row))
+                    padded_desc_rows.append(padded_row)
+                description_rows = padded_desc_rows
         
         # Get preview rows (first 15 rows of data)
-        preview_rows = df_data.head(15).values.tolist()
+        preview_rows = data_rows[:15]
         preview_row_count = len(preview_rows)
         
         # Detect suggested header row in the data rows (relative to data rows, 0-indexed)
-        suggested_header_row_relative = HeaderDetector.find_header_row(df_data.head(20))
+        suggested_header_row_relative, suggested_header_confidence = _detect_header_row_simple(data_rows)
         
-        # Calculate absolute row index (including description rows)
-        suggested_header_row_absolute = data_rows_start + suggested_header_row_relative
+        # Calculate absolute row index (1-indexed for display)
+        # data_start_idx is 0-indexed, suggested_header_row_relative is 0-indexed relative to data rows
+        # To get 1-indexed absolute: data_start_idx (0-indexed) + suggested_header_row_relative (0-indexed) + 1
+        # This matches how data_rows_structured calculates row_index: data_start_idx + idx + 1
+        suggested_header_row_absolute = data_start_idx + suggested_header_row_relative + 1
         
-        # Calculate confidence based on header detection score
-        # We'll use a simple heuristic: if header row is at index 0, high confidence
-        # Otherwise, medium confidence
-        if suggested_header_row_relative == 0:
-            suggested_header_confidence = "high"
-        elif suggested_header_row_relative < 3:
-            suggested_header_confidence = "medium"
-        else:
-            suggested_header_confidence = "low"
+        logger.info(f"Header detection results: relative={suggested_header_row_relative}, "
+                   f"data_start_idx={data_start_idx}, absolute={suggested_header_row_absolute}, "
+                   f"confidence={suggested_header_confidence}")
         
         # Convert description rows to structured format
+        # Use actual absolute row indices (1-indexed for display)
         description_rows_structured = []
         for idx, row in enumerate(description_rows):
+            absolute_row_index = idx + 1  # 1-indexed (first description row is row 1)
             description_rows_structured.append({
-                "row_index": idx + 1,  # 1-indexed for display
-                "cells": [str(val) if pd.notna(val) else "" for val in row]
+                "row_index": absolute_row_index,  # 1-indexed for display
+                "cells": [str(cell) if cell else "" for cell in row]
             })
         
         # Convert data rows to structured format with row_index and relative_index
         data_rows_structured = []
         for idx, row in enumerate(preview_rows):
             data_rows_structured.append({
-                "row_index": data_rows_start + idx + 1,  # 1-indexed absolute row number
+                "row_index": data_start_idx + idx + 1,  # 1-indexed absolute row number
                 "relative_index": idx,  # 0-indexed relative to data rows
-                "cells": [str(val) if pd.notna(val) else "" for val in row]
+                "cells": [str(cell) if cell else "" for cell in row]
             })
         
-        # Get column count
-        column_count = len(df_data.columns) if not df_data.empty else 0
+        # Get column count (use max columns across all rows)
+        column_count = max(len(row) for row in all_rows) if all_rows else 0
         
-        return {
-            "data_rows": data_rows_structured,  # Changed from "rows" to "data_rows"
+        response_data = {
+            "data_rows": data_rows_structured,
             "description_rows": description_rows_structured,
-            "data_rows_count": len(df_data),
+            "data_rows_count": len(data_rows),
             "description_rows_count": len(description_rows),
-            "data_rows_start": data_rows_start,
+            "data_rows_start": data_start_idx,
             "preview_row_count": preview_row_count,
             "column_count": column_count,
-            "total_rows": len(df_data),
+            "total_rows": len(data_rows),
             "suggested_header_row": suggested_header_row_relative,  # Relative to data rows (0-indexed)
             "suggested_header_row_absolute": suggested_header_row_absolute,  # Absolute including description rows
             "suggested_header_confidence": suggested_header_confidence,
             "has_description_rows": len(description_rows) > 0,
         }
         
+        # Log response for debugging
+        logger.info(f"File preview response: {len(description_rows_structured)} description rows, "
+                   f"{len(data_rows_structured)} data rows in preview, "
+                   f"data_rows_start={data_start_idx}, "
+                   f"has_description_rows={len(description_rows) > 0}")
+        
+        return response_data
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting file preview: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -3867,6 +4405,7 @@ async def get_file_preview(
 async def apply_header_selection(
     object_name: str = Form(..., description="MinIO object name/path"),
     header_row: int = Form(..., description="Row index to use as header (0-based)"),
+    header_row_count: int = Form(1, description="Number of header rows to merge (default: 1)"),
     sheet_name: Optional[str] = Form(None, description="Sheet name for Excel files"),
     client_id: str = Form(""),
     app_id: str = Form(""),
@@ -3881,54 +4420,189 @@ async def apply_header_selection(
         data = read_minio_object(object_name)
         filename = Path(object_name).name
         
-        # Handle Arrow files first (not supported by RobustFileReader)
+        # Read rows based on file type (WITHOUT padding to preserve original column counts)
         if filename.lower().endswith(".arrow"):
+            # Handle Arrow files - convert to rows
             df_pl = pl.read_ipc(io.BytesIO(data))
-            df_raw = df_pl.to_pandas()
+            df = df_pl.to_pandas()
             # Extract column names as first row
-            column_names = df_raw.columns.tolist()
+            column_names = df.columns.tolist()
             # Reset columns to numeric indices
-            df_raw.columns = range(len(df_raw.columns))
+            df.columns = range(len(df.columns))
             # Prepend column names as first row
-            first_row_df = pd.DataFrame([column_names], columns=df_raw.columns)
-            df_raw = pd.concat([first_row_df, df_raw], ignore_index=True)
-        elif filename.lower().endswith((".csv", ".xls", ".xlsx")):
-            # Use RobustFileReader for CSV/Excel files
-            try:
-                df_result, file_metadata = RobustFileReader.read_file_to_pandas(
-                    content=data,
-                    filename=filename,
-                    sheet_name=sheet_name,
-                    return_raw=True,
-                )
-                
-                # Handle both single DataFrame and dict (multiple sheets)
-                if isinstance(df_result, dict):
-                    df_raw = list(df_result.values())[0]  # Use first sheet
-                else:
-                    df_raw = df_result
-            except Exception as e:
-                logger.error(f"RobustFileReader failed: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+            first_row_df = pd.DataFrame([column_names], columns=df.columns)
+            df = pd.concat([first_row_df, df], ignore_index=True)
+            # Convert DataFrame to list of lists (preserve original lengths)
+            all_rows = [list(row) for row in df.values]
+        elif filename.lower().endswith(".csv"):
+            # Use Python's csv module - DON'T pad rows so we can detect column count differences
+            all_rows = _read_csv_rows_simple(data, pad_rows=False)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            # Use openpyxl for Excel files (already preserves original lengths)
+            all_rows = _read_excel_rows_simple(data, sheet_name)
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
         
-        # Separate description rows if any
-        description_rows, df_data = DescriptionSeparator.separate_description_rows(df_raw)
+        if not all_rows:
+            raise HTTPException(status_code=400, detail="File appears to be empty")
+        
+        # Separate description rows from data rows using simple column-count logic
+        # This works because rows have their original column counts (not padded)
+        description_rows, data_rows, data_start_idx = _separate_rows_simple(all_rows)
+        
+        # Convert data rows to DataFrame for processing
+        # Find max columns to ensure consistent DataFrame structure
+        max_cols = max(len(row) for row in data_rows) if data_rows else 0
+        if max_cols == 0:
+            raise HTTPException(status_code=400, detail="No data rows found in file")
+        
+        # NOW pad rows to have same number of columns (after separation)
+        padded_data_rows = []
+        for row in data_rows:
+            padded_row = row + [''] * (max_cols - len(row))
+            padded_data_rows.append(padded_row[:max_cols])  # Ensure exact length
+        
+        # Create DataFrame from data rows
+        # CRITICAL: Let pandas infer types naturally instead of forcing all to string
+        # This preserves numeric and datetime types from the original file
+        df_data = pd.DataFrame(padded_data_rows)
+        
+        # Try to infer types for each column (preserve numeric/datetime types)
+        # This is important because _read_excel_rows_simple and _read_csv_rows_simple
+        # return string values, but we want pandas to detect the actual types
+        for col_idx in range(len(df_data.columns)):
+            col_data = df_data.iloc[:, col_idx]
+            
+            # Skip if column is all empty
+            if col_data.astype(str).str.strip().eq('').all():
+                continue
+            
+            # Try to convert to numeric first (handles int and float)
+            try:
+                numeric_col = pd.to_numeric(col_data, errors='coerce')
+                # If most values converted successfully, use numeric type
+                non_null_count = numeric_col.notna().sum()
+                total_count = len(col_data)
+                if total_count > 0 and non_null_count >= total_count * 0.8:  # At least 80% numeric
+                    df_data.iloc[:, col_idx] = numeric_col
+                    logger.debug(f"Column {col_idx}: inferred numeric type (converted {non_null_count}/{total_count} values)")
+                    continue
+            except Exception as e:
+                logger.debug(f"Column {col_idx}: numeric conversion failed: {e}")
+                pass
+            
+            # Try to convert to datetime
+            try:
+                datetime_col = pd.to_datetime(col_data, errors='coerce')
+                # If most values converted successfully, use datetime type
+                non_null_count = datetime_col.notna().sum()
+                total_count = len(col_data)
+                if total_count > 0 and non_null_count >= total_count * 0.8:  # At least 80% datetime
+                    df_data.iloc[:, col_idx] = datetime_col
+                    logger.debug(f"Column {col_idx}: inferred datetime type (converted {non_null_count}/{total_count} values)")
+                    continue
+            except Exception as e:
+                logger.debug(f"Column {col_idx}: datetime conversion failed: {e}")
+                pass
+            
+            # Otherwise keep as object/string (default)
+            # This preserves text columns
         
         # Validate header row index (header_row is relative to df_data after description separation)
         if header_row < 0 or header_row >= len(df_data):
             raise HTTPException(status_code=400, detail=f"Header row index {header_row} is out of range (0-{len(df_data)-1})")
         
-        # Apply header row (header_row is already relative to data rows from preview)
-        headers = df_data.iloc[header_row].fillna("").astype(str).tolist()
-        df_processed = df_data.iloc[header_row + 1:].copy()
-        df_processed.columns = headers
+        # Validate header_row_count
+        if header_row_count < 1:
+            header_row_count = 1
+        if header_row_count > 10:
+            header_row_count = 10  # Limit to 10 rows max
         
-        # Normalize column names
+        # Check if we have enough rows for multi-row header
+        if header_row + header_row_count > len(df_data):
+            logger.warning(f"Requested {header_row_count} header rows starting at {header_row}, but only {len(df_data) - header_row} rows available. Using available rows.")
+            header_row_count = len(df_data) - header_row
+        
+        # Merge multiple header rows if needed
+        if header_row_count > 1:
+            # Get header rows
+            header_rows = []
+            for i in range(header_row_count):
+                row_idx = header_row + i
+                if row_idx < len(df_data):
+                    # CRITICAL: Preserve numeric values by converting to string properly
+                    # Use values property to get actual cell values, not column names
+                    row_values = df_data.iloc[row_idx].values
+                    header_row_data = []
+                    for val in row_values:
+                        if pd.isna(val) or val == "":
+                            header_row_data.append("")
+                        else:
+                            # Preserve numeric values as strings (e.g., 2021.0 -> "2021.0")
+                            header_row_data.append(str(val).strip())
+                    header_rows.append(header_row_data)
+            
+            # Merge header rows: combine values from each row
+            # Example: ["Sales", "", "2024"] + ["", "Q1", ""] → ["Sales", "Q1", "2024"]
+            # Or: ["Sales", "", ""] + ["", "", "2024"] → ["Sales_2024", "", ""]
+            merged_headers = []
+            max_cols = max(len(row) for row in header_rows) if header_rows else 0
+            
+            for col_idx in range(max_cols):
+                column_values = []
+                for header_row_data in header_rows:
+                    if col_idx < len(header_row_data):
+                        val = header_row_data[col_idx].strip() if isinstance(header_row_data[col_idx], str) else str(header_row_data[col_idx]).strip()
+                        if val:  # Only add non-empty values
+                            column_values.append(val)
+                
+                # Combine column values
+                if column_values:
+                    # Join with underscore, e.g., "Sales" + "2024" → "Sales_2024"
+                    merged_header = "_".join(column_values)
+                    merged_headers.append(merged_header)
+                else:
+                    merged_headers.append("")  # Empty column
+            
+            headers = merged_headers
+            logger.info(f"Merged {header_row_count} header rows into: {headers[:5]}...")
+        else:
+            # Single header row - CRITICAL: Preserve numeric values
+            # Use values property to get actual cell values, not column names
+            row_values = df_data.iloc[header_row].values
+            headers = []
+            for val in row_values:
+                if pd.isna(val) or val == "":
+                    headers.append("")
+                else:
+                    # Preserve numeric values as strings (e.g., 2021.0 -> "2021.0")
+                    headers.append(str(val).strip())
+        
+        # Apply merged headers to data rows (skip header rows)
+        df_processed = df_data.iloc[header_row + header_row_count:].copy()
+        
+        # Ensure we have enough column names (pad if needed)
+        if len(headers) < len(df_processed.columns):
+            headers.extend([f"Column_{i}" for i in range(len(headers), len(df_processed.columns))])
+        elif len(headers) > len(df_processed.columns):
+            headers = headers[:len(df_processed.columns)]
+        
+        # CRITICAL: Preserve original header values exactly as user selected them
+        # Ensure headers match the number of columns
+        final_headers = headers[:len(df_processed.columns)]
+        if len(final_headers) < len(df_processed.columns):
+            final_headers.extend([f"Column_{i}" for i in range(len(final_headers), len(df_processed.columns))])
+        
+        # Apply headers directly - preserve user-selected names exactly
+        df_processed.columns = final_headers
+        
+        # Normalize column names - only replace truly empty column names with "Unnamed: X"
+        # DO NOT standardize headers (lowercase, replace special chars) - preserve user-selected names exactly
         from app.features.data_upload_validate.file_ingestion.processors.cleaning import DataCleaner
         df_processed = DataCleaner.normalize_column_names(df_processed)
-        df_processed = DataCleaner.standardize_headers(df_processed)
+        # CRITICAL: Skip standardize_headers to preserve user-selected column names exactly
+        # This prevents numeric headers (like "2021.0") from being converted to "unnamed_X"
+        # df_processed = DataCleaner.standardize_headers(df_processed)  # COMMENTED OUT
         
         # Remove empty rows/columns
         df_processed = DataCleaner.remove_empty_rows(df_processed)
@@ -3984,6 +4658,7 @@ async def apply_header_selection(
             "total_rows": len(df_processed),
             "total_columns": len(df_processed.columns),
             "header_row_applied": header_row,
+            "header_row_count": header_row_count,
             "description_rows_count": len(description_rows),
         }
         

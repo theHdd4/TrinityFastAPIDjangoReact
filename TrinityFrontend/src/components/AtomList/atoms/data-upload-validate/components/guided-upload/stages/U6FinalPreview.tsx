@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { VALIDATE_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
+import { saveFileToSavedDataFrames } from '../utils/saveFileHelper';
+import { toast } from '@/hooks/use-toast';
 
 interface U6FinalPreviewProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -649,6 +651,48 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
     console.log('Download cleaned data');
   };
 
+  const [savingFile, setSavingFile] = useState(false);
+
+  const handleConfirmAndPrime = async () => {
+    if (!currentFile) return;
+    
+    setSavingFile(true);
+    try {
+      // Save the transformed file to Saved DataFrames panel
+      const oldFilePath = currentFile.path;
+      const savedPath = await saveFileToSavedDataFrames(
+        currentFile.path,
+        currentFile.name,
+        oldFilePath
+      );
+      
+      if (savedPath) {
+        // Update file path in flow state
+        flow.updateUploadedFilePath(currentFile.name, savedPath);
+        
+        // Proceed to next stage (U7)
+        onNext();
+      } else {
+        // If save failed, still proceed but show warning
+        toast({
+          title: 'Warning',
+          description: 'File processed but may not be visible in Saved DataFrames panel.',
+          variant: 'destructive',
+        });
+        onNext();
+      }
+    } catch (error: any) {
+      console.error('Error saving file:', error);
+      toast({
+        title: 'Error saving file',
+        description: error.message || 'Failed to save file. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingFile(false);
+    }
+  };
+
   if (loading) {
     return (
       <StageLayout
@@ -993,10 +1037,18 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           </div>
           <div className="flex justify-end pt-4 border-t border-blue-200">
             <Button
-              onClick={onNext}
+              onClick={handleConfirmAndPrime}
+              disabled={savingFile}
               className="bg-[#41C185] hover:bg-[#36a870] text-white"
             >
-              Confirm & Prime Dataset
+              {savingFile ? (
+                <>
+                  <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Saving...
+                </>
+              ) : (
+                'Confirm & Prime Dataset'
+              )}
             </Button>
           </div>
         </div>

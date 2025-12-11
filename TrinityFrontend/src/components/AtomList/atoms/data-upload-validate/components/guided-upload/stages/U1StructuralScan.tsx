@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { FileText, CheckCircle2, ChevronRight, RotateCcw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { saveFileToSavedDataFrames } from '../utils/saveFileHelper';
+import { toast } from '@/hooks/use-toast';
 
 interface U1StructuralScanProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -137,6 +139,54 @@ export const U1StructuralScan: React.FC<U1StructuralScanProps> = ({
     updateFileSheetSelection(fileName, sheetName);
   };
 
+  const [savingFiles, setSavingFiles] = useState(false);
+
+  const handleContinue = async () => {
+    // Save all uploaded files to Saved DataFrames panel before proceeding
+    setSavingFiles(true);
+    try {
+      const savePromises = uploadedFiles.map(async (file) => {
+        // Only save if file has a path (not just uploaded)
+        if (file.path && !file.path.startsWith('temp_uploads/')) {
+          // File already saved, skip
+          return file.path;
+        }
+        
+        // Save file to Saved DataFrames (initial save, don't overwrite)
+        const newPath = await saveFileToSavedDataFrames(
+          file.path || file.name,
+          file.name,
+          undefined,
+          false // Initial save, don't overwrite
+        );
+        
+        if (newPath) {
+          // Update file path in flow state
+          flow.updateUploadedFilePath(file.name, newPath);
+          return newPath;
+        }
+        return file.path;
+      });
+      
+      await Promise.all(savePromises);
+      
+      // Note: The GuidedUploadFlow component automatically saves flow state with currentStage: "U1"
+      // when onNext() is called, which ensures files left at U1 show as red (not in progress)
+      
+      // Proceed to next stage
+      onNext();
+    } catch (error: any) {
+      console.error('Error saving files:', error);
+      toast({
+        title: 'Error saving files',
+        description: error.message || 'Failed to save files. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingFiles(false);
+    }
+  };
+
   return (
     <StageLayout
       title="Upload Your Dataset"
@@ -221,17 +271,33 @@ export const U1StructuralScan: React.FC<U1StructuralScanProps> = ({
               {Array.from(excelWorkbooks.entries()).map(([baseName, files]) => {
                 const firstFile = files[0];
                 const sheetCount = firstFile.totalSheets || firstFile.sheetNames?.length || files.length;
+                // Check if file is processed (not in tmp/ and has been saved)
+                const isProcessed = firstFile.processed || (firstFile.path && !firstFile.path.includes('tmp/') && !firstFile.path.includes('temp_uploads/'));
+                const borderColor = isProcessed ? 'border-gray-200' : 'border-red-300 bg-red-50';
+                const iconColor = isProcessed ? 'text-blue-600' : 'text-red-600';
                 return (
-                  <div key={baseName} className="bg-white rounded p-3 border border-gray-200">
+                  <div key={baseName} className={`bg-white rounded p-3 border-2 ${borderColor}`}>
                     <div className="flex items-start gap-2">
-                      <FileText className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                      <FileText className={`w-4 h-4 ${iconColor} mt-0.5 flex-shrink-0`} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {baseName}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {baseName}
+                          </p>
+                          {!isProcessed && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                              Needs Processing
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-gray-600 mt-1">
                           Excel workbook with {sheetCount} sheet{sheetCount !== 1 ? 's' : ''}
                         </p>
+                        {!isProcessed && (
+                          <p className="text-xs text-red-600 mt-1 font-medium">
+                            ⚠️ This file needs to be processed before continuing
+                          </p>
+                        )}
                         {firstFile.sheetNames && firstFile.sheetNames.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1">
                             {firstFile.sheetNames.map((sheet, idx) => (
@@ -250,19 +316,48 @@ export const U1StructuralScan: React.FC<U1StructuralScanProps> = ({
                 );
               })}
               {/* Regular Files */}
-              {regularFiles.map((file, idx) => (
-                <div key={idx} className="bg-white rounded p-3 border border-gray-200">
-                  <div className="flex items-start gap-2">
-                    <FileText className="w-4 h-4 text-gray-600 mt-0.5 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {file.name}
-                      </p>
+              {regularFiles.map((file, idx) => {
+                // Check if file is processed (not in tmp/ and has been saved)
+                const isProcessed = file.processed || (file.path && !file.path.includes('tmp/') && !file.path.includes('temp_uploads/'));
+                const borderColor = isProcessed ? 'border-gray-200' : 'border-red-300 bg-red-50';
+                const iconColor = isProcessed ? 'text-gray-600' : 'text-red-600';
+                return (
+                  <div key={idx} className={`bg-white rounded p-3 border-2 ${borderColor}`}>
+                    <div className="flex items-start gap-2">
+                      <FileText className={`w-4 h-4 ${iconColor} mt-0.5 flex-shrink-0`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {file.name}
+                          </p>
+                          {!isProcessed && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                              Needs Processing
+                            </span>
+                          )}
+                        </div>
+                        {!isProcessed && (
+                          <p className="text-xs text-red-600 mt-1 font-medium">
+                            ⚠️ This file needs to be processed before continuing
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
+            {/* Warning for unprocessed files */}
+            {uploadedFiles.some(f => !f.processed && (f.path?.includes('tmp/') || f.path?.includes('temp_uploads/'))) && (
+              <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm text-red-800 font-medium">
+                  ⚠️ Some files are not yet processed. Files marked in red need to be processed before you can continue.
+                </p>
+                <p className="text-xs text-red-700 mt-1">
+                  Click "Continue" to process these files in the next step.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -300,11 +395,21 @@ export const U1StructuralScan: React.FC<U1StructuralScanProps> = ({
               </Button>
             )}
             <Button
-              onClick={onNext}
+              onClick={handleContinue}
+              disabled={savingFiles}
               className="flex items-center gap-2 bg-[#458EE2] hover:bg-[#3a7bc7]"
             >
-              Continue
-              <ChevronRight className="w-4 h-4" />
+              {savingFiles ? (
+                <>
+                  <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Saving...
+                </>
+              ) : (
+                <>
+                  Continue
+                  <ChevronRight className="w-4 h-4" />
+                </>
+              )}
             </Button>
           </div>
         </div>

@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Upload, FileText } from 'lucide-react';
+import { Upload, FileText, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { VALIDATE_API } from '@/lib/api';
@@ -37,7 +37,8 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
     sheetNameMap?: Record<string, string>;
   } | null>(null);
   const { toast } = useToast();
-  const { addUploadedFiles } = flow;
+  const { addUploadedFiles, state } = flow;
+  const { uploadedFiles } = state;
   
   // Track saved files to ensure they're saved even if user cancels
   const [savedFiles, setSavedFiles] = useState<Array<{ name: string; path: string; size: number }>>([]);
@@ -102,6 +103,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       
       // Add to guided flow state with temp path
       // The file will be processed and saved in U2 stage
+      // Mark as unprocessed (processed: false) since it's still in tmp/
       const uploadedFileInfo = {
         name: meta.file_name,
         path: tempPath, // Temp path - will be updated in U2 after processing
@@ -110,6 +112,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
         sheetNames: sheetOptions.length > 0 ? sheetOptions : (selectedSheets.length > 0 ? selectedSheets : undefined),
         selectedSheet: selectedSheets.length > 0 ? selectedSheets[0] : sheetOptions[0],
         totalSheets: sheetOptions.length,
+        processed: false, // Explicitly mark as unprocessed - file is in tmp/ and needs processing
       };
       
       addUploadedFiles([uploadedFileInfo]);
@@ -501,6 +504,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
     const fileKey = deriveFileKey(tempUploadMeta.file_name);
     
     // Add to guided flow state with temp path
+    // Mark as unprocessed (processed: false) since it's still in tmp/
     const uploadedFileInfo = {
       name: tempUploadMeta.file_name,
       path: tempPath, // Temp path - will be updated in U2 after processing
@@ -509,6 +513,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       sheetNames: selectedSheets.length > 0 ? selectedSheets : undefined,
       selectedSheet: selectedSheets.length > 0 ? selectedSheets[0] : undefined,
       totalSheets: selectedSheets.length,
+      processed: false, // Explicitly mark as unprocessed - file is in tmp/ and needs processing
     };
     
     addUploadedFiles([uploadedFileInfo]);
@@ -629,6 +634,77 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
         {uploadError && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-sm text-red-600">{uploadError}</p>
+          </div>
+        )}
+
+        {/* Uploaded Files List with Status */}
+        {uploadedFiles.length > 0 && (
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <FileText className="w-4 h-4 text-gray-600" />
+              Uploaded Files ({uploadedFiles.length})
+            </h3>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {uploadedFiles.map((file, idx) => {
+                // Check if file is processed (not in tmp/ and has been saved)
+                const isProcessed = file.processed || (file.path && !file.path.includes('tmp/') && !file.path.includes('temp_uploads/'));
+                const borderColor = isProcessed ? 'border-gray-200 bg-white' : 'border-red-300 bg-red-50';
+                const iconColor = isProcessed ? 'text-blue-600' : 'text-red-600';
+                return (
+                  <div key={idx} className={`rounded p-3 border-2 ${borderColor}`}>
+                    <div className="flex items-start gap-2">
+                      <FileText className={`w-4 h-4 ${iconColor} mt-0.5 flex-shrink-0`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className={`text-sm font-medium truncate ${!isProcessed ? 'text-red-900' : 'text-gray-900'}`}>
+                            {file.name}
+                          </p>
+                          {!isProcessed && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 whitespace-nowrap">
+                              Needs Processing
+                            </span>
+                          )}
+                          {isProcessed && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap">
+                              Processed
+                            </span>
+                          )}
+                        </div>
+                        {!isProcessed && (
+                          <p className="text-xs text-red-700 mt-1 font-medium">
+                            ⚠️ This file needs to be processed in the next steps
+                          </p>
+                        )}
+                        {file.sheetNames && file.sheetNames.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {file.sheetNames.map((sheet, sheetIdx) => (
+                              <span
+                                key={sheetIdx}
+                                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
+                              >
+                                {sheet}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Warning for unprocessed files */}
+            {uploadedFiles.some(f => !f.processed && (f.path?.includes('tmp/') || f.path?.includes('temp_uploads/'))) && (
+              <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm text-red-800 font-medium">
+                  ⚠️ Some files are not yet processed
+                </p>
+                <p className="text-xs text-red-700 mt-1">
+                  Files marked in <span className="font-semibold text-red-600">red</span> need to be processed. 
+                  Click "Continue" to proceed to the next step where you can process these files.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

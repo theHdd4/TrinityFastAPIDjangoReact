@@ -1,15 +1,17 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { FileText, AlertTriangle, CheckCircle2, ChevronRight, RotateCcw, X, ArrowLeft } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronRight, RotateCcw, X, ArrowLeft } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+// Removed RadioGroup - using Select dropdown instead
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { saveFileToSavedDataFrames } from '../utils/saveFileHelper';
+import { toast } from '@/hooks/use-toast';
 
 interface U2UnderstandingFilesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -19,26 +21,25 @@ interface U2UnderstandingFilesProps {
   onCancel?: () => void;
 }
 
-interface PreviewRow {
-  rowIndex: number;
-  cells: (string | number | null)[];
-  isMisaligned?: boolean;
-  columnCount?: number;
-  expectedColumnCount?: number;
-  isDescriptionRow?: boolean; // Mark description/metadata rows
-  relativeIndex?: number; // 0-indexed relative to data rows (for header selection)
+interface FilePreviewRow {
+  row_index: number; // 1-indexed absolute row number
+  relative_index?: number; // 0-indexed relative to data rows
+  cells: string[];
 }
 
-interface HeaderDetection {
-  suggestedRow: number;
-  confidence: 'high' | 'medium' | 'low';
-  reason?: string;
-}
-
-interface RowAlignmentIssue {
-  rowIndex: number;
-  issue: 'too_many_columns' | 'too_few_columns' | 'delimiter_mismatch' | 'missing_quotes';
-  message: string;
+interface FilePreviewResponse {
+  data_rows: FilePreviewRow[];
+  description_rows: FilePreviewRow[];
+  data_rows_count: number;
+  description_rows_count: number;
+  data_rows_start: number;
+  preview_row_count: number;
+  column_count: number;
+  total_rows: number;
+  suggested_header_row: number; // Relative to data rows (0-indexed)
+  suggested_header_row_absolute: number; // Absolute including description rows
+  suggested_header_confidence: 'high' | 'medium' | 'low';
+  has_description_rows: boolean;
 }
 
 export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({ 
@@ -53,211 +54,33 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
   
   const [selectedFileIndex, setSelectedFileIndex] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
-  const [headerDetection, setHeaderDetection] = useState<HeaderDetection | null>(null);
-  const [selectedHeaderRow, setSelectedHeaderRow] = useState<number>(1);
+  const [previewData, setPreviewData] = useState<FilePreviewResponse | null>(null);
+  const [selectedHeaderRow, setSelectedHeaderRow] = useState<number>(0);
+  const [selectedHeaderRows, setSelectedHeaderRows] = useState<number[]>([]); // For multi-row headers
   const [headerRowCount, setHeaderRowCount] = useState<number>(1);
   const [multiRowHeader, setMultiRowHeader] = useState(false);
-  const [rowAlignmentIssues, setRowAlignmentIssues] = useState<RowAlignmentIssue[]>([]);
-  const [delimiter, setDelimiter] = useState<string>('auto');
-  const [customDelimiter, setCustomDelimiter] = useState<string>('');
+  const [customHeaderRowCount, setCustomHeaderRowCount] = useState<string>('');
+  const [useCustomHeaderCount, setUseCustomHeaderCount] = useState(false);
   const [error, setError] = useState<string>('');
-  const [columnNames, setColumnNames] = useState<string[]>([]);
-  const [descriptionRows, setDescriptionRows] = useState<PreviewRow[]>([]);
-  const [dataRowsStart, setDataRowsStart] = useState<number>(0);
   const [applyingHeader, setApplyingHeader] = useState(false);
   const [sheetMetadata, setSheetMetadata] = useState<{ rows: number; columns: number } | null>(null);
-  const [noHeader, setNoHeader] = useState(false);
 
   const currentFile = uploadedFiles[selectedFileIndex];
   const currentHeaderSelection = currentFile ? headerSelections[currentFile.name] : null;
   const hasMultipleFiles = uploadedFiles.length > 1;
   const hasMultipleSheets = (currentFile?.sheetNames?.length || 0) > 1;
+  
+  // Check if current file is processed
+  const isCurrentFileProcessed = currentFile ? 
+    (currentFile.processed || (currentFile.path && !currentFile.path.includes('tmp/') && !currentFile.path.includes('temp_uploads/'))) : 
+    false;
+  
+  // Check if any files are unprocessed
+  const hasUnprocessedFiles = uploadedFiles.some(f => 
+    !f.processed && (f.path?.includes('tmp/') || f.path?.includes('temp_uploads/'))
+  );
 
-  // Detect header row using robust heuristics on actual data
-  const detectHeaderRow = (rows: PreviewRow[]): HeaderDetection => {
-    if (rows.length === 0) {
-      return { suggestedRow: 1, confidence: 'low' };
-    }
-
-    // Analyze first 10 rows (headers are usually in first few rows)
-    const candidates = rows.slice(0, Math.min(10, rows.length));
-    let bestRow = 1;
-    let bestScore = 0;
-    const scores: Array<{ row: number; score: number; reasons: string[] }> = [];
-
-    candidates.forEach((row, idx) => {
-      let score = 0;
-      const reasons: string[] = [];
-      const rowNum = idx + 1;
-      const cells = row.cells.filter(c => c !== null && String(c).trim().length > 0);
-      const totalCells = row.cells.length;
-      
-      if (cells.length === 0) {
-        // Empty row - unlikely to be header
-        scores.push({ row: rowNum, score: 0, reasons: ['Empty row'] });
-        return;
-      }
-      
-      // 1. Check if row has mostly text values (headers are usually text, not numbers)
-      const textCells = cells.filter(cell => {
-        const str = String(cell).trim();
-        // Check if it's NOT a number (or looks like text)
-        const isNumber = !isNaN(Number(str)) && str !== '';
-        const isDate = /^\d{4}-\d{2}-\d{2}/.test(str) || /^\d{2}\/\d{2}\/\d{4}/.test(str);
-        return !isNumber && !isDate;
-      });
-      const textRatio = textCells.length / Math.max(1, cells.length);
-      
-      if (textRatio > 0.8) {
-        score += 35;
-        reasons.push('Mostly text values');
-      } else if (textRatio > 0.5) {
-        score += 20;
-        reasons.push('Mix of text and numbers');
-      }
-      
-      // 2. Check for title case, mixed case, or proper case (common in headers)
-      const hasTitleCase = cells.some(cell => {
-        const str = String(cell).trim();
-        if (str.length === 0) return false;
-        // Title case: First letter uppercase, rest lowercase or mixed
-        const isTitleCase = /^[A-Z][a-z]/.test(str) || /^[A-Z][a-zA-Z\s]+$/.test(str);
-        // Mixed case (not all uppercase, not all lowercase)
-        const isMixedCase = str !== str.toUpperCase() && str !== str.toLowerCase() && str.length > 1;
-        return isTitleCase || isMixedCase;
-      });
-      if (hasTitleCase) {
-        score += 25;
-        reasons.push('Title case or mixed case detected');
-      }
-      
-      // 3. Check for common header patterns (words like "Name", "Date", "ID", "Total", etc.)
-      const headerKeywords = ['name', 'id', 'date', 'time', 'total', 'sum', 'count', 'amount', 
-                              'price', 'cost', 'value', 'type', 'category', 'status', 'description',
-                              'code', 'number', 'qty', 'quantity', 'unit', 'rate', 'percent', '%'];
-      const hasHeaderKeywords = cells.some(cell => {
-        const str = String(cell).toLowerCase().trim();
-        return headerKeywords.some(keyword => str.includes(keyword));
-      });
-      if (hasHeaderKeywords) {
-        score += 30;
-        reasons.push('Contains common header keywords');
-      }
-      
-      // 4. Check for consistent structure (all cells filled, similar length)
-      if (cells.length === totalCells && totalCells > 2) {
-        score += 15;
-        reasons.push('All cells filled');
-      }
-      
-      // 5. Check if subsequent rows look like data (numbers, dates) - this row is likely header
-      if (idx < rows.length - 1) {
-        const nextRow = rows[idx + 1];
-        const nextRowCells = nextRow.cells.filter(c => c !== null && String(c).trim().length > 0);
-        const nextRowHasNumbers = nextRowCells.some(cell => {
-          const str = String(cell).trim();
-          return !isNaN(Number(str)) && str !== '';
-        });
-        if (nextRowHasNumbers && textRatio > 0.6) {
-          score += 20;
-          reasons.push('Next row contains data (numbers)');
-        }
-      }
-      
-      // 6. Prefer earlier rows (but not too much weight)
-      if (rowNum <= 3) {
-        score += 10;
-        reasons.push('Early row position');
-      } else if (rowNum <= 5) {
-        score += 5;
-      }
-      
-      // 7. Check for special characters that are common in headers (spaces, underscores, hyphens)
-      const hasHeaderFormatting = cells.some(cell => {
-        const str = String(cell).trim();
-        return /[\s_\-]/.test(str) && str.length > 3;
-      });
-      if (hasHeaderFormatting) {
-        score += 10;
-        reasons.push('Header-like formatting');
-      }
-      
-      // 8. Penalize rows that look like data (mostly numbers)
-      const numberCells = cells.filter(cell => {
-        const str = String(cell).trim();
-        return !isNaN(Number(str)) && str !== '';
-      });
-      const numberRatio = numberCells.length / Math.max(1, cells.length);
-      if (numberRatio > 0.7) {
-        score -= 30; // Strong penalty - this looks like data, not header
-        reasons.push('Mostly numeric (likely data)');
-      }
-      
-      scores.push({ row: rowNum, score, reasons });
-      
-      if (score > bestScore) {
-        bestScore = score;
-        bestRow = rowNum;
-      }
-    });
-
-    // Determine confidence based on score difference
-    const sortedScores = scores.sort((a, b) => b.score - a.score);
-    const topScore = sortedScores[0]?.score || 0;
-    const secondScore = sortedScores[1]?.score || 0;
-    const scoreDiff = topScore - secondScore;
-    
-    let confidence: 'high' | 'medium' | 'low' = 'low';
-    if (topScore >= 70 && scoreDiff >= 20) {
-      confidence = 'high';
-    } else if (topScore >= 50 && scoreDiff >= 10) {
-      confidence = 'medium';
-    } else if (topScore >= 40) {
-      confidence = 'medium';
-    }
-
-    const bestRowData = scores.find(s => s.row === bestRow);
-    const reason = confidence === 'high' 
-      ? `This row looks like your header based on: ${bestRowData?.reasons.slice(0, 2).join(', ')}.`
-      : confidence === 'medium'
-      ? `This row might be your header. ${bestRowData?.reasons[0] || ''}`
-      : 'Please review and select the correct header row.';
-
-    return {
-      suggestedRow: bestRow,
-      confidence,
-      reason,
-    };
-  };
-
-  // Detect row alignment issues
-  const detectAlignmentIssues = (rows: PreviewRow[], expectedColumnCount: number): RowAlignmentIssue[] => {
-    const issues: RowAlignmentIssue[] = [];
-    
-    rows.forEach((row, idx) => {
-      const rowNum = idx + 1;
-      const actualCount = row.cells.length;
-      
-      if (actualCount > expectedColumnCount) {
-        issues.push({
-          rowIndex: rowNum,
-          issue: 'too_many_columns',
-          message: `Row ${rowNum.toLocaleString()} has ${actualCount} columns, expected ${expectedColumnCount}. This might be due to unquoted text containing delimiters.`,
-        });
-      } else if (actualCount < expectedColumnCount && actualCount > 0) {
-        issues.push({
-          rowIndex: rowNum,
-          issue: 'too_few_columns',
-          message: `Row ${rowNum.toLocaleString()} has ${actualCount} columns, expected ${expectedColumnCount}.`,
-        });
-      }
-    });
-
-    return issues;
-  };
-
-  // Fetch preview data using new /file-preview endpoint
+  // Fetch preview data from backend
   useEffect(() => {
     const fetchPreview = async () => {
       if (!currentFile) return;
@@ -265,9 +88,8 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       setLoading(true);
       setError('');
 
-        try {
-        // Build query string for file-preview endpoint
-          const envStr = localStorage.getItem('env');
+      try {
+        const envStr = localStorage.getItem('env');
         let queryParams = new URLSearchParams({
           object_name: currentFile.path,
         });
@@ -276,21 +98,21 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           queryParams.append('sheet_name', currentFile.selectedSheet);
         }
         
-          if (envStr) {
-            try {
-              const env = JSON.parse(envStr);
+        if (envStr) {
+          try {
+            const env = JSON.parse(envStr);
             queryParams.append('client_id', env.CLIENT_ID || '');
             queryParams.append('app_id', env.APP_ID || '');
             queryParams.append('project_id', env.PROJECT_ID || '');
-            } catch {
+          } catch {
             // Ignore env parse errors
           }
         }
         
         const res = await fetch(`${VALIDATE_API}/file-preview?${queryParams.toString()}`, {
           method: 'GET',
-              credentials: 'include',
-            });
+          credentials: 'include',
+        });
 
         if (!res.ok) {
           const errorText = await res.text();
@@ -298,18 +120,12 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           throw new Error(`Failed to load file preview: ${res.status} ${errorText}`);
         }
 
-        const data = await res.json();
-        console.log('File preview data:', { 
-          total_rows: data.total_rows, 
-          data_rows_count: data.data_rows_count || data.data_rows?.length || 0,
-          description_rows_count: data.description_rows?.length || 0,
-          data_rows_start: data.data_rows_start,
-          preview_row_count: data.preview_row_count,
-          has_data_rows: !!data.data_rows && data.data_rows.length > 0,
-          has_description_rows: !!data.description_rows && data.description_rows.length > 0,
-        });
+        const data: FilePreviewResponse = await res.json();
+        console.log('File preview response:', data);
         
-        // Store sheet metadata (rows, columns)
+        setPreviewData(data);
+        
+        // Store sheet metadata
         if (data.total_rows !== undefined && data.column_count !== undefined) {
           setSheetMetadata({
             rows: data.total_rows,
@@ -317,100 +133,40 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           });
         }
         
-        // Check if we have data rows
-        if (!data.data_rows || data.data_rows.length === 0) {
-          if (data.error) {
-            throw new Error(data.error);
-          }
-          throw new Error('No data rows found. The file may be empty or could not be parsed correctly.');
-        }
-        
-        // STEP 1: Extract description rows (if any exist)
-        const descRows: PreviewRow[] = [];
-        if (data.description_rows && Array.isArray(data.description_rows)) {
-          data.description_rows.forEach((descRow: any) => {
-            descRows.push({
-              rowIndex: descRow.row_index || 0, // 1-indexed absolute row number
-              cells: descRow.cells || [],
-              columnCount: descRow.cells?.length || 0,
-              expectedColumnCount: data.column_count || 0,
-              isDescriptionRow: true,
-            });
-          });
-        }
-        setDescriptionRows(descRows);
-        setDataRowsStart(data.data_rows_start || 0);
-        
-        // STEP 2: Extract DATA ROWS ONLY (these are the rows user can select as header)
-        const dataRows: PreviewRow[] = [];
-        if (data.data_rows && Array.isArray(data.data_rows)) {
-          data.data_rows.forEach((dataRow: any) => {
-            dataRows.push({
-              rowIndex: dataRow.row_index || 0, // 1-indexed absolute row number (for display)
-              relativeIndex: dataRow.relative_index || 0, // 0-indexed relative to data rows (for header selection)
-              cells: dataRow.cells || [],
-              columnCount: dataRow.cells?.length || 0,
-              expectedColumnCount: data.column_count || 0,
-              isDescriptionRow: false, // These are data rows, not description rows
-            });
-          });
-        }
-        
-        if (dataRows.length === 0) {
-          throw new Error(data.error || 'No data rows found. Please check the file format.');
-        }
-        
-        // STEP 3: Use backend's suggested header row (relative to data rows, 0-indexed)
-        const suggestedHeaderRelative = data.suggested_header_row !== undefined ? data.suggested_header_row : 0;
-        const suggestedHeaderAbsolute = data.suggested_header_row_absolute !== undefined 
-          ? data.suggested_header_row_absolute + 1  // Convert to 1-indexed for display
-          : (data.data_rows_start || 0) + suggestedHeaderRelative + 1;
-        
-        setHeaderDetection({
-          suggestedRow: suggestedHeaderAbsolute,
-          confidence: data.suggested_header_confidence || 'low',
-          reason: `Backend detection suggests row ${suggestedHeaderAbsolute} (data row ${suggestedHeaderRelative + 1}) with ${data.suggested_header_confidence || 'low'} confidence.`,
-        });
-        
-        // Set selected header row to the suggested one (using absolute row index for display)
-        setSelectedHeaderRow(suggestedHeaderAbsolute);
-        
-        // STEP 4: Detect alignment issues (on data rows only)
-        const columnCount = data.column_count || 0;
-        const issues = detectAlignmentIssues(dataRows, columnCount);
-        setRowAlignmentIssues(issues);
-        
-        // Mark misaligned rows
-        const rowsWithIssues = dataRows.map(row => ({
-          ...row,
-          isMisaligned: issues.some(issue => issue.rowIndex === row.rowIndex),
-        }));
-        
-        // Set preview data to DATA ROWS ONLY (description rows are shown separately)
-        setPreviewData(rowsWithIssues);
-        
-        // Set column names (use Col 1, Col 2, etc. as placeholders)
-        // Fix: Use dataRows instead of undefined allRows
-        if (dataRows.length > 0 && dataRows[0].cells.length > 0) {
-          setColumnNames(dataRows[0].cells.map((_, idx) => `Col ${idx + 1}`));
+        // Set suggested header row
+        if (data.suggested_header_row_absolute !== undefined) {
+          setSelectedHeaderRow(data.suggested_header_row_absolute);
+          setSelectedHeaderRows([data.suggested_header_row_absolute]);
         }
         
         // Load saved header selection if exists
         if (currentHeaderSelection) {
           if (currentHeaderSelection.noHeader) {
-            setNoHeader(true);
             setSelectedHeaderRow(0);
+            setSelectedHeaderRows([]);
           } else {
-            setNoHeader(false);
-            setSelectedHeaderRow(currentHeaderSelection.headerRowIndex + 1);
+            // Convert relative index to absolute
+            const absoluteIndex = data.data_rows_start + (currentHeaderSelection.headerRowIndex || 0) + 1;
+            setSelectedHeaderRow(absoluteIndex);
             setHeaderRowCount(currentHeaderSelection.headerRowCount || 1);
             setMultiRowHeader(currentHeaderSelection.headerRowCount > 1);
+            
+            // For multi-row headers, reconstruct the selected rows array
+            if (currentHeaderSelection.headerRowCount > 1) {
+              const savedRows: number[] = [];
+              for (let i = 0; i < (currentHeaderSelection.headerRowCount || 1); i++) {
+                savedRows.push(absoluteIndex + i);
+              }
+              setSelectedHeaderRows(savedRows);
+            } else {
+              setSelectedHeaderRows([absoluteIndex]);
+            }
           }
         }
       } catch (err: any) {
         setError(err.message || 'Failed to load preview');
       } finally {
-      setLoading(false);
+        setLoading(false);
       }
     };
 
@@ -419,15 +175,14 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
     }
   }, [currentFile, currentHeaderSelection]);
 
-  // Save header selection - rowIndex is absolute (1-indexed) for display
-  // CRITICAL: Only data rows can be selected as headers (description rows are excluded)
+  // Handle header selection change
   const handleHeaderSelectionChange = (rowIndex: number | 'none') => {
     if (rowIndex === 'none') {
-      setNoHeader(true);
       setSelectedHeaderRow(0);
-      if (currentFile) {
+      setSelectedHeaderRows([]);
+      if (currentFile && previewData) {
         setHeaderSelection(currentFile.name, {
-          headerRowIndex: -1, // -1 indicates no header
+          headerRowIndex: -1,
           headerRowCount: 0,
           noHeader: true,
         });
@@ -435,34 +190,155 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       return;
     }
     
-    setNoHeader(false);
-    // Find the data row - previewData only contains data rows now (description rows are separate)
-    const dataRow = previewData.find(r => r.rowIndex === rowIndex);
-    if (!dataRow || dataRow.isDescriptionRow) {
-      return; // Safety check: Don't allow selecting description rows
-    }
-    
-    setSelectedHeaderRow(rowIndex);
-    if (currentFile) {
-      // Store relative_index (0-indexed relative to data rows) for backend
-      // This is what we'll send to /apply-header-selection
-      const relativeIndex = dataRow.relativeIndex !== undefined 
-        ? dataRow.relativeIndex 
-        : (rowIndex - 1 - dataRowsStart); // Fallback calculation
-      
-      setHeaderSelection(currentFile.name, {
-        headerRowIndex: relativeIndex, // 0-indexed relative to data rows
-        headerRowCount: headerRowCount,
-        noHeader: false,
+    if (multiRowHeader) {
+      // Multi-row header mode: toggle row in/out of selection
+      setSelectedHeaderRows(prev => {
+        const isSelected = prev.includes(rowIndex);
+        let newSelection: number[];
+        
+        if (isSelected) {
+          // Remove from selection
+          newSelection = prev.filter(r => r !== rowIndex).sort((a, b) => a - b);
+        } else {
+          // Add to selection (keep sorted)
+          newSelection = [...prev, rowIndex].sort((a, b) => a - b);
+        }
+        
+        // Update single header row to first selected row
+        if (newSelection.length > 0) {
+          setSelectedHeaderRow(newSelection[0]);
+          setHeaderRowCount(newSelection.length);
+          
+          // Save selection
+          if (currentFile && previewData) {
+            const firstRow = previewData.data_rows.find(r => r.row_index === newSelection[0]);
+            const relativeIndex = firstRow?.relative_index !== undefined 
+              ? firstRow.relative_index 
+              : Math.max(0, newSelection[0] - 1 - previewData.data_rows_start);
+            
+            setHeaderSelection(currentFile.name, {
+              headerRowIndex: relativeIndex,
+              headerRowCount: newSelection.length,
+              noHeader: false,
+            });
+          }
+        } else {
+          setSelectedHeaderRow(0);
+          setHeaderRowCount(1);
+        }
+        
+        return newSelection;
       });
+    } else {
+      // Single row header mode - check if it looks like multi-row header
+      setSelectedHeaderRow(rowIndex);
+      
+      // Auto-detect if this row + next rows look like multi-row headers
+      let detectedMultiRow = false;
+      let detectedRowCount = 1;
+      let detectedRows = [rowIndex];
+      
+      if (previewData) {
+        const selectedRowIndex = previewData.data_rows.findIndex(r => r.row_index === rowIndex);
+        if (selectedRowIndex >= 0 && selectedRowIndex < previewData.data_rows.length - 1) {
+          // Check next 2 rows to see if they also look like headers
+          const nextRow1 = previewData.data_rows[selectedRowIndex + 1];
+          
+          // Simple heuristic: if next rows have mostly text (not numbers), they might be headers
+          const looksLikeMultiRowHeader = (() => {
+            if (!nextRow1) return false;
+            
+            // Check if next row has similar structure (mostly text, similar column count)
+            const nextRow1Cells = nextRow1.cells || [];
+            const selectedRowCells = previewData.data_rows[selectedRowIndex].cells || [];
+            
+            if (nextRow1Cells.length !== selectedRowCells.length) return false;
+            
+            // Count text vs numbers in next row
+            let textCount = 0;
+            let nonEmptyCount = 0;
+            for (const cell of nextRow1Cells.slice(0, Math.min(10, nextRow1Cells.length))) {
+              if (cell && String(cell).trim()) {
+                nonEmptyCount++;
+                const cellStr = String(cell).trim();
+                // Check if it's NOT a number
+                if (isNaN(Number(cellStr.replace(/[,$%]/g, '')))) {
+                  textCount++;
+                }
+              }
+            }
+            
+            // If next row is mostly text (like headers), it might be part of multi-row header
+            const textRatio = nonEmptyCount > 0 ? textCount / nonEmptyCount : 0;
+            return textRatio >= 0.7 && nonEmptyCount >= selectedRowCells.length * 0.5;
+          })();
+          
+          if (looksLikeMultiRowHeader) {
+            // Auto-enable multi-row header mode
+            detectedMultiRow = true;
+            detectedRowCount = 2; // Default to 2 rows
+            detectedRows = [rowIndex, nextRow1.row_index];
+            
+            // Check if third row also looks like header
+            const nextRow2 = previewData.data_rows[selectedRowIndex + 2];
+            if (nextRow2) {
+              const nextRow2Cells = nextRow2.cells || [];
+              let textCount2 = 0;
+              let nonEmptyCount2 = 0;
+              for (const cell of nextRow2Cells.slice(0, Math.min(10, nextRow2Cells.length))) {
+                if (cell && String(cell).trim()) {
+                  nonEmptyCount2++;
+                  const cellStr = String(cell).trim();
+                  if (isNaN(Number(cellStr.replace(/[,$%]/g, '')))) {
+                    textCount2++;
+                  }
+                }
+              }
+              const textRatio2 = nonEmptyCount2 > 0 ? textCount2 / nonEmptyCount2 : 0;
+              if (textRatio2 >= 0.7 && nonEmptyCount2 >= selectedRowCells.length * 0.5) {
+                detectedRowCount = 3;
+                detectedRows = [rowIndex, nextRow1.row_index, nextRow2.row_index];
+              }
+            }
+          }
+        }
+      }
+      
+      // Apply detected multi-row header settings
+      if (detectedMultiRow) {
+        setMultiRowHeader(true);
+        setHeaderRowCount(detectedRowCount);
+        setSelectedHeaderRows(detectedRows);
+      } else {
+        setSelectedHeaderRows([rowIndex]);
+      }
+      
+      if (currentFile && previewData) {
+        // Find the data row to get relative index
+        const dataRow = previewData.data_rows.find(r => r.row_index === rowIndex);
+        const relativeIndex = dataRow?.relative_index !== undefined 
+          ? dataRow.relative_index 
+          : Math.max(0, rowIndex - 1 - previewData.data_rows_start);
+        
+        setHeaderSelection(currentFile.name, {
+          headerRowIndex: relativeIndex,
+          headerRowCount: detectedMultiRow ? detectedRowCount : 1,
+          noHeader: false,
+        });
+      }
     }
   };
 
   const handleHeaderRowCountChange = (count: number) => {
     setHeaderRowCount(count);
-    if (currentFile) {
+    if (currentFile && previewData) {
+      const dataRow = previewData.data_rows.find(r => r.row_index === selectedHeaderRow);
+      const relativeIndex = dataRow?.relative_index !== undefined 
+        ? dataRow.relative_index 
+        : Math.max(0, selectedHeaderRow - 1 - previewData.data_rows_start);
+      
       setHeaderSelection(currentFile.name, {
-        headerRowIndex: selectedHeaderRow - 1,
+        headerRowIndex: relativeIndex,
         headerRowCount: count,
         noHeader: false,
       });
@@ -472,17 +348,22 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
   const handleMultiRowHeaderToggle = (checked: boolean) => {
     setMultiRowHeader(checked);
     if (!checked) {
+      // Switch back to single row mode
       setHeaderRowCount(1);
-      handleHeaderRowCountChange(1);
-    }
-  };
-
-  const handleDelimiterFix = (newDelimiter: string) => {
-    setDelimiter(newDelimiter);
-    // In production, this would re-fetch preview with new delimiter
-    // For now, we'll just update the state
-    if (newDelimiter === 'custom' && customDelimiter) {
-      // Apply custom delimiter
+      if (selectedHeaderRow > 0) {
+        setSelectedHeaderRows([selectedHeaderRow]);
+        handleHeaderRowCountChange(1);
+      } else {
+        setSelectedHeaderRows([]);
+      }
+      setUseCustomHeaderCount(false);
+      setCustomHeaderRowCount('');
+    } else {
+      // Switch to multi-row mode - initialize with current selection
+      if (selectedHeaderRow > 0) {
+        setSelectedHeaderRows([selectedHeaderRow]);
+        setHeaderRowCount(1);
+      }
     }
   };
 
@@ -501,14 +382,12 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
     }
   };
 
-  // Handle Continue - apply header selection and process file
+  // Handle Continue - apply header selection
   const handleContinue = async () => {
-    if (!currentFile) return;
+    if (!currentFile || !previewData) return;
     
-    // If no header selected, warn user or proceed with no header
-    if (noHeader) {
-      // TODO: Handle no header case - may need backend support
-      setError('Please select a header row or contact support for files without headers.');
+    if (selectedHeaderRow === 0) {
+      setError('Please select a header row.');
       return;
     }
     
@@ -517,16 +396,16 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
     
     try {
       // Get relative index from the selected data row
-      // CRITICAL: header_row must be relative to data rows (0-indexed), not absolute
-      const selectedDataRow = previewData.find(r => r.rowIndex === selectedHeaderRow);
-      const relativeHeaderIndex = selectedDataRow?.relativeIndex !== undefined
-        ? selectedDataRow.relativeIndex
-        : Math.max(0, (selectedHeaderRow - 1) - dataRowsStart); // Fallback calculation
+      const selectedDataRow = previewData.data_rows.find(r => r.row_index === selectedHeaderRow);
+      const relativeHeaderIndex = selectedDataRow?.relative_index !== undefined
+        ? selectedDataRow.relative_index
+        : Math.max(0, selectedHeaderRow - 1 - previewData.data_rows_start);
       
-      // Call /apply-header-selection endpoint with FormData (backend expects Form, not JSON)
+      // Call /apply-header-selection endpoint
       const form = new FormData();
       form.append('object_name', currentFile.path);
-      form.append('header_row', relativeHeaderIndex.toString()); // Backend expects 'header_row', not 'header_row_index'
+      form.append('header_row', relativeHeaderIndex.toString());
+      form.append('header_row_count', headerRowCount.toString()); // Send number of header rows
       if (currentFile.selectedSheet) {
         form.append('sheet_name', currentFile.selectedSheet);
       }
@@ -535,7 +414,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       const res = await fetch(`${VALIDATE_API}/apply-header-selection`, {
         method: 'POST',
         credentials: 'include',
-        body: form, // FormData - don't set Content-Type header, browser will set it with boundary
+        body: form,
       });
 
       if (!res.ok) {
@@ -547,12 +426,29 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       
       // Update flow state with processed file path
       if (result.file_path && currentFile) {
-        // Update the uploaded file with processed path
-        updateUploadedFilePath(currentFile.name, result.file_path);
+        const oldFilePath = currentFile.path;
+        
+        // Save the processed file to Saved DataFrames panel
+        const savedPath = await saveFileToSavedDataFrames(
+          result.file_path,
+          currentFile.name,
+          oldFilePath
+        );
+        
+        if (savedPath) {
+          updateUploadedFilePath(currentFile.name, savedPath);
+        } else {
+          updateUploadedFilePath(currentFile.name, result.file_path);
+          toast({
+            title: 'Warning',
+            description: 'File processed but may not be visible in Saved DataFrames panel.',
+            variant: 'destructive',
+          });
+        }
         
         // Save header selection
         setHeaderSelection(currentFile.name, {
-          headerRowIndex: selectedHeaderRow - 1,
+          headerRowIndex: relativeHeaderIndex,
           headerRowCount: headerRowCount,
           noHeader: false,
         });
@@ -563,7 +459,6 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
         setSelectedFileIndex(selectedFileIndex + 1);
         setApplyingHeader(false);
       } else {
-        // All files processed, move to next stage
         onNext();
       }
     } catch (err: any) {
@@ -571,10 +466,6 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       setApplyingHeader(false);
     }
   };
-
-  const expectedColumnCount = previewData.length > 0 
-    ? previewData[0].expectedColumnCount || previewData[0].cells.length 
-    : 0;
 
   return (
     <StageLayout
@@ -587,9 +478,44 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       }
     >
       <div className="space-y-6">
+        {/* Warning for unprocessed files */}
+        {hasUnprocessedFiles && (
+          <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-red-900 mb-1">
+                  ⚠️ Unprocessed Files Detected
+                </p>
+                <p className="text-xs text-red-800 mb-2">
+                  Some files are not yet processed. Files marked in <span className="font-semibold text-red-600">red</span> need to be processed before you can continue.
+                </p>
+                <div className="text-xs text-red-700 space-y-1">
+                  {uploadedFiles
+                    .filter(f => !f.processed && (f.path?.includes('tmp/') || f.path?.includes('temp_uploads/')))
+                    .map((file, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <span className="text-red-500 font-bold">●</span>
+                        <span className="font-medium">{file.name}</span>
+                        <span className="text-red-600">(Needs Processing)</span>
+                      </div>
+                    ))}
+                </div>
+                <p className="text-xs text-red-700 mt-2 font-medium">
+                  Please process these files by selecting a header row and applying it. This will save them properly.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {/* File Selection (if multiple files) */}
         {hasMultipleFiles && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className={`border-2 rounded-lg p-4 ${
+            isCurrentFileProcessed 
+              ? 'bg-gray-50 border-gray-200' 
+              : 'bg-red-50 border-red-300'
+          }`}>
             <Label className="text-sm font-medium text-gray-700 mb-2 block">
               Select File to Review
             </Label>
@@ -597,17 +523,44 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
               value={selectedFileIndex.toString()}
               onValueChange={(value) => setSelectedFileIndex(parseInt(value, 10))}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className={`w-full ${
+                !isCurrentFileProcessed ? 'border-red-300' : ''
+              }`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {uploadedFiles.map((file, idx) => (
-                  <SelectItem key={idx} value={idx.toString()}>
-                    {file.name}
-                  </SelectItem>
-                ))}
+                {uploadedFiles.map((file, idx) => {
+                  // Check if file is processed (not in tmp/ and has been saved)
+                  const isProcessed = file.processed || (file.path && !file.path.includes('tmp/') && !file.path.includes('temp_uploads/'));
+                  return (
+                    <SelectItem 
+                      key={idx} 
+                      value={idx.toString()}
+                      className={!isProcessed ? 'text-red-600 font-medium' : ''}
+                    >
+                      <div className="flex items-center gap-2">
+                        {!isProcessed && <span className="text-red-500 font-bold">●</span>}
+                        <span className={!isProcessed ? 'font-semibold' : ''}>{file.name}</span>
+                        {!isProcessed && (
+                          <span className="text-xs text-red-500 bg-red-100 px-1.5 py-0.5 rounded">
+                            Needs Processing
+                          </span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
+            {!isCurrentFileProcessed && (
+              <div className="mt-2 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-red-700">
+                  <span className="font-semibold">{currentFile?.name}</span> needs to be processed. 
+                  Please select a header row and apply it to process this file.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -633,7 +586,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
               {currentFile.sheetNames?.map((sheet, idx) => {
                 const isSelected = currentFile.selectedSheet === sheet || 
                   (!currentFile.selectedSheet && idx === 0);
-                const isRecommended = idx === 0; // First sheet is recommended
+                const isRecommended = idx === 0;
                 return (
                   <button
                     key={idx}
@@ -660,8 +613,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           </div>
         )}
 
-      {/* Data Preview - MANDATORY - Always shown */}
-      <div className="space-y-6">
+        {/* Loading State */}
         {loading && (
           <div className="text-center py-8 border border-gray-200 rounded-lg bg-gray-50">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#458EE2]"></div>
@@ -669,117 +621,43 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           </div>
         )}
         
+        {/* Error State */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <p className="text-sm text-red-600">{error}</p>
           </div>
         )}
         
-        {!loading && !error && (
+        {/* Preview Data */}
+        {!loading && !error && previewData && (
           <div className="space-y-6">
-            {/* Description Rows Section */}
-            {descriptionRows.length > 0 && (
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                <Label className="text-sm font-medium text-gray-700 mb-3 block">
-                  File Metadata / Description Rows
-                </Label>
-                <div className="space-y-2">
-                  {descriptionRows.map((row, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-white border border-gray-200 rounded p-2 text-xs"
-                    >
-                      <div className="font-medium text-gray-600 mb-1">
-                        Row {row.rowIndex} (Original file)
-                      </div>
-                      <div className="text-gray-700 flex flex-wrap gap-2">
-                        {row.cells.map((cell, cellIdx) => {
-                          const cellValue = cell !== null && cell !== undefined 
-                            ? String(cell) 
-                            : '';
-                          return cellValue ? (
-                            <span key={cellIdx} className="px-2 py-1 bg-gray-100 rounded">
-                              {cellValue.length > 30 ? cellValue.substring(0, 30) + '...' : cellValue}
-                            </span>
-                          ) : null;
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Preview Panel */}
-        <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-gray-900">File Preview</h3>
-                  <span className="text-xs text-gray-500">
-                    Showing first {Math.min(previewData.length, 15)} rows
-                  </span>
-                </div>
-              
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <div className="overflow-x-auto max-h-96">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-50 sticky top-0">
-                      <tr>
-                        <th className="px-2 py-1.5 text-left font-medium text-gray-600 border-r border-gray-200">
-                          Row
-                        </th>
-                        {previewData.length > 0 && previewData[0].cells.map((_, colIdx) => (
-                          <th
-                            key={colIdx}
-                            className="px-2 py-1.5 text-left font-medium text-gray-600 border-r border-gray-200 last:border-r-0"
-                            title={columnNames[colIdx] || `Column ${colIdx + 1}`}
-                          >
-                            {columnNames[colIdx] || `Col ${colIdx + 1}`}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {previewData.map((row) => {
-                        const isHeaderRow = row.rowIndex === selectedHeaderRow;
-                        const isInHeaderRange = row.rowIndex >= selectedHeaderRow && 
-                          row.rowIndex < selectedHeaderRow + headerRowCount;
-                        const isDescRow = row.isDescriptionRow || false;
-                        
-                        return (
+            {/* Description Rows Section - Always Show */}
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <Label className="text-sm font-medium text-gray-700 mb-3 block">
+                Description Rows (Metadata)
+              </Label>
+              {previewData.description_rows.length > 0 ? (
+                <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                  <div className="overflow-x-auto max-h-64">
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {previewData.description_rows.map((row, idx) => (
                           <tr
-                            key={row.rowIndex}
-                            className={`
-                              ${isHeaderRow ? 'bg-[#458EE2] bg-opacity-10 border-2 border-[#458EE2]' : ''}
-                              ${isInHeaderRange && !isHeaderRow ? 'bg-blue-50' : ''}
-                              ${row.isMisaligned ? 'bg-yellow-50 border-l-4 border-yellow-400' : ''}
-                              ${isDescRow ? 'bg-gray-100 opacity-75' : ''}
-                              hover:bg-gray-50
-                              ${!isDescRow ? 'cursor-pointer' : 'cursor-not-allowed'}
-                            `}
-                            onClick={() => !isDescRow && handleHeaderSelectionChange(row.rowIndex)}
+                            key={idx}
+                            className="border-b border-gray-200 last:border-b-0 hover:bg-gray-50"
                           >
-                            <td className="px-2 py-1.5 font-medium text-gray-600 border-r border-gray-200">
-                              {row.rowIndex}
-                              {isHeaderRow && (
-                                <span className="ml-1 text-[#458EE2]">✓</span>
-                              )}
-                              {isDescRow && (
-                                <span className="ml-1 text-xs text-gray-500">(Metadata)</span>
-                              )}
+                            <td className="px-3 py-2 font-medium text-gray-600 border-r border-gray-200 w-20">
+                              Row {row.row_index}
                             </td>
                             {row.cells.map((cell, cellIdx) => {
-                              const cellValue = cell !== null && cell !== undefined 
-                                ? (typeof cell === 'number' ? cell.toString() : String(cell))
-                                : '';
-                              const displayValue = cellValue.length > 20 
-                                ? cellValue.substring(0, 20) + '...' 
+                              const cellValue = cell || '';
+                              const displayValue = cellValue.length > 50 
+                                ? cellValue.substring(0, 50) + '...' 
                                 : cellValue;
-
-            return (
+                              return (
                                 <td
                                   key={cellIdx}
-                                  className="px-2 py-1.5 text-gray-700 border-r border-gray-200 last:border-r-0 truncate max-w-[120px]"
+                                  className="px-3 py-2 text-gray-700 border-r border-gray-200 last:border-r-0"
                                   title={cellValue || ''}
                                 >
                                   {displayValue || <span className="text-gray-400">—</span>}
@@ -787,274 +665,350 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                               );
                             })}
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
+                    <p className="text-sm text-green-800">
+                      No description rows found. Your data is clean and ready to use.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Data Rows Preview Panel */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-900">Data Rows</h3>
+                  <span className="text-xs text-gray-500">
+                    Showing first {previewData.preview_row_count} rows
+                  </span>
+                </div>
+              
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto max-h-96">
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {previewData.data_rows.map((row) => {
+                          const isHeaderRow = multiRowHeader 
+                            ? selectedHeaderRows.includes(row.row_index)
+                            : row.row_index === selectedHeaderRow;
+                          const isInHeaderRange = multiRowHeader && selectedHeaderRow > 0
+                            ? row.row_index >= selectedHeaderRow && 
+                              row.row_index < selectedHeaderRow + headerRowCount
+                            : false;
+                          
+                          return (
+                            <tr
+                              key={row.row_index}
+                              className={`
+                                ${isHeaderRow ? 'bg-yellow-100 border-2 border-yellow-400' : ''}
+                                ${isInHeaderRange && !isHeaderRow ? 'bg-yellow-50' : ''}
+                                ${multiRowHeader && isHeaderRow ? 'cursor-pointer' : ''}
+                                ${!isHeaderRow ? 'hover:bg-gray-50 cursor-pointer' : ''}
+                                border-b border-gray-200 last:border-b-0
+                              `}
+                              onClick={() => handleHeaderSelectionChange(row.row_index)}
+                            >
+                              <td className="px-3 py-2 font-medium text-gray-600 border-r border-gray-200 w-20">
+                                Row {row.row_index}
+                                {isHeaderRow && (
+                                  <span className="ml-1 text-yellow-600 font-bold">
+                                    ✓
+                                  </span>
+                                )}
+                                {multiRowHeader && isHeaderRow && selectedHeaderRows.length > 1 && (
+                                  <span className="ml-1 text-xs text-yellow-700">
+                                    ({selectedHeaderRows.indexOf(row.row_index) + 1}/{selectedHeaderRows.length})
+                                  </span>
+                                )}
+                              </td>
+                              {row.cells.map((cell, cellIdx) => {
+                                const cellValue = cell || '';
+                                const displayValue = cellValue.length > 30 
+                                  ? cellValue.substring(0, 30) + '...' 
+                                  : cellValue;
+
+                                return (
+                                  <td
+                                    key={cellIdx}
+                                    className="px-3 py-2 text-gray-700 border-r border-gray-200 last:border-r-0"
+                                    title={cellValue || ''}
+                                  >
+                                    {displayValue || <span className="text-gray-400">—</span>}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
-              {/* Row Alignment Issues */}
-              {rowAlignmentIssues.length > 0 && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  <div className="flex items-start gap-2 mb-3">
-                    <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-yellow-900 mb-1">
-                        Some rows appear misaligned
-                      </p>
-                      <p className="text-xs text-yellow-700">
-                        This might be due to delimiter or formatting issues. Let's fix that before continuing.
-                      </p>
-                    </div>
-                  </div>
+              {/* Header Selection Panel */}
+              <div className="space-y-6">
+                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Select Header Row</h3>
                   
-                  <div className="space-y-2">
-                    {rowAlignmentIssues.slice(0, 3).map((issue, idx) => (
-                      <p key={idx} className="text-xs text-yellow-800">
-                        {issue.message}
-                      </p>
-                    ))}
-                    {rowAlignmentIssues.length > 3 && (
-                      <p className="text-xs text-yellow-600">
-                        ...and {rowAlignmentIssues.length - 3} more issue{rowAlignmentIssues.length - 3 !== 1 ? 's' : ''}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="mt-4 space-y-2">
-                    <p className="text-xs font-medium text-yellow-900 mb-2">Fix Options:</p>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDelimiterFix('quoted')}
-                        className="text-xs"
-                      >
-                        Apply quoted CSV mode
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDelimiterFix('semicolon')}
-                        className="text-xs"
-                      >
-                        Try semicolon delimiter
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDelimiterFix('pipe')}
-                        className="text-xs"
-                      >
-                        Try pipe delimiter
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDelimiterFix('auto')}
-                        className="text-xs"
-                      >
-                        Auto-detect delimiter
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      <Input
-                        placeholder="Custom delimiter"
-                        value={customDelimiter}
-                        onChange={(e) => setCustomDelimiter(e.target.value)}
-                        className="h-8 text-xs"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && customDelimiter) {
-                            handleDelimiterFix('custom');
-                          }
-                        }}
-                      />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDelimiterFix('custom')}
-                        disabled={!customDelimiter}
-                        className="text-xs"
-                      >
-                        Apply
-                      </Button>
-                    </div>
-                  </div>
+                  {/* Header Suggestion Label */}
+                  {previewData.suggested_header_row_absolute && (
+                    <div className={`mb-4 p-3 rounded-lg ${
+                      previewData.suggested_header_confidence === 'high' 
+                        ? 'bg-green-50 border border-green-200'
+                        : previewData.suggested_header_confidence === 'medium'
+                        ? 'bg-yellow-50 border border-yellow-200'
+                        : 'bg-gray-50 border border-gray-200'
+                    }`}>
+                      <div className="flex items-start gap-2">
+                        {previewData.suggested_header_confidence === 'high' && (
+                          <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div className="flex-1">
+                          <p className="text-xs font-medium text-gray-900 mb-1">
+                            {previewData.suggested_header_confidence === 'high' 
+                              ? 'Suggested Header Row'
+                              : previewData.suggested_header_confidence === 'medium'
+                              ? 'Possible Header Row'
+                              : 'Header Detection'}
+                          </p>
+                          <p className="text-xs text-gray-700">
+                            Row {previewData.suggested_header_row_absolute} is suggested as the header row.
+                          </p>
                         </div>
-                      )}
-              </div>
-                        </div>
-
-            {/* Header Selection Panel */}
-            <div className="space-y-6">
-              <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-gray-900 mb-4">Select Header Row</h3>
-                
-                {headerDetection && (
-                  <div className={`mb-4 p-3 rounded-lg ${
-                    headerDetection.confidence === 'high' 
-                      ? 'bg-green-50 border border-green-200'
-                      : headerDetection.confidence === 'medium'
-                      ? 'bg-yellow-50 border border-yellow-200'
-                      : 'bg-gray-50 border border-gray-200'
-                  }`}>
-                    <div className="flex items-start gap-2">
-                      {headerDetection.confidence === 'high' && (
-                        <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
-                      )}
-                      <div className="flex-1">
-                        <p className="text-xs font-medium text-gray-900 mb-1">
-                          {headerDetection.confidence === 'high' 
-                            ? 'Suggested Header Row'
-                            : headerDetection.confidence === 'medium'
-                            ? 'Possible Header Row'
-                            : 'Header Detection'}
-                        </p>
-                        <p className="text-xs text-gray-700">
-                          {headerDetection.confidence === 'high' 
-                            ? `This row looks like your header based on similar files uploaded earlier.`
-                            : headerDetection.reason || `This row might be your header.`}
-                        </p>
                       </div>
                     </div>
+                  )}
+
+                  {/* Selected Header Row Display Box */}
+                  <div className="mb-4">
+                    <Label className="text-sm font-medium text-gray-700 mb-2 block">
+                      {multiRowHeader ? 'Selected Header Rows' : 'Selected Header Row'}
+                    </Label>
+                    <div className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-md">
+                      {selectedHeaderRow === 0 ? (
+                        <span className="text-gray-500">
+                          {multiRowHeader 
+                            ? 'Click on rows in the table to select them as header rows'
+                            : 'Click on a row in the table to select it as header'}
+                        </span>
+                      ) : (
+                        <div className="space-y-2">
+                          {multiRowHeader && selectedHeaderRows.length > 0 ? (
+                            <>
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-gray-900">
+                                  {selectedHeaderRows.length} row{selectedHeaderRows.length !== 1 ? 's' : ''} selected
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleHeaderSelectionChange('none')}
+                                  className="text-xs h-6 px-2"
+                                >
+                                  Clear All
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {selectedHeaderRows.map((rowNum, idx) => (
+                                  <span
+                                    key={rowNum}
+                                    className="inline-flex items-center px-2 py-1 bg-yellow-100 border border-yellow-400 rounded text-xs font-medium text-gray-900"
+                                  >
+                                    Row {rowNum}
+                                    {previewData.suggested_header_row_absolute === rowNum && (
+                                      <span className="ml-1 text-[#458EE2]">(Suggested)</span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleHeaderSelectionChange(rowNum);
+                                      }}
+                                      className="ml-1 text-yellow-700 hover:text-yellow-900"
+                                    >
+                                      ×
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium text-gray-900">
+                                Row {selectedHeaderRow}
+                                {previewData.suggested_header_row_absolute === selectedHeaderRow && (
+                                  <span className="ml-2 text-xs text-[#458EE2] font-normal">(Suggested)</span>
+                                )}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleHeaderSelectionChange('none')}
+                                className="text-xs h-6 px-2"
+                              >
+                                Clear
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {multiRowHeader 
+                        ? 'Click on rows in the data table to add/remove them from header selection'
+                        : 'Click on any row in the data table to select it as the header row'}
+                    </p>
+                  </div>
 
-                <RadioGroup
-                  value={noHeader ? 'none' : selectedHeaderRow.toString()}
-                  onValueChange={(value) => handleHeaderSelectionChange(value === 'none' ? 'none' : parseInt(value, 10))}
-                >
-                  {previewData.slice(0, Math.min(15, previewData.length)).map((row) => {
-                    const isDescRow = row.isDescriptionRow || false;
-                    return (
-                      <div key={row.rowIndex} className="flex items-center space-x-2 mb-2">
-                        <RadioGroupItem 
-                          value={row.rowIndex.toString()} 
-                          id={`row-${row.rowIndex}`}
-                          disabled={isDescRow}
+                  {/* Auto-detected multi-row header message */}
+                  {selectedHeaderRow > 0 && multiRowHeader && (
+                    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-sm font-medium text-gray-900 mb-2">
+                        Your selected header row seems to span multiple rows.
+                      </p>
+                      <p className="text-xs text-gray-700 mb-3">
+                        Select how many header rows you want to include. Trinity will combine them automatically (e.g., "Sales" + "2024" → "Sales_2024").
+                      </p>
+                      
+                      {/* User Selection: Number of Header Rows */}
+                      <div className="mt-3">
+                        <Label className="text-sm font-medium text-gray-700 mb-2 block">
+                          Number of Header Rows
+                        </Label>
+                        <Select
+                          value={headerRowCount.toString()}
+                          onValueChange={(value) => {
+                            const count = parseInt(value, 10);
+                            handleHeaderRowCountChange(count);
+                            
+                            // Update selected rows array based on count
+                            if (previewData && selectedHeaderRow > 0) {
+                              const selectedRowIndex = previewData.data_rows.findIndex(r => r.row_index === selectedHeaderRow);
+                              if (selectedRowIndex >= 0) {
+                                const newSelectedRows: number[] = [];
+                                for (let i = 0; i < count && (selectedRowIndex + i) < previewData.data_rows.length; i++) {
+                                  const row = previewData.data_rows[selectedRowIndex + i];
+                                  if (row) {
+                                    newSelectedRows.push(row.row_index);
+                                  }
+                                }
+                                setSelectedHeaderRows(newSelectedRows);
+                              }
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="1">1 row</SelectItem>
+                            <SelectItem value="2">2 rows</SelectItem>
+                            <SelectItem value="3">3 rows</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Manual multi-row header toggle - for manual selection when not auto-detected */}
+                  {selectedHeaderRow > 0 && !multiRowHeader && (
+                    <div className="mb-4">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="multi-row-header"
+                          checked={multiRowHeader}
+                          onCheckedChange={(checked) => {
+                            setMultiRowHeader(checked as boolean);
+                            if (checked) {
+                              // Initialize with current selection
+                              setSelectedHeaderRows([selectedHeaderRow]);
+                              setHeaderRowCount(1);
+                            } else {
+                              setSelectedHeaderRows([]);
+                            }
+                            setUseCustomHeaderCount(false);
+                            setCustomHeaderRowCount('');
+                          }}
                         />
                         <Label
-                          htmlFor={`row-${row.rowIndex}`}
-                          className={`text-sm cursor-pointer flex-1 ${
-                            isDescRow ? 'text-gray-400 cursor-not-allowed' : 'text-gray-700'
-                          }`}
+                          htmlFor="multi-row-header"
+                          className="text-sm text-gray-700 cursor-pointer"
                         >
-                          Row {row.rowIndex}
-                          {headerDetection?.suggestedRow === row.rowIndex && (
-                            <span className="ml-2 text-xs text-[#458EE2]">(Suggested)</span>
-                          )}
-                          {isDescRow && (
-                            <span className="ml-2 text-xs text-gray-400">(Metadata - cannot be header)</span>
-                          )}
+                          My headers span multiple rows
                         </Label>
                       </div>
-                    );
-                  })}
-                  {/* None of these are headers option */}
-                  <div className="flex items-center space-x-2 mb-2 mt-4 pt-4 border-t border-gray-200">
-                    <RadioGroupItem 
-                      value="none" 
-                      id="row-none"
-                    />
-                    <Label
-                      htmlFor="row-none"
-                      className="text-sm cursor-pointer flex-1 text-gray-700"
-                    >
-                      None of these are headers
-                    </Label>
-                  </div>
-                </RadioGroup>
+                    </div>
+                  )}
 
-                <div className="mt-4 pt-4 border-t border-gray-200">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="multi-row-header"
-                      checked={multiRowHeader}
-                      onCheckedChange={handleMultiRowHeaderToggle}
-                    />
-                    <Label
-                      htmlFor="multi-row-header"
-                      className="text-sm text-gray-700 cursor-pointer"
-                    >
-                      My headers span multiple rows
-                    </Label>
-                  </div>
-
-                  {multiRowHeader && (
-                    <div className="mt-3">
-                      <p className="text-xs text-gray-700 mb-2">
-                        Your selected header row seems to span multiple rows. Select how many header rows you want to include.
-                      </p>
-                      <Select
-                        value={headerRowCount.toString()}
-                        onValueChange={(value) => handleHeaderRowCountChange(parseInt(value, 10))}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1">1 row</SelectItem>
-                          <SelectItem value="2">2 rows</SelectItem>
-                          <SelectItem value="3">3 rows</SelectItem>
-                        </SelectContent>
-                      </Select>
+                  {/* Manual row selection display (when multi-row is manually enabled) */}
+                  {selectedHeaderRow > 0 && multiRowHeader && selectedHeaderRows.length > 0 && (
+                    <div className="mb-4">
+                      <Label className="text-sm font-medium text-gray-700 mb-2 block">
+                        Selected Header Rows
+                      </Label>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedHeaderRows.map((rowNum) => (
+                          <span
+                            key={rowNum}
+                            className="inline-flex items-center px-2 py-1 bg-yellow-100 border border-yellow-400 rounded text-xs font-medium text-gray-900"
+                          >
+                            Row {rowNum}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleHeaderSelectionChange(rowNum);
+                              }}
+                              className="ml-1 text-yellow-700 hover:text-yellow-900"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
                       <p className="text-xs text-gray-500 mt-2">
-                        Trinity will combine them automatically (e.g., "Sales" + "2024" → "Sales_2024").
+                        Click rows in the table to add/remove them from header selection.
                       </p>
                     </div>
                   )}
                 </div>
-              </div>
 
-              {/* Warnings */}
-              {headerDetection?.confidence === 'low' && !noHeader && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-sm text-yellow-800">
-                      I'm not fully sure where your column names are. Please select the correct row.
-                    </p>
+                {/* Warnings */}
+                {previewData.suggested_header_confidence === 'low' && selectedHeaderRow > 0 && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                      <p className="text-sm text-yellow-800">
+                        I'm not fully sure where your column names are. Please select the correct row.
+                      </p>
+                    </div>
                   </div>
-                </div>
-              )}
-              
-              {/* Multiple likely rows warning */}
-              {headerDetection && headerDetection.confidence === 'medium' && !noHeader && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-sm text-yellow-800">
-                      Two rows look like they could be your header. Please choose the correct one.
-                    </p>
-                  </div>
-                </div>
-              )}
-              
-              {/* Row alignment warning */}
-              {rowAlignmentIssues.length > 0 && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-sm text-yellow-800">
-                      Some rows appear misaligned. Once headers are confirmed, I'll help you fix any formatting issues.
-                    </p>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {/* Next Steps Info */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-gray-700">
-                  Next, we'll review your column names and give you a chance to rename them if needed.
-                </p>
+                {/* Next Steps Info */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm text-gray-700">
+                    Next, we'll review your column names and give you a chance to rename them if needed.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
         )}
-      </div>
 
-      {/* Controls */}
+        {/* Controls */}
         <div className="flex items-center justify-between gap-4 pt-4 border-t border-gray-200">
           <div className="flex items-center gap-2">
             <Button
@@ -1089,7 +1043,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
             )}
             <Button
               onClick={handleContinue}
-              disabled={loading || applyingHeader || !currentFile || noHeader}
+              disabled={loading || applyingHeader || !currentFile || !previewData || selectedHeaderRow === 0}
               className="flex items-center gap-2 bg-[#458EE2] hover:bg-[#3a7bc7]"
             >
               {applyingHeader ? (

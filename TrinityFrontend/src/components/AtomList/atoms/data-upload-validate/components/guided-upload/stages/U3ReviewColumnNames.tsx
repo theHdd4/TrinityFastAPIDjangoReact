@@ -184,9 +184,27 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
   };
 
   const handleKeepToggle = (index: number, keep: boolean) => {
-    setColumns(prev => prev.map((col, idx) =>
-      idx === index ? { ...col, keep } : col
-    ));
+    console.log('handleKeepToggle called:', index, keep);
+    setColumns(prev => {
+      const updated = prev.map((col, idx) =>
+        idx === index ? { ...col, keep } : col
+      );
+      console.log('Updated columns:', updated);
+      
+      // Save immediately with updated columns
+      if (currentFile) {
+        const edits: ColumnNameEdit[] = updated.map(col => ({
+          originalName: col.originalName,
+          editedName: col.editedName,
+          aiSuggested: col.tag === 'ai_suggestion',
+          historicalMatch: col.tag === 'previously_used',
+          keep: col.keep,
+        }));
+        setColumnNameEdits(currentFile.name, edits);
+      }
+      
+      return updated;
+    });
     if (!keep) {
       setDeletedColumns(prev => new Set(prev).add(index));
     } else {
@@ -212,44 +230,136 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
   };
 
   const handleApplyRuleBasedSuggestions = () => {
-    setColumns(prev => prev.map(col => ({
-      ...col,
-      editedName: col.ruleBasedSuggestion || col.editedName,
-      tag: col.ruleBasedSuggestion && col.ruleBasedSuggestion !== col.originalName ? 'ai_suggestion' as const : col.tag,
-    })));
+    console.log('handleApplyRuleBasedSuggestions called');
+    setColumns(prev => {
+      const updated = prev.map(col => ({
+        ...col,
+        editedName: col.ruleBasedSuggestion || col.editedName,
+        tag: col.ruleBasedSuggestion && col.ruleBasedSuggestion !== col.originalName ? 'ai_suggestion' as const : col.tag,
+      }));
+      console.log('Updated columns:', updated);
+      
+      // Save immediately
+      if (currentFile) {
+        const edits: ColumnNameEdit[] = updated.map(col => ({
+          originalName: col.originalName,
+          editedName: col.editedName,
+          aiSuggested: col.tag === 'ai_suggestion',
+          historicalMatch: col.tag === 'previously_used',
+          keep: col.keep,
+        }));
+        setColumnNameEdits(currentFile.name, edits);
+      }
+      
+      return updated;
+    });
   };
 
   const handleApplyHistorical = () => {
-    setColumns(prev => prev.map(col => ({
-      ...col,
-      editedName: col.historicalMatch || col.editedName,
-      tag: col.historicalMatch ? 'previously_used' as const : col.tag,
-    })));
+    console.log('handleApplyHistorical called');
+    setColumns(prev => {
+      const updated = prev.map(col => ({
+        ...col,
+        editedName: col.historicalMatch || col.editedName,
+        tag: col.historicalMatch ? 'previously_used' as const : col.tag,
+      }));
+      console.log('Updated columns:', updated);
+      
+      // Save immediately
+      if (currentFile) {
+        const edits: ColumnNameEdit[] = updated.map(col => ({
+          originalName: col.originalName,
+          editedName: col.editedName,
+          aiSuggested: col.tag === 'ai_suggestion',
+          historicalMatch: col.tag === 'previously_used',
+          keep: col.keep,
+        }));
+        setColumnNameEdits(currentFile.name, edits);
+      }
+      
+      return updated;
+    });
   };
 
   const handleReset = () => {
-    setColumns(prev => prev.map(col => ({
-      ...col,
-      editedName: col.originalName,
-      tag: undefined,
-    })));
+    console.log('handleReset called');
+    setColumns(prev => {
+      const updated = prev.map(col => ({
+        ...col,
+        editedName: col.originalName,
+        tag: undefined,
+        keep: true,
+      }));
+      console.log('Updated columns:', updated);
+      
+      // Save immediately
+      if (currentFile) {
+        const edits: ColumnNameEdit[] = updated.map(col => ({
+          originalName: col.originalName,
+          editedName: col.editedName,
+          aiSuggested: col.tag === 'ai_suggestion',
+          historicalMatch: col.tag === 'previously_used',
+          keep: col.keep,
+        }));
+        setColumnNameEdits(currentFile.name, edits);
+      }
+      
+      return updated;
+    });
+    setDeletedColumns(new Set());
   };
 
   // Bulk removal actions
   const handleRemoveEmptyColumns = () => {
-    setColumns(prev => prev.map((col, idx) => ({
-      ...col,
-      keep: col.sampleValues.length > 0 ? col.keep : false,
-    })));
+    console.log('handleRemoveEmptyColumns called');
+    setColumns(prev => {
+      const updated = prev.map((col, idx) => ({
+        ...col,
+        keep: col.sampleValues.length > 0 ? col.keep : false,
+      }));
+      console.log('Updated columns:', updated);
+      
+      // Save immediately
+      if (currentFile) {
+        const edits: ColumnNameEdit[] = updated.map(col => ({
+          originalName: col.originalName,
+          editedName: col.editedName,
+          aiSuggested: col.tag === 'ai_suggestion',
+          historicalMatch: col.tag === 'previously_used',
+          keep: col.keep,
+        }));
+        setColumnNameEdits(currentFile.name, edits);
+      }
+      
+      return updated;
+    });
   };
 
   const handleRemoveHighMissingColumns = () => {
+    console.log('handleRemoveHighMissingColumns called');
     // This would need backend support to calculate missing percentage
     // For now, just mark columns with no sample values
-    setColumns(prev => prev.map(col => ({
-      ...col,
-      keep: col.sampleValues.length > 0 ? col.keep : false,
-    })));
+    setColumns(prev => {
+      const updated = prev.map(col => ({
+        ...col,
+        keep: col.sampleValues.length > 0 ? col.keep : false,
+      }));
+      console.log('Updated columns:', updated);
+      
+      // Save immediately
+      if (currentFile) {
+        const edits: ColumnNameEdit[] = updated.map(col => ({
+          originalName: col.originalName,
+          editedName: col.editedName,
+          aiSuggested: col.tag === 'ai_suggestion',
+          historicalMatch: col.tag === 'previously_used',
+          keep: col.keep,
+        }));
+        setColumnNameEdits(currentFile.name, edits);
+      }
+      
+      return updated;
+    });
   };
 
   const handleNext = () => {
@@ -299,8 +409,14 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
             <Button
               variant="outline"
               size="sm"
-              onClick={handleApplyHistorical}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Apply Historical button clicked');
+                handleApplyHistorical();
+              }}
               className="flex items-center gap-2"
+              type="button"
             >
               <History className="w-4 h-4" />
               Use Historical Names
@@ -310,8 +426,14 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
             <Button
               variant="outline"
               size="sm"
-              onClick={handleApplyRuleBasedSuggestions}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Apply AI Suggestions button clicked');
+                handleApplyRuleBasedSuggestions();
+              }}
               className="flex items-center gap-2"
+              type="button"
             >
               <Lightbulb className="w-4 h-4" />
               Apply AI Suggestions
@@ -320,8 +442,14 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
           <Button
             variant="outline"
             size="sm"
-            onClick={handleRemoveEmptyColumns}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('Remove Empty Columns button clicked');
+              handleRemoveEmptyColumns();
+            }}
             className="flex items-center gap-2"
+            type="button"
           >
             <Trash2 className="w-4 h-4" />
             Remove Empty Columns
@@ -329,8 +457,14 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
           <Button
             variant="outline"
             size="sm"
-            onClick={handleRemoveHighMissingColumns}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('Remove High Missing Columns button clicked');
+              handleRemoveHighMissingColumns();
+            }}
             className="flex items-center gap-2"
+            type="button"
           >
             <Trash2 className="w-4 h-4" />
             Remove Columns with &gt;95% Missing
@@ -338,8 +472,14 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
           <Button
             variant="outline"
             size="sm"
-            onClick={handleReset}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('Reset All button clicked');
+              handleReset();
+            }}
             className="flex items-center gap-2"
+            type="button"
           >
             <RotateCcw className="w-4 h-4" />
             Reset All
@@ -374,9 +514,10 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
               <tbody className="divide-y divide-gray-200">
                 {columns.map((column, index) => {
                   const isDeleted = !column.keep;
+                  const selectValue = column.keep ? 'keep' : 'delete';
                   return (
                     <tr
-                      key={index}
+                      key={`${column.originalName}-${index}`}
                       className={isDeleted ? 'bg-gray-50 opacity-60' : 'hover:bg-gray-50'}
                     >
                       <td className="px-4 py-3 text-gray-600 text-xs">
@@ -425,18 +566,34 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <Select
-                          value={column.keep ? 'keep' : 'delete'}
-                          onValueChange={(value) => handleKeepToggle(index, value === 'keep')}
+                        <div 
+                          className="relative inline-block w-32" 
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <SelectTrigger className="w-32">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="keep">Keep</SelectItem>
-                            <SelectItem value="delete">Delete</SelectItem>
-                          </SelectContent>
-                        </Select>
+                          <select
+                            value={selectValue}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              const value = e.target.value;
+                              console.log('Native select changed:', value, 'for index:', index);
+                              const newKeep = value === 'keep';
+                              handleKeepToggle(index, newKeep);
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                            }}
+                            className="w-full h-9 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 fill=%27none%27 viewBox=%270 0 20 20%27%3E%3Cpath stroke=%27%236b7280%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27 stroke-width=%271.5%27 d=%27M6 8l4 4 4-4%27/%3E%3C/svg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.5rem_center] bg-no-repeat pr-8"
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                            }}
+                          >
+                            <option value="keep">Keep</option>
+                            <option value="delete">Drop</option>
+                          </select>
+                        </div>
                         {isDeleted && (
                           <p className="text-xs text-gray-500 mt-1">Marked for removal</p>
                         )}
@@ -444,21 +601,21 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                       <td className="px-4 py-3">
                         <div className="flex gap-1 flex-wrap">
                           {column.tag === 'previously_used' && (
-                            <Badge className="bg-[#41C185] text-white text-xs">
+                            <Badge className="bg-[#41C185] text-white text-xs flex items-center">
                               <History className="w-3 h-3 mr-1" />
-                              Previously Used
+                              <span>Previously Used</span>
                             </Badge>
                           )}
                           {column.tag === 'ai_suggestion' && (
-                            <Badge className="bg-[#FFBD59] text-white text-xs">
+                            <Badge className="bg-[#FFBD59] text-white text-xs flex items-center">
                               <Lightbulb className="w-3 h-3 mr-1" />
-                              AI Suggestion
+                              <span>AI Suggestion</span>
                             </Badge>
                           )}
                           {column.tag === 'edited_by_user' && (
-                            <Badge className="bg-[#458EE2] text-white text-xs">
+                            <Badge className="bg-[#458EE2] text-white text-xs flex items-center">
                               <Pencil className="w-3 h-3 mr-1" />
-                              Edited by User
+                              <span>Edited by User</span>
                             </Badge>
                           )}
                         </div>

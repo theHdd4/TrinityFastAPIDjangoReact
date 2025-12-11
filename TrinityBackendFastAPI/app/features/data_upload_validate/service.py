@@ -368,6 +368,14 @@ def process_temp_upload(
         else:
             raise ValueError(f"Unsupported file type: {filename}") from exc
 
+    # CRITICAL: Save original CSV/Excel file BEFORE processing
+    # This ensures /file-preview can read the original file with actual headers
+    original_file_upload = None
+    if filename.lower().endswith((".csv", ".xls", ".xlsx")):
+        # Save original file so /file-preview can read it with actual headers
+        original_file_upload = upload_to_minio(content, filename, tmp_prefix + "originals/")
+        logger.info(f"Saved original file: {original_file_upload.get('object_name', '')}")
+    
     arrow_buf = io.BytesIO()
     df_pl.write_ipc(arrow_buf)
     arrow_name = Path(filename).stem + ".arrow"
@@ -385,12 +393,17 @@ def process_temp_upload(
         logger.error("data_upload.temp_upload.upload_failed file=%s error=%s", filename, error_msg)
         raise ValueError(error_msg)
 
+    # Return ORIGINAL file path for /file-preview, not processed Arrow file
+    # This ensures we can read the file with actual headers
+    file_path_to_return = original_file_upload.get("object_name") if original_file_upload else result["object_name"]
+    
     response: Dict[str, Any] = {
-        "file_path": result["object_name"],
+        "file_path": file_path_to_return,  # Return original file path, not Arrow file
         "file_name": filename,
         "has_data_quality_issues": False,
         "message": "File uploaded successfully",
         "workbook_path": workbook_upload.get("object_name") if workbook_upload else None,
+        "arrow_path": result["object_name"],  # Also return Arrow path for processing
     }
 
     if parsing_warnings:

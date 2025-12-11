@@ -119,10 +119,19 @@ class CSVReader:
                 except Exception:
                     continue
             else:
-                # Last resort: read with errors='ignore'
+                # Last resort: read with utf-8 and handle encoding errors at decode level
+                # Note: errors='ignore' is for decode(), not for pd.read_csv()
+                # We'll decode the content first with error handling, then pass to pandas
+                try:
+                    # Decode with error handling, then encode back to bytes for pandas
+                    decoded_content = content.decode("utf-8", errors='ignore')
+                    content_for_pandas = decoded_content.encode("utf-8")
+                except Exception:
+                    # If that fails, use original content
+                    content_for_pandas = content
+                
                 read_kwargs = {
                     "encoding": "utf-8",
-                    "errors": "ignore",
                     "sep": delimiter,
                     "header": None,
                     "low_memory": False,
@@ -138,7 +147,7 @@ class CSVReader:
                 if max_cols > 0:
                     read_kwargs["names"] = [f"col_{i}" for i in range(max_cols)]
                 
-                df_raw = pd.read_csv(io.BytesIO(content), **read_kwargs)
+                df_raw = pd.read_csv(io.BytesIO(content_for_pandas), **read_kwargs)
                 metadata["encoding"] = "utf-8"
                 metadata["parsing_method"] = "ignore_errors"
         
@@ -160,19 +169,49 @@ class CSVReader:
             metadata["header_row"] = header_row
             metadata["data_start_row"] = data_start
             
-            # Extract headers and data
-            headers = df_raw.iloc[header_row].fillna("").astype(str).tolist()
+            # Extract headers and data (preserve numeric headers)
+            header_row_raw = df_raw.iloc[header_row].tolist()
+            headers = []
+            for val in header_row_raw:
+                if pd.isna(val) or val == "":
+                    headers.append("")
+                else:
+                    # Preserve numeric headers (e.g., 2021.0)
+                    try:
+                        float_val = float(val)
+                        if float_val == int(float_val):
+                            headers.append(str(int(float_val)))
+                        else:
+                            headers.append(str(float_val))
+                    except (ValueError, TypeError):
+                        # Not numeric, convert to string normally
+                        headers.append(str(val).strip())
             df = df_raw.iloc[data_start:].copy()
             df.columns = headers
         else:
-            # Use first row as header
-            headers = df_raw.iloc[0].fillna("").astype(str).tolist()
+            # Use first row as header (preserve numeric headers)
+            header_row_raw = df_raw.iloc[0].tolist()
+            headers = []
+            for val in header_row_raw:
+                if pd.isna(val) or val == "":
+                    headers.append("")
+                else:
+                    # Preserve numeric headers (e.g., 2021.0)
+                    try:
+                        float_val = float(val)
+                        if float_val == int(float_val):
+                            headers.append(str(int(float_val)))
+                        else:
+                            headers.append(str(float_val))
+                    except (ValueError, TypeError):
+                        # Not numeric, convert to string normally
+                        headers.append(str(val).strip())
             df = df_raw.iloc[1:].copy()
             df.columns = headers
         
-        # Clean headers
+        # Clean headers (preserve numeric headers)
         df = DataCleaner.normalize_column_names(df)
-        df = DataCleaner.standardize_headers(df)
+        df = DataCleaner.standardize_headers(df, preserve_numeric=True)
         
         # Remove empty rows/columns if requested
         if skip_empty_rows:

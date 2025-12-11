@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { AlertTriangle, Lightbulb, History, Pencil, RotateCcw } from 'lucide-react';
+import { AlertTriangle, Lightbulb, History, Pencil } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,8 +15,7 @@ interface U4ReviewDataTypesProps {
 
 interface ColumnTypeInfo {
   columnName: string;
-  detectedType: string;
-  selectedType: string;
+  dataType: string; // Backend data type: int, float, string, date, datetime, boolean (renamed from updateType)
   columnRole: 'identifier' | 'measure';
   detectedRole: 'identifier' | 'measure';
   sampleValues: (string | number)[];
@@ -24,15 +23,18 @@ interface ColumnTypeInfo {
   missingPercentage: number;
   tag?: 'previously_used_type' | 'previously_used_role' | 'ai_suggestion' | 'edited_by_user';
   warning?: string;
+  suggestedDataType?: string; // Suggested backend data type from warnings (renamed from suggestedUpdateType)
   historicalType?: string;
   historicalRole?: 'identifier' | 'measure';
 }
 
+// Backend data types (matches backend dtype system) - This is now the main "Data Type" column
 const DATA_TYPES = [
-  { value: 'number', label: 'Number' },
-  { value: 'category', label: 'Category' },
-  { value: 'text', label: 'Text' },
+  { value: 'int', label: 'Integer (int)' },
+  { value: 'float', label: 'Float' },
+  { value: 'string', label: 'String' },
   { value: 'date', label: 'Date' },
+  { value: 'datetime', label: 'DateTime' },
   { value: 'boolean', label: 'Boolean' },
 ];
 
@@ -41,23 +43,72 @@ const COLUMN_ROLES = [
   { value: 'measure', label: 'Measure (metric)' },
 ];
 
-// Map pandas dtype to our data types
-// This matches what pandas/polars returns when reading files
-function mapDtypeToType(dtype: string): string {
-  const dtypeLower = dtype.toLowerCase();
-  if (dtypeLower.includes('int') || dtypeLower.includes('float') || dtypeLower === 'numeric') {
-    return 'number';
+// Map pandas dtype to backend data type (for "Data Type" column)
+// This matches the backend dtype system used in routes.py and SavedDataFramesPanel.tsx
+// Backend types: int, float, string, date, datetime, boolean
+function mapDtypeToDataType(dtype: string): string {
+  if (!dtype) {
+    return 'string'; // Default fallback
   }
-  if (dtypeLower.includes('bool')) {
+  
+  const dtypeLower = dtype.toLowerCase();
+  
+  // Integer types (matches backend logic)
+  if (dtypeLower.includes('int') && !dtypeLower.includes('float')) {
+    // Check for specific integer types: int64, int32, int16, int8, Int64 (nullable), etc.
+    if (dtypeLower === 'int64' || dtypeLower === 'int32' || dtypeLower === 'int16' || 
+        dtypeLower === 'int8' || dtypeLower === 'int' || dtypeLower === 'integer' ||
+        dtypeLower.startsWith('int') || dtypeLower === 'int64' || dtypeLower === 'int32') {
+      return 'int';
+    }
+  }
+  
+  // Float types (matches backend logic)
+  if (dtypeLower.includes('float') || dtypeLower === 'numeric' || dtypeLower === 'double') {
+    // Check for specific float types: float64, float32, float16, etc.
+    if (dtypeLower === 'float64' || dtypeLower === 'float32' || dtypeLower === 'float16' ||
+        dtypeLower === 'float' || dtypeLower.startsWith('float')) {
+      return 'float';
+    }
+  }
+  
+  // Boolean types (matches backend logic)
+  if (dtypeLower.includes('bool') || dtypeLower === 'boolean') {
     return 'boolean';
   }
-  if (dtypeLower.includes('datetime') || dtypeLower.includes('date')) {
+  
+  // Datetime types (matches backend logic)
+  // Check for datetime64 variants first (more specific)
+  if (dtypeLower.includes('datetime64') || dtypeLower.includes('datetime')) {
+    // datetime64[ns], datetime64, datetime64[ns, UTC], etc.
+    return 'datetime';
+  }
+  
+  // Date types (matches backend logic)
+  if (dtypeLower.includes('date') && !dtypeLower.includes('datetime')) {
     return 'date';
   }
-  if (dtypeLower === 'category') {
-    return 'category';
+  
+  // String/object types (matches backend logic)
+  // Default to string for object, category, string, and unknown types
+  if (dtypeLower === 'object' || dtypeLower === 'category' || dtypeLower === 'string' ||
+      dtypeLower === 'str' || dtypeLower.startsWith('string')) {
+    return 'string';
   }
-  return 'text';
+  
+  // Default fallback to string (matches backend default)
+  return 'string';
+}
+
+// Classify role based on data type (backend logic)
+function classifyRoleFromDataType(dataType: string): 'identifier' | 'measure' {
+  if (dataType === 'int' || dataType === 'float') {
+    return 'measure';
+  }
+  if (dataType === 'date' || dataType === 'datetime' || dataType === 'string' || dataType === 'boolean') {
+    return 'identifier';
+  }
+  return 'identifier'; // Default
 }
 
 // Classify column role based on name and type
@@ -208,16 +259,20 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
           
           const existingSelection = existingSelections.find(s => s.columnName === editedName);
           
-          const detectedType = mapDtypeToType(col.dtype || 'object');
-          // Use the raw dtype from pandas/polars for classification (matches backend logic)
-          const detectedRole = classifyColumnRole(editedName, detectedType, col.dtype || 'object');
+          // Use raw dtype directly (same as routes.py /file-metadata and SavedDataFramesPanel.tsx)
+          // This matches routes.py line 3770: "dtype": str(col_data.dtype)
+          const rawDtype = col.dtype || 'object';
+          const detectedDataType = mapDtypeToDataType(rawDtype); // Maps to backend types (int, float, string, etc.)
+          // Use the raw dtype from pandas/polars for classification (matches backend _classify_column logic in routes.py)
+          const detectedRole = classifyColumnRole(editedName, detectedDataType, rawDtype);
           
           // Determine tag
           let tag: 'previously_used_type' | 'previously_used_role' | 'ai_suggestion' | 'edited_by_user' | undefined;
           if (existingSelection) {
-            if (existingSelection.selectedType !== detectedType || (existingSelection.columnRole && existingSelection.columnRole !== detectedRole)) {
+            if ((existingSelection.updateType && existingSelection.updateType !== detectedDataType) || 
+                (existingSelection.columnRole && existingSelection.columnRole !== detectedRole)) {
               tag = 'edited_by_user';
-            } else if (col.historical_type && existingSelection.selectedType === col.historical_type) {
+            } else if (col.historical_type && existingSelection.updateType === col.historical_type) {
               tag = 'previously_used_type';
             } else if (col.historical_role && existingSelection.columnRole === col.historical_role) {
               tag = 'previously_used_role';
@@ -226,23 +281,45 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
             tag = 'ai_suggestion';
           }
 
-          // Check for warnings
+          // Check for warnings (using raw dtype for detection, same as routes.py logic)
           let warning: string | undefined;
-          if (detectedType === 'text' && col.sample_values?.some((v: any) => !isNaN(Number(v)) && v !== '')) {
+          let suggestedDataType: string | undefined;
+          const dtypeLower = rawDtype.toLowerCase();
+          
+          // Check if dtype is object/string but values look numeric (matches routes.py _infer_column_type logic)
+          if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str' || dtypeLower === 'category') &&
+              col.sample_values?.some((v: any) => {
+                const val = String(v).trim();
+                return val !== '' && !isNaN(Number(val)) && val !== '';
+              })) {
             warning = 'These values look numeric. Should this be a number?';
-          } else if (detectedType === 'number' && col.sample_values?.some((v: any) => isNaN(Number(v)) && String(v).trim() !== '')) {
+            suggestedDataType = 'float';
+          } 
+          // Check if dtype is numeric but values include non-numeric characters
+          else if ((dtypeLower.includes('int') || dtypeLower.includes('float')) &&
+                   col.sample_values?.some((v: any) => {
+                     const val = String(v).trim();
+                     return val !== '' && isNaN(Number(val));
+                   })) {
             warning = 'Some values include letters. Please confirm if this is a text column.';
-          } else if (detectedType === 'text' && col.sample_values?.some((v: any) => {
-            const str = String(v);
-            return /^\d{4}-\d{2}-\d{2}/.test(str) || /^\d{2}\/\d{2}\/\d{4}/.test(str);
-          })) {
+            suggestedDataType = 'string';
+          } 
+          // Check if dtype is object/string but values look like dates (matches routes.py datetime detection)
+          else if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str') &&
+                   col.sample_values?.some((v: any) => {
+                     const str = String(v);
+                     return /^\d{4}[-/]\d{2}[-/]\d{2}/.test(str) || 
+                            /^\d{2}[-/]\d{2}[-/]\d{4}/.test(str) ||
+                            /^\d{4}-\d{2}-\d{2}/.test(str) || 
+                            /^\d{2}\/\d{2}\/\d{4}/.test(str);
+                   })) {
             warning = 'These values look like dates. You can set the type to "Date".';
+            suggestedDataType = 'date';
           }
 
           return {
             columnName: editedName,
-            detectedType,
-            selectedType: existingSelection?.selectedType || detectedType,
+            dataType: existingSelection?.updateType || detectedDataType,
             columnRole: (existingSelection?.columnRole as 'identifier' | 'measure') || detectedRole,
             detectedRole,
             sampleValues: col.sample_values || [],
@@ -252,6 +329,7 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
             warning,
             historicalType: col.historical_type,
             historicalRole: col.historical_role,
+            suggestedDataType,
           };
         });
 
@@ -273,12 +351,21 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFile?.name, currentFile?.path, currentColumnEdits.length]);
 
-  const handleTypeChange = (columnName: string, newType: string) => {
-    setColumns(prev => prev.map(col =>
-      col.columnName === columnName 
-        ? { ...col, selectedType: newType, tag: 'edited_by_user' as const }
-        : col
-    ));
+  const handleDataTypeChange = (columnName: string, newDataType: string) => {
+    setColumns(prev => prev.map(col => {
+      if (col.columnName === columnName) {
+        // Auto-update role based on data type
+        const newRole = classifyRoleFromDataType(newDataType);
+        return { 
+          ...col, 
+          dataType: newDataType,
+          columnRole: newRole,
+          tag: 'edited_by_user' as const 
+        };
+      }
+      return col;
+    }));
+    handleSave();
   };
 
   const handleRoleChange = (columnName: string, newRole: 'identifier' | 'measure') => {
@@ -287,26 +374,30 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
         ? { ...col, columnRole: newRole, tag: 'edited_by_user' as const }
         : col
     ));
+    handleSave();
   };
 
-  const handleReset = (columnName: string) => {
+  const handleApplySuggestion = (columnName: string) => {
     setColumns(prev => prev.map(col => {
-      if (col.columnName === columnName) {
+      if (col.columnName === columnName && col.suggestedDataType) {
+        const newRole = classifyRoleFromDataType(col.suggestedDataType);
         return {
           ...col,
-          selectedType: col.detectedType,
-          columnRole: col.detectedRole,
-          tag: undefined,
+          dataType: col.suggestedDataType,
+          columnRole: newRole,
+          warning: undefined,
+          tag: 'ai_suggestion' as const,
         };
       }
       return col;
     }));
+    handleSave();
   };
 
-  // Bulk actions
+  // Bulk actions (using data type, matches routes.py logic)
   const handleConvertAllNumericToMeasures = () => {
     setColumns(prev => prev.map(col => {
-      if (col.selectedType === 'number' && col.columnRole === 'identifier') {
+      if ((col.dataType === 'int' || col.dataType === 'float') && col.columnRole === 'identifier') {
         return { ...col, columnRole: 'measure' as const, tag: 'edited_by_user' as const };
       }
       return col;
@@ -315,7 +406,7 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
 
   const handleConvertAllTextToIdentifiers = () => {
     setColumns(prev => prev.map(col => {
-      if (col.selectedType === 'text' && col.columnRole === 'measure') {
+      if ((col.dataType === 'string' || col.dataType === 'date' || col.dataType === 'datetime' || col.dataType === 'boolean') && col.columnRole === 'measure') {
         return { ...col, columnRole: 'identifier' as const, tag: 'edited_by_user' as const };
       }
       return col;
@@ -326,9 +417,8 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
     if (currentFile) {
       const selections: DataTypeSelection[] = columns.map(col => ({
         columnName: col.columnName,
-        detectedType: col.detectedType,
-        selectedType: col.selectedType,
-        format: col.selectedType === 'date' ? col.dtype : undefined,
+        updateType: col.dataType,
+        format: col.dataType === 'date' || col.dataType === 'datetime' ? col.dtype : undefined,
         columnRole: col.columnRole,
       }));
       setDataTypeSelections(currentFile.name, selections);
@@ -374,8 +464,13 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
   }
 
   const hasWarnings = columns.some(col => col.warning);
-  const hasNumericIdentifiers = columns.some(col => col.selectedType === 'number' && col.columnRole === 'identifier');
-  const hasTextMeasures = columns.some(col => col.selectedType === 'text' && col.columnRole === 'measure');
+  // Check for numeric identifiers and text measures using data type (matches routes.py logic)
+  const hasNumericIdentifiers = columns.some(col => {
+    return (col.dataType === 'int' || col.dataType === 'float') && col.columnRole === 'identifier';
+  });
+  const hasTextMeasures = columns.some(col => {
+    return (col.dataType === 'string' || col.dataType === 'date' || col.dataType === 'datetime' || col.dataType === 'boolean') && col.columnRole === 'measure';
+  });
 
   return (
     <StageLayout
@@ -417,11 +512,29 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
               <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm font-medium text-yellow-900 mb-2">Some columns may need type adjustment</p>
-                <div className="space-y-1">
+                <div className="space-y-2">
                   {columns.filter(col => col.warning).map((col, idx) => (
-                    <p key={idx} className="text-xs text-yellow-800">
-                      <strong>{col.columnName}:</strong> {col.warning}
-                    </p>
+                    <div key={idx} className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-yellow-800 flex-1">
+                        <strong>{col.columnName}:</strong> {col.warning}
+                      </p>
+                      {col.suggestedDataType && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            console.log('Apply suggestion for:', col.columnName);
+                            handleApplySuggestion(col.columnName);
+                          }}
+                          className="h-7 text-xs bg-yellow-100 hover:bg-yellow-200 border-yellow-300"
+                          type="button"
+                        >
+                          <Lightbulb className="w-3 h-3 mr-1" />
+                          Apply Suggestion
+                        </Button>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -437,7 +550,7 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Column Name</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Sample Values</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Detected Type</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Data Type</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Column Role</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Tags</th>
                 </tr>
@@ -460,81 +573,92 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <Select
-                        value={column.selectedType}
-                        onValueChange={(value) => handleTypeChange(column.columnName, value)}
+                      <div 
+                        className="relative inline-block w-40" 
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <SelectTrigger className="w-40">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {DATA_TYPES.map(type => (
-                            <SelectItem key={type.value} value={type.value}>
-                              {type.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {column.selectedType !== column.detectedType && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleReset(column.columnName)}
-                          className="mt-1 h-6 text-xs"
+                        <select
+                          value={column.dataType}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            const value = e.target.value;
+                            console.log('Data Type changed:', value, 'for column:', column.columnName);
+                            handleDataTypeChange(column.columnName, value);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="w-full h-9 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none bg-[right_0.5rem_center] bg-no-repeat pr-8"
+                          style={{
+                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                          }}
                         >
-                          <RotateCcw className="w-3 h-3 mr-1" />
-                          Reset
-                        </Button>
-                      )}
+                          {DATA_TYPES.map(type => (
+                            <option key={type.value} value={type.value}>
+                              {type.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
-                      <Select
-                        value={column.columnRole}
-                        onValueChange={(value) => handleRoleChange(column.columnName, value as 'identifier' | 'measure')}
+                      <div 
+                        className="relative inline-block w-48" 
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <SelectTrigger className="w-48">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
+                        <select
+                          value={column.columnRole}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            const value = e.target.value as 'identifier' | 'measure';
+                            console.log('Role changed:', value, 'for column:', column.columnName);
+                            handleRoleChange(column.columnName, value);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="w-full h-9 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none bg-[right_0.5rem_center] bg-no-repeat pr-8"
+                          style={{
+                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                          }}
+                        >
                           {COLUMN_ROLES.map(role => (
-                            <SelectItem key={role.value} value={role.value}>
+                            <option key={role.value} value={role.value}>
                               {role.label}
-                            </SelectItem>
+                            </option>
                           ))}
-                        </SelectContent>
-                      </Select>
+                        </select>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 flex-wrap">
                         {column.tag === 'previously_used_type' && (
-                          <Badge className="bg-[#41C185] text-white text-xs">
+                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-[#41C185] text-white">
                             <History className="w-3 h-3 mr-1" />
                             Previously Used Type
-                          </Badge>
+                          </div>
                         )}
                         {column.tag === 'previously_used_role' && (
-                          <Badge className="bg-[#41C185] text-white text-xs">
+                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-[#41C185] text-white">
                             <History className="w-3 h-3 mr-1" />
                             Previously Used Role
-                          </Badge>
+                          </div>
                         )}
                         {column.tag === 'ai_suggestion' && (
-                          <Badge className="bg-[#FFBD59] text-white text-xs">
+                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-[#FFBD59] text-white">
                             <Lightbulb className="w-3 h-3 mr-1" />
                             AI Suggestion
-                          </Badge>
+                          </div>
                         )}
                         {column.tag === 'edited_by_user' && (
-                          <Badge className="bg-[#458EE2] text-white text-xs">
+                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-[#458EE2] text-white">
                             <Pencil className="w-3 h-3 mr-1" />
                             Edited by User
-                          </Badge>
+                          </div>
                         )}
                         {column.warning && (
-                          <Badge variant="outline" className="text-yellow-700 border-yellow-300 text-xs">
+                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold text-yellow-700 border-yellow-300 bg-yellow-50">
                             <AlertTriangle className="w-3 h-3 mr-1" />
                             Potential Issue
-                          </Badge>
+                          </div>
                         )}
                       </div>
                     </td>

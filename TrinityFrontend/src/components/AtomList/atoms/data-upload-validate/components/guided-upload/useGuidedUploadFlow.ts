@@ -10,6 +10,7 @@ export interface UploadedFileInfo {
   sheetNames?: string[];
   selectedSheet?: string;
   totalSheets?: number;
+  processed?: boolean; // Whether file has been processed/saved (not just uploaded to tmp/)
 }
 
 export interface HeaderSelection {
@@ -30,6 +31,7 @@ export interface DataTypeSelection {
   columnName: string;
   detectedType: string;
   selectedType: string;
+  updateType?: string; // Backend data type: int, float, string, date, datetime, boolean
   format?: string; // For date types
   columnRole?: 'identifier' | 'measure'; // Identifier (dimension) or Measure (metric)
 }
