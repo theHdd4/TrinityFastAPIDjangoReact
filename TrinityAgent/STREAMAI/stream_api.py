@@ -185,6 +185,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
     close_reason = "workflow_complete"
     clarification_task = None
     clarification_history: list[dict] = []
+    vagueness_score: float | None = None
+    vagueness_threshold: float | None = None
 
     try:
         # Import components
@@ -208,9 +210,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
         logger.info("⏳ Waiting for message from client...")
         message_data = await websocket.receive_text()
         logger.info(f"📥 Raw message received (length: {len(message_data)} chars)")
-        
+
         message = json.loads(message_data)
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
+        vagueness_threshold = float(message.get("vagueness_threshold", 0.6))
 
         # Start clarification response listener (non-blocking) so lab-mode clients can resume pauses
         orchestrator = ws_orchestrator
@@ -263,76 +266,6 @@ async def execute_workflow_websocket(websocket: WebSocket):
         logger.info(f"📨 NEW REQUEST RECEIVED: {user_prompt}")
         logger.info(f"📨 Full message: {json.dumps(message, indent=2)}")
         logger.info("=" * 80)
-
-        # Evaluate vagueness before processing to engage human-in-the-loop when needed
-        vagueness_threshold = float(message.get("vagueness_threshold", 0.6))
-        vagueness_score = _compute_vagueness_score(user_prompt)
-        logger.info(
-            "🧭 Vagueness check -> score=%.2f threshold=%.2f", vagueness_score, vagueness_threshold
-        )
-
-        while vagueness_score < vagueness_threshold:
-            await _safe_send_json(
-                websocket,
-                {
-                    "type": "clarification_required",
-                    "message": (
-                        "I need more details to proceed. Please provide additional context or specifics. "
-                        f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
-                    ),
-                    "vagueness_score": vagueness_score,
-                    "vagueness_threshold": vagueness_threshold,
-                },
-            )
-            await _safe_send_json(
-                websocket,
-                {
-                    "type": "status",
-                    "status": "awaiting_clarification",
-                    "message": "Awaiting more details to reduce vagueness.",
-                },
-            )
-
-            clarification_response = await _wait_for_clarification_response(websocket)
-            if not clarification_response:
-                close_code = 1001
-                close_reason = "clarification_aborted"
-                return
-
-            clarification_history.append(
-                {
-                    "message": clarification_response.get("message", ""),
-                    "values": clarification_response.get("values") or {},
-                }
-            )
-
-            clarification_parts = []
-            if clarification_response.get("message"):
-                clarification_parts.append(clarification_response["message"])
-            values = clarification_response.get("values") or {}
-            if values:
-                clarification_parts.append(" | ".join(f"{k}: {v}" for k, v in values.items()))
-
-            if clarification_parts:
-                user_prompt = f"{user_prompt}\n\nUser clarification: {'; '.join(clarification_parts)}"
-
-            vagueness_score = _compute_vagueness_score(user_prompt)
-            logger.info(
-                "🧭 Recomputed vagueness score after clarification -> %.2f (threshold=%.2f)",
-                vagueness_score,
-                vagueness_threshold,
-            )
-
-        await _safe_send_json(
-            websocket,
-            {
-                "type": "status",
-                "status": "clarification_complete",
-                "message": "Received enough details. Proceeding with execution.",
-                "vagueness_score": vagueness_score,
-                "vagueness_threshold": vagueness_threshold,
-            },
-        )
 
         # Step 1: Send "Analyzing the query..." message immediately
         if not await _safe_send_json(websocket, {
@@ -546,7 +479,78 @@ async def execute_workflow_websocket(websocket: WebSocket):
             logger.info("✅ Text reply sent, closing connection")
             await _safe_close_websocket(websocket, code=1000, reason="text_reply_complete")
             return
-        
+
+        # Step 3b: Vagueness scoring only for workflow execution paths (after routing is fixed)
+        vagueness_score = _compute_vagueness_score(user_prompt)
+        logger.info(
+            "🧭 Vagueness check -> score=%.2f threshold=%.2f (workflow path)",
+            vagueness_score,
+            vagueness_threshold,
+        )
+
+        while vagueness_score < vagueness_threshold:
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "clarification_required",
+                    "message": (
+                        "I need more details to proceed. Please provide additional context or specifics. "
+                        f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
+                    ),
+                    "vagueness_score": vagueness_score,
+                    "vagueness_threshold": vagueness_threshold,
+                },
+            )
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "awaiting_clarification",
+                    "message": "Awaiting more details to reduce vagueness.",
+                },
+            )
+
+            clarification_response = await _wait_for_clarification_response(websocket)
+            if not clarification_response:
+                close_code = 1001
+                close_reason = "clarification_aborted"
+                return
+
+            clarification_history.append(
+                {
+                    "message": clarification_response.get("message", ""),
+                    "values": clarification_response.get("values") or {},
+                }
+            )
+
+            clarification_parts = []
+            if clarification_response.get("message"):
+                clarification_parts.append(clarification_response["message"])
+            values = clarification_response.get("values") or {}
+            if values:
+                clarification_parts.append(" | ".join(f"{k}: {v}" for k, v in values.items()))
+
+            if clarification_parts:
+                user_prompt = f"{user_prompt}\n\nUser clarification: {'; '.join(clarification_parts)}"
+
+            vagueness_score = _compute_vagueness_score(user_prompt)
+            logger.info(
+                "🧭 Recomputed vagueness score after clarification -> %.2f (threshold=%.2f)",
+                vagueness_score,
+                vagueness_threshold,
+            )
+
+        await _safe_send_json(
+            websocket,
+            {
+                "type": "status",
+                "status": "clarification_complete",
+                "message": "Received enough details. Proceeding with execution.",
+                "vagueness_score": vagueness_score,
+                "vagueness_threshold": vagueness_threshold,
+            },
+        )
+
         # Step 4: Handle as workflow (intent already detected above - no need to detect again)
         logger.info("🔄 Routing to workflow handler")
         logger.info("ℹ️ Intent detection already done - proceeding with workflow execution (will NOT detect intent again)")
