@@ -230,8 +230,47 @@ def _build_contextual_prompt(
     return "\n\n".join(segment for segment in segments if segment).strip()
 
 
+def _extract_data_references(text: str) -> list[str]:
+    """Extract likely dataset or file references from free text."""
+
+    if not text:
+        return []
+
+    dataset_tokens = re.findall(r"\b[\w.-]+\.(?:csv|json|parquet|xlsx)\b", text, re.I)
+    named_sets = re.findall(r"dataset\s+([\w-]+)", text, re.I)
+    return list(dict.fromkeys(dataset_tokens + named_sets))
+
+
+def _collect_known_scope_details(
+    atom_ai_context: dict, available_files: list[str] | None, contextual_prompt: str
+) -> dict:
+    """Aggregate known scope details like datasets, columns, and filters."""
+
+    clarifications = atom_ai_context.get("clarifications") or []
+
+    datasets: list[str] = []
+    if available_files:
+        datasets.extend(available_files[:3])
+
+    for clarification in clarifications:
+        response = clarification.get("response", "")
+        values = clarification.get("values") or {}
+        datasets.extend(_extract_data_references(response))
+        datasets.extend(_extract_data_references(" ".join(map(str, values.values()))))
+
+    datasets.extend(_extract_data_references(contextual_prompt))
+    datasets = list(dict.fromkeys(datasets))
+
+    return {
+        "datasets": datasets,
+    }
+
+
 def _summarize_known_data(
-    atom_ai_context: dict, available_files: list[str] | None, initial_prompt: str
+    atom_ai_context: dict,
+    available_files: list[str] | None,
+    initial_prompt: str,
+    contextual_prompt: str,
 ) -> str:
     """Generate a short summary of what is already known from the user."""
 
@@ -249,7 +288,14 @@ def _summarize_known_data(
             f"Recent clarification ({last_focus}): {clarification_notes[-1].get('response', '')}".strip()
         )
 
-    if available_files:
+    known_scope = _collect_known_scope_details(
+        atom_ai_context, available_files, contextual_prompt
+    )
+    datasets = known_scope.get("datasets") or []
+    if datasets:
+        dataset_list = ", ".join(datasets)
+        summaries.append(f"I’ll use: {dataset_list}")
+    elif available_files:
         file_list = ", ".join(available_files[:3])
         remaining = len(available_files) - min(3, len(available_files))
         if remaining > 0:
@@ -267,19 +313,34 @@ def _build_conversational_clarification(
     available_files: list[str] | None,
     initial_prompt: str,
     scope_detectability_threshold: float,
+    contextual_prompt: str,
 ) -> str:
     """Craft a conversational clarification prompt that cites known context."""
 
-    known_summary = _summarize_known_data(atom_ai_context, available_files, initial_prompt)
+    known_summary = _summarize_known_data(
+        atom_ai_context, available_files, initial_prompt, contextual_prompt
+    )
 
+    known_scope = _collect_known_scope_details(
+        atom_ai_context, available_files, contextual_prompt
+    )
+    datasets = known_scope.get("datasets") or []
+
+    scope_detail_default = (
+        "which file or dataset to use, plus the columns and any filters or joins"
+    )
     required_details = {
         "intent clarity": (
             "what success looks like, the exact deliverable (chart, table, cleaned file), and any must-have fields or metrics"
         ),
-        "scope detectability": (
-            "which file or dataset to use, column names, and any filters or joins you want me to apply"
-        ),
+        "scope detectability": scope_detail_default,
     }
+
+    if weakest_dimension == "scope detectability" and datasets:
+        dataset_hint = datasets[0] if len(datasets) == 1 else ", ".join(datasets[:2])
+        required_details["scope detectability"] = (
+            f"how to use {dataset_hint} — list the columns to focus on and any filters or joins"
+        )
 
     request_detail = required_details.get(
         weakest_dimension,
@@ -824,7 +885,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         # Laboratory prerequisite scoring for atom execution
         card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.6))
-        scope_detectability_threshold = float(message.get("scope_detectability_threshold", 0.7))
+        scope_detectability_threshold = float(message.get("scope_detectability_threshold", 0.6))
         contextual_prompt = _build_contextual_prompt(
             user_prompt, atom_ai_context, history_summary
         )
@@ -866,7 +927,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
             )[0]
 
             current_known_summary = _summarize_known_data(
-                atom_ai_context, available_files, user_prompt
+                atom_ai_context, available_files, user_prompt, contextual_prompt
             )
             atom_ai_context["latest_known_summary"] = current_known_summary
 
@@ -878,6 +939,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 available_files,
                 user_prompt,
                 scope_detectability_threshold,
+                contextual_prompt,
             )
 
             await _safe_send_json(
