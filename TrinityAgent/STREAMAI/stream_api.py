@@ -224,6 +224,7 @@ def _build_conversational_clarification(
     atom_ai_context: dict,
     available_files: list[str] | None,
     initial_prompt: str,
+    scope_detectability_threshold: float,
 ) -> str:
     """Craft a conversational clarification prompt that cites known context."""
 
@@ -243,11 +244,19 @@ def _build_conversational_clarification(
         "the specific goal and the data or filters you want me to focus on",
     )
 
+    scope_note = (
+        f" Scope detectability should be at least {scope_detectability_threshold:.2f} "
+        "so I can operate safely."
+        if weakest_dimension == "scope detectability"
+        else ""
+    )
+
     return (
         "I want to make sure I’m working with the right portion of your data. "
         f"Here’s what I have so far: {known_summary}. "
         f"Could you share {request_detail}? Once I have that, I’ll take care of the rest. "
-        f"(card_prerequisite_score={card_score:.2f}, threshold={threshold:.2f})"
+        f"(card_prerequisite_score={card_score:.2f}, threshold={threshold:.2f})."
+        f"{scope_note}"
     )
 
 # Initialize components (will be set by main_api.py)
@@ -741,6 +750,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         # Laboratory prerequisite scoring for atom execution
         card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.6))
+        scope_detectability_threshold = float(message.get("scope_detectability_threshold", 0.7))
         prerequisite_scores = _compute_prerequisite_scores(user_prompt)
         card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
         atom_ai_context = project_context.get("ATOM_AI_Context") or {}
@@ -761,6 +771,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 ),
                 "prerequisite_scores": prerequisite_scores,
                 "card_prerequisite_threshold": card_prerequisite_threshold,
+                "scope_detectability_threshold": scope_detectability_threshold,
             },
         )
 
@@ -770,6 +781,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
         while (
             card_prerequisite_score < card_prerequisite_threshold
             or clarification_vagueness < vagueness_threshold
+            or prerequisite_scores.get("scope_detectability_score", 0.0)
+            < scope_detectability_threshold
         ):
             iterations += 1
             weakest_dimension = min(
@@ -792,6 +805,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 atom_ai_context,
                 available_files,
                 user_prompt,
+                scope_detectability_threshold,
             )
 
             await _safe_send_json(
@@ -802,6 +816,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     "focus": weakest_dimension,
                     "prerequisite_scores": prerequisite_scores,
                     "card_prerequisite_threshold": card_prerequisite_threshold,
+                    "scope_detectability_threshold": scope_detectability_threshold,
                     "vagueness_threshold": vagueness_threshold,
                 },
             )
@@ -878,12 +893,15 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     ),
                     "prerequisite_scores": prerequisite_scores,
                     "card_prerequisite_threshold": card_prerequisite_threshold,
+                    "scope_detectability_threshold": scope_detectability_threshold,
                 },
             )
 
             if iterations >= max_prerequisite_iterations and (
                 card_prerequisite_score < card_prerequisite_threshold
                 or clarification_vagueness < vagueness_threshold
+                or prerequisite_scores.get("scope_detectability_score", 0.0)
+                < scope_detectability_threshold
             ):
                 await _safe_send_json(
                     websocket,
@@ -895,6 +913,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         ),
                         "prerequisite_scores": prerequisite_scores,
                         "card_prerequisite_threshold": card_prerequisite_threshold,
+                        "scope_detectability_threshold": scope_detectability_threshold,
                     },
                 )
                 close_code = 1001
@@ -909,6 +928,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "message": "Card prerequisites satisfied. Proceeding to atom execution.",
                 "prerequisite_scores": prerequisite_scores,
                 "card_prerequisite_threshold": card_prerequisite_threshold,
+                "scope_detectability_threshold": scope_detectability_threshold,
             },
         )
 
@@ -936,6 +956,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
             "clarification_history": clarification_history,
             "card_prerequisite_score": card_prerequisite_score,
             "card_prerequisite_threshold": card_prerequisite_threshold,
+            "scope_detectability_threshold": scope_detectability_threshold,
             "prerequisite_scores": prerequisite_scores,
             "ATOM_AI_Context": atom_ai_context,
         }
