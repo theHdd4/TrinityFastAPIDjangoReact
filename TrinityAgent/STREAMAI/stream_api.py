@@ -727,12 +727,22 @@ async def execute_workflow_websocket(websocket: WebSocket):
             )[0]
 
             clarification_prompts = {
-                "intent clarity": "What is the specific outcome you expect from this atom?",
-                "scope detectability": "Which dataset, file, or columns should this atom operate on?",
-                "task feasibility": "Are there constraints, sizes, or formats I should respect while executing this atom?",
+                "intent clarity": (
+                    "Describe the exact outcome and action you want (e.g., 'Create a bar chart of monthly revenue' or "
+                    "'Clean missing values and summarize averages'). Include the target format or file path if relevant."
+                ),
+                "scope detectability": (
+                    "List the exact dataset/file names and key fields or filters (e.g., "
+                    "'Use data/sales.csv with columns date, revenue; filter region=EU'). Mention any joins or groupings."
+                ),
+                "task feasibility": (
+                    "Share constraints that affect execution: data size, file formats, runtime/compute limits, "
+                    "or required output location (e.g., 'CSV is ~200MB; keep under 2 minutes; save output to reports/summary.csv')."
+                ),
             }
             clarification_message = clarification_prompts.get(
-                weakest_dimension, "Please provide more detail so I can execute the next atom correctly."
+                weakest_dimension,
+                "Please provide more detail so I can execute the next atom correctly. Include the goal, data sources, and any limits.",
             )
 
             await _safe_send_json(
@@ -741,6 +751,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     "type": "clarification_required",
                     "message": (
                         f"I need more details to proceed with {weakest_dimension}. "
+                        f"Please respond with the specifics outlined: {clarification_message} "
                         f"(card_prerequisite_score={card_prerequisite_score:.2f}, "
                         f"threshold={card_prerequisite_threshold:.2f})"
                     ),
