@@ -33,6 +33,16 @@ from STREAMAI.result_extractor import ResultExtractor
 
 class WorkflowEventsMixin:
     """Execution helper mixin extracted from WorkflowExecutionMixin."""
+
+    def _get_ws_send_cache(self, websocket) -> dict:
+        """Return (and attach) a cache used to dedupe websocket messages."""
+
+        cache = getattr(websocket, "_trinity_sent_messages", None)
+        if cache is None:
+            cache = {}
+            setattr(websocket, "_trinity_sent_messages", cache)
+        return cache
+
     async def _safe_close_websocket(self, websocket, code: int = 1000, reason: str = "") -> None:
             """Close websocket with a status code while swallowing close errors."""
             try:
@@ -55,7 +65,20 @@ class WorkflowEventsMixin:
                     logger.warning(f"⚠️ WebSocket disconnected, skipping {context}")
                     raise WebSocketDisconnect(code=1006)
 
+                signature_parts = [event.event_type]
+                if isinstance(event.payload, dict):
+                    message_value = event.payload.get("message")
+                    if message_value:
+                        signature_parts.append(str(message_value))
+                signature = "::".join(signature_parts)
+
+                cache = self._get_ws_send_cache(websocket)
+                if cache.get(signature):
+                    logger.debug("Skipping duplicate event %s", signature)
+                    return
+
                 await websocket.send_text(event.to_json())
+                cache[signature] = True
             except WebSocketDisconnect:
                 logger.info(f"🔌 WebSocket disconnected during {context}")
                 raise

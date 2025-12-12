@@ -48,17 +48,34 @@ def _is_websocket_connected(websocket: WebSocket) -> bool:
     return True
 
 
-async def _safe_send_json(websocket: WebSocket, payload: dict) -> bool:
+def _get_ws_send_cache(websocket: WebSocket) -> dict:
+    """Return (and attach) a cache used to dedupe websocket messages."""
+
+    cache = getattr(websocket, "_trinity_sent_messages", None)
+    if cache is None:
+        cache = {}
+        setattr(websocket, "_trinity_sent_messages", cache)
+    return cache
+
+
+async def _safe_send_json(websocket: WebSocket, payload: dict, *, dedupe_signature: str | None = None) -> bool:
     """Send a JSON message if the websocket is still open.
 
     Returns False when the connection is no longer available so callers can
     gracefully stop sending additional messages.
     """
+    if dedupe_signature:
+        cache = _get_ws_send_cache(websocket)
+        if cache.get(dedupe_signature):
+            return True
+
     if not _is_websocket_connected(websocket):
         return False
 
     try:
         await websocket.send_text(json.dumps(payload))
+        if dedupe_signature:
+            cache[dedupe_signature] = True
         return True
     except WebSocketDisconnect:
         return False
@@ -68,6 +85,16 @@ async def _safe_send_json(websocket: WebSocket, payload: dict) -> bool:
     except Exception as send_error:  # pragma: no cover - defensive
         logger.warning(f"WebSocket send failed: {send_error}")
         return False
+
+
+def _build_dedupe_signature(payload: dict) -> str | None:
+    """Return a lightweight signature to avoid sending duplicate payloads."""
+
+    message = payload.get("message") if isinstance(payload, dict) else None
+    payload_type = payload.get("type") if isinstance(payload, dict) else None
+    if payload_type and message:
+        return f"{payload_type}::{message}"
+    return None
 
 
 async def _wait_for_clarification_response(websocket: WebSocket) -> dict | None:
@@ -593,11 +620,16 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 )
 
                 if decision.clarifications:
-                    await _safe_send_json(websocket, {
+                    clarification_payload = {
                         "type": "clarification_required",
                         "message": "Please confirm: " + "; ".join(decision.clarifications),
                         "intent_record": intent_record.to_dict(),
-                    })
+                    }
+                    await _safe_send_json(
+                        websocket,
+                        clarification_payload,
+                        dedupe_signature=_build_dedupe_signature(clarification_payload),
+                    )
                     await _safe_send_json(websocket, {
                         "type": "status",
                         "status": "awaiting_clarification",
@@ -642,11 +674,16 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     # Continue execution without requesting user confirmation
 
                 if decision.requires_files and not available_files:
-                    await _safe_send_json(websocket, {
+                    clarification_payload = {
                         "type": "clarification_required",
                         "message": "I need a dataset or file to run Atom Agents. Upload a file and try again.",
                         "intent_record": intent_record.to_dict(),
-                    })
+                    }
+                    await _safe_send_json(
+                        websocket,
+                        clarification_payload,
+                        dedupe_signature=_build_dedupe_signature(clarification_payload),
+                    )
                     close_code = 1000
                     close_reason = "missing_files"
                     return
@@ -802,17 +839,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
         )
 
         while vagueness_score < vagueness_threshold:
+            clarification_payload = {
+                "type": "clarification_required",
+                "message": (
+                    "I need more details to proceed. Please provide additional context or specifics. "
+                    f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
+                ),
+                "vagueness_score": vagueness_score,
+                "vagueness_threshold": vagueness_threshold,
+            }
             await _safe_send_json(
                 websocket,
-                {
-                    "type": "clarification_required",
-                    "message": (
-                        "I need more details to proceed. Please provide additional context or specifics. "
-                        f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
-                    ),
-                    "vagueness_score": vagueness_score,
-                    "vagueness_threshold": vagueness_threshold,
-                },
+                clarification_payload,
+                dedupe_signature=_build_dedupe_signature(clarification_payload),
             )
             await _safe_send_json(
                 websocket,
@@ -955,17 +994,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 contextual_prompt,
             )
 
+            clarification_payload = {
+                "type": "clarification_required",
+                "message": clarification_message,
+                "focus": weakest_dimension,
+                "prerequisite_scores": prerequisite_scores,
+                "card_prerequisite_threshold": card_prerequisite_threshold,
+                "scope_detectability_threshold": scope_detectability_threshold,
+                "vagueness_threshold": vagueness_threshold,
+            }
             await _safe_send_json(
                 websocket,
-                {
-                    "type": "clarification_required",
-                    "message": clarification_message,
-                    "focus": weakest_dimension,
-                    "prerequisite_scores": prerequisite_scores,
-                    "card_prerequisite_threshold": card_prerequisite_threshold,
-                    "scope_detectability_threshold": scope_detectability_threshold,
-                    "vagueness_threshold": vagueness_threshold,
-                },
+                clarification_payload,
+                dedupe_signature=_build_dedupe_signature(clarification_payload),
             )
             await _safe_send_json(
                 websocket,
@@ -1058,18 +1099,20 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 or prerequisite_scores.get("scope_detectability_score", 0.0)
                 < scope_detectability_threshold
             ):
+                clarification_payload = {
+                    "type": "clarification_required",
+                    "message": (
+                        "I'm still missing enough detail to execute atoms reliably after multiple attempts. "
+                        "Please provide a concise, specific description so we can continue."
+                    ),
+                    "prerequisite_scores": prerequisite_scores,
+                    "card_prerequisite_threshold": card_prerequisite_threshold,
+                    "scope_detectability_threshold": scope_detectability_threshold,
+                }
                 await _safe_send_json(
                     websocket,
-                    {
-                        "type": "clarification_required",
-                        "message": (
-                            "I'm still missing enough detail to execute atoms reliably after multiple attempts. "
-                            "Please provide a concise, specific description so we can continue."
-                        ),
-                        "prerequisite_scores": prerequisite_scores,
-                        "card_prerequisite_threshold": card_prerequisite_threshold,
-                        "scope_detectability_threshold": scope_detectability_threshold,
-                    },
+                    clarification_payload,
+                    dedupe_signature=_build_dedupe_signature(clarification_payload),
                 )
                 close_code = 1001
                 close_reason = "prerequisite_threshold_not_met"
