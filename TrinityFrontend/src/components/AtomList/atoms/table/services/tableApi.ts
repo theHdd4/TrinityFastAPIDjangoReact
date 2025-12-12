@@ -27,12 +27,120 @@ export interface TableUpdateRequest {
 
 import { ConditionalFormatRule } from '../components/conditional-formatting/types';
 
+export interface TableMetadata {
+  cellFormatting?: {
+    [rowIndex: string]: {
+      [column: string]: {
+        html?: string;
+        fontFamily?: string;
+        fontSize?: number;
+        bold?: boolean;
+        italic?: boolean;
+        underline?: boolean;
+        strikethrough?: boolean;
+        textColor?: string;
+        backgroundColor?: string;
+        textAlign?: 'left' | 'center' | 'right';
+      };
+    };
+  };
+  design?: {
+    theme?: string;
+    borderStyle?: string;
+    customColors?: {
+      header?: string;
+      oddRow?: string;
+      evenRow?: string;
+      border?: string;
+    };
+    columnAlignment?: {
+      [columnName: string]: {
+        horizontal: 'left' | 'center' | 'right';
+        vertical: 'top' | 'middle' | 'bottom';
+      };
+    };
+    columnFontStyles?: {
+      [columnName: string]: {
+        fontSize?: number;
+        bold?: boolean;
+        italic?: boolean;
+        color?: string;
+      };
+    };
+  };
+  layout?: {
+    headerRow?: boolean;
+    totalRow?: boolean;
+    bandedRows?: boolean;
+    bandedColumns?: boolean;
+    firstColumn?: boolean;
+    lastColumn?: boolean;
+  };
+  columnWidths?: Record<string, number>;
+  rowHeights?: Record<number, number>;
+}
+
 export interface TableSaveRequest {
   table_id: string;
   filename?: string;
   overwrite_original?: boolean;
   use_header_row?: boolean;
   conditional_format_rules?: ConditionalFormatRule[];
+  metadata?: TableMetadata;
+}
+
+// Backend metadata format (snake_case) - matches backend schema
+export interface BackendTableMetadata {
+  cell_formatting?: {
+    [rowIndex: string]: {
+      [column: string]: {
+        html?: string;
+        fontFamily?: string;
+        fontSize?: number;
+        bold?: boolean;
+        italic?: boolean;
+        underline?: boolean;
+        strikethrough?: boolean;
+        textColor?: string;
+        backgroundColor?: string;
+        textAlign?: 'left' | 'center' | 'right';
+      };
+    };
+  };
+  design?: {
+    theme?: string;
+    borderStyle?: string;
+    customColors?: {
+      header?: string;
+      oddRow?: string;
+      evenRow?: string;
+      border?: string;
+    };
+    columnAlignment?: {
+      [columnName: string]: {
+        horizontal: 'left' | 'center' | 'right';
+        vertical: 'top' | 'middle' | 'bottom';
+      };
+    };
+    columnFontStyles?: {
+      [columnName: string]: {
+        fontSize?: number;
+        bold?: boolean;
+        italic?: boolean;
+        color?: string;
+      };
+    };
+  };
+  layout?: {
+    headerRow?: boolean;
+    totalRow?: boolean;
+    bandedRows?: boolean;
+    bandedColumns?: boolean;
+    firstColumn?: boolean;
+    lastColumn?: boolean;
+  };
+  column_widths?: Record<string, number>;
+  row_heights?: Record<number, number>;
 }
 
 export interface TableResponse {
@@ -44,6 +152,7 @@ export interface TableResponse {
   object_name?: string;
   settings?: TableSettings;
   conditional_format_styles?: Record<string, Record<string, Record<string, string>>>;
+  metadata?: BackendTableMetadata;  // Backend sends snake_case
 }
 
 export interface TableSaveResponse {
@@ -96,13 +205,16 @@ export const updateTable = async (tableId: string, settings: TableSettings): Pro
  * @param filename Optional filename (without .arrow extension)
  * @param overwriteOriginal If true, overwrite original file
  * @param useHeaderRow If true, first row values become column names (for blank tables with header row ON)
+ * @param conditionalFormatRules Optional conditional formatting rules
+ * @param metadata Optional table metadata (formatting, design, layout)
  */
 export const saveTable = async (
   tableId: string, 
   filename?: string, 
   overwriteOriginal?: boolean,
   useHeaderRow?: boolean,
-  conditionalFormatRules?: ConditionalFormatRule[]
+  conditionalFormatRules?: ConditionalFormatRule[],
+  metadata?: TableMetadata
 ): Promise<TableSaveResponse> => {
   const response = await fetch(`${TABLE_API}/save`, {
     method: 'POST',
@@ -112,7 +224,14 @@ export const saveTable = async (
       filename,
       overwrite_original: overwriteOriginal || false,
       use_header_row: useHeaderRow || false,
-      conditional_format_rules: conditionalFormatRules || []
+      conditional_format_rules: conditionalFormatRules || [],
+      metadata: metadata ? {
+        cell_formatting: metadata.cellFormatting,
+        design: metadata.design,
+        layout: metadata.layout,
+        column_widths: metadata.columnWidths,
+        row_heights: metadata.rowHeights,
+      } : undefined
     })
   });
   

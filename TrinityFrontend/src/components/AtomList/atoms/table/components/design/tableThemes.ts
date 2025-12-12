@@ -17,6 +17,7 @@ export interface TableTheme {
     hoverBg?: string;
     totalRowBg?: string;
     firstColumnBg?: string;
+    lastColumnBg?: string;
   };
 }
 
@@ -189,4 +190,6 @@ export const getThemesByCategory = (category: 'light' | 'medium' | 'dark'): Tabl
 export const getAllThemes = (): TableTheme[] => {
   return Object.values(TABLE_THEMES);
 };
+
+
 

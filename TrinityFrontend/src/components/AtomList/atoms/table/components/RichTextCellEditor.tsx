@@ -139,18 +139,51 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
     // Check if focus is moving to another cell editor or toolbar
     const relatedTarget = e.relatedTarget as HTMLElement;
     if (relatedTarget) {
+      // Enhanced detection for toolbar elements, popovers, and color pickers
       // Don't commit if focus is moving to:
       // 1. Another contentEditable cell editor
       // 2. Toolbar elements (buttons, popovers, etc.)
+      // 3. Radix UI Popover components (font dropdown, color picker)
+      // 4. Color input elements
+      // 5. Any element within the toolbar root
       if (relatedTarget.hasAttribute('contenteditable') ||
           relatedTarget.closest('[data-text-toolbar-root]') ||
           relatedTarget.closest('[role="dialog"]') ||
-          relatedTarget.closest('[role="menu"]')) {
-        return;
+          relatedTarget.closest('[role="menu"]') ||
+          relatedTarget.closest('[role="popover"]') ||
+          relatedTarget.closest('[data-radix-popover-content]') ||
+          relatedTarget.closest('[data-radix-popover-trigger]') ||
+          relatedTarget.closest('[data-radix-portal]') ||
+          relatedTarget.closest('[data-state="open"]') ||
+          relatedTarget.closest('input[type="color"]') ||
+          relatedTarget.closest('[data-color-tray]') ||
+          relatedTarget.closest('button[aria-haspopup]') ||
+          relatedTarget.closest('[aria-expanded="true"]') ||
+          (relatedTarget.tagName === 'INPUT' && relatedTarget.getAttribute('type') === 'color') ||
+          (relatedTarget.tagName === 'BUTTON' && relatedTarget.closest('[data-text-toolbar-root]'))) {
+        return; // Don't commit
       }
     }
 
+    // Increase delay to allow popover interactions (font dropdown, color picker)
     setTimeout(() => {
+      // Double-check focus hasn't returned to editor or toolbar
+      const activeElement = document.activeElement;
+      if (activeElement && (
+          activeElement === editorRef.current ||
+          activeElement.closest('[data-text-toolbar-root]') ||
+          activeElement.closest('[role="popover"]') ||
+          activeElement.closest('[data-radix-popover-content]') ||
+          activeElement.closest('[data-radix-popover-trigger]') ||
+          activeElement.closest('[data-radix-portal]') ||
+          activeElement.closest('[data-state="open"]') ||
+          activeElement.closest('input[type="color"]') ||
+          activeElement.closest('[aria-expanded="true"]') ||
+          activeElement.closest('button[aria-haspopup]')
+      )) {
+        return; // Still in toolbar/editor/popover, don't commit
+      }
+      
       // Double-check we're still supposed to commit
       if (!editorRef.current || isCommittingRef.current || !isEditing) return;
       
@@ -164,10 +197,9 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
         
         onBlur?.();
       } catch (error) {
-        console.error('[RichTextCellEditor] Error in handleBlur:', error);
         isCommittingRef.current = false;
       }
-    }, 150); // Slightly longer delay to allow toolbar interactions
+    }, 250); // Increased delay for popover interactions (font dropdown, color picker)
   }, [onCommit, onBlur, getPlainText, isEditing]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -184,7 +216,6 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
           onCommit(plainText, currentHtml);
           // Note: isCommittingRef will be reset after commit completes
         } catch (error) {
-          console.error('[RichTextCellEditor] Error in handleKeyDown (Enter):', error);
           isCommittingRef.current = false;
         }
       }
@@ -197,7 +228,7 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
       try {
         onCancel();
       } catch (error) {
-        console.error('[RichTextCellEditor] Error in handleKeyDown (Escape):', error);
+        // Error handling
       }
       return;
     }
@@ -213,7 +244,6 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
           onCommit(plainText, currentHtml);
           // Note: isCommittingRef will be reset after commit completes
         } catch (error) {
-          console.error('[RichTextCellEditor] Error in handleKeyDown (Tab):', error);
           isCommittingRef.current = false;
         }
       }
@@ -248,6 +278,7 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
     const hasFormatting = formatting && Object.keys(formatting).length > 0;
     const shouldUseHtml = (hasFormatting || html) && displayHtml;
     
+    // Display mode - don't apply backgroundColor here (applied to cell instead)
     const displayStyle: React.CSSProperties = {
       whiteSpace: 'nowrap',  // CHANGED: from 'pre-wrap' to 'nowrap' (Excel-like)
       textOverflow: 'ellipsis',  // NEW: Add ellipsis for overflow
@@ -256,6 +287,7 @@ const RichTextCellEditor: React.FC<RichTextCellEditorProps> = ({
       ...(formatting?.fontFamily && { fontFamily: formatting.fontFamily }),
       ...(formatting?.fontSize && { fontSize: `${formatting.fontSize}px` }),
       ...(formatting?.textColor && { color: formatting.textColor }),
+      // backgroundColor NOT included - applied to cell instead
       ...(formatting?.bold && { fontWeight: 'bold' }),
       ...(formatting?.italic && { fontStyle: 'italic' }),
       ...(formatting?.underline && { textDecoration: 'underline' }),
