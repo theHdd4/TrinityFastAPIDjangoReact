@@ -7,6 +7,7 @@ interface NumberFilterComponentProps {
   onApplyFilter: (column: string, filterValue: string[] | [number, number]) => void;
   onClearFilter: (column: string) => void;
   onClose: () => void;
+  currentFilter?: string[] | [number, number]; // Current filter values for this column
 }
 
 /**
@@ -62,7 +63,8 @@ const NumberFilterComponent: React.FC<NumberFilterComponentProps> = ({
   data,
   onApplyFilter,
   onClearFilter,
-  onClose
+  onClose,
+  currentFilter
 }) => {
   const [filterType, setFilterType] = useState<'values' | 'conditions'>('values');
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
@@ -70,7 +72,7 @@ const NumberFilterComponent: React.FC<NumberFilterComponentProps> = ({
   const [conditionValue1, setConditionValue1] = useState<string>('');
   const [conditionValue2, setConditionValue2] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
-
+  
   // Get unique values for this column
   const uniqueValues = useMemo(() => {
     const values = data.rows
@@ -95,6 +97,37 @@ const NumberFilterComponent: React.FC<NumberFilterComponentProps> = ({
     
     return stringValues;
   }, [data.rows, column]);
+
+  // Update selectedValues when uniqueValues or currentFilter changes
+  React.useEffect(() => {
+    // Check if currentFilter is a values filter (array of strings/numbers)
+    if (currentFilter && Array.isArray(currentFilter) && currentFilter.length > 0) {
+      // Check if it's a range filter [min, max] (2 numbers)
+      if (currentFilter.length === 2 && typeof currentFilter[0] === 'number' && typeof currentFilter[1] === 'number') {
+        // This is a range filter, switch to conditions tab
+        setFilterType('conditions');
+        // Parse range values for conditions
+        setConditionValue1(currentFilter[0].toString());
+        setConditionValue2(currentFilter[1].toString());
+        setSelectedValues([]);
+      } else {
+        // Convert filter values to strings and match with uniqueValues
+        const filterStrings = currentFilter.map(v => formatNumberForDisplay(Number(v)));
+        const validFilterValues = filterStrings.filter(v => uniqueValues.includes(v));
+        if (validFilterValues.length > 0) {
+          setSelectedValues(validFilterValues);
+          setFilterType('values');
+        } else {
+          // If filter values don't match, select all
+          setSelectedValues([...uniqueValues]);
+        }
+      }
+    } else {
+      // If no filter, select all by default
+      setSelectedValues([...uniqueValues]);
+      setFilterType('values');
+    }
+  }, [uniqueValues, currentFilter]);
 
   // Get statistics for this column
   const stats = useMemo(() => {
@@ -399,4 +432,6 @@ const NumberFilterComponent: React.FC<NumberFilterComponentProps> = ({
 };
 
 export default NumberFilterComponent;
+
+
 

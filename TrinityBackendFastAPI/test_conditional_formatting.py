@@ -149,3 +149,5 @@ print("   - Polars DataFrame with actual data")
 print("   - Running FastAPI server")
 print("   - MinIO/MongoDB services (for full app context)")
 
+
+

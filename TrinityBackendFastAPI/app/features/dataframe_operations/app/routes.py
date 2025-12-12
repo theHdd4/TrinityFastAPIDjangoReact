@@ -1221,9 +1221,6 @@ async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_na
         # Reorder the dataframe with the new column order
         df = df.select(all_columns)
         
-        print(f"[Backend] Duplicated column '{name}' as '{new_name}' at position {insert_position}")
-        print(f"[Backend] New column order: {all_columns}")
-        
     except HTTPException:
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:

@@ -1323,6 +1323,12 @@ const MetricsColOps: React.FC = () => {
           ? filename
           : `${filename}.arrow`;
       setPreviewFile(savedFile);
+      
+      // ========================================================================
+      // AUTO-DISPLAY IN TABLE ATOM (Save - overwrites same dataframe)
+      // ========================================================================
+      await handleTableAtomAutoDisplay(savedFile, metricsInputs, true);
+      
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
     } catch (err: any) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to save DataFrame';
@@ -1406,6 +1412,12 @@ const MetricsColOps: React.FC = () => {
           : `${filename}.arrow`;
       setPreviewFile(savedFile);
       setShowSaveModal(false);
+      
+      // ========================================================================
+      // AUTO-DISPLAY IN TABLE ATOM (Save As - creates new dataframe)
+      // ========================================================================
+      await handleTableAtomAutoDisplay(savedFile, metricsInputs, false);
+      
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
     } catch (err: any) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to save DataFrame';
@@ -1413,6 +1425,104 @@ const MetricsColOps: React.FC = () => {
       toast({ title: 'Error', description: errorMsg, variant: 'destructive' });
     } finally {
       setSaveLoading(false);
+    }
+  };
+
+  // Helper function to handle table atom auto-display after save
+  const handleTableAtomAutoDisplay = async (
+    savedFile: string,
+    metricsInputs: any,
+    isOverwrite: boolean
+  ) => {
+    try {
+      // console.log('🎯 [MetricsColOps Table Atom] Save completed, handling table atom display:', {
+      //   savedFile,
+      //   isOverwrite,
+      //   contextCardId: metricsInputs.contextCardId,
+      //   contextAtomId: metricsInputs.contextAtomId
+      // });
+
+      const store = useLaboratoryStore.getState();
+      const contextCardId = metricsInputs.contextCardId;
+      const contextAtomId = metricsInputs.contextAtomId;
+
+      if (contextCardId && contextAtomId) {
+        // Context available - check atom type
+        const card = store.findCardByAtomId?.(contextAtomId);
+        const currentAtom = card?.atoms.find(a => a.id === contextAtomId);
+
+        // console.log('🎯 [MetricsColOps Table Atom] Context found:', {
+        //   cardFound: !!card,
+        //   cardId: card?.id,
+        //   currentAtomType: currentAtom?.atomId,
+        //   currentAtomId: currentAtom?.id
+        // });
+
+        if (currentAtom?.atomId === 'table') {
+          // Update existing Table atom
+          // console.log('✅ [MetricsColOps Table Atom] Updating existing Table atom');
+          await store.updateTableAtomWithFile?.(contextAtomId, savedFile);
+          toast({
+            title: 'Table updated',
+            description: 'The updated dataframe has been displayed in the Table atom'
+          });
+        } else if (currentAtom) {
+          // Replace atom with Table, move original to next card
+          // console.log('🔄 [MetricsColOps Table Atom] Replacing atom with Table, moving original to next card');
+          const result = await store.replaceAtomWithTable?.(
+            contextCardId,
+            contextAtomId,
+            savedFile
+          );
+
+          if (result?.success && result.tableAtomId) {
+            // console.log('✅ [MetricsColOps Table Atom] Atom replaced successfully');
+            toast({
+              title: 'Data displayed in Table',
+              description: 'The updated dataframe has been displayed in a Table atom. The original atom has been moved to the next card.'
+            });
+          } else {
+            console.warn('⚠️ [MetricsColOps Table Atom] Failed to replace atom:', result?.error);
+          }
+        } else {
+          console.warn('⚠️ [MetricsColOps Table Atom] Atom not found in card, creating new card');
+          // Atom not found, create new card
+          const tableAtomId = await store.createCardWithTableAtom?.(savedFile);
+          if (tableAtomId) {
+            // console.log('✅ [MetricsColOps Table Atom] Created new card with Table atom');
+            toast({
+              title: 'Data displayed in Table',
+              description: 'The updated dataframe has been displayed in a new Table atom'
+            });
+          }
+        }
+      } else {
+        // No context - create new card with Table atom
+        // console.log('🆕 [MetricsColOps Table Atom] No context, creating new card');
+        const tableAtomId = await store.createCardWithTableAtom?.(savedFile);
+        if (tableAtomId) {
+          // console.log('✅ [MetricsColOps Table Atom] Created new card with Table atom');
+          toast({
+            title: 'Data displayed in Table',
+            description: 'The updated dataframe has been displayed in a new Table atom'
+          });
+        } else {
+          console.warn('⚠️ [MetricsColOps Table Atom] Failed to create new card');
+        }
+      }
+    } catch (tableError) {
+      console.error('❌ [MetricsColOps Table Atom] Error:', tableError);
+      // Don't fail the save operation if table display fails, but try fallback
+      try {
+        // console.log('🔄 [MetricsColOps Table Atom] Attempting fallback: create new card');
+        const store = useLaboratoryStore.getState();
+        const tableAtomId = await store.createCardWithTableAtom?.(savedFile);
+        if (tableAtomId) {
+          // console.log('✅ [MetricsColOps Table Atom] Fallback succeeded - created card');
+        }
+      } catch (fallbackError) {
+        console.error('❌ [MetricsColOps Table Atom] Fallback error:', fallbackError);
+      }
     }
   };
 
