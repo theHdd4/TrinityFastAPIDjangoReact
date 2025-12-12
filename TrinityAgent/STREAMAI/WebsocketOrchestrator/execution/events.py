@@ -14,6 +14,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+# Reusable websocket caches keyed by websocket_session_id so reconnects do not re-send
+_SHARED_WS_CACHES: dict[str, dict[str, bool]] = {}
+
 from ..common import aiohttp, generate_insights, logger, memory_storage_module, summarize_chat_messages, WebSocketDisconnect
 from ..constants import DATASET_OUTPUT_ATOMS, PREFERS_LATEST_DATASET_ATOMS
 from ..types import ReActState, RetryableJSONGenerationError, StepEvaluation, WebSocketEvent, WorkflowPlan, WorkflowStepPlan
@@ -38,9 +41,19 @@ class WorkflowEventsMixin:
         """Return (and attach) a cache used to dedupe websocket messages."""
 
         cache = getattr(websocket, "_trinity_sent_messages", None)
-        if cache is None:
+        if cache is not None:
+            return cache
+
+        shared_key = getattr(websocket, "_trinity_ws_key", None)
+        if shared_key:
+            cache = _SHARED_WS_CACHES.get(shared_key)
+            if cache is None:
+                cache = {}
+                _SHARED_WS_CACHES[shared_key] = cache
+        else:
             cache = {}
-            setattr(websocket, "_trinity_sent_messages", cache)
+
+        setattr(websocket, "_trinity_sent_messages", cache)
         return cache
 
     def _normalized_message_signature(self, payload) -> str | None:

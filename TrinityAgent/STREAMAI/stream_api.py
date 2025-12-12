@@ -52,9 +52,21 @@ def _get_ws_send_cache(websocket: WebSocket) -> dict:
     """Return (and attach) a cache used to dedupe websocket messages."""
 
     cache = getattr(websocket, "_trinity_sent_messages", None)
-    if cache is None:
+    if cache is not None:
+        return cache
+
+    # If a websocket_session_id is already attached, reuse any shared cache to
+    # avoid duplicate sends when the browser reconnects mid-flow.
+    shared_key = getattr(websocket, "_trinity_ws_key", None)
+    if shared_key:
+        cache = _SHARED_WS_CACHES.get(shared_key)
+        if cache is None:
+            cache = {}
+            _SHARED_WS_CACHES[shared_key] = cache
+    else:
         cache = {}
-        setattr(websocket, "_trinity_sent_messages", cache)
+
+    setattr(websocket, "_trinity_sent_messages", cache)
     return cache
 
 
@@ -444,6 +456,9 @@ except ImportError:
 # Track prior workflow sessions to allow resumption when intent stays on workflows
 _previous_workflow_sessions: dict[str, str] = {}
 
+# Reusable websocket caches keyed by websocket_session_id so reconnects do not re-send
+_SHARED_WS_CACHES: dict[str, dict[str, bool]] = {}
+
 
 @router.get("/health")
 async def health_check():
@@ -511,6 +526,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
         message = json.loads(message_data)
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
         vagueness_threshold = float(message.get("vagueness_threshold", 0.6))
+
+        # Extract session identifiers early for intent caching and websocket scoping
+        session_id = message.get("session_id", None)  # Frontend chat session ID
+        websocket_session_id = message.get("websocket_session_id") or message.get("websocketSessionId")
+        chat_id = message.get("chat_id", None)  # Frontend chat ID
+        if not session_id:
+            session_id = f"ws_{uuid.uuid4().hex[:8]}"
+        if not websocket_session_id:
+            websocket_session_id = session_id or f"ws_conn_{uuid.uuid4().hex[:12]}"
+
+        # Attach websocket key and cache immediately so downstream senders share dedupe across modules
+        setattr(websocket, "_trinity_ws_key", websocket_session_id)
+        setattr(websocket, "_trinity_sent_messages", _SHARED_WS_CACHES.setdefault(websocket_session_id, {}))
 
         # Start clarification response listener (non-blocking) so lab-mode clients can resume pauses
         orchestrator = ws_orchestrator
@@ -588,14 +616,6 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 async def _generate_text_reply_direct(prompt):
                     return "I apologize, but I couldn't process your request."
 
-        # Extract session identifiers early for intent caching and websocket scoping
-        session_id = message.get("session_id", None)  # Frontend chat session ID
-        websocket_session_id = message.get("websocket_session_id") or message.get("websocketSessionId")
-        chat_id = message.get("chat_id", None)  # Frontend chat ID
-        if not session_id:
-            session_id = f"ws_{uuid.uuid4().hex[:8]}"
-        if not websocket_session_id:
-            websocket_session_id = session_id or f"ws_conn_{uuid.uuid4().hex[:12]}"
         available_files = message.get("available_files", [])
         prior_workflow_session = _previous_workflow_sessions.get(session_id) or _previous_workflow_sessions.get(chat_id or "")
 
