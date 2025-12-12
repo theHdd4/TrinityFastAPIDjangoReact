@@ -1,0 +1,11 @@
+Investigation summary (why the browser saw two intent_debug cycles)
+------------------------------------------------------------------
+* The WebSocket handler in `TrinityAgent/STREAMAI/stream_api.py` had two independent consumers calling `websocket.receive_text()` after the handshake:
+  * `_wait_for_clarification_response` blocked directly on `receive_text` whenever a workflow step needed clarification.
+  * A background `clarification_router` task simultaneously looped on `receive_text` to resume paused workflows.
+* Starlette/ASGI websockets allow only one pending `receive_text` call at a time. When both coroutines waited concurrently, Starlette raised a runtime error and tore down the connection. The client immediately reconnected and replayed the request, which caused the duplicate `intent_debug` and workflow events in the browser log.
+
+Fix applied
+-----------
+* Added a single receive loop that reads from the socket and feeds an internal `incoming_queue`. All clarification waits now read from that queue, preventing concurrent reads.
+* The same loop still forwards clarification responses to the orchestrator, so workflow pause/resume flows remain intact while the connection stays open for the entire mixed workflow execution.

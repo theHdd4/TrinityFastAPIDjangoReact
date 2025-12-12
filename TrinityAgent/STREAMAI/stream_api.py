@@ -48,17 +48,72 @@ def _is_websocket_connected(websocket: WebSocket) -> bool:
     return True
 
 
-async def _safe_send_json(websocket: WebSocket, payload: dict) -> bool:
+def _get_ws_send_cache(websocket: WebSocket) -> dict:
+    """Return (and attach) a cache used to dedupe websocket messages."""
+
+    cache = getattr(websocket, "_trinity_sent_messages", None)
+    if cache is not None:
+        return cache
+
+    # If a websocket_session_id is already attached, reuse any shared cache to
+    # avoid duplicate sends when the browser reconnects mid-flow.
+    shared_key = getattr(websocket, "_trinity_ws_key", None)
+    if shared_key:
+        cache = _SHARED_WS_CACHES.get(shared_key)
+        if cache is None:
+            cache = {}
+            _SHARED_WS_CACHES[shared_key] = cache
+    else:
+        cache = {}
+
+    setattr(websocket, "_trinity_sent_messages", cache)
+    return cache
+
+
+def _normalized_message_signature(payload: dict | None) -> str | None:
+    """Return a normalized message-based signature for cross-module dedupe."""
+
+    if not isinstance(payload, dict):
+        return None
+
+    message = payload.get("message")
+    if not isinstance(message, str):
+        return None
+
+    normalized = re.sub(r"\s+", " ", message).strip().lower()
+    return f"msg::{normalized}" if normalized else None
+
+
+async def _safe_send_json(websocket: WebSocket, payload: dict, *, dedupe_signature: str | None = None) -> bool:
     """Send a JSON message if the websocket is still open.
 
     Returns False when the connection is no longer available so callers can
     gracefully stop sending additional messages.
     """
+    cache = _get_ws_send_cache(websocket)
+
+    signatures: list[str] = []
+    if dedupe_signature:
+        signatures.append(dedupe_signature)
+    else:
+        auto_signature = _build_dedupe_signature(payload)
+        if auto_signature:
+            signatures.append(auto_signature)
+
+    message_signature = _normalized_message_signature(payload)
+    if message_signature:
+        signatures.append(message_signature)
+
+    if any(cache.get(sig) for sig in signatures):
+        return True
+
     if not _is_websocket_connected(websocket):
         return False
 
     try:
         await websocket.send_text(json.dumps(payload))
+        for sig in signatures:
+            cache[sig] = True
         return True
     except WebSocketDisconnect:
         return False
@@ -70,13 +125,40 @@ async def _safe_send_json(websocket: WebSocket, payload: dict) -> bool:
         return False
 
 
-async def _wait_for_clarification_response(websocket: WebSocket) -> dict | None:
-    """Block until a clarification response arrives or the socket closes."""
+def _build_dedupe_signature(payload: dict) -> str | None:
+    """Return a lightweight signature to avoid sending duplicate payloads."""
+
+    message = payload.get("message") if isinstance(payload, dict) else None
+    payload_type = payload.get("type") if isinstance(payload, dict) else None
+    if payload_type and message:
+        return f"{payload_type}::{message}"
+    return None
+
+
+async def _wait_for_clarification_response(
+    websocket: WebSocket,
+    *,
+    incoming_queue: asyncio.Queue | None = None,
+    queue_timeout: float | None = None,
+) -> dict | None:
+    """Block until a clarification response arrives or the socket closes.
+
+    If ``incoming_queue`` is provided, use it as the single consumer for
+    ``websocket.receive_text`` to avoid concurrent reads that can tear down
+    the connection.
+    """
 
     while True:
         try:
-            incoming = await websocket.receive_text()
-            parsed = json.loads(incoming)
+            if incoming_queue is not None:
+                parsed = await asyncio.wait_for(
+                    incoming_queue.get(), timeout=queue_timeout
+                )
+            else:
+                incoming = await websocket.receive_text()
+                parsed = json.loads(incoming)
+        except asyncio.TimeoutError:
+            continue
         except WebSocketDisconnect:
             return None
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -391,6 +473,9 @@ except ImportError:
 # Track prior workflow sessions to allow resumption when intent stays on workflows
 _previous_workflow_sessions: dict[str, str] = {}
 
+# Reusable websocket caches keyed by websocket_session_id so reconnects do not re-send
+_SHARED_WS_CACHES: dict[str, dict[str, bool]] = {}
+
 
 @router.get("/health")
 async def health_check():
@@ -459,8 +544,23 @@ async def execute_workflow_websocket(websocket: WebSocket):
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
         vagueness_threshold = float(message.get("vagueness_threshold", 0.6))
 
-        # Start clarification response listener (non-blocking) so lab-mode clients can resume pauses
+        # Extract session identifiers early for intent caching and websocket scoping
+        session_id = message.get("session_id", None)  # Frontend chat session ID
+        websocket_session_id = message.get("websocket_session_id") or message.get("websocketSessionId")
+        chat_id = message.get("chat_id", None)  # Frontend chat ID
+        if not session_id:
+            session_id = f"ws_{uuid.uuid4().hex[:8]}"
+        if not websocket_session_id:
+            websocket_session_id = session_id or f"ws_conn_{uuid.uuid4().hex[:12]}"
+
+        # Attach websocket key and cache immediately so downstream senders share dedupe across modules
+        setattr(websocket, "_trinity_ws_key", websocket_session_id)
+        setattr(websocket, "_trinity_sent_messages", _SHARED_WS_CACHES.setdefault(websocket_session_id, {}))
+
+        # Start a single receive loop to prevent concurrent websocket.receive_text calls
         orchestrator = ws_orchestrator
+        incoming_queue: asyncio.Queue = asyncio.Queue()
+        clarification_stop = asyncio.Event()
 
         async def handle_clarification_response(incoming: dict) -> bool:
             if incoming.get("type") != "clarification_response":
@@ -478,9 +578,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     "requestId": incoming.get("requestId"),
                     "session_id": incoming.get("session_id"),
                 })
-            return True
-
-        clarification_stop = asyncio.Event()
+            return accepted
 
         async def clarification_router():
             while not clarification_stop.is_set():
@@ -489,9 +587,11 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         websocket.receive_text(), timeout=5.0
                     )
                     parsed_router = json.loads(router_message)
-                    handled = await handle_clarification_response(parsed_router)
-                    if not handled:
-                        logger.debug("Received non-clarification message during stream: %s", parsed_router)
+                    await incoming_queue.put(parsed_router)
+                    if await handle_clarification_response(parsed_router):
+                        logger.debug(
+                            "Clarification routed via orchestrator for request %s", parsed_router.get("requestId")
+                        )
                 except asyncio.TimeoutError:
                     continue
                 except asyncio.CancelledError:
@@ -535,14 +635,6 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 async def _generate_text_reply_direct(prompt):
                     return "I apologize, but I couldn't process your request."
 
-        # Extract session identifiers early for intent caching and websocket scoping
-        session_id = message.get("session_id", None)  # Frontend chat session ID
-        websocket_session_id = message.get("websocket_session_id") or message.get("websocketSessionId")
-        chat_id = message.get("chat_id", None)  # Frontend chat ID
-        if not session_id:
-            session_id = f"ws_{uuid.uuid4().hex[:8]}"
-        if not websocket_session_id:
-            websocket_session_id = session_id or f"ws_conn_{uuid.uuid4().hex[:12]}"
         available_files = message.get("available_files", [])
         prior_workflow_session = _previous_workflow_sessions.get(session_id) or _previous_workflow_sessions.get(chat_id or "")
 
@@ -593,18 +685,25 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 )
 
                 if decision.clarifications:
-                    await _safe_send_json(websocket, {
+                    clarification_payload = {
                         "type": "clarification_required",
                         "message": "Please confirm: " + "; ".join(decision.clarifications),
                         "intent_record": intent_record.to_dict(),
-                    })
+                    }
+                    await _safe_send_json(
+                        websocket,
+                        clarification_payload,
+                        dedupe_signature=_build_dedupe_signature(clarification_payload),
+                    )
                     await _safe_send_json(websocket, {
                         "type": "status",
                         "status": "awaiting_clarification",
                         "message": "Awaiting user confirmation before continuing.",
                     })
 
-                    clarification_response = await _wait_for_clarification_response(websocket)
+                    clarification_response = await _wait_for_clarification_response(
+                        websocket, incoming_queue=incoming_queue
+                    )
                     if not clarification_response:
                         close_code = 1001
                         close_reason = "clarification_aborted"
@@ -642,11 +741,16 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     # Continue execution without requesting user confirmation
 
                 if decision.requires_files and not available_files:
-                    await _safe_send_json(websocket, {
+                    clarification_payload = {
                         "type": "clarification_required",
                         "message": "I need a dataset or file to run Atom Agents. Upload a file and try again.",
                         "intent_record": intent_record.to_dict(),
-                    })
+                    }
+                    await _safe_send_json(
+                        websocket,
+                        clarification_payload,
+                        dedupe_signature=_build_dedupe_signature(clarification_payload),
+                    )
                     close_code = 1000
                     close_reason = "missing_files"
                     return
@@ -802,17 +906,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
         )
 
         while vagueness_score < vagueness_threshold:
+            clarification_payload = {
+                "type": "clarification_required",
+                "message": (
+                    "I need more details to proceed. Please provide additional context or specifics. "
+                    f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
+                ),
+                "vagueness_score": vagueness_score,
+                "vagueness_threshold": vagueness_threshold,
+            }
             await _safe_send_json(
                 websocket,
-                {
-                    "type": "clarification_required",
-                    "message": (
-                        "I need more details to proceed. Please provide additional context or specifics. "
-                        f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
-                    ),
-                    "vagueness_score": vagueness_score,
-                    "vagueness_threshold": vagueness_threshold,
-                },
+                clarification_payload,
+                dedupe_signature=_build_dedupe_signature(clarification_payload),
             )
             await _safe_send_json(
                 websocket,
@@ -823,7 +929,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 },
             )
 
-            clarification_response = await _wait_for_clarification_response(websocket)
+            clarification_response = await _wait_for_clarification_response(
+                websocket, incoming_queue=incoming_queue
+            )
             if not clarification_response:
                 close_code = 1001
                 close_reason = "clarification_aborted"
@@ -955,17 +1063,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 contextual_prompt,
             )
 
+            clarification_payload = {
+                "type": "clarification_required",
+                "message": clarification_message,
+                "focus": weakest_dimension,
+                "prerequisite_scores": prerequisite_scores,
+                "card_prerequisite_threshold": card_prerequisite_threshold,
+                "scope_detectability_threshold": scope_detectability_threshold,
+                "vagueness_threshold": vagueness_threshold,
+            }
             await _safe_send_json(
                 websocket,
-                {
-                    "type": "clarification_required",
-                    "message": clarification_message,
-                    "focus": weakest_dimension,
-                    "prerequisite_scores": prerequisite_scores,
-                    "card_prerequisite_threshold": card_prerequisite_threshold,
-                    "scope_detectability_threshold": scope_detectability_threshold,
-                    "vagueness_threshold": vagueness_threshold,
-                },
+                clarification_payload,
+                dedupe_signature=_build_dedupe_signature(clarification_payload),
             )
             await _safe_send_json(
                 websocket,
@@ -977,7 +1087,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 },
             )
 
-            clarification_response = await _wait_for_clarification_response(websocket)
+            clarification_response = await _wait_for_clarification_response(
+                websocket, incoming_queue=incoming_queue
+            )
             if not clarification_response:
                 close_code = 1001
                 close_reason = "clarification_aborted"
@@ -1058,18 +1170,20 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 or prerequisite_scores.get("scope_detectability_score", 0.0)
                 < scope_detectability_threshold
             ):
+                clarification_payload = {
+                    "type": "clarification_required",
+                    "message": (
+                        "I'm still missing enough detail to execute atoms reliably after multiple attempts. "
+                        "Please provide a concise, specific description so we can continue."
+                    ),
+                    "prerequisite_scores": prerequisite_scores,
+                    "card_prerequisite_threshold": card_prerequisite_threshold,
+                    "scope_detectability_threshold": scope_detectability_threshold,
+                }
                 await _safe_send_json(
                     websocket,
-                    {
-                        "type": "clarification_required",
-                        "message": (
-                            "I'm still missing enough detail to execute atoms reliably after multiple attempts. "
-                            "Please provide a concise, specific description so we can continue."
-                        ),
-                        "prerequisite_scores": prerequisite_scores,
-                        "card_prerequisite_threshold": card_prerequisite_threshold,
-                        "scope_detectability_threshold": scope_detectability_threshold,
-                    },
+                    clarification_payload,
+                    dedupe_signature=_build_dedupe_signature(clarification_payload),
                 )
                 close_code = 1001
                 close_reason = "prerequisite_threshold_not_met"
