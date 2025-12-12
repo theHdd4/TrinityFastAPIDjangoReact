@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronRight, RotateCcw, X, ArrowLeft } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
@@ -50,9 +50,16 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
   onCancel 
 }) => {
   const { state, setHeaderSelection, updateFileSheetSelection, updateUploadedFilePath } = flow;
-  const { uploadedFiles, headerSelections } = state;
+  const { uploadedFiles, headerSelections, selectedFileIndex: savedSelectedIndex } = state;
   
-  const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+  // Get the selected file from U1 - this is the ONLY file we process in steps 3-8
+  const selectedFileIndex = savedSelectedIndex !== undefined && savedSelectedIndex < uploadedFiles.length
+    ? savedSelectedIndex
+    : 0;
+  const currentFile = uploadedFiles[selectedFileIndex];
+  const currentHeaderSelection = currentFile ? headerSelections[currentFile.name] : null;
+  const hasMultipleSheets = (currentFile?.sheetNames?.length || 0) > 1;
+  
   const [loading, setLoading] = useState(true);
   const [previewData, setPreviewData] = useState<FilePreviewResponse | null>(null);
   const [selectedHeaderRow, setSelectedHeaderRow] = useState<number>(0);
@@ -63,22 +70,20 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
   const [useCustomHeaderCount, setUseCustomHeaderCount] = useState(false);
   const [error, setError] = useState<string>('');
   const [applyingHeader, setApplyingHeader] = useState(false);
-  const [sheetMetadata, setSheetMetadata] = useState<{ rows: number; columns: number } | null>(null);
-
-  const currentFile = uploadedFiles[selectedFileIndex];
-  const currentHeaderSelection = currentFile ? headerSelections[currentFile.name] : null;
-  const hasMultipleFiles = uploadedFiles.length > 1;
-  const hasMultipleSheets = (currentFile?.sheetNames?.length || 0) > 1;
+  const [sheetMetadata, setSheetMetadata] = useState<Record<string, { rows: number; columns: number }>>({});
+  const [rowIssues, setRowIssues] = useState<{ items: any[]; total: number; limit: number; offset: number; hasMore: boolean }>({ items: [], total: 0, limit: 50, offset: 0, hasMore: false });
+  const [rowIssuesLoading, setRowIssuesLoading] = useState(false);
+  const [rowIssuesError, setRowIssuesError] = useState<string | null>(null);
   
   // Check if current file is processed
   const isCurrentFileProcessed = currentFile ? 
     (currentFile.processed || (currentFile.path && !currentFile.path.includes('tmp/') && !currentFile.path.includes('temp_uploads/'))) : 
     false;
   
-  // Check if any files are unprocessed
-  const hasUnprocessedFiles = uploadedFiles.some(f => 
-    !f.processed && (f.path?.includes('tmp/') || f.path?.includes('temp_uploads/'))
-  );
+  // Check if current file is unprocessed
+  const hasUnprocessedFiles = currentFile ? 
+    (!currentFile.processed && (currentFile.path?.includes('tmp/') || currentFile.path?.includes('temp_uploads/'))) :
+    false;
 
   // Fetch preview data from backend
   useEffect(() => {
@@ -125,12 +130,16 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
         
         setPreviewData(data);
         
-        // Store sheet metadata
+        // Store sheet metadata scoped to sheet
         if (data.total_rows !== undefined && data.column_count !== undefined) {
-          setSheetMetadata({
-            rows: data.total_rows,
-            columns: data.column_count,
-          });
+          const sheetKey = currentFile.selectedSheet || currentFile.sheetNames?.[0] || '__default';
+          setSheetMetadata((prev) => ({
+            ...prev,
+            [sheetKey]: {
+              rows: data.total_rows,
+              columns: data.column_count,
+            },
+          }));
         }
         
         // Set suggested header row
@@ -173,7 +182,63 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
     if (currentFile) {
       void fetchPreview();
     }
-  }, [currentFile, currentHeaderSelection]);
+  }, [currentFile, currentHeaderSelection, currentFile?.selectedSheet]);
+
+  // Fetch full-dataset row issues (paginated, server-side scan)
+  const fetchRowIssues = useCallback(
+    async (nextOffset: number = 0, nextLimit: number = rowIssues.limit) => {
+      if (!currentFile) return;
+      setRowIssuesLoading(true);
+      setRowIssuesError(null);
+      try {
+        const envStr = localStorage.getItem('env');
+        const params = new URLSearchParams({
+          object_name: currentFile.path,
+          offset: String(nextOffset),
+          limit: String(nextLimit),
+        });
+        if (currentFile.selectedSheet) {
+          params.append('sheet_name', currentFile.selectedSheet);
+        }
+        if (envStr) {
+          try {
+            const env = JSON.parse(envStr);
+            params.append('client_id', env.CLIENT_ID || '');
+            params.append('app_id', env.APP_ID || '');
+            params.append('project_id', env.PROJECT_ID || '');
+          } catch {
+            // ignore
+          }
+        }
+        const res = await fetch(`${VALIDATE_API}/row-issues?${params.toString()}`, {
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || 'Failed to fetch row issues');
+        }
+        const data = await res.json();
+        setRowIssues({
+          items: data.issues || [],
+          total: data.issues_count || 0,
+          limit: data.limit || nextLimit,
+          offset: data.offset || nextOffset,
+          hasMore: !!data.has_more,
+        });
+      } catch (err: any) {
+        setRowIssuesError(err.message || 'Failed to load row issues');
+      } finally {
+        setRowIssuesLoading(false);
+      }
+    },
+    [currentFile, rowIssues.limit],
+  );
+
+  useEffect(() => {
+    if (currentFile) {
+      void fetchRowIssues(0, rowIssues.limit);
+    }
+  }, [currentFile, currentFile?.selectedSheet, fetchRowIssues, rowIssues.limit]);
 
   // Handle header selection change
   const handleHeaderSelectionChange = (rowIndex: number | 'none') => {
@@ -243,6 +308,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
         if (selectedRowIndex >= 0 && selectedRowIndex < previewData.data_rows.length - 1) {
           // Check next 2 rows to see if they also look like headers
           const nextRow1 = previewData.data_rows[selectedRowIndex + 1];
+          const selectedRowCells = previewData.data_rows[selectedRowIndex].cells || [];
           
           // Simple heuristic: if next rows have mostly text (not numbers), they might be headers
           const looksLikeMultiRowHeader = (() => {
@@ -250,7 +316,6 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
             
             // Check if next row has similar structure (mostly text, similar column count)
             const nextRow1Cells = nextRow1.cells || [];
-            const selectedRowCells = previewData.data_rows[selectedRowIndex].cells || [];
             
             if (nextRow1Cells.length !== selectedRowCells.length) return false;
             
@@ -454,13 +519,8 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
         });
       }
       
-      // Move to next file or next stage
-      if (selectedFileIndex < uploadedFiles.length - 1) {
-        setSelectedFileIndex(selectedFileIndex + 1);
-        setApplyingHeader(false);
-      } else {
-        onNext();
-      }
+      // After U1, we only process one file, so always move to next stage
+      onNext();
     } catch (err: any) {
       setError(err.message || 'Failed to apply header selection');
       setApplyingHeader(false);
@@ -478,91 +538,53 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       }
     >
       <div className="space-y-6">
-        {/* Warning for unprocessed files */}
-        {hasUnprocessedFiles && (
+        {/* File + sheet context */}
+        {currentFile && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <div className="flex items-center gap-2 text-sm text-gray-800">
+              <span className="font-semibold text-gray-900">File:</span>
+              <span>{currentFile.name}</span>
+            </div>
+            {currentFile.selectedSheet && (
+              <div className="flex items-center gap-2 text-sm text-gray-700">
+                <span className="font-semibold text-gray-900">Sheet:</span>
+                <span>{currentFile.selectedSheet}</span>
+              </div>
+            )}
+            {(() => {
+              const sheetKey = currentFile.selectedSheet || currentFile.sheetNames?.[0] || '__default';
+              const meta = sheetMetadata[sheetKey];
+              if (!meta) return null;
+              return (
+                <div className="flex items-center gap-2 text-sm text-gray-700">
+                  <span className="font-semibold text-gray-900">Shape:</span>
+                  <span>{meta.rows.toLocaleString()} rows · {meta.columns} cols</span>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Warning for unprocessed file */}
+        {hasUnprocessedFiles && currentFile && (
           <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
             <div className="flex items-start gap-2">
               <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm font-medium text-red-900 mb-1">
-                  ⚠️ Unprocessed Files Detected
+                  ⚠️ File Needs Processing
                 </p>
                 <p className="text-xs text-red-800 mb-2">
-                  Some files are not yet processed. Files marked in <span className="font-semibold text-red-600">red</span> need to be processed before you can continue.
+                  <span className="font-semibold">{currentFile.name}</span> needs to be processed before you can continue.
                 </p>
-                <div className="text-xs text-red-700 space-y-1">
-                  {uploadedFiles
-                    .filter(f => !f.processed && (f.path?.includes('tmp/') || f.path?.includes('temp_uploads/')))
-                    .map((file, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <span className="text-red-500 font-bold">●</span>
-                        <span className="font-medium">{file.name}</span>
-                        <span className="text-red-600">(Needs Processing)</span>
-                      </div>
-                    ))}
-                </div>
                 <p className="text-xs text-red-700 mt-2 font-medium">
-                  Please process these files by selecting a header row and applying it. This will save them properly.
+                  Please select a header row and apply it to process this file.
                 </p>
               </div>
             </div>
           </div>
         )}
         
-        {/* File Selection (if multiple files) */}
-        {hasMultipleFiles && (
-          <div className={`border-2 rounded-lg p-4 ${
-            isCurrentFileProcessed 
-              ? 'bg-gray-50 border-gray-200' 
-              : 'bg-red-50 border-red-300'
-          }`}>
-            <Label className="text-sm font-medium text-gray-700 mb-2 block">
-              Select File to Review
-            </Label>
-            <Select
-              value={selectedFileIndex.toString()}
-              onValueChange={(value) => setSelectedFileIndex(parseInt(value, 10))}
-            >
-              <SelectTrigger className={`w-full ${
-                !isCurrentFileProcessed ? 'border-red-300' : ''
-              }`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {uploadedFiles.map((file, idx) => {
-                  // Check if file is processed (not in tmp/ and has been saved)
-                  const isProcessed = file.processed || (file.path && !file.path.includes('tmp/') && !file.path.includes('temp_uploads/'));
-                  return (
-                    <SelectItem 
-                      key={idx} 
-                      value={idx.toString()}
-                      className={!isProcessed ? 'text-red-600 font-medium' : ''}
-                    >
-                      <div className="flex items-center gap-2">
-                        {!isProcessed && <span className="text-red-500 font-bold">●</span>}
-                        <span className={!isProcessed ? 'font-semibold' : ''}>{file.name}</span>
-                        {!isProcessed && (
-                          <span className="text-xs text-red-500 bg-red-100 px-1.5 py-0.5 rounded">
-                            Needs Processing
-                          </span>
-                        )}
-                      </div>
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            {!isCurrentFileProcessed && (
-              <div className="mt-2 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-                <p className="text-xs text-red-700">
-                  <span className="font-semibold">{currentFile?.name}</span> needs to be processed. 
-                  Please select a header row and apply it to process this file.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Sheet Selection (if Excel with multiple sheets) */}
         {hasMultipleSheets && currentFile && (
@@ -587,6 +609,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                 const isSelected = currentFile.selectedSheet === sheet || 
                   (!currentFile.selectedSheet && idx === 0);
                 const isRecommended = idx === 0;
+                const meta = sheetMetadata[sheet];
                 return (
                   <button
                     key={idx}
@@ -598,9 +621,9 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                     }`}
                   >
                     {sheet}
-                    {sheetMetadata && (
+                    {meta && (
                       <span className="ml-1 text-xs opacity-75">
-                        ({sheetMetadata.rows.toLocaleString()} rows, {sheetMetadata.columns} cols)
+                        ({meta.rows.toLocaleString()} rows, {meta.columns} cols)
                       </span>
                     )}
                     {isRecommended && (
@@ -872,58 +895,8 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                     </p>
                   </div>
 
-                  {/* Auto-detected multi-row header message */}
-                  {selectedHeaderRow > 0 && multiRowHeader && (
-                    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                      <p className="text-sm font-medium text-gray-900 mb-2">
-                        Your selected header row seems to span multiple rows.
-                      </p>
-                      <p className="text-xs text-gray-700 mb-3">
-                        Select how many header rows you want to include. Trinity will combine them automatically (e.g., "Sales" + "2024" → "Sales_2024").
-                      </p>
-                      
-                      {/* User Selection: Number of Header Rows */}
-                      <div className="mt-3">
-                        <Label className="text-sm font-medium text-gray-700 mb-2 block">
-                          Number of Header Rows
-                        </Label>
-                        <Select
-                          value={headerRowCount.toString()}
-                          onValueChange={(value) => {
-                            const count = parseInt(value, 10);
-                            handleHeaderRowCountChange(count);
-                            
-                            // Update selected rows array based on count
-                            if (previewData && selectedHeaderRow > 0) {
-                              const selectedRowIndex = previewData.data_rows.findIndex(r => r.row_index === selectedHeaderRow);
-                              if (selectedRowIndex >= 0) {
-                                const newSelectedRows: number[] = [];
-                                for (let i = 0; i < count && (selectedRowIndex + i) < previewData.data_rows.length; i++) {
-                                  const row = previewData.data_rows[selectedRowIndex + i];
-                                  if (row) {
-                                    newSelectedRows.push(row.row_index);
-                                  }
-                                }
-                                setSelectedHeaderRows(newSelectedRows);
-                              }
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="1">1 row</SelectItem>
-                            <SelectItem value="2">2 rows</SelectItem>
-                            <SelectItem value="3">3 rows</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Manual multi-row header toggle - for manual selection when not auto-detected */}
-                  {selectedHeaderRow > 0 && !multiRowHeader && (
+                  {/* Multi-row header toggle */}
+                  {selectedHeaderRow > 0 && (
                     <div className="mb-4">
                       <div className="flex items-center space-x-2">
                         <Checkbox
@@ -936,7 +909,8 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                               setSelectedHeaderRows([selectedHeaderRow]);
                               setHeaderRowCount(1);
                             } else {
-                              setSelectedHeaderRows([]);
+                              setSelectedHeaderRows([selectedHeaderRow]);
+                              setHeaderRowCount(1);
                             }
                             setUseCustomHeaderCount(false);
                             setCustomHeaderRowCount('');
@@ -949,37 +923,92 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                           My headers span multiple rows
                         </Label>
                       </div>
+                      {multiRowHeader && (
+                        <p className="text-xs text-gray-500 mt-2 ml-6">
+                          Click additional rows in the table to add them. Trinity will combine headers automatically (e.g., "Sales" + "2024" → "Sales_2024").
+                        </p>
+                      )}
                     </div>
                   )}
+                </div>
 
-                  {/* Manual row selection display (when multi-row is manually enabled) */}
-                  {selectedHeaderRow > 0 && multiRowHeader && selectedHeaderRows.length > 0 && (
-                    <div className="mb-4">
-                      <Label className="text-sm font-medium text-gray-700 mb-2 block">
-                        Selected Header Rows
-                      </Label>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedHeaderRows.map((rowNum) => (
-                          <span
-                            key={rowNum}
-                            className="inline-flex items-center px-2 py-1 bg-yellow-100 border border-yellow-400 rounded text-xs font-medium text-gray-900"
+                {/* Row Validation Section */}
+                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Row Validation</h3>
+                  {rowIssuesLoading ? (
+                    <div className="flex items-center gap-2 p-2 bg-gray-50 border border-gray-200 rounded">
+                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-[#458EE2]"></div>
+                      <p className="text-xs text-gray-700">Scanning rows for issues…</p>
+                    </div>
+                  ) : rowIssuesError ? (
+                    <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded">
+                      <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                      <p className="text-xs text-red-700">{rowIssuesError}</p>
+                    </div>
+                  ) : rowIssues.items.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                        <AlertTriangle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-xs font-medium text-yellow-800">
+                            {rowIssues.total} row{rowIssues.total !== 1 ? 's' : ''} have potential issues
+                          </p>
+                        </div>
+                      </div>
+                      <div className="max-h-40 overflow-y-auto space-y-1">
+                        {rowIssues.items.map((item) => (
+                          <div
+                            key={`${item.row_index}-${item.column_count}`}
+                            className="flex flex-col gap-1 px-2 py-1 bg-yellow-50 border-l-2 border-yellow-400 text-xs"
                           >
-                            Row {rowNum}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleHeaderSelectionChange(rowNum);
-                              }}
-                              className="ml-1 text-yellow-700 hover:text-yellow-900"
-                            >
-                              ×
-                            </button>
-                          </span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-gray-700">Row {item.row_index}</span>
+                              <span className="text-gray-500">
+                                {item.column_count} cols, {item.non_empty_cells} non-empty
+                              </span>
+                            </div>
+                            <ul className="list-disc list-inside text-yellow-800 space-y-0.5">
+                              {(item.issues || []).map((msg: string, idx: number) => (
+                                <li key={idx}>{msg}</li>
+                              ))}
+                            </ul>
+                          </div>
                         ))}
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                        Click rows in the table to add/remove them from header selection.
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="text-xs text-gray-600">
+                          Showing {rowIssues.offset + 1}-
+                          {Math.min(rowIssues.offset + rowIssues.limit, rowIssues.total)} of {rowIssues.total}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={rowIssues.offset === 0 || rowIssuesLoading}
+                            onClick={() => fetchRowIssues(Math.max(0, rowIssues.offset - rowIssues.limit), rowIssues.limit)}
+                            className="h-8 px-2 text-xs"
+                          >
+                            Prev
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={!rowIssues.hasMore || rowIssuesLoading}
+                            onClick={() => fetchRowIssues(rowIssues.offset + rowIssues.limit, rowIssues.limit)}
+                            className="h-8 px-2 text-xs"
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded">
+                      <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                      <p className="text-xs text-green-800">
+                        All rows have consistent structure. No delimiter or formatting issues detected.
                       </p>
                     </div>
                   )}

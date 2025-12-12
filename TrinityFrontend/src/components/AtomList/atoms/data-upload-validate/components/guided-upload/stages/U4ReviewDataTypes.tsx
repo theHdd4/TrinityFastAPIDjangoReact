@@ -165,15 +165,18 @@ function classifyColumnRole(columnName: string, columnType: string, dtype: strin
 
 export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNext, onBack }) => {
   const { state, setDataTypeSelections } = flow;
-  const { uploadedFiles, columnNameEdits, dataTypeSelections } = state;
-  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const { uploadedFiles, columnNameEdits, dataTypeSelections, selectedFileIndex } = state;
+
+  // Only process the file selected in U1
+  const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
+  const currentFile = uploadedFiles[chosenIndex];
+
   const [columns, setColumns] = useState<ColumnTypeInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const loadedFileRef = useRef<string | null>(null);
   const isFetchingRef = useRef(false);
 
-  const currentFile = uploadedFiles[currentFileIndex];
   const currentColumnEdits = currentFile ? (columnNameEdits[currentFile.name] || []) : [];
 
   useEffect(() => {
@@ -286,34 +289,39 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
           let suggestedDataType: string | undefined;
           const dtypeLower = rawDtype.toLowerCase();
           
-          // Check if dtype is object/string but values look numeric (matches routes.py _infer_column_type logic)
-          if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str' || dtypeLower === 'category') &&
-              col.sample_values?.some((v: any) => {
-                const val = String(v).trim();
-                return val !== '' && !isNaN(Number(val)) && val !== '';
-              })) {
-            warning = 'These values look numeric. Should this be a number?';
-            suggestedDataType = 'float';
-          } 
-          // Check if dtype is numeric but values include non-numeric characters
-          else if ((dtypeLower.includes('int') || dtypeLower.includes('float')) &&
-                   col.sample_values?.some((v: any) => {
-                     const val = String(v).trim();
-                     return val !== '' && isNaN(Number(val));
-                   })) {
-            warning = 'Some values include letters. Please confirm if this is a text column.';
+          // Suggest better dtype based on sample values
+          const sampleValues = col.sample_values || [];
+          const looksNumeric = sampleValues.some((v: any) => {
+            const val = String(v).trim();
+            return val !== '' && !isNaN(Number(val));
+          });
+          const looksInteger = looksNumeric && sampleValues.every((v: any) => {
+            const val = String(v).trim();
+            if (val === '' || isNaN(Number(val))) return false;
+            const num = Number(val);
+            return Number.isInteger(num);
+          });
+          const looksDate = sampleValues.some((v: any) => {
+            const str = String(v);
+            return /^\d{4}[-/]\d{2}[-/]\d{2}/.test(str) || 
+                   /^\d{2}[-/]\d{2}[-/]\d{4}/.test(str) ||
+                   /^\d{4}-\d{2}-\d{2}/.test(str) || 
+                   /^\d{2}\/\d{2}\/\d{4}/.test(str);
+          });
+          const hasNonNumericInNumeric = (dtypeLower.includes('int') || dtypeLower.includes('float')) &&
+            sampleValues.some((v: any) => {
+              const val = String(v).trim();
+              return val !== '' && isNaN(Number(val));
+            });
+
+          if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str' || dtypeLower === 'category') && looksNumeric) {
+            warning = 'These values look numeric. Consider converting to number.';
+            suggestedDataType = looksInteger ? 'int' : 'float';
+          } else if (hasNonNumericInNumeric) {
+            warning = 'Some values include letters. Consider converting to text.';
             suggestedDataType = 'string';
-          } 
-          // Check if dtype is object/string but values look like dates (matches routes.py datetime detection)
-          else if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str') &&
-                   col.sample_values?.some((v: any) => {
-                     const str = String(v);
-                     return /^\d{4}[-/]\d{2}[-/]\d{2}/.test(str) || 
-                            /^\d{2}[-/]\d{2}[-/]\d{4}/.test(str) ||
-                            /^\d{4}-\d{2}-\d{2}/.test(str) || 
-                            /^\d{2}\/\d{2}\/\d{4}/.test(str);
-                   })) {
-            warning = 'These values look like dates. You can set the type to "Date".';
+          } else if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str') && looksDate) {
+            warning = 'These values look like dates. Consider setting type to Date.';
             suggestedDataType = 'date';
           }
 
@@ -368,6 +376,22 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
     handleSave();
   };
 
+  const handleSuggestedTypeChange = (columnName: string, newType: string) => {
+    setColumns(prev => prev.map(col => {
+      if (col.columnName === columnName) {
+        const newRole = classifyRoleFromDataType(newType);
+        return {
+          ...col,
+          dataType: newType,
+          suggestedDataType: newType,
+          columnRole: newRole,
+        };
+      }
+      return col;
+    }));
+    handleSave();
+  };
+
   const handleRoleChange = (columnName: string, newRole: 'identifier' | 'measure') => {
     setColumns(prev => prev.map(col =>
       col.columnName === columnName 
@@ -413,9 +437,27 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
     }));
   };
 
-  const handleSave = () => {
+  // Apply pending AI suggestions (without overriding manual changes) before save/continue
+  const applySuggestionsToColumns = (cols: ColumnTypeInfo[]) => {
+    return cols.map(col => {
+      if (col.suggestedDataType && col.suggestedDataType !== col.dataType) {
+        const newRole = classifyRoleFromDataType(col.suggestedDataType);
+        return {
+          ...col,
+          dataType: col.suggestedDataType,
+          columnRole: newRole,
+          tag: col.tag ?? 'ai_suggestion',
+          warning: undefined,
+        };
+      }
+      return col;
+    });
+  };
+
+  const handleSave = (colsOverride?: ColumnTypeInfo[]) => {
+    const colsToSave = colsOverride ?? columns;
     if (currentFile) {
-      const selections: DataTypeSelection[] = columns.map(col => ({
+      const selections: DataTypeSelection[] = colsToSave.map(col => ({
         columnName: col.columnName,
         updateType: col.dataType,
         format: col.dataType === 'date' || col.dataType === 'datetime' ? col.dtype : undefined,
@@ -426,14 +468,10 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
   };
 
   const handleNext = () => {
-    handleSave();
-    if (currentFileIndex < uploadedFiles.length - 1) {
-      // Reset loaded file ref when moving to next file
-      loadedFileRef.current = null;
-      setCurrentFileIndex(currentFileIndex + 1);
-    } else {
-      onNext();
-    }
+    const updatedColumns = applySuggestionsToColumns(columns);
+    setColumns(updatedColumns);
+    handleSave(updatedColumns);
+    onNext();
   };
 
   if (loading) {
@@ -551,6 +589,7 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Column Name</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Sample Values</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Data Type</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Suggested Type</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Column Role</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Tags</th>
                 </tr>
@@ -563,10 +602,10 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
                     </td>
                     <td className="px-4 py-3">
                       <div className="text-xs text-gray-600 max-w-xs truncate">
-                        {column.sampleValues.slice(0, 5).map((val, idx) => (
+                        {Array.from(new Set(column.sampleValues)).slice(0, 5).map((val, idx, arr) => (
                           <span key={idx}>
                             {String(val).length > 20 ? String(val).substring(0, 20) + '...' : String(val)}
-                            {idx < column.sampleValues.length - 1 && idx < 4 && ', '}
+                            {idx < arr.length - 1 && ', '}
                           </span>
                         ))}
                         {column.sampleValues.length === 0 && <span className="text-gray-400">No samples</span>}
@@ -584,6 +623,33 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
                             const value = e.target.value;
                             console.log('Data Type changed:', value, 'for column:', column.columnName);
                             handleDataTypeChange(column.columnName, value);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="w-full h-9 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none bg-[right_0.5rem_center] bg-no-repeat pr-8"
+                          style={{
+                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                          }}
+                        >
+                          {DATA_TYPES.map(type => (
+                            <option key={type.value} value={type.value}>
+                              {type.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div 
+                        className="relative inline-block w-40" 
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <select
+                          value={column.suggestedDataType || column.dataType}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            const value = e.target.value;
+                            handleSuggestedTypeChange(column.columnName, value);
                           }}
                           onClick={(e) => e.stopPropagation()}
                           onMouseDown={(e) => e.stopPropagation()}
@@ -676,35 +742,7 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
           </p>
         </div>
 
-        {/* File Navigation */}
-        {uploadedFiles.length > 1 && (
-          <div className="flex items-center justify-between pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (currentFileIndex > 0) {
-                  handleSave();
-                  // Reset loaded file ref when moving to previous file
-                  loadedFileRef.current = null;
-                  setCurrentFileIndex(currentFileIndex - 1);
-                }
-              }}
-              disabled={currentFileIndex === 0}
-            >
-              Previous File
-            </Button>
-            <span className="text-sm text-gray-600">
-              {currentFileIndex + 1} / {uploadedFiles.length}
-            </span>
-            <Button
-              variant="outline"
-              onClick={handleNext}
-              disabled={currentFileIndex === uploadedFiles.length - 1}
-            >
-              Next File
-            </Button>
-          </div>
-        )}
+        {/* Single-file flow after U1 selection: no file navigation */}
       </div>
     </StageLayout>
   );

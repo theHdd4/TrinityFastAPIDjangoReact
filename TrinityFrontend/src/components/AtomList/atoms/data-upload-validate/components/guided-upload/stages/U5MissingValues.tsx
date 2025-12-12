@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { AlertTriangle, Lightbulb, History, RotateCcw, Eye } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +17,7 @@ interface ColumnMissingInfo {
   columnName: string;
   dataType: string;
   columnRole: 'identifier' | 'measure';
+  displayType?: string;
   missingCount: number;
   missingPercent: number;
   totalRows: number;
@@ -32,8 +32,31 @@ interface ColumnMissingInfo {
   historicalTreatment?: MissingValueStrategy['strategy'];
 }
 
-// Treatment options based on data type and role
-// Matches backend strategies exactly: drop, mean, median, mode, zero, empty, custom, none
+// Map backend/step-4 dtypes to missing-value buckets
+const mapDataTypeForMissing = (rawType?: string, role?: 'identifier' | 'measure'): 'number' | 'category' | 'text' | 'date' => {
+  const t = (rawType || '').toLowerCase();
+  // Numeric
+  if (['int', 'float', 'numeric', 'number'].some(k => t.includes(k))) return 'number';
+  // Dates
+  if (t === 'date' || t === 'datetime') return 'date';
+  // Boolean behaves like categorical
+  if (t.includes('bool')) return 'category';
+  // Strings: identifiers -> category; measures -> text
+  if (t.includes('string') || t.includes('object') || t.includes('category') || t.includes('str')) {
+    return role === 'measure' ? 'text' : 'category';
+  }
+  return 'text';
+};
+
+// Fallback role inference when Step 4 role is missing
+const inferRoleFromType = (rawType?: string): 'identifier' | 'measure' => {
+  const t = (rawType || '').toLowerCase();
+  if (['int', 'float', 'numeric', 'number'].some(k => t.includes(k))) return 'measure';
+  return 'identifier';
+};
+
+// Treatment options based on data type and role (aligned to backend-supported strategies)
+// Backend strategies supported: drop, mean, median, mode, zero, empty, custom, ffill, bfill, none
 const getTreatmentOptions = (dataType: string, columnRole: 'identifier' | 'measure'): Array<{value: MissingValueStrategy['strategy'], label: string}> => {
   const isNumeric = dataType === 'number';
   const isCategory = dataType === 'category';
@@ -42,47 +65,58 @@ const getTreatmentOptions = (dataType: string, columnRole: 'identifier' | 'measu
   const isIdentifier = columnRole === 'identifier';
 
   if (isNumeric && !isIdentifier) {
-    // Numeric Measures - backend supports: drop, mean, median, mode, zero, empty, custom
+    // Numeric (Measures)
     return [
       { value: 'zero', label: 'Replace with 0' },
       { value: 'mean', label: 'Replace with mean' },
       { value: 'median', label: 'Replace with median' },
-      { value: 'mode', label: 'Replace with mode' },
-      { value: 'custom', label: 'Replace with custom value' },
-      { value: 'drop', label: 'Drop rows with missing values' },
-      { value: 'none', label: 'Leave missing' },
-    ];
-  } else if (isCategory || (isText && isIdentifier)) {
-    // Categorical/Text Identifiers - backend supports: mode, empty, custom, drop
-    return [
-      { value: 'mode', label: 'Replace with most frequent value' },
-      { value: 'empty', label: 'Replace with empty string' },
-      { value: 'custom', label: 'Replace with "Unknown"' },
-      { value: 'drop', label: 'Drop rows' },
-      { value: 'none', label: 'Leave missing' },
-    ];
-  } else if (isDate) {
-    // Dates - backend supports: mode, custom, drop
-    return [
-      { value: 'mode', label: 'Replace with most frequent date' },
-      { value: 'custom', label: 'Replace with custom date' },
-      { value: 'drop', label: 'Drop rows' },
-      { value: 'none', label: 'Leave missing' },
-    ];
-  } else if (isText && !isIdentifier) {
-    // Text Measures - backend supports: empty, custom, drop
-    return [
-      { value: 'empty', label: 'Replace with empty string' },
-      { value: 'custom', label: 'Replace with "Not provided"' },
-      { value: 'drop', label: 'Drop rows' },
-      { value: 'none', label: 'Leave missing' },
-    ];
-  } else {
-    // Default (shouldn't happen, but fallback)
-    return [
+      { value: 'ffill', label: 'Forward fill' },
+      { value: 'bfill', label: 'Backward fill' },
       { value: 'none', label: 'Leave missing' },
     ];
   }
+
+  if (isNumeric && isIdentifier) {
+    // Numeric Identifiers
+    return [
+      { value: 'custom', label: 'Replace with "Unknown"' },
+      { value: 'mode', label: 'Replace with highest-frequency value' },
+      { value: 'none', label: 'Leave missing' },
+    ];
+  }
+
+  if ((isCategory || isText) && isIdentifier) {
+    // Category/Text (Identifiers)
+    return [
+      { value: 'custom', label: 'Replace with "Unknown"' },
+      { value: 'mode', label: 'Replace with highest-frequency category' },
+      { value: 'none', label: 'Leave missing' },
+    ];
+  }
+
+  if (isDate) {
+    // Dates
+    return [
+      { value: 'ffill', label: 'Forward fill date' },
+      { value: 'bfill', label: 'Backward fill' },
+      { value: 'drop', label: 'Drop rows' },
+      { value: 'none', label: 'Leave missing' },
+    ];
+  }
+
+  if (isText && !isIdentifier) {
+    // Text (Measures)
+    return [
+      { value: 'custom', label: 'Replace with "Not provided"' },
+      { value: 'empty', label: 'Replace with empty string' },
+      { value: 'none', label: 'Leave missing' },
+    ];
+  }
+
+  // Default fallback
+  return [
+    { value: 'none', label: 'Leave missing' },
+  ];
 };
 
 // Note: All missing value treatment logic is handled by the backend
@@ -94,6 +128,8 @@ const getTreatmentOptions = (dataType: string, columnRole: 'identifier' | 'measu
 // - zero: fills with 0
 // - empty: fills with empty string ""
 // - custom: fills with custom value (converts to numeric if column is numeric, otherwise uses as string)
+// - ffill: forward fill
+// - bfill: backward fill
 // - none: no treatment (leave missing)
 // 
 // Frontend only collects user preferences and sends them to backend via /apply-data-transformations
@@ -107,16 +143,18 @@ function getMissingColor(missingPercent: number): string {
 
 export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, onBack }) => {
   const { state, setMissingValueStrategies } = flow;
-  const { uploadedFiles, dataTypeSelections, missingValueStrategies } = state;
-  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const { uploadedFiles, dataTypeSelections, missingValueStrategies, selectedFileIndex, columnNameEdits } = state;
+  const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
   const [columns, setColumns] = useState<ColumnMissingInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const loadedFileRef = useRef<string | null>(null);
   const isFetchingRef = useRef(false);
+  const columnsRef = useRef<ColumnMissingInfo[]>([]);
 
-  const currentFile = uploadedFiles[currentFileIndex];
+  const currentFile = uploadedFiles[chosenIndex];
   const currentDataTypes = currentFile ? (dataTypeSelections[currentFile.name] || []) : [];
+  const currentColumnEdits = currentFile ? (columnNameEdits[currentFile.name] || []) : [];
 
   useEffect(() => {
     const fetchMissingValues = async () => {
@@ -169,55 +207,60 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
 
         const existingStrategies = missingValueStrategies[currentFile.name] || [];
 
+        // Build maps for edited column names (from U3)
+        const originalToEditedMap = new Map<string, string>();
+        const editedToOriginalMap = new Map<string, string>();
+        if (Array.isArray(currentColumnEdits)) {
+          currentColumnEdits.forEach(edit => {
+            if (edit.keep !== false) {
+              originalToEditedMap.set(edit.originalName, edit.editedName);
+              editedToOriginalMap.set(edit.editedName, edit.originalName);
+            }
+          });
+        }
+
         // Build column info from metadata and data type selections
         const columnInfos: ColumnMissingInfo[] = metadataData.columns
           .map((col: any) => {
-            const dataTypeSelection = currentDataTypes.find(dt => dt.columnName === col.name);
-            const existingStrategy = existingStrategies.find(s => s.columnName === col.name);
+            const editedName = originalToEditedMap.get(col.name) || col.name;
+
+            // Skip columns that were deleted in U3
+            const editEntry = currentColumnEdits.find(e => e.originalName === col.name);
+            if (editEntry?.keep === false) {
+              return null;
+            }
+
+            const dataTypeSelection = currentDataTypes.find(dt => dt.columnName === editedName);
+            const existingStrategy = existingStrategies.find(s => s.columnName === editedName);
             
-            const dataType = dataTypeSelection?.selectedType || 'text';
-            const columnRole = dataTypeSelection?.columnRole || 'identifier';
+            const selectionType =
+              dataTypeSelection?.updateType
+              || dataTypeSelection?.selectedType
+              || dataTypeSelection?.detectedType
+              || col.dtype
+              || 'string';
+            const columnRole = dataTypeSelection?.columnRole || inferRoleFromType(selectionType);
+            const dataType = mapDataTypeForMissing(selectionType, columnRole);
+            const displayType = selectionType || 'string';
             const missingPercent = col.missing_percentage || 0;
             
             // Default treatment: suggest based on data type and role, or use existing strategy
             // Backend handles all actual treatment logic via _apply_missing_strategy() in routes.py
             // The backend function supports: drop, mean, median, mode, zero, empty, custom, none
             // User selects treatment from dropdown, backend applies it via /apply-data-transformations
-            let suggestedTreatment: MissingValueStrategy['strategy'] = existingStrategy?.strategy || 'none';
-            
-            // If no existing strategy, suggest based on data type, role, and missing percentage
-            if (!existingStrategy) {
-              const isNumeric = dataType === 'number';
-              const isCategory = dataType === 'category';
-              const isText = dataType === 'text';
-              const isDate = dataType === 'date';
-              const isIdentifier = columnRole === 'identifier';
-              
-              // High missingness (>40%) - suggest drop
-              if (missingPercent > 40) {
-                suggestedTreatment = 'drop';
-              } else if (isNumeric && !isIdentifier) {
-                // Numeric measures
-                if (missingPercent <= 5) {
-                  suggestedTreatment = 'zero';
-                } else if (missingPercent <= 20) {
-                  suggestedTreatment = 'mean';
-                } else {
-                  suggestedTreatment = 'median';
-                }
-              } else if ((isCategory || isText) && isIdentifier) {
-                // Categorical/Text identifiers
-                if (missingPercent <= 10) {
-                  suggestedTreatment = 'mode';
-                } else {
-                  suggestedTreatment = 'custom';
-                }
-              } else if (isDate) {
-                suggestedTreatment = 'mode';
-              } else if (isText && !isIdentifier) {
-                suggestedTreatment = 'empty';
-              }
-            }
+            const suggestedTreatment: MissingValueStrategy['strategy'] = existingStrategy?.strategy
+              || suggestTreatment({
+                columnName: col.name,
+                dataType,
+                columnRole,
+                missingPercent,
+                missingCount: col.missing_count || 0,
+                totalRows: metadataData.total_rows || 0,
+                sampleValues: col.sample_values || [],
+                sampleMissingValues: [],
+                suggestedTreatment: 'none',
+                selectedTreatment: 'none',
+              } as ColumnMissingInfo);
 
             // Determine tag based on existing strategy or AI suggestion
             let tag: 'previously_used' | 'ai_suggestion' | 'edited_by_user' | undefined;
@@ -256,7 +299,8 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
             let defaultCustomValue: string | number | undefined = existingStrategy?.value;
 
             return {
-              columnName: col.name,
+              columnName: editedName,
+              displayType,
               dataType,
               columnRole,
               missingCount: col.missing_count || 0,
@@ -279,6 +323,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
           .sort((a: ColumnMissingInfo, b: ColumnMissingInfo) => b.missingPercent - a.missingPercent);
 
         setColumns(columnInfos);
+        columnsRef.current = columnInfos;
         loadedFileRef.current = fileKey;
       } catch (err: any) {
         console.error('Failed to fetch missing values:', err);
@@ -293,112 +338,110 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFile?.name, currentFile?.path, currentDataTypes.length]);
 
+  const updateColumns = (
+    updater: (prev: ColumnMissingInfo[]) => ColumnMissingInfo[],
+    autoSave: boolean = true,
+  ) => {
+    let nextColumns: ColumnMissingInfo[] = [];
+    setColumns(prev => {
+      nextColumns = updater(prev);
+      return nextColumns;
+    });
+    columnsRef.current = nextColumns;
+    if (autoSave) {
+      handleSave(nextColumns);
+    }
+  };
+
   const handleTreatmentChange = (columnName: string, treatment: MissingValueStrategy['strategy']) => {
-    setColumns(prev => prev.map(col => {
-      if (col.columnName === columnName) {
-        // Set default custom value when switching to custom strategy
-        let customValue = col.customValue;
-        if (treatment === 'custom' && !customValue) {
-          if (col.columnRole === 'identifier' && (col.dataType === 'category' || col.dataType === 'text')) {
-            customValue = 'Unknown';
-          } else if (col.dataType === 'text' && col.columnRole === 'measure') {
-            customValue = 'Not provided';
-          } else {
-            customValue = '';
+    updateColumns(prev =>
+      prev.map(col => {
+        if (col.columnName === columnName) {
+          let customValue = col.customValue;
+          if (treatment === 'custom' && !customValue) {
+            if (col.columnRole === 'identifier') {
+              customValue = 'Unknown';
+            } else if (col.dataType === 'text' && col.columnRole === 'measure') {
+              customValue = 'Not provided';
+            } else {
+              customValue = '';
+            }
           }
+          return {
+            ...col,
+            selectedTreatment: treatment,
+            customValue,
+            tag: 'edited_by_user' as const,
+          };
         }
-        return { 
-          ...col, 
-          selectedTreatment: treatment, 
-          customValue,
-          tag: 'edited_by_user' as const 
-        };
-      }
-      return col;
-    }));
-    
-    // Auto-save when treatment changes
-    setTimeout(() => {
-      handleSave();
-    }, 100);
+        return col;
+      }),
+    );
   };
 
   const handleCustomValueChange = (columnName: string, value: string) => {
-    setColumns(prev => prev.map(col =>
-      col.columnName === columnName 
-        ? { ...col, customValue: value, tag: 'edited_by_user' as const }
-        : col
-    ));
-    
-    // Auto-save when custom value changes
-    setTimeout(() => {
-      handleSave();
-    }, 300); // Debounce a bit for custom value input
+    updateColumns(prev =>
+      prev.map(col =>
+        col.columnName === columnName
+          ? { ...col, customValue: value, tag: 'edited_by_user' as const }
+          : col,
+      ),
+    );
   };
 
   const handleReset = (columnName: string) => {
-    setColumns(prev => prev.map(col => {
-      if (col.columnName === columnName) {
-        // Reset to 'none' (no treatment) - backend will handle if user selects a treatment
-        return {
-          ...col,
-          selectedTreatment: 'none' as const,
-          customValue: undefined,
-          tag: col.historicalTreatment ? 'previously_used' as const : undefined,
-        };
-      }
-      return col;
-    }));
-    
-    // Auto-save after reset
-    setTimeout(() => {
-      handleSave();
-    }, 100);
+    updateColumns(prev =>
+      prev.map(col => {
+        if (col.columnName === columnName) {
+          return {
+            ...col,
+            selectedTreatment: 'none' as const,
+            customValue: undefined,
+            tag: col.historicalTreatment ? ('previously_used' as const) : undefined,
+          };
+        }
+        return col;
+      }),
+    );
   };
 
   // Bulk actions - using backend strategy names
   const handleApplyAllNumeric = () => {
-    setColumns(prev => prev.map(col => {
-      if (col.dataType === 'number' && col.columnRole === 'measure') {
-        return { ...col, selectedTreatment: 'mean' as const, tag: 'edited_by_user' as const };
-      }
-      return col;
-    }));
-    // Auto-save after bulk action
-    setTimeout(() => {
-      handleSave();
-    }, 100);
+    updateColumns(prev =>
+      prev.map(col => {
+        if (col.dataType === 'number' && col.columnRole === 'measure') {
+          return { ...col, selectedTreatment: 'mean' as const, tag: 'edited_by_user' as const };
+        }
+        return col;
+      }),
+    );
   };
 
   const handleApplyAllCategorical = () => {
-    setColumns(prev => prev.map(col => {
-      if ((col.dataType === 'category' || col.dataType === 'text') && col.columnRole === 'identifier') {
-        return { 
-          ...col, 
-          selectedTreatment: 'custom' as const, 
-          customValue: 'Unknown',
-          tag: 'edited_by_user' as const 
-        };
-      }
-      return col;
-    }));
-    // Auto-save after bulk action
-    setTimeout(() => {
-      handleSave();
-    }, 100);
+    updateColumns(prev =>
+      prev.map(col => {
+        if ((col.dataType === 'category' || col.dataType === 'text') && col.columnRole === 'identifier') {
+          return {
+            ...col,
+            selectedTreatment: 'custom' as const,
+            customValue: 'Unknown',
+            tag: 'edited_by_user' as const,
+          };
+        }
+        return col;
+      }),
+    );
   };
 
   const handleApplyClientMemory = () => {
-    setColumns(prev => prev.map(col => {
-      if (col.historicalTreatment) {
-        return { ...col, selectedTreatment: col.historicalTreatment, tag: 'previously_used' as const };
-      }
-      return col;
-    }));
-    // Auto-save after bulk action
-    setTimeout(() => {
-      handleSave();
-    }, 100);
+    updateColumns(prev =>
+      prev.map(col => {
+        if (col.historicalTreatment) {
+          return { ...col, selectedTreatment: col.historicalTreatment, tag: 'previously_used' as const };
+        }
+        return col;
+      }),
+    );
   };
 
   // AI suggestion logic: suggests treatments based on data type, role, and missing percentage
@@ -415,34 +458,33 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
       return 'drop';
     }
 
-    // Numeric measures - suggest mean for low missingness, zero for very low
+    // Numeric measures
     if (isNumeric && !isIdentifier) {
-      if (missingPercent <= 5) {
-        return 'zero';
-      } else if (missingPercent <= 20) {
-        return 'mean';
-      } else {
-        return 'median';
-      }
+      if (missingPercent <= 5) return 'zero';
+      if (missingPercent <= 20) return 'mean';
+      return 'median';
     }
 
-    // Categorical/Text identifiers - suggest mode or custom "Unknown"
+    // Category/Text identifiers
     if ((isCategory || isText) && isIdentifier) {
-      if (missingPercent <= 10) {
-        return 'mode';
-      } else {
-        return 'custom'; // Will use "Unknown" as default
-      }
+      if (missingPercent <= 10) return 'mode'; // highest-frequency
+      return 'custom'; // Unknown
     }
 
-    // Dates - suggest mode
+    // Numeric identifiers
+    if (isNumeric && isIdentifier) {
+      if (missingPercent <= 10) return 'mode';
+      return 'custom';
+    }
+
+    // Dates
     if (isDate) {
-      return 'mode';
+      return 'ffill';
     }
 
-    // Text measures - suggest empty string
+    // Text measures
     if (isText && !isIdentifier) {
-      return 'empty';
+      return 'custom'; // Not provided
     }
 
     // Default: leave missing
@@ -450,99 +492,84 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
   };
 
   const handleApplyAISuggestions = () => {
-    setColumns(prev => prev.map(col => {
-      const suggested = suggestTreatment(col);
-      let customValue = col.customValue;
-      
-      // Set default custom value if suggested treatment is 'custom'
-      if (suggested === 'custom') {
-        if (col.columnRole === 'identifier' && (col.dataType === 'category' || col.dataType === 'text')) {
-          customValue = 'Unknown';
-        } else if (col.dataType === 'text' && col.columnRole === 'measure') {
-          customValue = 'Not provided';
-        } else {
-          customValue = '';
+    updateColumns(prev =>
+      prev.map(col => {
+        const suggested = suggestTreatment(col);
+        let customValue = col.customValue;
+
+        if (suggested === 'custom') {
+          if (col.columnRole === 'identifier' && (col.dataType === 'category' || col.dataType === 'text')) {
+            customValue = 'Unknown';
+          } else if (col.dataType === 'text' && col.columnRole === 'measure') {
+            customValue = 'Not provided';
+          } else {
+            customValue = '';
+          }
         }
-      }
-      
-      return {
-        ...col,
-        selectedTreatment: suggested,
-        customValue,
-        tag: 'ai_suggestion' as const,
-      };
-    }));
-    
-    // Auto-save after applying AI suggestions
-    setTimeout(() => {
-      handleSave();
-    }, 100);
+
+        return {
+          ...col,
+          selectedTreatment: suggested,
+          customValue,
+          tag: 'ai_suggestion' as const,
+        };
+      }),
+    );
   };
 
-  const handleSave = () => {
-    if (currentFile) {
-      // Build strategies matching backend format exactly
-      // Backend expects: { column_name: { strategy: str, value?: str | number } }
-      const strategies: MissingValueStrategy[] = columns.map(col => {
-        // For 'none' strategy, don't include it in strategies (backend treats it as no strategy)
+  function handleSave(nextColumns?: ColumnMissingInfo[]) {
+    if (!currentFile) return;
+
+    const colsToUse = nextColumns ?? columnsRef.current ?? columns;
+
+    const strategies: MissingValueStrategy[] = colsToUse
+      .map(col => {
         if (col.selectedTreatment === 'none') {
           return null;
         }
-        
-        // For custom strategy, ensure value is set appropriately
-        // Backend logic: custom_value is required for 'custom' strategy
+
         if (col.selectedTreatment === 'custom') {
-          let value: string | number = col.customValue || '';
-          
-          // Set default values based on column type/role if not already set (matching backend expectations)
+          let value: string | number = col.customValue ?? '';
+
           if (!col.customValue) {
-            if (col.columnRole === 'identifier' && (col.dataType === 'category' || col.dataType === 'text')) {
+            if (col.columnRole === 'identifier') {
               value = 'Unknown';
             } else if (col.dataType === 'text' && col.columnRole === 'measure') {
               value = 'Not provided';
             } else if (col.dataType === 'number') {
-              // For numeric columns, backend will convert custom_value to numeric
-              // Default to 0 for numeric custom values
               value = 0;
             } else {
-              value = ''; // Default empty string
+              value = '';
             }
           }
-          
+
+          if (col.dataType === 'number' && value !== undefined && value !== null) {
+            const numericValue = typeof value === 'string' ? Number(value) : value;
+            if (!Number.isNaN(Number(numericValue))) {
+              value = numericValue as number;
+            }
+          }
+
           return {
             columnName: col.columnName,
             strategy: 'custom',
-            value: value, // Backend expects value for custom strategy
+            value,
           };
         }
-        
-        // For non-custom strategies, don't include value (backend doesn't need it)
-        // Backend logic:
-        // - drop: removes rows with missing values
-        // - mean: fills with mean (only for numeric columns)
-        // - median: fills with median (only for numeric columns)
-        // - mode: fills with mode (first mode value, or empty string if no mode)
-        // - zero: fills with 0
-        // - empty: fills with empty string ""
+
         return {
           columnName: col.columnName,
           strategy: col.selectedTreatment,
-          // Don't include value for non-custom strategies
         };
-      }).filter((s): s is MissingValueStrategy => s !== null);
-      
-      setMissingValueStrategies(currentFile.name, strategies);
-    }
-  };
+      })
+      .filter((s): s is MissingValueStrategy => s !== null);
+
+    setMissingValueStrategies(currentFile.name, strategies);
+  }
 
   const handleNext = () => {
     handleSave();
-    if (currentFileIndex < uploadedFiles.length - 1) {
-      loadedFileRef.current = null;
-      setCurrentFileIndex(currentFileIndex + 1);
-    } else {
-      onNext();
-    }
+    onNext();
   };
 
   if (loading) {
@@ -689,7 +716,14 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
                   return (
                     <tr key={index} className="hover:bg-gray-50">
                       <td className="px-4 py-3">
-                        <span className="font-medium text-gray-900">{column.columnName}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-gray-900">{column.columnName}</span>
+                          {column.displayType && (
+                            <Badge variant="outline" className="text-xs text-gray-700 border-gray-300">
+                              {column.displayType}
+                            </Badge>
+                          )}
+                        </div>
                         {column.warning && (
                           <div className="mt-1">
                             <Badge variant="outline" className="text-yellow-700 border-yellow-300 text-xs">
@@ -734,21 +768,30 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
                       </td>
                       <td className="px-4 py-3">
                         <div className="space-y-2">
-                          <Select
-                            value={column.selectedTreatment}
-                            onValueChange={(value) => handleTreatmentChange(column.columnName, value as MissingValueStrategy['strategy'])}
+                          <div
+                            className="relative inline-block w-48"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            <SelectTrigger className="w-48">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
+                            <select
+                              value={column.selectedTreatment}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                handleTreatmentChange(column.columnName, e.target.value as MissingValueStrategy['strategy']);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              className="w-full h-9 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none bg-[right_0.5rem_center] bg-no-repeat pr-8"
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              }}
+                            >
                               {treatmentOptions.map(option => (
-                                <SelectItem key={option.value} value={option.value}>
+                                <option key={option.value} value={option.value}>
                                   {option.label}
-                                </SelectItem>
+                                </option>
                               ))}
-                            </SelectContent>
-                          </Select>
+                            </select>
+                          </div>
                           {column.selectedTreatment === 'custom' && (
                             <Input
                               type="text"
@@ -808,34 +851,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
           </p>
         </div>
 
-        {/* File Navigation */}
-        {uploadedFiles.length > 1 && (
-          <div className="flex items-center justify-between pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (currentFileIndex > 0) {
-                  handleSave();
-                  loadedFileRef.current = null;
-                  setCurrentFileIndex(currentFileIndex - 1);
-                }
-              }}
-              disabled={currentFileIndex === 0}
-            >
-              Previous File
-            </Button>
-            <span className="text-sm text-gray-600">
-              {currentFileIndex + 1} / {uploadedFiles.length}
-            </span>
-            <Button
-              variant="outline"
-              onClick={handleNext}
-              disabled={currentFileIndex === uploadedFiles.length - 1}
-            >
-              Next File
-            </Button>
-          </div>
-        )}
+        {/* Single-file flow after U1 selection: no file navigation */}
       </div>
     </StageLayout>
   );

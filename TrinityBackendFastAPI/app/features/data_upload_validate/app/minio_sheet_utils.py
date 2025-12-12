@@ -13,6 +13,9 @@ from minio.error import S3Error
 from fastapi import HTTPException
 from app.DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET, ensure_minio_bucket, upload_to_minio
 
+# Import robust file reader for proper Excel/CSV handling
+from app.features.data_upload_validate.file_ingestion.robust_file_reader import RobustFileReader
+
 # Try to import openpyxl for direct Excel access
 try:
     from openpyxl import load_workbook
@@ -50,6 +53,8 @@ def extract_all_sheets_from_excel(
 ) -> Dict[str, Any]:
     """
     Extract all sheets from an Excel file and store each as a separate Parquet file in MinIO.
+    Uses a hybrid approach: simple pandas for sheet discovery, robust reading for column preservation.
+    Falls back to simple pandas if robust reading fails.
     Stores files in a folder structure: {prefix}uploads/{upload_session_id}/{filename}/sheets/
     
     Args:
@@ -67,7 +72,7 @@ def extract_all_sheets_from_excel(
     minio_client = get_client()
     
     try:
-        # Create ExcelFile object to get sheet names
+        # STEP 1: Use simple pandas ExcelFile to discover all sheet names (most reliable)
         excel_bytes_for_names = io.BytesIO(excel_content)
         excel_file = pd.ExcelFile(excel_bytes_for_names, engine='openpyxl')
         sheet_names = excel_file.sheet_names
@@ -75,7 +80,7 @@ def extract_all_sheets_from_excel(
         if not sheet_names:
             raise ValueError("Excel file contains no sheets")
         
-        logger.info(f"Found {len(sheet_names)} sheets: {sheet_names}")
+        logger.info(f"Found {len(sheet_names)} sheets: {sheet_names} (session_id={upload_session_id})")
         
         # Create folder structure: {prefix}uploads/{upload_session_id}/{filename}/
         folder_name = upload_session_id
@@ -93,34 +98,121 @@ def extract_all_sheets_from_excel(
         )
         logger.info(f"Stored original Excel file: {original_path}")
         
-        # Extract and store each sheet in the folder
-        # Create a fresh ExcelFile for each sheet to avoid stream consumption issues
+        # STEP 2: Try to read all sheets using RobustFileReader for column preservation
+        df_dict = {}
+        use_robust_reader = True
+        
+        try:
+            logger.info("Attempting robust Excel reading with RobustFileReader...")
+            df_result, metadata = RobustFileReader.read_file_to_pandas(
+                content=excel_content,
+                filename="workbook.xlsx",
+                sheet_name=None,  # Read all sheets
+                auto_detect_header=False,
+                return_raw=True,
+            )
+            
+            # Handle single sheet case (RobustFileReader returns DataFrame directly)
+            if isinstance(df_result, pd.DataFrame):
+                # Single sheet - wrap in dict using first sheet name
+                df_dict = {sheet_names[0]: df_result}
+            elif isinstance(df_result, dict):
+                df_dict = df_result
+            else:
+                logger.warning(f"Unexpected df_result type: {type(df_result)}, falling back to simple pandas")
+                use_robust_reader = False
+                
+            # Verify we got all sheets
+            if use_robust_reader and len(df_dict) == 0:
+                logger.warning("RobustFileReader returned empty dict, falling back to simple pandas")
+                use_robust_reader = False
+                
+        except Exception as e:
+            logger.warning(f"RobustFileReader failed: {e}, falling back to simple pandas")
+            use_robust_reader = False
+        
+        # STEP 3: Fallback - read each sheet individually using simple pandas
+        if not use_robust_reader or len(df_dict) < len(sheet_names):
+            logger.info("Using simple pandas fallback for sheet reading...")
+            for sheet_name in sheet_names:
+                if sheet_name in df_dict:
+                    continue  # Already read by robust reader
+                try:
+                    # Create fresh BytesIO for each sheet
+                    excel_bytes_for_sheet = io.BytesIO(excel_content)
+                    # Read with dtype=str to preserve all data
+                    df_pandas = pd.read_excel(
+                        excel_bytes_for_sheet,
+                        sheet_name=sheet_name,
+                        engine='openpyxl',
+                        dtype=str,  # Read all as string to preserve data
+                        keep_default_na=False,
+                        na_values=[],
+                    )
+                    df_dict[sheet_name] = df_pandas
+                    logger.info(f"Read sheet '{sheet_name}' using simple pandas: {len(df_pandas)} rows, {len(df_pandas.columns)} cols")
+                except Exception as e:
+                    logger.error(f"Failed to read sheet '{sheet_name}' with simple pandas: {e}")
+                    continue
+        
+        # STEP 4: Extract and store each sheet
         extracted_sheets = []
         for idx, sheet_name in enumerate(sheet_names):
             try:
-                logger.info(f"Extracting sheet {idx + 1}/{len(sheet_names)}: '{sheet_name}' (type: {type(sheet_name).__name__})")
+                logger.info(f"Processing sheet {idx + 1}/{len(sheet_names)}: '{sheet_name}'")
                 
                 # Ensure sheet_name is a string
                 if not isinstance(sheet_name, str):
-                    logger.warning(f"Sheet name is not a string: {sheet_name} (type: {type(sheet_name)}). Converting.")
+                    logger.warning(f"Sheet name is not a string: {sheet_name}. Converting.")
                     sheet_name = str(sheet_name)
                 
-                # Create a fresh BytesIO and ExcelFile for each sheet
-                # This ensures we have a clean stream for each read operation
-                excel_bytes_for_sheet = io.BytesIO(excel_content)
-                excel_file_for_sheet = pd.ExcelFile(excel_bytes_for_sheet, engine='openpyxl')
+                # Get the DataFrame for this sheet
+                df_pandas = df_dict.get(sheet_name)
                 
-                # Parse the sheet by name - parse() accepts sheet name as first positional argument
-                # This should work correctly with string sheet names
-                df_pandas = excel_file_for_sheet.parse(sheet_name)
-                
-                # Skip empty sheets
-                if df_pandas.empty:
-                    logger.warning(f"Skipping empty sheet: {sheet_name}")
+                if df_pandas is None:
+                    logger.warning(f"Sheet '{sheet_name}' not found in parsed results, skipping")
                     continue
                 
+                # Check if truly empty (no rows at all, or all values are NaN)
+                # Be more lenient - only skip if DataFrame has 0 rows
+                if len(df_pandas) == 0:
+                    logger.warning(f"Skipping empty sheet (0 rows): {sheet_name}")
+                    continue
+                
+                # Clean the DataFrame: strip column names & drop completely empty columns
+                df_pandas.columns = [str(c).strip() for c in df_pandas.columns]
+                df_pandas = df_pandas.dropna(axis=1, how='all')
+                df_pandas = df_pandas.reset_index(drop=True)
+                
+                # Skip if all columns were empty
+                if len(df_pandas.columns) == 0:
+                    logger.warning(f"Skipping sheet with all empty columns: {sheet_name}")
+                    continue
+                
+                # CRITICAL: Convert all columns to string to avoid type conversion errors
+                # This handles datetime, float, int, and other types that polars can't auto-convert
+                for col in df_pandas.columns:
+                    try:
+                        # Convert each column to string, handling NaN/None values
+                        df_pandas[col] = df_pandas[col].apply(
+                            lambda x: str(x) if pd.notna(x) and x is not None else ''
+                        )
+                    except Exception as col_err:
+                        logger.warning(f"Could not convert column '{col}' to string: {col_err}")
+                        # Fallback: use astype with errors='ignore'
+                        df_pandas[col] = df_pandas[col].astype(str).replace('nan', '').replace('None', '')
+                
                 # Convert to Polars and normalize column names
-                df_pl = pl.from_pandas(df_pandas)
+                try:
+                    df_pl = pl.from_pandas(df_pandas)
+                except Exception as conv_err:
+                    # Fallback: Create Polars DataFrame from dict with explicit string conversion
+                    logger.warning(f"Direct pandas conversion failed: {conv_err}, using dict fallback")
+                    data_dict = {}
+                    for col in df_pandas.columns:
+                        data_dict[col] = [str(v) if pd.notna(v) and v is not None else '' for v in df_pandas[col]]
+                    df_pl = pl.DataFrame(data_dict)
+                
                 df_pl = _normalize_column_names(df_pl)
                 
                 # Convert to Parquet format
@@ -157,7 +249,7 @@ def extract_all_sheets_from_excel(
                 )
                 
             except Exception as e:
-                logger.error(f"Error extracting sheet '{sheet_name}': {e}")
+                logger.error(f"Error extracting sheet '{sheet_name}': {e}", exc_info=True)
                 # Continue with other sheets even if one fails
                 continue
         
@@ -172,8 +264,10 @@ def extract_all_sheets_from_excel(
             "original_file_path": original_path
         }
         
+    except ValueError:
+        raise
     except Exception as e:
-        logger.error(f"Error extracting sheets from Excel file: {e}")
+        logger.error(f"Error extracting sheets from Excel file: {e}", exc_info=True)
         raise ValueError(f"Failed to extract sheets from Excel file: {str(e)}") from e
 
 

@@ -1,5 +1,6 @@
 # app/routes.py - API Routes
 from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any, Optional
 import base64
 import json
@@ -454,6 +455,7 @@ load_existing_configs = data_upload_service.load_existing_configs
 
 
 # Upload arbitrary file to MinIO and return its path
+# Supports large files up to 2GB with chunked reading
 @router.post("/upload-file")
 async def upload_file(
     file: UploadFile = File(...),
@@ -465,6 +467,8 @@ async def upload_file(
     project_name: str = Form(""),
     sheet_name: str = Form(""),
 ):
+    import gc
+    
     start_time = perf_counter()
     logger.info(
         "data_upload.temp_upload.start file=%s client_id=%s app_id=%s project_id=%s",
@@ -488,47 +492,104 @@ async def upload_file(
 
     prefix = await get_object_prefix()
     tmp_prefix = prefix + "tmp/"
-    content = await file.read()
-    logger.info(
-        "data_upload.temp_upload.read_bytes file=%s size=%s prefix=%s",
-        file.filename,
-        len(content),
-        tmp_prefix,
-    )
+    
+    # Maximum file size: 2GB
+    MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+    CHUNK_SIZE = 10 * 1024 * 1024  # 10 MB chunks
+    
+    try:
+        # Read file in chunks to handle large files
+        content_buffer = io.BytesIO()
+        total_size = 0
+        
+        while True:
+            chunk = await file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            
+            # Check file size limit
+            if total_size > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds maximum size of 2GB. Current size: {total_size / (1024*1024*1024):.2f}GB"
+                )
+            
+            content_buffer.write(chunk)
+        
+        content = content_buffer.getvalue()
+        content_buffer.close()
+        gc.collect()
+        
+        logger.info(
+            "data_upload.temp_upload.read_bytes file=%s size=%s prefix=%s",
+            file.filename,
+            len(content),
+            tmp_prefix,
+        )
 
-    submission = celery_task_client.submit_callable(
-        name="data_upload_validate.upload_file",
-        dotted_path="app.features.data_upload_validate.service.process_temp_upload",
-        kwargs={
-            "file_b64": base64.b64encode(content).decode("utf-8"),
-            "filename": file.filename,
-            "tmp_prefix": tmp_prefix,
-            "sheet_name": sheet_name or None,
-        },
-        metadata={
-            "feature": "data_upload_validate",
-            "operation": "upload_file",
-            "filename": file.filename,
-            "prefix": tmp_prefix,
-        },
-    )
+        submission = celery_task_client.submit_callable(
+            name="data_upload_validate.upload_file",
+            dotted_path="app.features.data_upload_validate.service.process_temp_upload",
+            kwargs={
+                "file_b64": base64.b64encode(content).decode("utf-8"),
+                "filename": file.filename,
+                "tmp_prefix": tmp_prefix,
+                "sheet_name": sheet_name or None,
+            },
+            metadata={
+                "feature": "data_upload_validate",
+                "operation": "upload_file",
+                "filename": file.filename,
+                "prefix": tmp_prefix,
+                "file_size_mb": total_size / (1024 * 1024),
+            },
+        )
+        
+        # Free memory after submitting task
+        del content
+        gc.collect()
 
-    if submission.status == "failure":  # pragma: no cover - defensive programming
-        logger.error(
-            "data_upload.temp_upload.failed task_id=%s file=%s",
+        if submission.status == "failure":  # pragma: no cover - defensive programming
+            logger.error(
+                "data_upload.temp_upload.failed task_id=%s file=%s",
+                submission.task_id,
+                file.filename,
+            )
+            raise HTTPException(status_code=400, detail=submission.detail or "Upload failed")
+
+        duration_ms = (perf_counter() - start_time) * 1000
+        logger.info(
+            "data_upload.temp_upload.queued file=%s task_id=%s duration_ms=%.2f size_mb=%.2f",
+            file.filename,
             submission.task_id,
+            duration_ms,
+            total_size / (1024 * 1024),
+        )
+        return format_task_response(submission, embed_result=True)
+        
+    except HTTPException:
+        raise
+    except MemoryError as e:
+        logger.error(
+            "data_upload.temp_upload.memory_error file=%s error=%s",
+            file.filename,
+            str(e),
+        )
+        gc.collect()
+        raise HTTPException(
+            status_code=507,
+            detail="Server ran out of memory processing file. Try a smaller file or contact support."
+        )
+    except Exception as e:
+        logger.exception(
+            "data_upload.temp_upload.error file=%s",
             file.filename,
         )
-        raise HTTPException(status_code=400, detail=submission.detail or "Upload failed")
-
-    duration_ms = (perf_counter() - start_time) * 1000
-    logger.info(
-        "data_upload.temp_upload.queued file=%s task_id=%s duration_ms=%.2f",
-        file.filename,
-        submission.task_id,
-        duration_ms,
-    )
-    return format_task_response(submission, embed_result=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload file: {str(e)}"
+        )
 
 
 @router.post("/upload-excel-multi-sheet")
@@ -544,6 +605,7 @@ async def upload_excel_multi_sheet(
     """
     Upload an Excel file and extract all sheets automatically.
     Each sheet is stored separately in MinIO as a Parquet file.
+    Supports large files up to 2GB with chunked reading.
     
     Returns:
         {
@@ -553,6 +615,9 @@ async def upload_excel_multi_sheet(
             "original_file_path": "..."
         }
     """
+    import tempfile
+    import gc
+    
     start_time = perf_counter()
     
     # Validate file type
@@ -582,22 +647,57 @@ async def upload_excel_multi_sheet(
     # Generate unique upload session ID
     upload_session_id = str(uuid.uuid4())
     
-    # Read file content
-    content = await file.read()
-    logger.info(
-        "data_upload.multi_sheet.start file=%s size=%s session_id=%s",
-        file.filename,
-        len(content),
-        upload_session_id,
-    )
+    # Maximum file size: 2GB
+    MAX_EXCEL_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+    
+    # Use chunked reading for large files to avoid memory issues
+    CHUNK_SIZE = 10 * 1024 * 1024  # 10 MB chunks
     
     try:
+        # Read file in chunks to handle large files
+        # Use a temporary file for very large files to avoid memory issues
+        content_buffer = io.BytesIO()
+        total_size = 0
+        
+        while True:
+            chunk = await file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            
+            # Check file size limit
+            if total_size > MAX_EXCEL_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds maximum size of 2GB. Current size: {total_size / (1024*1024*1024):.2f}GB"
+                )
+            
+            content_buffer.write(chunk)
+        
+        # Get the complete content
+        content = content_buffer.getvalue()
+        content_buffer.close()
+        
+        # Force garbage collection to free memory from chunks
+        gc.collect()
+        
+        logger.info(
+            "data_upload.multi_sheet.start file=%s size=%s session_id=%s",
+            file.filename,
+            len(content),
+            upload_session_id,
+        )
+        
         # Extract all sheets and store in MinIO
         result = extract_all_sheets_from_excel(
             excel_content=content,
             upload_session_id=upload_session_id,
             prefix=prefix
         )
+        
+        # Free memory after processing
+        del content
+        gc.collect()
         
         duration_ms = (perf_counter() - start_time) * 1000
         logger.info(
@@ -613,6 +713,7 @@ async def upload_excel_multi_sheet(
             "upload_session_id": result["upload_session_id"],
             "session_id": result["upload_session_id"],  # Alias for compatibility
             "file_name": file.filename,
+            "file_size_mb": total_size / (1024 * 1024),
             "sheet_count": len(result["sheets"]),
             "sheets": result["sheets"],
             "sheet_details": result.get("sheet_details", []),
@@ -626,6 +727,8 @@ async def upload_excel_multi_sheet(
         )
         return response_data
         
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.error(
             "data_upload.multi_sheet.failed session_id=%s error=%s",
@@ -633,6 +736,17 @@ async def upload_excel_multi_sheet(
             str(e),
         )
         raise HTTPException(status_code=400, detail=str(e))
+    except MemoryError as e:
+        logger.error(
+            "data_upload.multi_sheet.memory_error session_id=%s error=%s",
+            upload_session_id,
+            str(e),
+        )
+        gc.collect()
+        raise HTTPException(
+            status_code=507,
+            detail="Server ran out of memory processing file. Try a smaller file or contact support."
+        )
     except Exception as e:
         logger.exception(
             "data_upload.multi_sheet.error session_id=%s",
@@ -2017,7 +2131,7 @@ async def save_dataframes(
                 }
             )
 
-    MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
+    MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB - increased for large datasets
     STATUS_TTL = 3600
 
     for source in iter_sources:
@@ -2046,7 +2160,7 @@ async def save_dataframes(
         fileobj.seek(0)
         if size > MAX_FILE_SIZE:
             redis_client.set(progress_key, "rejected", ex=STATUS_TTL)
-            raise HTTPException(status_code=413, detail=f"{filename} exceeds 512MB limit")
+            raise HTTPException(status_code=413, detail=f"{filename} exceeds 2GB limit (current size: {size / (1024*1024*1024):.2f}GB)")
 
         redis_client.set(progress_key, "parsing", ex=STATUS_TTL)
 
@@ -3025,6 +3139,37 @@ async def download_dataframe(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/download_dataframe_direct")
+async def download_dataframe_direct(object_name: str):
+    """
+    Stream the dataframe file directly from MinIO (avoids presigned host resolution issues).
+    """
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+
+    try:
+        obj = minio_client.get_object(MINIO_BUCKET, object_name)
+        content = obj.read()
+        obj.close()
+        obj.release_conn()
+
+        filename = Path(object_name).name
+        return StreamingResponse(
+          iter([content]),
+          media_type="application/octet-stream",
+          headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+          },
+        )
+    except S3Error as e:
+        if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_name)
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/load-saved-dataframe")
 async def load_saved_dataframe(
     request: Request,
@@ -3610,6 +3755,12 @@ def _apply_missing_strategy(
         fill_value = ""
     elif strategy_lower == "custom":
         fill_value = custom_value
+    elif strategy_lower == "ffill":
+        df[column] = series.ffill()
+        return df
+    elif strategy_lower == "bfill":
+        df[column] = series.bfill()
+        return df
     else:
         fill_value = custom_value
 
@@ -4401,6 +4552,125 @@ async def get_file_preview(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/row-issues")
+async def get_row_issues(
+    object_name: str = Query(..., description="MinIO object name/path"),
+    client_id: str = Query(""),
+    app_id: str = Query(""),
+    project_id: str = Query(""),
+    sheet_name: Optional[str] = Query(None, description="Sheet name for Excel files"),
+    limit: int = Query(200, ge=1, le=2000, description="Max issues to return"),
+    offset: int = Query(0, ge=0, description="Offset into the issues list"),
+):
+    """
+    Scan the full file for structural row issues (delimiter spillover, extra/missing columns, sparse rows).
+    Returns total issue counts and a paginated slice of problematic rows to avoid loading everything in the UI.
+    """
+    try:
+        # Resolve original file if an Arrow path is provided
+        original_object_name = object_name
+        if object_name.lower().endswith(".arrow"):
+            path_parts = object_name.split("/")
+            if "tmp" in path_parts:
+                tmp_idx = path_parts.index("tmp")
+                original_filename_base = path_parts[-1].replace(".arrow", "")
+                for ext in [".csv", ".xlsx", ".xls"]:
+                    test_path = "/".join(path_parts[:tmp_idx+1]) + "/originals/" + original_filename_base + ext
+                    try:
+                        read_minio_object(test_path)
+                        original_object_name = test_path
+                        break
+                    except Exception:
+                        continue
+            if original_object_name == object_name and "tmp" in path_parts:
+                tmp_idx = path_parts.index("tmp")
+                prefix_parts = path_parts[:tmp_idx] if tmp_idx > 0 else []
+                session_id = path_parts[-1].replace(".arrow", "")
+                test_path = "/".join(prefix_parts) + "/uploads/" + session_id + "/original.xlsx"
+                try:
+                    read_minio_object(test_path)
+                    original_object_name = test_path
+                except Exception:
+                    pass
+
+        data = read_minio_object(original_object_name)
+        filename = Path(original_object_name).name
+
+        # Read all rows (un-padded) to keep true column counts
+        if filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
+            df.columns = range(len(df.columns))
+            all_rows = [list(row) for row in df.values]
+        elif filename.lower().endswith(".csv"):
+            all_rows = _read_csv_rows_simple(data, pad_rows=False)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            all_rows = _read_excel_rows_simple(data, sheet_name)
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+
+        if not all_rows:
+            raise HTTPException(status_code=400, detail="File appears to be empty")
+
+        # Separate description/data rows (keeps raw lengths)
+        description_rows, data_rows, data_start_idx = _separate_rows_simple(all_rows)
+        if not data_rows:
+            raise HTTPException(status_code=400, detail="No data rows found in file")
+
+        expected_columns = max(len(row) for row in data_rows) if data_rows else 0
+
+        issues: List[Dict[str, Any]] = []
+        for idx, row in enumerate(data_rows):
+            row_len = len(row)
+            non_empty = sum(1 for cell in row if cell and str(cell).strip())
+            row_issues: List[str] = []
+
+            if row_len > expected_columns:
+                row_issues.append(f"Has {row_len - expected_columns} extra column(s) - possible delimiter spillover")
+            elif row_len < expected_columns and non_empty > 0:
+                row_issues.append(f"Missing {expected_columns - row_len} column(s)")
+
+            # Unescaped delimiters / unconventional content
+            has_comma = any(cell and "," in str(cell) and not str(cell).startswith('"') for cell in row)
+            has_semicolon = any(cell and str(cell).count(";") >= 2 for cell in row)
+            has_tab = any(cell and "\t" in str(cell) for cell in row)
+            if has_comma or has_semicolon or has_tab:
+                row_issues.append("Contains potential unescaped delimiters")
+
+            # Sparse row
+            if expected_columns > 0 and non_empty > 0 and non_empty < expected_columns * 0.2:
+                row_issues.append("Mostly empty - may be metadata or formatting")
+
+            if row_issues:
+                issues.append({
+                    "row_index": data_start_idx + idx + 1,  # absolute, 1-indexed
+                    "column_count": row_len,
+                    "non_empty_cells": non_empty,
+                    "issues": row_issues,
+                    "severity": "warning",
+                })
+
+        total_issues = len(issues)
+        paged_issues = issues[offset:offset + limit] if issues else []
+        has_more = offset + limit < total_issues
+
+        return {
+            "total_data_rows": len(data_rows),
+            "expected_columns": expected_columns,
+            "issues_count": total_issues,
+            "issues": paged_issues,
+            "limit": limit,
+            "offset": offset,
+            "has_more": has_more,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error scanning row issues: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/apply-header-selection")
 async def apply_header_selection(
     object_name: str = Form(..., description="MinIO object name/path"),
@@ -4462,10 +4732,76 @@ async def apply_header_selection(
             padded_row = row + [''] * (max_cols - len(row))
             padded_data_rows.append(padded_row[:max_cols])  # Ensure exact length
         
-        # Create DataFrame from data rows
+        # CRITICAL: Extract headers from RAW STRING ROWS before type inference
+        # This preserves numeric/date headers exactly as they appear in the file
+        # Validate header row index (header_row is relative to padded_data_rows after description separation)
+        if header_row < 0 or header_row >= len(padded_data_rows):
+            raise HTTPException(status_code=400, detail=f"Header row index {header_row} is out of range (0-{len(padded_data_rows)-1})")
+        
+        # Validate header_row_count
+        if header_row_count < 1:
+            header_row_count = 1
+        if header_row_count > 10:
+            header_row_count = 10  # Limit to 10 rows max
+        
+        # Check if we have enough rows for multi-row header
+        if header_row + header_row_count > len(padded_data_rows):
+            logger.warning(f"Requested {header_row_count} header rows starting at {header_row}, but only {len(padded_data_rows) - header_row} rows available. Using available rows.")
+            header_row_count = len(padded_data_rows) - header_row
+        
+        # Extract headers from RAW STRING ROWS (before type inference)
+        # This ensures numeric/date headers are preserved as strings exactly as they appear
+        if header_row_count > 1:
+            # Get header rows from raw string data
+            header_rows = []
+            for i in range(header_row_count):
+                row_idx = header_row + i
+                if row_idx < len(padded_data_rows):
+                    # Get raw string values directly from padded rows
+                    header_row_data = padded_data_rows[row_idx]
+                    header_rows.append(header_row_data)
+            
+            # Merge header rows: combine values from each row
+            # Example: ["Sales", "", "2024"] + ["", "Q1", ""] → ["Sales", "Q1", "2024"]
+            # Or: ["Sales", "", ""] + ["", "", "2024"] → ["Sales_2024", "", ""]
+            merged_headers = []
+            max_cols = max(len(row) for row in header_rows) if header_rows else 0
+            
+            for col_idx in range(max_cols):
+                column_values = []
+                for header_row_data in header_rows:
+                    if col_idx < len(header_row_data):
+                        val = header_row_data[col_idx]
+                        # Convert to string and strip - preserve exact representation
+                        val_str = str(val).strip() if val else ""
+                        # Only add non-empty values
+                        if val_str:
+                            column_values.append(val_str)
+                
+                # Combine column values
+                if column_values:
+                    # Join with underscore, e.g., "Sales" + "2024" → "Sales_2024"
+                    merged_header = "_".join(column_values)
+                    merged_headers.append(merged_header)
+                else:
+                    merged_headers.append("")  # Empty column
+            
+            headers = merged_headers
+            logger.info(f"Merged {header_row_count} header rows into: {headers[:5]}...")
+        else:
+            # Single header row - extract from raw string data
+            header_row_raw = padded_data_rows[header_row]
+            headers = []
+            for val in header_row_raw:
+                # Convert to string and preserve exact representation (including numeric like "2021.0")
+                val_str = str(val).strip() if val else ""
+                headers.append(val_str)
+        
+        # Now create DataFrame from data rows (skip header rows)
         # CRITICAL: Let pandas infer types naturally instead of forcing all to string
         # This preserves numeric and datetime types from the original file
-        df_data = pd.DataFrame(padded_data_rows)
+        data_rows_only = padded_data_rows[header_row + header_row_count:]
+        df_data = pd.DataFrame(data_rows_only)
         
         # Try to infer types for each column (preserve numeric/datetime types)
         # This is important because _read_excel_rows_simple and _read_csv_rows_simple
@@ -4508,78 +4844,8 @@ async def apply_header_selection(
             # Otherwise keep as object/string (default)
             # This preserves text columns
         
-        # Validate header row index (header_row is relative to df_data after description separation)
-        if header_row < 0 or header_row >= len(df_data):
-            raise HTTPException(status_code=400, detail=f"Header row index {header_row} is out of range (0-{len(df_data)-1})")
-        
-        # Validate header_row_count
-        if header_row_count < 1:
-            header_row_count = 1
-        if header_row_count > 10:
-            header_row_count = 10  # Limit to 10 rows max
-        
-        # Check if we have enough rows for multi-row header
-        if header_row + header_row_count > len(df_data):
-            logger.warning(f"Requested {header_row_count} header rows starting at {header_row}, but only {len(df_data) - header_row} rows available. Using available rows.")
-            header_row_count = len(df_data) - header_row
-        
-        # Merge multiple header rows if needed
-        if header_row_count > 1:
-            # Get header rows
-            header_rows = []
-            for i in range(header_row_count):
-                row_idx = header_row + i
-                if row_idx < len(df_data):
-                    # CRITICAL: Preserve numeric values by converting to string properly
-                    # Use values property to get actual cell values, not column names
-                    row_values = df_data.iloc[row_idx].values
-                    header_row_data = []
-                    for val in row_values:
-                        if pd.isna(val) or val == "":
-                            header_row_data.append("")
-                        else:
-                            # Preserve numeric values as strings (e.g., 2021.0 -> "2021.0")
-                            header_row_data.append(str(val).strip())
-                    header_rows.append(header_row_data)
-            
-            # Merge header rows: combine values from each row
-            # Example: ["Sales", "", "2024"] + ["", "Q1", ""] → ["Sales", "Q1", "2024"]
-            # Or: ["Sales", "", ""] + ["", "", "2024"] → ["Sales_2024", "", ""]
-            merged_headers = []
-            max_cols = max(len(row) for row in header_rows) if header_rows else 0
-            
-            for col_idx in range(max_cols):
-                column_values = []
-                for header_row_data in header_rows:
-                    if col_idx < len(header_row_data):
-                        val = header_row_data[col_idx].strip() if isinstance(header_row_data[col_idx], str) else str(header_row_data[col_idx]).strip()
-                        if val:  # Only add non-empty values
-                            column_values.append(val)
-                
-                # Combine column values
-                if column_values:
-                    # Join with underscore, e.g., "Sales" + "2024" → "Sales_2024"
-                    merged_header = "_".join(column_values)
-                    merged_headers.append(merged_header)
-                else:
-                    merged_headers.append("")  # Empty column
-            
-            headers = merged_headers
-            logger.info(f"Merged {header_row_count} header rows into: {headers[:5]}...")
-        else:
-            # Single header row - CRITICAL: Preserve numeric values
-            # Use values property to get actual cell values, not column names
-            row_values = df_data.iloc[header_row].values
-            headers = []
-            for val in row_values:
-                if pd.isna(val) or val == "":
-                    headers.append("")
-                else:
-                    # Preserve numeric values as strings (e.g., 2021.0 -> "2021.0")
-                    headers.append(str(val).strip())
-        
-        # Apply merged headers to data rows (skip header rows)
-        df_processed = df_data.iloc[header_row + header_row_count:].copy()
+        # df_data already contains only data rows (header rows were excluded above)
+        df_processed = df_data.copy()
         
         # Ensure we have enough column names (pad if needed)
         if len(headers) < len(df_processed.columns):
@@ -4587,22 +4853,37 @@ async def apply_header_selection(
         elif len(headers) > len(df_processed.columns):
             headers = headers[:len(df_processed.columns)]
         
-        # CRITICAL: Preserve original header values exactly as user selected them
-        # Ensure headers match the number of columns
-        final_headers = headers[:len(df_processed.columns)]
-        if len(final_headers) < len(df_processed.columns):
-            final_headers.extend([f"Column_{i}" for i in range(len(final_headers), len(df_processed.columns))])
+        # Apply headers directly - preserve exact names as selected by user
+        df_processed.columns = headers[:len(df_processed.columns)]
         
-        # Apply headers directly - preserve user-selected names exactly
-        df_processed.columns = final_headers
-        
-        # Normalize column names - only replace truly empty column names with "Unnamed: X"
-        # DO NOT standardize headers (lowercase, replace special chars) - preserve user-selected names exactly
+        # Only normalize empty column names (don't standardize/modify non-empty names)
+        # This preserves numeric headers and exact user-selected names
         from app.features.data_upload_validate.file_ingestion.processors.cleaning import DataCleaner
-        df_processed = DataCleaner.normalize_column_names(df_processed)
-        # CRITICAL: Skip standardize_headers to preserve user-selected column names exactly
-        # This prevents numeric headers (like "2021.0") from being converted to "unnamed_X"
-        # df_processed = DataCleaner.standardize_headers(df_processed)  # COMMENTED OUT
+        # Only normalize truly empty column names, don't modify existing ones
+        columns_list = df_processed.columns.tolist()
+        new_columns = []
+        unnamed_counter = 0
+        for col in columns_list:
+            col_str = str(col).strip()
+            if not col_str or col_str == "":
+                new_columns.append(f"Column_{unnamed_counter}")
+                unnamed_counter += 1
+            else:
+                # Preserve exact column name as-is
+                new_columns.append(col_str)
+        
+        # Handle duplicate column names by appending suffix
+        seen = {}
+        final_columns = []
+        for col in new_columns:
+            if col in seen:
+                seen[col] += 1
+                final_columns.append(f"{col}_{seen[col]}")
+            else:
+                seen[col] = 0
+                final_columns.append(col)
+        
+        df_processed.columns = final_columns
         
         # Remove empty rows/columns
         df_processed = DataCleaner.remove_empty_rows(df_processed)
@@ -5021,6 +5302,10 @@ async def apply_data_transformations(request: Request):
                     # For non-numeric columns, use as string
                     df[col_name].fillna(str(custom_value), inplace=True)
                     logger.info(f"Applied custom string value '{custom_value}' to column '{col_name}'")
+            elif strategy == "ffill":
+                df[col_name] = df[col_name].ffill()
+            elif strategy == "bfill":
+                df[col_name] = df[col_name].bfill()
         
         # Apply dtype changes
         logger.info(f"Starting dtype changes. Total dtype_changes to apply: {len(dtype_changes)}")

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
+import { VALIDATE_API } from '@/lib/api';
 
 interface U7SuccessProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -25,6 +26,10 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
   const getSummaryStats = () => {
     let totalRenamed = 0;
     let totalTypesChanged = 0;
+    let totalColumns = 0;
+    let totalNumeric = 0;
+    let totalCategorical = 0;
+    let totalDate = 0;
     let totalStrategiesSet = 0;
     let totalIdentifiers = 0;
     let totalMeasures = 0;
@@ -34,9 +39,13 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
       totalRenamed += edits.filter(e => e.editedName !== e.originalName && e.keep !== false).length;
 
       const types = dataTypeSelections[file.name] || [];
+      totalColumns += types.length;
       totalTypesChanged += types.filter(t => t.selectedType !== t.detectedType).length;
       totalIdentifiers += types.filter(t => t.columnRole === 'identifier').length;
       totalMeasures += types.filter(t => t.columnRole === 'measure').length;
+      totalNumeric += types.filter(t => t.selectedType === 'number').length;
+      totalCategorical += types.filter(t => t.selectedType === 'category').length;
+      totalDate += types.filter(t => t.selectedType === 'date' || t.selectedType === 'datetime').length;
 
       const strategies = missingValueStrategies[file.name] || [];
       totalStrategiesSet += strategies.filter(s => s.strategy !== 'none').length;
@@ -46,6 +55,10 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
       totalFiles: uploadedFiles.length,
       totalRenamed,
       totalTypesChanged,
+      totalColumns,
+      totalNumeric,
+      totalCategorical,
+      totalDate,
       totalStrategiesSet,
       totalIdentifiers,
       totalMeasures,
@@ -55,16 +68,39 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
 
   const stats = getSummaryStats();
   const currentTimestamp = new Date().toLocaleString();
+  const primaryFile = uploadedFiles[state.selectedFileIndex ?? 0] || uploadedFiles[0];
 
   const handleDownload = () => {
-    // TODO: Implement download functionality
-    console.log('Download cleaned dataset');
+    if (!primaryFile?.path) {
+      console.warn('No processed file available to download');
+      return;
+    }
+    const url = `${VALIDATE_API}/download_dataframe_direct?object_name=${encodeURIComponent(primaryFile.path)}`;
+    fetch(url, { credentials: 'include' })
+      .then(res => {
+        if (!res.ok) throw new Error('Download failed');
+        return res.blob();
+      })
+      .then(blob => {
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const filename = primaryFile.name || 'dataset';
+        link.href = downloadUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(downloadUrl);
+      })
+      .catch(err => console.error('Download failed', err));
   };
 
   const handleAction = (action: string) => {
-    // TODO: Implement navigation to different actions
-    console.log(`Action: ${action}`);
-    // Close the modal after action
+    if (action === 'upload') {
+      onRestart?.(); // send user back to step 1
+      return;
+    }
+    // For now, close the flow after triggering an action hook
     onClose?.();
   };
 
@@ -96,21 +132,23 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
           <h3 className="font-semibold text-gray-900 mb-4">What We Completed</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {stats.hasHeaders && (
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-[#41C185] flex-shrink-0" />
-                <span className="text-sm text-gray-700">Headers identified and cleaned</span>
-              </div>
-            )}
-            {stats.totalRenamed > 0 && (
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-[#41C185] flex-shrink-0" />
-                <span className="text-sm text-gray-700">Column names finalized ({stats.totalRenamed} renamed)</span>
-              </div>
-            )}
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-[#41C185] flex-shrink-0" />
-              <span className="text-sm text-gray-700">Data types validated</span>
+              <span className="text-sm text-gray-700">
+                Headers identified and cleaned
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-[#41C185] flex-shrink-0" />
+              <span className="text-sm text-gray-700">
+                Column names finalized ({stats.totalRenamed} renamed)
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-[#41C185] flex-shrink-0" />
+              <span className="text-sm text-gray-700">
+                Data types validated ({stats.totalTypesChanged} changed of {stats.totalColumns} columns)
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-[#41C185] flex-shrink-0" />
@@ -118,12 +156,12 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
                 Identifiers & Measures assigned ({stats.totalIdentifiers} identifiers, {stats.totalMeasures} measures)
               </span>
             </div>
-            {stats.totalStrategiesSet > 0 && (
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-[#41C185] flex-shrink-0" />
-                <span className="text-sm text-gray-700">Missing values treated ({stats.totalStrategiesSet} columns)</span>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-[#41C185] flex-shrink-0" />
+              <span className="text-sm text-gray-700">
+                Missing values treated ({stats.totalStrategiesSet} columns)
+              </span>
+            </div>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-[#41C185] flex-shrink-0" />
               <span className="text-sm text-gray-700">Row alignment issues resolved</span>
@@ -235,8 +273,11 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
               <div>
                 <h4 className="font-medium text-gray-900 text-sm mb-1">Saved in Data Library</h4>
                 <p className="text-xs text-gray-600">
-                  Your dataset is available in the Saved Dataframes Panel under 'Primed Datasets'.
+                  Your dataset is available in the Saved Dataframes Panel under <strong>‘Primed Datasets’</strong>.
                 </p>
+                <Badge variant="outline" className="mt-2 text-xs border-[#41C185] text-[#41C185] bg-white">
+                  Classified as Green — fully primed
+                </Badge>
               </div>
             </div>
           </div>
@@ -247,9 +288,8 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
               <FileText className="w-5 h-5 text-gray-600 mt-0.5 flex-shrink-0" />
               <div>
                 <h4 className="font-medium text-gray-900 text-sm mb-1">Dataset Versioning</h4>
-                <p className="text-xs text-gray-600">
-                  Version 1 created • {currentTimestamp}
-                </p>
+                <p className="text-xs text-gray-600">Version 1 created • {currentTimestamp}</p>
+                <p className="text-xs text-gray-500">Updates here if dataset is re-primed later.</p>
               </div>
             </div>
           </div>
@@ -260,6 +300,9 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
               <Download className="w-5 h-5 text-[#41C185] mt-0.5 flex-shrink-0" />
               <div className="flex-1">
                 <h4 className="font-medium text-gray-900 text-sm mb-2">Download Cleaned Dataset</h4>
+                <p className="text-xs text-gray-600 mb-2">
+                  Grab the primed data locally as a reassurance action.
+                </p>
                 <Button
                   variant="outline"
                   size="sm"

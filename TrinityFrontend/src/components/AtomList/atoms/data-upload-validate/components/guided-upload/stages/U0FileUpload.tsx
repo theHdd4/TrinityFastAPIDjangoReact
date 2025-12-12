@@ -1,6 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Upload, FileText, AlertTriangle } from 'lucide-react';
+import { Upload, FileText, AlertTriangle, Clock, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { VALIDATE_API } from '@/lib/api';
@@ -11,6 +11,41 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { Checkbox } from '@/components/ui/checkbox';
+
+// Upload progress state interface
+interface UploadProgress {
+  fileName: string;
+  progress: number; // 0-100
+  bytesUploaded: number;
+  totalBytes: number;
+  speed: number; // bytes per second
+  estimatedTimeRemaining: number; // seconds
+  status: 'uploading' | 'processing' | 'done' | 'error';
+  startTime: number;
+}
+
+// Helper: Format bytes to human readable
+const formatBytes = (bytes: number): string => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
+// Helper: Format time remaining
+const formatTimeRemaining = (seconds: number): string => {
+  if (seconds <= 0 || !isFinite(seconds)) return 'calculating...';
+  if (seconds < 60) return `${Math.ceil(seconds)}s remaining`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m ${Math.ceil(seconds % 60)}s remaining`;
+  return `${Math.floor(seconds / 3600)}h ${Math.ceil((seconds % 3600) / 60)}m remaining`;
+};
+
+// Helper: Format speed
+const formatSpeed = (bytesPerSecond: number): string => {
+  if (bytesPerSecond <= 0) return '0 B/s';
+  return formatBytes(bytesPerSecond) + '/s';
+};
 
 interface U0FileUploadProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -42,6 +77,17 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
   
   // Track saved files to ensure they're saved even if user cancels
   const [savedFiles, setSavedFiles] = useState<Array<{ name: string; path: string; size: number }>>([]);
+  
+  // Upload progress tracking
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
+  const [overallProgress, setOverallProgress] = useState<{
+    totalFiles: number;
+    completedFiles: number;
+    totalBytes: number;
+    uploadedBytes: number;
+    averageSpeed: number;
+    overallProgress: number;
+  } | null>(null);
 
   // Reuse the same helper functions from SavedDataFramesPanel
   const appendEnvFields = (form: FormData) => {
@@ -121,26 +167,9 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       setIsUploading(false);
       resetUploadState();
       
-      // Process next file in queue if any
-      if (pendingFilesQueue.length > 0) {
-        const nextFile = pendingFilesQueue[0];
-        setPendingFilesQueue(prev => prev.slice(1));
-        // Use setTimeout to ensure state is reset before processing next file
-        setTimeout(() => {
-          setPendingFile(nextFile);
-          setUploadError('');
-          setSheetOptions([]);
-          setSelectedSheets([]);
-          setHasMultipleSheets(false);
-          setTempUploadMeta(null);
-          setIsUploadModalOpen(true);
-          void uploadSelectedFile(nextFile);
-        }, 100);
-      } else {
-        // All files uploaded (to tmp/), proceed to next stage
-        // Files will be processed and saved in U2 stage
-        onNext();
-      }
+      // All files uploaded (to tmp/), proceed to next stage
+      // Files will be processed and saved in U2 stage
+      onNext();
     } catch (err: any) {
       // Comprehensive error handling with user-friendly messages
       const errorMessage = err.message || 'Failed to upload file';
@@ -151,9 +180,31 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
     }
   };
 
-  const uploadSelectedFile = async (file: File, sheets?: string[]) => {
-    setIsUploading(true);
-    setUploadError('');
+  // Upload a single file with progress tracking using XMLHttpRequest
+  const uploadSingleFile = useCallback(async (
+    file: File, 
+    fileIndex: number
+  ): Promise<{ success: boolean; error?: string }> => {
+    const startTime = Date.now();
+    
+    // Initialize progress for this file
+    const initialProgress: UploadProgress = {
+      fileName: file.name,
+      progress: 0,
+      bytesUploaded: 0,
+      totalBytes: file.size,
+      speed: 0,
+      estimatedTimeRemaining: 0,
+      status: 'uploading',
+      startTime,
+    };
+    
+    setUploadProgress(prev => {
+      const updated = [...prev];
+      updated[fileIndex] = initialProgress;
+      return updated;
+    });
+    
     try {
       // Replace spaces with underscores in filename
       const sanitizedFileName = file.name.replace(/\s+/g, '_');
@@ -165,37 +216,134 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       const isExcelFile = sanitizedFileName.toLowerCase().endsWith('.xlsx') || 
                          sanitizedFileName.toLowerCase().endsWith('.xls');
       
-      if (isExcelFile) {
-        // Use multi-sheet Excel upload endpoint
-        const form = new FormData();
-        form.append('file', sanitizedFile);
-        appendEnvFields(form);
+      const endpoint = isExcelFile 
+        ? `${VALIDATE_API}/upload-excel-multi-sheet`
+        : `${VALIDATE_API}/upload-file`;
+      
+      // Create FormData
+      const form = new FormData();
+      form.append('file', sanitizedFile);
+      appendEnvFields(form);
+      
+      // Use XMLHttpRequest for progress tracking
+      const uploadResult = await new Promise<any>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
         
-        const res = await fetch(`${VALIDATE_API}/upload-excel-multi-sheet`, {
-          method: 'POST',
-          body: form,
-          credentials: 'include'
+        // Track upload progress
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const elapsed = (Date.now() - startTime) / 1000; // seconds
+            const bytesUploaded = event.loaded;
+            const totalBytes = event.total;
+            const progress = Math.round((bytesUploaded / totalBytes) * 100);
+            const speed = elapsed > 0 ? bytesUploaded / elapsed : 0;
+            const remainingBytes = totalBytes - bytesUploaded;
+            const estimatedTimeRemaining = speed > 0 ? remainingBytes / speed : 0;
+            
+            setUploadProgress(prev => {
+              const updated = [...prev];
+              updated[fileIndex] = {
+                ...updated[fileIndex],
+                progress,
+                bytesUploaded,
+                totalBytes,
+                speed,
+                estimatedTimeRemaining,
+                status: 'uploading',
+              };
+              return updated;
+            });
+            
+            // Update overall progress
+            setOverallProgress(prev => {
+              if (!prev) return prev;
+              const allProgress = uploadProgress.map((p, i) => 
+                i === fileIndex ? bytesUploaded : (p?.bytesUploaded || 0)
+              );
+              const totalUploaded = allProgress.reduce((a, b) => a + b, 0);
+              return {
+                ...prev,
+                uploadedBytes: totalUploaded,
+                averageSpeed: speed,
+                overallProgress: Math.round((totalUploaded / prev.totalBytes) * 100),
+              };
+            });
+          }
         });
         
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => null);
-          const detail = errorData?.detail || (typeof errorData === 'string' ? errorData : '');
-          throw new Error(detail || 'Upload failed');
-        }
+        // Handle completion
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const response = JSON.parse(xhr.responseText);
+              // Update progress to processing state
+              setUploadProgress(prev => {
+                const updated = [...prev];
+                updated[fileIndex] = {
+                  ...updated[fileIndex],
+                  progress: 100,
+                  status: 'processing',
+                };
+                return updated;
+              });
+              resolve(response);
+            } catch (e) {
+              reject(new Error('Invalid response from server'));
+            }
+          } else {
+            try {
+              const errorData = JSON.parse(xhr.responseText);
+              reject(new Error(errorData?.detail || 'Upload failed'));
+            } catch {
+              reject(new Error(`Upload failed with status ${xhr.status}`));
+            }
+          }
+        });
         
-        const data = await res.json();
+        // Handle errors
+        xhr.addEventListener('error', () => {
+          setUploadProgress(prev => {
+            const updated = [...prev];
+            updated[fileIndex] = {
+              ...updated[fileIndex],
+              status: 'error',
+            };
+            return updated;
+          });
+          reject(new Error('Network error during upload'));
+        });
+        
+        xhr.addEventListener('timeout', () => {
+          setUploadProgress(prev => {
+            const updated = [...prev];
+            updated[fileIndex] = {
+              ...updated[fileIndex],
+              status: 'error',
+            };
+            return updated;
+          });
+          reject(new Error('Upload timed out. Please try again with a smaller file or check your connection.'));
+        });
+        
+        // Configure request - 10 minute timeout for large files
+        xhr.timeout = 600000; // 10 minutes
+        xhr.open('POST', endpoint);
+        xhr.withCredentials = true;
+        xhr.send(form);
+      });
+      
+      // Process the response based on file type
+      if (isExcelFile) {
+        const data = uploadResult;
         const sheetNames = Array.isArray(data.sheets) ? data.sheets : [];
         const sheetDetails = Array.isArray(data.sheet_details) ? data.sheet_details : [];
-        const uploadSessionId = data.upload_session_id || data.session_id;
         const fileName = data.file_name || sanitizedFileName;
-        const sheetCount = data.sheet_count || sheetNames.length;
         
         if (sheetNames.length === 0) {
           throw new Error('No sheets found in Excel file');
         }
         
         // Create a map of original sheet names to normalized names
-        // Use normalized_name from backend sheet_details instead of re-normalizing
         const sheetNameMap = new Map<string, string>();
         sheetDetails.forEach((detail: any) => {
           if (detail.original_name && detail.normalized_name) {
@@ -211,97 +359,66 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
           });
         }
         
-        setTempUploadMeta({
-          file_path: data.original_file_path || '',
-          file_name: fileName,
-          workbook_path: data.original_file_path || null,
-          upload_session_id: uploadSessionId,
-          sheetNameMap: Object.fromEntries(sheetNameMap), // Store mapping
-        });
-        
-        setSheetOptions(sheetNames);
-        setSelectedSheets(sheets || sheetNames); // Default to all sheets
-        setHasMultipleSheets(sheetNames.length > 1);
-        
-        // CRITICAL CHANGE: Do NOT save files immediately!
-        // Store temp paths for Excel files (same as CSV files)
-        // Files will be processed and saved in U2 stage
-        const tempPath = data.original_file_path || ''; // This is the tmp/ path from /upload-excel-multi-sheet
-        
-        console.log('[U0FileUpload] Storing temp Excel file path (will be processed in U2):', tempPath);
-        
-        // Validate temp path exists
-        if (!tempPath || !tempPath.includes('tmp/')) {
-          console.warn('[U0FileUpload] Warning: Excel file path does not contain tmp/. Path:', tempPath);
-        }
-        
-        // Show success toast (file uploaded, but not yet processed)
-        toast({ 
-          title: 'File uploaded', 
-          description: `${fileName} with ${sheetNames.length} sheet${sheetNames.length > 1 ? 's' : ''} is ready for processing. Continue to next steps to process the file.`,
-        });
-        
-        // Add to guided flow state with temp path
-        // The file will be processed and saved in U2 stage
+        // Store temp path (will be processed in U2 stage)
+        const tempPath = data.original_file_path || '';
         const fileKey = deriveFileKey(fileName);
+        
+        // Auto-select all sheets for parallel uploads
         const uploadedFileInfo = {
           name: fileName,
-          path: tempPath, // Temp path - will be updated in U2 after processing
-          size: pendingFile?.size || 0,
+          path: tempPath,
+          size: file.size || 0,
           fileKey: fileKey,
           sheetNames: sheetNames.length > 0 ? sheetNames : undefined,
           selectedSheet: sheetNames.length > 0 ? sheetNames[0] : undefined,
           totalSheets: sheetNames.length,
+          processed: false,
         };
         
         addUploadedFiles([uploadedFileInfo]);
-        
-        // Reset state AFTER all async operations complete
-        setIsUploading(false);
-        resetUploadState();
-        
-        // Process next file in queue if any
-        if (pendingFilesQueue.length > 0) {
-          const nextFile = pendingFilesQueue[0];
-          setPendingFilesQueue(prev => prev.slice(1));
-          setTimeout(() => {
-            setPendingFile(nextFile);
-            setUploadError('');
-            setSheetOptions([]);
-            setSelectedSheets([]);
-            setHasMultipleSheets(false);
-            setTempUploadMeta(null);
-            setIsUploadModalOpen(true);
-            void uploadSelectedFile(nextFile);
-          }, 100);
-        } else {
-          // All files uploaded (to tmp/), proceed to next stage
-          // Files will be processed and saved in U2 stage
-          onNext();
-        }
       } else {
-        // CSV or other file - use regular upload endpoint (simplified)
-        const form = new FormData();
-        form.append('file', sanitizedFile);
-        appendEnvFields(form);
-        const res = await fetch(`${VALIDATE_API}/upload-file`, {
-          method: 'POST',
-          body: form,
-          credentials: 'include'
-        });
-        const payload = await res.json().catch(() => null);
-        if (!res.ok || !payload) {
-          const detail = payload?.detail || (typeof payload === 'string' ? payload : '');
-          throw new Error(detail || 'Upload failed');
-        }
-        const data = await waitForTaskResult(payload);
-        await finalizeSave({ file_path: data.file_path, file_name: data.file_name || sanitizedFileName });
+        // CSV - wait for task result
+        const data = await waitForTaskResult(uploadResult);
+        
+        const fileKey = deriveFileKey(data.file_name || sanitizedFileName);
+        const tempPath = data.file_path || '';
+        
+        const uploadedFileInfo = {
+          name: data.file_name || sanitizedFileName,
+          path: tempPath,
+          size: file.size || 0,
+          fileKey: fileKey,
+          processed: false,
+        };
+        
+        addUploadedFiles([uploadedFileInfo]);
       }
+      
+      // Mark as done
+      setUploadProgress(prev => {
+        const updated = [...prev];
+        updated[fileIndex] = {
+          ...updated[fileIndex],
+          progress: 100,
+          status: 'done',
+        };
+        return updated;
+      });
+      
+      return { success: true };
     } catch (err: any) {
-      setUploadError(err.message || 'Upload failed');
-      setIsUploading(false);
+      const errorMessage = err.message || 'Upload failed';
+      setUploadProgress(prev => {
+        const updated = [...prev];
+        updated[fileIndex] = {
+          ...updated[fileIndex],
+          status: 'error',
+        };
+        return updated;
+      });
+      return { success: false, error: errorMessage };
     }
-  };
+  }, [addUploadedFiles, uploadProgress]);
 
   const finalizeSaveMultiSheet = async (fileName: string, uploadSessionId: string, sheetsToSave: string[]) => {
     console.log(`[U0FileUpload] finalizeSaveMultiSheet called for ${sheetsToSave.length} sheet(s)`);
@@ -455,24 +572,9 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       setIsUploading(false);
       resetUploadState();
       
-      // Process next file in queue if any
-      if (pendingFilesQueue.length > 0) {
-        const nextFile = pendingFilesQueue[0];
-        setPendingFilesQueue(prev => prev.slice(1));
-        setTimeout(() => {
-          setPendingFile(nextFile);
-          setUploadError('');
-          setSheetOptions([]);
-          setSelectedSheets([]);
-          setHasMultipleSheets(false);
-          setTempUploadMeta(null);
-          setIsUploadModalOpen(true);
-          void uploadSelectedFile(nextFile);
-        }, 100);
-      } else {
-        console.log(`[U0FileUpload] All files processed, proceeding to next stage`);
-        onNext();
-      }
+      // All files processed, proceed to next stage
+      console.log(`[U0FileUpload] All files processed, proceeding to next stage`);
+      onNext();
     } catch (err: any) {
       // Comprehensive error handling with user-friendly messages
       const errorMessage = err.message || 'Failed to save sheets';
@@ -483,55 +585,20 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
     }
   };
 
+  // Note: handleSheetConfirm is kept for backward compatibility but is not used in parallel upload flow
+  // The modal is not shown in the new parallel upload flow
   const handleSheetConfirm = async () => {
-    if (!pendingFile || selectedSheets.length === 0) {
-      console.warn('[U0FileUpload] handleSheetConfirm: No file or no sheets selected');
-      return;
-    }
-    if (!tempUploadMeta?.upload_session_id) {
-      console.warn('[U0FileUpload] handleSheetConfirm: No upload_session_id, falling back to single sheet upload');
-      // Fallback to single sheet upload
-      await uploadSelectedFile(pendingFile, [selectedSheets[0]]);
-      return;
-    }
-    
-    // CRITICAL CHANGE: Do NOT save files immediately!
-    // Store temp paths and proceed to next stage (files will be processed in U2)
-    console.log(`[U0FileUpload] handleSheetConfirm: Storing temp paths for ${selectedSheets.length} sheet(s)`);
-    setIsUploadModalOpen(false); // Close modal
-    
-    const tempPath = tempUploadMeta.file_path || '';
-    const fileKey = deriveFileKey(tempUploadMeta.file_name);
-    
-    // Add to guided flow state with temp path
-    // Mark as unprocessed (processed: false) since it's still in tmp/
-    const uploadedFileInfo = {
-      name: tempUploadMeta.file_name,
-      path: tempPath, // Temp path - will be updated in U2 after processing
-      size: pendingFile?.size || 0,
-      fileKey: fileKey,
-      sheetNames: selectedSheets.length > 0 ? selectedSheets : undefined,
-      selectedSheet: selectedSheets.length > 0 ? selectedSheets[0] : undefined,
-      totalSheets: selectedSheets.length,
-      processed: false, // Explicitly mark as unprocessed - file is in tmp/ and needs processing
-    };
-    
-    addUploadedFiles([uploadedFileInfo]);
-    
-    // Show success toast
-    toast({ 
-      title: 'File uploaded', 
-      description: `${tempUploadMeta.file_name} with ${selectedSheets.length} sheet${selectedSheets.length > 1 ? 's' : ''} is ready for processing. Continue to next steps.`,
-    });
-    
-    // Reset state and proceed to next stage
-    setIsUploading(false);
-    resetUploadState();
-    onNext();
+    // This function is not used in the new parallel upload flow
+    // Files are uploaded directly without modal interaction
+    console.warn('[U0FileUpload] handleSheetConfirm called but not used in parallel upload flow');
   };
 
   const handleFileSelect = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+
+    // Maximum file size: 2GB
+    const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2 GB
+    const MAX_FILE_SIZE_MB = 2048;
 
     const validFiles = Array.from(files).filter(file => {
       const ext = file.name.split('.').pop()?.toLowerCase();
@@ -547,23 +614,112 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       return;
     }
 
-    const fileArray = Array.from(validFiles) as File[];
-    const firstFile = fileArray[0];
-    const remainingFiles = fileArray.slice(1);
-    
-    // Store remaining files in queue
-    if (remainingFiles.length > 0) {
-      setPendingFilesQueue(remainingFiles);
+    // Check file sizes
+    const oversizedFiles = validFiles.filter(file => file.size > MAX_FILE_SIZE);
+    if (oversizedFiles.length > 0) {
+      const fileNames = oversizedFiles.map(f => `${f.name} (${(f.size / (1024*1024*1024)).toFixed(2)}GB)`).join(', ');
+      toast({
+        title: 'File too large',
+        description: `Files exceed ${MAX_FILE_SIZE_MB}MB limit: ${fileNames}`,
+        variant: 'destructive',
+      });
+      return;
     }
+
+    // Calculate total size
+    const totalBytes = validFiles.reduce((acc, f) => acc + f.size, 0);
+    const totalSizeMB = totalBytes / (1024 * 1024);
+
+    // Show info for large files
+    if (totalSizeMB > 100) {
+      toast({
+        title: 'Large file upload',
+        description: `Uploading ${totalSizeMB.toFixed(1)}MB total. Progress will be shown below.`,
+      });
+    }
+
+    // Initialize progress tracking
+    setUploadProgress(validFiles.map(file => ({
+      fileName: file.name,
+      progress: 0,
+      bytesUploaded: 0,
+      totalBytes: file.size,
+      speed: 0,
+      estimatedTimeRemaining: 0,
+      status: 'uploading' as const,
+      startTime: Date.now(),
+    })));
     
-    setPendingFile(firstFile);
+    setOverallProgress({
+      totalFiles: validFiles.length,
+      completedFiles: 0,
+      totalBytes,
+      uploadedBytes: 0,
+      averageSpeed: 0,
+      overallProgress: 0,
+    });
+
+    // Upload all files in parallel
+    setIsUploading(true);
     setUploadError('');
-    setSheetOptions([]);
-    setSelectedSheets([]);
-    setHasMultipleSheets(false);
-    setTempUploadMeta(null);
-    setIsUploadModalOpen(true);
-    void uploadSelectedFile(firstFile);
+    
+    try {
+      // Upload all files in parallel with progress tracking
+      const uploadPromises = validFiles.map((file, index) => uploadSingleFile(file, index));
+      const results = await Promise.allSettled(uploadPromises);
+      
+      // Check results
+      const successes = results.filter(r => r.status === 'fulfilled' && r.value.success);
+      const failures = results.filter(r => 
+        r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success)
+      );
+      
+      const successCount = successes.length;
+      const failureCount = failures.length;
+      
+      // Update overall progress
+      setOverallProgress(prev => prev ? {
+        ...prev,
+        completedFiles: successCount,
+        overallProgress: 100,
+      } : null);
+      
+      if (successCount > 0) {
+        toast({
+          title: successCount === validFiles.length ? 'All files uploaded' : 'Some files uploaded',
+          description: `${successCount} file(s) uploaded successfully.${failureCount > 0 ? ` ${failureCount} file(s) failed.` : ''} Continue to next step to process them.`,
+        });
+        
+        // Automatically move to next stage after successful uploads
+        // Small delay to ensure state updates are complete
+        setTimeout(() => {
+          setIsUploading(false);
+          setUploadProgress([]);
+          setOverallProgress(null);
+          onNext();
+        }, 1000);
+      } else {
+        // All uploads failed
+        const errorMessages = failures.map((f, idx) => {
+          if (f.status === 'rejected') {
+            return `${validFiles[idx].name}: ${f.reason?.message || 'Upload failed'}`;
+          } else if (f.status === 'fulfilled' && f.value.error) {
+            return `${validFiles[idx].name}: ${f.value.error}`;
+          }
+          return `${validFiles[idx].name}: Upload failed`;
+        }).join('; ');
+        
+        setUploadError(`All file uploads failed: ${errorMessages}`);
+        setIsUploading(false);
+        setUploadProgress([]);
+        setOverallProgress(null);
+      }
+    } catch (err: any) {
+      setUploadError(err.message || 'Failed to upload files');
+      setIsUploading(false);
+      setUploadProgress([]);
+      setOverallProgress(null);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -589,7 +745,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
   return (
     <StageLayout
       title="Upload Your Dataset"
-      explanation="Choose a CSV or Excel file from your computer."
+      explanation="Choose one or more CSV or Excel files from your computer. You can upload multiple files at once."
     >
       <div 
         className="space-y-6"
@@ -605,14 +761,139 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
             className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white px-8 py-6 text-base"
           >
             <FileText className="w-5 h-5 mr-2" />
-            Select File
+            Select File{uploadedFiles.length > 0 ? 's' : ''}
           </Button>
           
-          {isUploading && (
+          {/* Real-time Upload Progress */}
+          {isUploading && uploadProgress.length > 0 && (
+            <div className="w-full max-w-lg space-y-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
+              {/* Overall Progress Header */}
+              {overallProgress && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-gray-900">
+                      {uploadProgress.some(p => p.status === 'processing') 
+                        ? `Processing ${overallProgress.totalFiles} file${overallProgress.totalFiles > 1 ? 's' : ''} on server...`
+                        : `Uploading ${overallProgress.totalFiles} file${overallProgress.totalFiles > 1 ? 's' : ''}`
+                      }
+                    </span>
+                    <span className={`text-sm font-medium ${
+                      uploadProgress.some(p => p.status === 'processing') ? 'text-amber-600' : 'text-[#458EE2]'
+                    }`}>
+                      {uploadProgress.some(p => p.status === 'processing') 
+                        ? 'Processing...'
+                        : `${overallProgress.overallProgress}%`
+                      }
+                    </span>
+                  </div>
+                  
+                  {/* Overall progress bar */}
+                  <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full transition-all duration-300 ease-out ${
+                        uploadProgress.some(p => p.status === 'processing') 
+                          ? 'bg-amber-500 animate-pulse' 
+                          : 'bg-[#458EE2]'
+                      }`}
+                      style={{ width: `${Math.max(overallProgress.overallProgress, uploadProgress.some(p => p.status === 'processing') ? 100 : 0)}%` }}
+                    />
+                  </div>
+                  
+                  {/* Overall stats */}
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>
+                      {formatBytes(overallProgress.uploadedBytes)} / {formatBytes(overallProgress.totalBytes)}
+                    </span>
+                    {uploadProgress.some(p => p.status === 'processing') ? (
+                      <span className="flex items-center gap-1 text-amber-600">
+                        <Clock className="w-3 h-3 animate-spin" />
+                        Extracting sheets & converting...
+                      </span>
+                    ) : overallProgress.averageSpeed > 0 ? (
+                      <span className="flex items-center gap-1">
+                        <Zap className="w-3 h-3" />
+                        {formatSpeed(overallProgress.averageSpeed)}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+              
+              {/* Individual file progress */}
+              <div className="space-y-3 max-h-48 overflow-y-auto">
+                {uploadProgress.map((progress, idx) => (
+                  <div key={idx} className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-gray-700 truncate max-w-[60%]">
+                        {progress.fileName}
+                      </span>
+                      <span className={`text-xs font-medium ${
+                        progress.status === 'done' ? 'text-green-600' :
+                        progress.status === 'error' ? 'text-red-600' :
+                        progress.status === 'processing' ? 'text-amber-600' :
+                        'text-[#458EE2]'
+                      }`}>
+                        {progress.status === 'done' ? '✓ Complete' :
+                         progress.status === 'error' ? '✗ Failed' :
+                         progress.status === 'processing' ? '⏳ Server processing...' :
+                         `${progress.progress}%`}
+                      </span>
+                    </div>
+                    
+                    {/* Individual file progress bar */}
+                    <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-300 ease-out ${
+                          progress.status === 'done' ? 'bg-green-500' :
+                          progress.status === 'error' ? 'bg-red-500' :
+                          progress.status === 'processing' ? 'bg-amber-500 animate-pulse' :
+                          'bg-[#458EE2]'
+                        }`}
+                        style={{ width: `${progress.progress}%` }}
+                      />
+                    </div>
+                    
+                    {/* File stats */}
+                    {progress.status === 'uploading' && (
+                      <div className="flex items-center justify-between text-[10px] text-gray-400">
+                        <span>
+                          {formatBytes(progress.bytesUploaded)} / {formatBytes(progress.totalBytes)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-2.5 h-2.5" />
+                          {formatTimeRemaining(progress.estimatedTimeRemaining)}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* Processing message for large files */}
+                    {progress.status === 'processing' && progress.totalBytes > 50 * 1024 * 1024 && (
+                      <div className="text-[10px] text-amber-600">
+                        Large file ({formatBytes(progress.totalBytes)}) - extracting sheets may take 1-5 minutes...
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              
+              {/* Upload tip for large files */}
+              {overallProgress && overallProgress.totalBytes > 100 * 1024 * 1024 && (
+                <p className="text-[10px] text-gray-400 text-center border-t border-gray-200 pt-2">
+                  {uploadProgress.some(p => p.status === 'processing') 
+                    ? '⏳ Server is extracting sheets and converting to optimized format. Please wait...'
+                    : '💡 Large files supported up to 2GB. Upload speed depends on your connection.'
+                  }
+                </p>
+              )}
+            </div>
+          )}
+          
+          {/* Simple uploading state when no progress yet */}
+          {isUploading && uploadProgress.length === 0 && (
             <div className="space-y-2 w-full max-w-xs">
-              <p className="text-gray-700 font-medium text-center">Uploading files...</p>
+              <p className="text-gray-700 font-medium text-center">Preparing upload...</p>
               <div className="w-full h-1 bg-gray-200 rounded-full overflow-hidden">
-                <div className="h-full bg-[#458EE2] animate-pulse" style={{ width: '60%' }} />
+                <div className="h-full bg-[#458EE2] animate-pulse" style={{ width: '30%' }} />
               </div>
             </div>
           )}
@@ -711,7 +992,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
         {/* Secondary link: Supported formats */}
         <div className="text-center">
           <p className="text-sm text-gray-500">
-            Supported formats: <span className="font-medium">CSV, XLSX, TSV</span>
+            Supported formats: <span className="font-medium">CSV, XLSX, XLS, TSV</span> (up to 2GB)
           </p>
         </div>
 

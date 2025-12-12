@@ -38,13 +38,14 @@ export interface DataTypeSelection {
 
 export interface MissingValueStrategy {
   columnName: string;
-  strategy: 'drop' | 'mean' | 'median' | 'mode' | 'zero' | 'empty' | 'custom' | 'none';
+  strategy: 'drop' | 'mean' | 'median' | 'mode' | 'zero' | 'empty' | 'custom' | 'ffill' | 'bfill' | 'none';
   value?: string | number; // Required for 'custom' strategy
 }
 
 export interface GuidedUploadFlowState {
   currentStage: UploadStage;
   uploadedFiles: UploadedFileInfo[];
+  selectedFileIndex?: number; // Index of the file selected in U1 for processing in subsequent stages
   headerSelections: Record<string, HeaderSelection>; // keyed by file name
   columnNameEdits: Record<string, ColumnNameEdit[]>; // keyed by file name
   dataTypeSelections: Record<string, DataTypeSelection[]>; // keyed by file name
@@ -194,6 +195,13 @@ export function useGuidedUploadFlow(initialState?: Partial<GuidedUploadFlowState
     }));
   }, []);
 
+  const setSelectedFileIndex = useCallback((fileIndex: number) => {
+    setState(prev => ({
+      ...prev,
+      selectedFileIndex: fileIndex,
+    }));
+  }, []);
+
   return {
     state,
     goToStage,
@@ -208,6 +216,7 @@ export function useGuidedUploadFlow(initialState?: Partial<GuidedUploadFlowState
     setMissingValueStrategies,
     updateFileSheetSelection,
     updateUploadedFilePath,
+    setSelectedFileIndex,
   };
 }
 

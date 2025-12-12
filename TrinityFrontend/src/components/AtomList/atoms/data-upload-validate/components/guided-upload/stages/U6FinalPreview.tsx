@@ -5,8 +5,6 @@ import { Badge } from '@/components/ui/badge';
 import { VALIDATE_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
-import { saveFileToSavedDataFrames } from '../utils/saveFileHelper';
-import { toast } from '@/hooks/use-toast';
 
 interface U6FinalPreviewProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -35,9 +33,11 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
     columnNameEdits,
     dataTypeSelections,
     missingValueStrategies,
+    selectedFileIndex,
   } = state;
 
-  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const chosenIndex =
+    selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
   const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
   const [columns, setColumns] = useState<ColumnSummary[]>([]);
   const [totalRows, setTotalRows] = useState(0);
@@ -50,7 +50,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
   const loadedFileRef = useRef<string | null>(null);
   const hasAttemptedFetchRef = useRef(false);
 
-  const currentFile = uploadedFiles[currentFileIndex];
+  const currentFile = uploadedFiles[chosenIndex];
   const currentColumnEdits = currentFile ? (columnNameEdits[currentFile.name] || []) : [];
   const currentDataTypes = currentFile ? (dataTypeSelections[currentFile.name] || []) : [];
   const currentStrategies = currentFile ? (missingValueStrategies[currentFile.name] || []) : [];
@@ -577,13 +577,6 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
     void fetchPreviewData();
   }, [currentFile?.name, currentFile?.path, buildStateBasedData]);
 
-  // Reset refs when file index changes
-  useEffect(() => {
-    loadedFileRef.current = null;
-    hasAttemptedFetchRef.current = false;
-    isFetchingRef.current = false;
-  }, [currentFileIndex]);
-
   // Calculate summary statistics - use columns state if available, otherwise fall back to dataTypeSelections
   const getSummaryStats = () => {
     // Use columns from state (which includes all processed columns) if available
@@ -597,9 +590,45 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
       }));
 
     const renamedColumns = currentColumnEdits.filter(e => e.editedName !== e.originalName && e.keep !== false).length;
-    const numericColumns = columnsToUse.filter(col => col.type === 'number' || col.type === 'float64' || col.type === 'int64').length;
-    const categoricalColumns = columnsToUse.filter(col => col.type === 'category' || col.type === 'object' || col.type === 'string').length;
-    const dateColumns = columnsToUse.filter(col => col.type === 'date' || col.type === 'datetime64').length;
+
+    const numericColumns = columnsToUse.filter(col => {
+      const t = String(col.type || '').toLowerCase();
+      return (
+        t === 'number' ||
+        t === 'numeric' ||
+        t === 'int' ||
+        t === 'integer' ||
+        t === 'int64' ||
+        t === 'int32' ||
+        t === 'float' ||
+        t === 'float64' ||
+        t === 'float32' ||
+        t === 'double' ||
+        t === 'decimal'
+      );
+    }).length;
+
+    const categoricalColumns = columnsToUse.filter(col => {
+      const t = String(col.type || '').toLowerCase();
+      return (
+        t === 'category' ||
+        t === 'categorical' ||
+        t === 'object' ||
+        t === 'string' ||
+        t === 'text'
+      );
+    }).length;
+
+    const dateColumns = columnsToUse.filter(col => {
+      const t = String(col.type || '').toLowerCase();
+      return (
+        t === 'date' ||
+        t === 'datetime' ||
+        t === 'datetime64' ||
+        t === 'datetime64[ns]' ||
+        t === 'timestamp'
+      );
+    }).length;
     const identifiers = columnsToUse.filter(col => col.role === 'identifier').length;
     const measures = columnsToUse.filter(col => col.role === 'measure').length;
     const treatedColumns = currentStrategies.filter(s => s.strategy !== 'none').length;
@@ -649,48 +678,6 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
   const handleDownload = async () => {
     // TODO: Implement download functionality
     console.log('Download cleaned data');
-  };
-
-  const [savingFile, setSavingFile] = useState(false);
-
-  const handleConfirmAndPrime = async () => {
-    if (!currentFile) return;
-    
-    setSavingFile(true);
-    try {
-      // Save the transformed file to Saved DataFrames panel
-      const oldFilePath = currentFile.path;
-      const savedPath = await saveFileToSavedDataFrames(
-        currentFile.path,
-        currentFile.name,
-        oldFilePath
-      );
-      
-      if (savedPath) {
-        // Update file path in flow state
-        flow.updateUploadedFilePath(currentFile.name, savedPath);
-        
-        // Proceed to next stage (U7)
-        onNext();
-      } else {
-        // If save failed, still proceed but show warning
-        toast({
-          title: 'Warning',
-          description: 'File processed but may not be visible in Saved DataFrames panel.',
-          variant: 'destructive',
-        });
-        onNext();
-      }
-    } catch (error: any) {
-      console.error('Error saving file:', error);
-      toast({
-        title: 'Error saving file',
-        description: error.message || 'Failed to save file. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setSavingFile(false);
-    }
   };
 
   if (loading) {
@@ -766,10 +753,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
               </div>
             </div>
             <button
-              onClick={() => {
-                // TODO: Open modal/drawer with naming decisions
-                console.log('View naming decisions');
-              }}
+              onClick={() => onGoToStage && onGoToStage('U3')}
               className="mt-3 text-xs text-[#458EE2] hover:text-[#3a7bc7] flex items-center gap-1"
             >
               View naming decisions
@@ -820,10 +804,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
               </div>
             </div>
             <button
-              onClick={() => {
-                // TODO: Open modal/drawer with role details
-                console.log('View role details');
-              }}
+              onClick={() => onGoToStage && onGoToStage('U4')}
               className="mt-3 text-xs text-[#458EE2] hover:text-[#3a7bc7] flex items-center gap-1"
             >
               View details
@@ -855,10 +836,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
               )}
             </div>
             <button
-              onClick={() => {
-                // TODO: Open modal/drawer with missing value summary
-                console.log('View missing-value summary');
-              }}
+              onClick={() => onGoToStage && onGoToStage('U5')}
               className="mt-3 text-xs text-[#458EE2] hover:text-[#3a7bc7] flex items-center gap-1"
             >
               View missing-value summary
@@ -957,37 +935,6 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           </p>
         </div>
 
-        {/* File Navigation */}
-        {uploadedFiles.length > 1 && (
-          <div className="flex items-center justify-between pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (currentFileIndex > 0) {
-                  setCurrentFileIndex(currentFileIndex - 1);
-                }
-              }}
-              disabled={currentFileIndex === 0}
-            >
-              Previous File
-            </Button>
-            <span className="text-sm text-gray-600">
-              {currentFileIndex + 1} / {uploadedFiles.length}
-            </span>
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (currentFileIndex < uploadedFiles.length - 1) {
-                  setCurrentFileIndex(currentFileIndex + 1);
-                }
-              }}
-              disabled={currentFileIndex === uploadedFiles.length - 1}
-            >
-              Next File
-            </Button>
-          </div>
-        )}
-
         {/* Final Confirmation Panel */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <p className="text-sm text-gray-700 mb-4">
@@ -1037,18 +984,10 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           </div>
           <div className="flex justify-end pt-4 border-t border-blue-200">
             <Button
-              onClick={handleConfirmAndPrime}
-              disabled={savingFile}
+              onClick={onNext}
               className="bg-[#41C185] hover:bg-[#36a870] text-white"
             >
-              {savingFile ? (
-                <>
-                  <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Saving...
-                </>
-              ) : (
-                'Confirm & Prime Dataset'
-              )}
+              Confirm & Prime Dataset
             </Button>
           </div>
         </div>

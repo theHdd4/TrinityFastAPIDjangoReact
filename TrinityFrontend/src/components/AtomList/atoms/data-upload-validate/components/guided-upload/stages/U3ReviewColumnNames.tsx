@@ -69,14 +69,13 @@ function generateRuleBasedSuggestion(columnName: string): { cleaned: string; rea
 
 export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, onNext, onBack }) => {
   const { state, setColumnNameEdits } = flow;
-  const { uploadedFiles, columnNameEdits } = state;
-  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const { uploadedFiles, columnNameEdits, selectedFileIndex } = state;
+  const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
+  const currentFile = uploadedFiles[chosenIndex];
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [deletedColumns, setDeletedColumns] = useState<Set<number>>(new Set());
-
-  const currentFile = uploadedFiles[currentFileIndex];
 
   useEffect(() => {
     const fetchColumnNames = async () => {
@@ -364,12 +363,7 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
 
   const handleNext = () => {
     handleSave();
-    if (currentFileIndex < uploadedFiles.length - 1) {
-      setCurrentFileIndex(currentFileIndex + 1);
-      setDeletedColumns(new Set());
-    } else {
-      onNext();
-    }
+    onNext();
   };
 
   // Check for duplicate names
@@ -560,8 +554,8 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-xs text-gray-600 max-w-xs truncate">
-                          {column.sampleValues.slice(0, 5).join(', ')}
-                          {column.sampleValues.length > 5 && '...'}
+                          {Array.from(new Set(column.sampleValues)).slice(0, 5).join(', ')}
+                          {Array.from(new Set(column.sampleValues)).length > 5 && '...'}
                           {column.sampleValues.length === 0 && <span className="text-gray-400">No samples</span>}
                         </div>
                       </td>
@@ -636,34 +630,7 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
           </p>
         </div>
 
-        {/* File Navigation */}
-        {uploadedFiles.length > 1 && (
-          <div className="flex items-center justify-between pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (currentFileIndex > 0) {
-                  handleSave();
-                  setCurrentFileIndex(currentFileIndex - 1);
-                  setDeletedColumns(new Set());
-                }
-              }}
-              disabled={currentFileIndex === 0}
-            >
-              Previous File
-            </Button>
-            <span className="text-sm text-gray-600">
-              {currentFileIndex + 1} / {uploadedFiles.length}
-            </span>
-            <Button
-              variant="outline"
-              onClick={handleNext}
-              disabled={currentFileIndex === uploadedFiles.length - 1}
-            >
-              Next File
-            </Button>
-          </div>
-        )}
+        {/* Single-file flow after U1 selection: no file navigation */}
       </div>
     </StageLayout>
   );
