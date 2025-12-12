@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-upload-validate/components/guided-upload';
+import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 

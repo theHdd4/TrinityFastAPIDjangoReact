@@ -290,14 +290,14 @@ export const getExploreDataSummary = (data: any): StandardizedDataSummary => {
 };
 
 /**
- * Extract data summary for data-upload-validate atom
+ * Extract data summary for data-validate atom
  */
-export const getDataUploadValidateDataSummary = (data: any): StandardizedDataSummary => {
+export const getDataValidateDataSummary = (data: any): StandardizedDataSummary => {
   const validateConfig = data.validate_json || {};
   const validationResults = data.validation_results || {};
   
   const summary: StandardizedDataSummary = {
-    atom_type: 'data-upload-validate',
+    atom_type: 'data-validate',
     summary_data: {
       validation_rules: validateConfig.validation_rules || [],
       validation_results: {
@@ -340,8 +340,8 @@ export const getDataSummary = (atomType: string, data: any): StandardizedDataSum
       return getDataframeOperationsDataSummary(data);
     case 'explore':
       return getExploreDataSummary(data);
-    case 'data-upload-validate':
-      return getDataUploadValidateDataSummary(data);
+    case 'data-validate':
+      return getDataValidateDataSummary(data);
     default:
       // Default summary for unknown atom types
       return {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { VALIDATE_API } from '@/lib/api';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
-import type { GuidedUploadFlowState, UploadStage } from '@/components/AtomList/atoms/data-upload-validate/components/guided-upload/useGuidedUploadFlow';
+import type { GuidedUploadFlowState, UploadStage } from '@/components/AtomList/atoms/data-validate/components/guided-upload/useGuidedUploadFlow';
 
 interface PersistedFlowState extends GuidedUploadFlowState {
   projectContext: ProjectContext;

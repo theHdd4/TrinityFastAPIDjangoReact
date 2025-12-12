@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
-import type { UploadStage } from '@/components/AtomList/atoms/data-upload-validate/components/guided-upload/useGuidedUploadFlow';
+import type { UploadStage } from '@/components/AtomList/atoms/data-validate/components/guided-upload/useGuidedUploadFlow';
 
 export type LaboratoryScenario = 'A' | 'B' | 'C' | 'D' | 'loading';
 

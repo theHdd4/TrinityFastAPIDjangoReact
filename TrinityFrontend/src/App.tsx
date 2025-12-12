@@ -20,7 +20,7 @@ import SharedDashboard from "./pages/SharedDashboard";
 import SharedDataFrame from "./pages/SharedDataFrame";
 import Users from "./pages/Users";
 import Clients from "./pages/Clients";
-import DataFrameView from "./components/AtomList/atoms/data-upload-validate/DataFrameView";
+import DataFrameView from "./components/AtomList/atoms/data-validate/DataFrameView";
 import KeyboardShortcuts from "./components/KeyboardShortcuts";
 
 const queryClient = new QueryClient();

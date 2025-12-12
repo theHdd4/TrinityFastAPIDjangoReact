@@ -52,6 +52,32 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFileRef[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Wait for atom to be registered in store before rendering
+  useEffect(() => {
+    let cancelled = false;
+    let retryCount = 0;
+    const maxRetries = 3;
+    const retryDelay = 500;
+
+    const checkAtom = () => {
+      if (cancelled) return;
+      
+      if (atom || retryCount >= maxRetries) {
+        setIsInitialized(true);
+      } else {
+        retryCount++;
+        setTimeout(checkAtom, retryDelay);
+      }
+    };
+
+    checkAtom();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [atom]);
   const [openSections, setOpenSections] = useState<string[]>(['setting1', 'fileValidation']);
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
@@ -2252,7 +2278,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       // Complete the save
       if (successfullySavedFiles.length > 0) {
         addNavigationItem(user?.id, {
-          atom: 'data-upload-validate',
+          atom: 'data-validate',
           files: uploadedFiles.map(f => f.name),
           settings
         });
@@ -2348,6 +2374,19 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     Object.values(validationResults).length > 0 &&
     Object.values(validationResults).every(v => v.includes('Success'))
   );
+
+  // Show loading state while initializing
+  if (!isInitialized) {
+    return (
+      <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex items-center justify-center">
+        <div className="animate-pulse flex flex-col items-center">
+          <div className="w-16 h-16 rounded-full bg-blue-200 mb-4"></div>
+          <div className="h-4 w-32 bg-blue-200 rounded mb-2"></div>
+          <div className="h-3 w-48 bg-blue-100 rounded"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">

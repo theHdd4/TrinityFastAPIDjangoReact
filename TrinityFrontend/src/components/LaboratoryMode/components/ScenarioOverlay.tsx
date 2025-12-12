@@ -12,8 +12,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import type { LaboratoryScenario, ScenarioData } from '../hooks/useLaboratoryScenario';
-import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-upload-validate/components/guided-upload';
-import type { GuidedUploadFlowState } from '@/components/AtomList/atoms/data-upload-validate/components/guided-upload/useGuidedUploadFlow';
+import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
+import type { GuidedUploadFlowState } from '@/components/AtomList/atoms/data-validate/components/guided-upload/useGuidedUploadFlow';
 import { useGuidedFlowPersistence } from '../hooks/useGuidedFlowPersistence';
 
 interface ScenarioOverlayProps {

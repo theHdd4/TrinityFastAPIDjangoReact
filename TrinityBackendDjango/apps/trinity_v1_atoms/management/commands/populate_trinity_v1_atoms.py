@@ -13,7 +13,8 @@ class Command(BaseCommand):
         # Data from atomCategories.ts - all atoms from the frontend
         atoms_data = [
             # Data Sources
-            {'atom_id': 'data-upload-validate', 'name': 'Data Upload Validate', 'description': 'Validate and process uploaded data files', 'category': 'Data Sources'},
+            {'atom_id': 'data-upload', 'name': 'Data Upload', 'description': 'Upload, clean, and prime your data files with guided workflow', 'category': 'Data Sources'},
+            {'atom_id': 'data-validate', 'name': 'Data Validate', 'description': 'Validate data with automatic type detection and quality checks', 'category': 'Data Sources'},
             {'atom_id': 'csv-import', 'name': 'CSV Import', 'description': 'Import data from CSV files', 'category': 'Data Sources'},
             {'atom_id': 'json-import', 'name': 'JSON Import', 'description': 'Import data from JSON files', 'category': 'Data Sources'},
             {'atom_id': 'database-connect', 'name': 'Database Connect', 'description': 'Connect to external databases', 'category': 'Data Sources'},

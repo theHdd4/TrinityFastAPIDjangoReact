@@ -176,9 +176,13 @@ export const SIGNUPS_API =
   normalizeUrl(import.meta.env.VITE_SIGNUPS_API) ||
   `${backendOrigin}${djangoPrefix}/signups`;
 
+export const UPLOAD_API =
+  normalizeUrl(import.meta.env.VITE_UPLOAD_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload`;
+
 export const VALIDATE_API =
   normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
-  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-validate`;
 
 export const DATAFRAME_VALIDATION_API =
   normalizeUrl(import.meta.env.VITE_DATAFRAME_VALIDATION_API) ||

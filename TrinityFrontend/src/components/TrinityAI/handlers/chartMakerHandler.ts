@@ -144,7 +144,7 @@ export const chartMakerHandler: AtomHandler = {
     
     try {
        // Try to fetch the frames list to match the filename to object_name
-       const framesResponse = await fetch(`${CHART_MAKER_API.replace('/chart-maker', '')}/data-upload-validate/list_saved_dataframes`);
+       const framesResponse = await fetch(`${CHART_MAKER_API.replace('/chart-maker', '')}/data-validate/list_saved_dataframes`);
       if (framesResponse.ok) {
         const framesData = await framesResponse.json();
         const frames = framesData.files || [];

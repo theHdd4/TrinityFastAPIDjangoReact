@@ -83,8 +83,10 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
     // Supports both display names and atom IDs (kebab-case)
     const atomCategoryMap: Record<string, string> = {
       // Data Sources - Blue
-      'Data Upload Validate': 'blue',
-      'data-upload-validate': 'blue',
+      'Data Upload': 'blue',
+      'data-upload': 'blue',
+      'Data Validate': 'green',
+      'data-validate': 'green',
       'CSV Import': 'blue',
       'csv-import': 'blue', 
       'JSON Import': 'blue',

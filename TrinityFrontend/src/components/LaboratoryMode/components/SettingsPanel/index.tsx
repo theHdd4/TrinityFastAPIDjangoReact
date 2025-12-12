@@ -27,7 +27,8 @@ import {
   LayoutCard,
 } from '../../store/laboratoryStore';
 
-import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
+import DataValidateProperties from '@/components/AtomList/atoms/data-validate/components/properties/DataUploadValidateProperties';
+import DataUploadProperties from '@/components/AtomList/atoms/data-upload/components/properties/DataUploadProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
 import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
 import ConcatProperties from '@/components/AtomList/atoms/concat/components/properties/ConcatProperties';
@@ -145,7 +146,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_CLUSTERING_SETTINGS }
       : atom?.atomId === 'scenario-planner'
       ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
-      : atom?.atomId === 'data-upload-validate'
+      : atom?.atomId === 'data-validate'
+      ? createDefaultDataUploadSettings()
+      : atom?.atomId === 'data-upload'
       ? createDefaultDataUploadSettings()
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
@@ -230,8 +233,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <TabsContent value="settings" className="flex-1 mt-0">
               {selectedAtomId ? (
                 <>
-                  {atom?.atomId === 'data-upload-validate' ? (
-                    <DataUploadValidateProperties atomId={selectedAtomId} />
+                  {atom?.atomId === 'data-validate' ? (
+                    <DataValidateProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'data-upload' ? (
+                    <DataUploadProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'feature-overview' ? (
                     <FeatureOverviewProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'groupby-wtg-avg' ? (

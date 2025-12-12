@@ -76,7 +76,7 @@ type StandaloneChipData = {
 const getCategoryColor = (atomName: string) => {
   const atomCategoryMap: Record<string, string> = {
     // Data Sources - Blue
-    'data-upload-validate': 'blue', 'csv-import': 'blue', 'json-import': 'blue', 'database-connect': 'blue',
+    'data-upload': 'blue', 'data-validate': 'green', 'csv-import': 'blue', 'json-import': 'blue', 'database-connect': 'blue',
     // Data Processing - Green
     'feature-overview': 'green', 'groupby-weighted-average': 'green', 'merge': 'green', 'concat': 'green',
     'scope-selector': 'green', 'row-operations': 'green', 'column-classifier': 'green', 'create-column': 'green',

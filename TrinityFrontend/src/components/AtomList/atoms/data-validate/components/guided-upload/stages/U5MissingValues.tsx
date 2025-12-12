@@ -324,6 +324,59 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
 
         setColumns(columnInfos);
         columnsRef.current = columnInfos;
+        
+        // 🔥 AUTO-SAVE: Save initial suggested treatments immediately so they're available even if user doesn't interact
+        if (currentFile && columnInfos.length > 0) {
+          const initialStrategies: MissingValueStrategy[] = columnInfos
+            .map(col => {
+              if (col.selectedTreatment === 'none') {
+                return null;
+              }
+
+              if (col.selectedTreatment === 'custom') {
+                let value: string | number = col.customValue ?? '';
+
+                if (!col.customValue) {
+                  if (col.columnRole === 'identifier') {
+                    value = 'Unknown';
+                  } else if (col.dataType === 'text' && col.columnRole === 'measure') {
+                    value = 'Not provided';
+                  } else if (col.dataType === 'number') {
+                    value = 0;
+                  } else {
+                    value = '';
+                  }
+                }
+
+                if (col.dataType === 'number' && value !== undefined && value !== null) {
+                  const numericValue = typeof value === 'string' ? Number(value) : value;
+                  if (!Number.isNaN(Number(numericValue))) {
+                    value = numericValue as number;
+                  }
+                }
+
+                return {
+                  columnName: col.columnName,
+                  strategy: 'custom',
+                  value,
+                };
+              }
+
+              return {
+                columnName: col.columnName,
+                strategy: col.selectedTreatment,
+              };
+            })
+            .filter((s): s is MissingValueStrategy => s !== null);
+
+          console.log('🔥 U5 AUTO-SAVE: Saving initial suggested treatments on load:', {
+            fileName: currentFile.name,
+            strategies: initialStrategies
+          });
+
+          setMissingValueStrategies(currentFile.name, initialStrategies);
+        }
+        
         loadedFileRef.current = fileKey;
       } catch (err: any) {
         console.error('Failed to fetch missing values:', err);
@@ -354,6 +407,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
   };
 
   const handleTreatmentChange = (columnName: string, treatment: MissingValueStrategy['strategy']) => {
+    console.log('🔧 U5 handleTreatmentChange called:', { columnName, treatment });
     updateColumns(prev =>
       prev.map(col => {
         if (col.columnName === columnName) {
@@ -367,12 +421,14 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
               customValue = '';
             }
           }
-          return {
+          const updatedCol = {
             ...col,
             selectedTreatment: treatment,
             customValue,
             tag: 'edited_by_user' as const,
           };
+          console.log('🔧 U5 Updated column:', updatedCol);
+          return updatedCol;
         }
         return col;
       }),
@@ -518,7 +574,10 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
   };
 
   function handleSave(nextColumns?: ColumnMissingInfo[]) {
-    if (!currentFile) return;
+    if (!currentFile) {
+      console.log('❌ U5 handleSave: No currentFile, skipping save');
+      return;
+    }
 
     const colsToUse = nextColumns ?? columnsRef.current ?? columns;
 
@@ -564,11 +623,23 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
       })
       .filter((s): s is MissingValueStrategy => s !== null);
 
+    console.log('💾 U5 handleSave called:', {
+      fileName: currentFile.name,
+      columnsCount: colsToUse.length,
+      strategies: strategies
+    });
+
     setMissingValueStrategies(currentFile.name, strategies);
+    console.log('💾 U5 setMissingValueStrategies called successfully');
   }
 
   const handleNext = () => {
+    console.log('🚀 U5 handleNext called - saving before navigation');
+    console.log('🚀 U5 Current columns state:', columns);
+    
     handleSave();
+    
+    console.log('🚀 U5 Navigating to next stage');
     onNext();
   };
 
@@ -842,6 +913,28 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* Debug Section - Remove this after fixing */}
+        <div className="bg-gray-50 border border-gray-300 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-medium text-gray-700">Debug: Current Saved Missing Value Strategies</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const currentStrategies = currentFile ? (missingValueStrategies[currentFile.name] || []) : [];
+                console.log('🔍 U5 Current saved missingValueStrategies:', currentStrategies);
+                alert(`Saved strategies: ${JSON.stringify(currentStrategies, null, 2)}`);
+              }}
+            >
+              Show Saved Strategies
+            </Button>
+          </div>
+          <p className="text-xs text-gray-600">
+            Click "Show Saved Strategies" to see what's currently saved in missingValueStrategies. 
+            This should update when you change treatment dropdowns.
+          </p>
         </div>
 
         {/* Summary */}
