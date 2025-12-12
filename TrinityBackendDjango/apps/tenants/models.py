@@ -15,6 +15,7 @@ class Tenant(TenantMixin):
     projects_allowed = models.JSONField(default=list, blank=True)
     admin_name = models.CharField(max_length=255, blank=True)
     admin_email = models.EmailField(blank=True)
+    is_active = models.BooleanField(default=True)
 
     auto_create_schema = True
 

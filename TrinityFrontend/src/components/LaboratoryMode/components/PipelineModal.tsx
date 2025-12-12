@@ -650,12 +650,72 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 
                 // Get additional_results from execution
                 const additionalResults = taskResult.additional_results || taskResult.result?.additional_results || {};
+                const logEntryAdditionalResults = logEntry.additional_results || {};
                 
-                // 1. Update file_path/dataSource to replacement file (if it was replaced)
-                if (stepConfig.file_path && stepConfig.file_path !== currentSettings.selectedFile) {
+                // 1. Update file_path/dataSource to replacement file (always update even if same, to ensure consistency)
+                if (stepConfig.file_path) {
                   updateData.selectedFile = stepConfig.file_path;
-                } else if (stepConfig.file_key && stepConfig.file_key !== currentSettings.selectedFile) {
+                } else if (stepConfig.file_key) {
                   updateData.selectedFile = stepConfig.file_key;
+                }
+                
+                // 1a. ALWAYS load column summary (like feature-overview identifiers/measures and pivot-table columns)
+                // Priority: logEntry (from backend) > logEntryAdditionalResults > additionalResults
+                // This ensures filters and numerical columns are always up-to-date, even if filename is the same
+                const columnSummary = logEntry.column_summary 
+                  || logEntryAdditionalResults.column_summary 
+                  || additionalResults.column_summary;
+                const columns = logEntry.columns 
+                  || logEntryAdditionalResults.columns 
+                  || additionalResults.columns;
+                const filterOptions = logEntry.filter_options 
+                  || logEntryAdditionalResults.filter_options 
+                  || additionalResults.filter_options;
+                const numericalColumns = logEntry.numerical_columns 
+                  || logEntryAdditionalResults.numerical_columns 
+                  || additionalResults.numerical_columns;
+                
+                // Extract columns and filter options from column_summary if not directly available
+                let extractedColumns = columns;
+                let extractedFilterOptions = filterOptions;
+                let extractedNumericalColumns = numericalColumns;
+                
+                if (columnSummary && columnSummary.summary) {
+                  const summary = Array.isArray(columnSummary.summary) ? columnSummary.summary : [];
+                  if (!extractedColumns) {
+                    extractedColumns = summary.map((item: any) => item.column).filter(Boolean);
+                  }
+                  if (!extractedFilterOptions) {
+                    extractedFilterOptions = {};
+                    summary.forEach((item: any) => {
+                      const column = item.column;
+                      if (column && item.unique_values) {
+                        extractedFilterOptions[column] = item.unique_values;
+                        extractedFilterOptions[column.toLowerCase()] = item.unique_values;
+                      }
+                    });
+                  }
+                  if (!extractedNumericalColumns) {
+                    extractedNumericalColumns = [];
+                    summary.forEach((item: any) => {
+                      const column = item.column;
+                      const dataType = String(item.data_type || '').toLowerCase();
+                      if (column && (dataType.includes('int') || dataType.includes('float') || dataType.includes('number'))) {
+                        extractedNumericalColumns.push(column);
+                      }
+                    });
+                  }
+                }
+                
+                // Always update columns, filter options, and numerical columns (like feature-overview always updates identifiers/measures)
+                if (extractedColumns && Array.isArray(extractedColumns) && extractedColumns.length > 0) {
+                  updateData.availableColumns = extractedColumns;
+                }
+                if (extractedFilterOptions && typeof extractedFilterOptions === 'object' && Object.keys(extractedFilterOptions).length > 0) {
+                  updateData.filterOptions = extractedFilterOptions; // Replace entirely, don't merge
+                }
+                if (extractedNumericalColumns && Array.isArray(extractedNumericalColumns) && extractedNumericalColumns.length > 0) {
+                  updateData.numericalColumns = extractedNumericalColumns; // Replace entirely, don't merge
                 }
                 
                 // 2. Apply stored configuration from MongoDB
@@ -804,6 +864,154 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 if (dateAnalysis) {
                   updateData.dateAnalysis = dateAnalysis;
                 }
+                
+                // Update atom settings
+                updateAtomSettings(atomInstanceId, updateData);
+                
+                successCount++;
+                processedCount++;
+              } else if (atomType === 'pivot-table') {
+                // Handle pivot-table atom updates
+                // Force re-render by updating timestamp (like feature-overview)
+                const stepConfig = logEntry.configuration || {};
+                const updateData: any = {
+                  pipelineExecutionTimestamp: Date.now(), // Force re-render by changing timestamp
+                };
+                
+                // Get additional_results from execution
+                const additionalResults = taskResult.additional_results || taskResult.result?.additional_results || {};
+                const logEntryAdditionalResults = logEntry.additional_results || {};
+                
+                // Prioritize logEntry for direct backend-provided data, then task_response, then additional_results
+                const pivotResults = logEntry.pivot_results 
+                  || logEntryAdditionalResults.pivot_results 
+                  || additionalResults.pivot_results 
+                  || taskResponse.data 
+                  || taskResult.data;
+                const pivotHierarchy = logEntry.pivot_hierarchy 
+                  || logEntryAdditionalResults.pivot_hierarchy 
+                  || additionalResults.pivot_hierarchy 
+                  || taskResponse.hierarchy 
+                  || taskResult.hierarchy;
+                const pivotColumnHierarchy = logEntry.pivot_column_hierarchy 
+                  || logEntryAdditionalResults.pivot_column_hierarchy 
+                  || additionalResults.pivot_column_hierarchy 
+                  || taskResponse.column_hierarchy 
+                  || taskResult.column_hierarchy;
+                const pivotRowCount = logEntry.pivot_row_count 
+                  || logEntryAdditionalResults.pivot_row_count 
+                  || additionalResults.pivot_row_count 
+                  || taskResponse.rows 
+                  || taskResult.rows;
+                const pivotUpdatedAt = logEntry.pivot_updated_at 
+                  || logEntryAdditionalResults.pivot_updated_at 
+                  || additionalResults.pivot_updated_at 
+                  || taskResponse.updated_at 
+                  || taskResult.updated_at;
+                
+                // 1. Update dataSource to replacement file (if it was replaced)
+                // Always update even if same, to ensure consistency
+                if (stepConfig.data_source) {
+                  updateData.dataSource = stepConfig.data_source;
+                } else if (stepConfig.file_key) {
+                  updateData.dataSource = stepConfig.file_key;
+                }
+                
+                // 1a. ALWAYS load column summary (like feature-overview identifiers/measures)
+                // Priority: logEntry (from backend) > logEntryAdditionalResults > additionalResults
+                // This ensures columns and filter options are always up-to-date, even if filename is the same
+                const columnSummary = logEntry.column_summary 
+                  || logEntryAdditionalResults.column_summary 
+                  || additionalResults.column_summary;
+                const columns = logEntry.columns 
+                  || logEntryAdditionalResults.columns 
+                  || additionalResults.columns;
+                const filterOptions = logEntry.filter_options 
+                  || logEntryAdditionalResults.filter_options 
+                  || additionalResults.filter_options;
+                
+                // Extract columns from column_summary if not directly available
+                let extractedColumns = columns;
+                let extractedFilterOptions = filterOptions;
+                
+                if (columnSummary && columnSummary.summary) {
+                  const summary = Array.isArray(columnSummary.summary) ? columnSummary.summary : [];
+                  if (!extractedColumns) {
+                    extractedColumns = summary.map((item: any) => item.column).filter(Boolean);
+                  }
+                  if (!extractedFilterOptions) {
+                    extractedFilterOptions = {};
+                    summary.forEach((item: any) => {
+                      const column = item.column;
+                      if (column && item.unique_values) {
+                        extractedFilterOptions[column] = item.unique_values;
+                        extractedFilterOptions[column.toLowerCase()] = item.unique_values;
+                      }
+                    });
+                  }
+                }
+                
+                // Always update columns and filter options (like feature-overview always updates identifiers/measures)
+                if (extractedColumns && Array.isArray(extractedColumns) && extractedColumns.length > 0) {
+                  updateData.dataSourceColumns = extractedColumns;
+                  updateData.fields = extractedColumns;
+                }
+                if (extractedFilterOptions && typeof extractedFilterOptions === 'object' && Object.keys(extractedFilterOptions).length > 0) {
+                  updateData.pivotFilterOptions = extractedFilterOptions; // Replace entirely, don't merge
+                }
+                
+                // 2. Update pivot results if available
+                if (pivotResults && Array.isArray(pivotResults)) {
+                  updateData.pivotResults = pivotResults;
+                }
+                if (pivotHierarchy && Array.isArray(pivotHierarchy)) {
+                  updateData.pivotHierarchy = pivotHierarchy;
+                }
+                if (pivotColumnHierarchy && Array.isArray(pivotColumnHierarchy)) {
+                  updateData.pivotColumnHierarchy = pivotColumnHierarchy;
+                }
+                if (pivotRowCount !== undefined && pivotRowCount !== null) {
+                  updateData.pivotRowCount = pivotRowCount;
+                }
+                if (pivotUpdatedAt) {
+                  updateData.pivotUpdatedAt = pivotUpdatedAt;
+                }
+                
+                // 3. Apply stored configuration from MongoDB
+                if (stepConfig.rows && Array.isArray(stepConfig.rows)) {
+                  updateData.rowFields = stepConfig.rows;
+                }
+                if (stepConfig.columns && Array.isArray(stepConfig.columns)) {
+                  updateData.columnFields = stepConfig.columns;
+                }
+                if (stepConfig.values && Array.isArray(stepConfig.values)) {
+                  updateData.valueFields = stepConfig.values;
+                }
+                if (stepConfig.filters && Array.isArray(stepConfig.filters)) {
+                  // Convert filters to pivotFilterSelections format
+                  const filterSelections: Record<string, string[]> = {};
+                  stepConfig.filters.forEach((filter: any) => {
+                    if (filter.field && filter.include && Array.isArray(filter.include)) {
+                      filterSelections[filter.field] = filter.include;
+                    }
+                  });
+                  if (Object.keys(filterSelections).length > 0) {
+                    updateData.pivotFilterSelections = {
+                      ...(currentSettings.pivotFilterSelections || {}),
+                      ...filterSelections,
+                    };
+                  }
+                }
+                if (stepConfig.sorting && typeof stepConfig.sorting === 'object') {
+                  updateData.pivotSorting = stepConfig.sorting;
+                }
+                if (stepConfig.grand_totals) {
+                  updateData.grandTotalsMode = stepConfig.grand_totals;
+                }
+                
+                // 4. Update status
+                updateData.pivotStatus = 'success';
+                updateData.pivotError = null;
                 
                 // Update atom settings
                 updateAtomSettings(atomInstanceId, updateData);
@@ -971,7 +1179,7 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 const additionalResults = taskResult.additional_results || taskResult.result?.additional_results || {};
                 const logEntryAdditionalResults = logEntry.additional_results || {};
 
-                // 1. Update dataSource/fileId to replacement file (if it was replaced)
+                // 1. Update dataSource/fileId to replacement file (always update even if same, to ensure consistency)
                 const fileId = stepConfig.file_id || logEntryAdditionalResults.file_id || additionalResults.file_id;
                 console.log('🔄 [PIPELINE] ChartMaker fileId resolution', {
                   stepConfig_file_id: stepConfig.file_id,
@@ -982,13 +1190,106 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                   currentSettings_fileId: currentSettings.fileId,
                 });
                 
-                if (fileId && fileId !== currentSettings.dataSource && fileId !== currentSettings.fileId) {
+                if (fileId) {
                   updateData.dataSource = fileId;
                   updateData.fileId = fileId;
                   updateData.selectedDataSource = fileId;
                   console.log('✅ [PIPELINE] ChartMaker fileId updated', { fileId });
                 }
-
+                
+                // 1a. ALWAYS load column summary (like feature-overview identifiers/measures and pivot-table columns)
+                // Priority: logEntry (from backend) > logEntryAdditionalResults > additionalResults
+                // This ensures column options for each dropdown are always up-to-date, even if filename is the same
+                const columnSummary = logEntry.column_summary 
+                  || logEntryAdditionalResults.column_summary 
+                  || additionalResults.column_summary;
+                const columns = logEntry.columns 
+                  || logEntryAdditionalResults.columns 
+                  || additionalResults.columns;
+                
+                // Extract columns from column_summary if not directly available
+                let extractedColumns = columns;
+                
+                if (columnSummary && columnSummary.summary) {
+                  const summary = Array.isArray(columnSummary.summary) ? columnSummary.summary : [];
+                  if (!extractedColumns) {
+                    extractedColumns = summary.map((item: any) => item.column).filter(Boolean);
+                  }
+                }
+                
+                // Always update columns for dropdown options (like feature-overview always updates identifiers/measures)
+                if (extractedColumns && Array.isArray(extractedColumns) && extractedColumns.length > 0) {
+                  // Update uploadedData with fresh columns for all dropdowns
+                  updateData.uploadedData = {
+                    ...(currentSettings.uploadedData || {}),
+                    columns: extractedColumns,
+                    allColumns: extractedColumns,
+                    numeric_columns: extractedColumns.filter((col: string) => {
+                      // Try to identify numeric columns from column summary
+                      if (columnSummary && columnSummary.summary) {
+                        const item = columnSummary.summary.find((s: any) => s.column === col);
+                        if (item) {
+                          const dataType = String(item.data_type || '').toLowerCase();
+                          return dataType.includes('int') || dataType.includes('float') || dataType.includes('number');
+                        }
+                      }
+                      return false;
+                    }),
+                    numericColumns: extractedColumns.filter((col: string) => {
+                      if (columnSummary && columnSummary.summary) {
+                        const item = columnSummary.summary.find((s: any) => s.column === col);
+                        if (item) {
+                          const dataType = String(item.data_type || '').toLowerCase();
+                          return dataType.includes('int') || dataType.includes('float') || dataType.includes('number');
+                        }
+                      }
+                      return false;
+                    }),
+                    categorical_columns: extractedColumns.filter((col: string) => {
+                      if (columnSummary && columnSummary.summary) {
+                        const item = columnSummary.summary.find((s: any) => s.column === col);
+                        if (item) {
+                          const dataType = String(item.data_type || '').toLowerCase();
+                          return !(dataType.includes('int') || dataType.includes('float') || dataType.includes('number'));
+                        }
+                      }
+                      return true;
+                    }),
+                    categoricalColumns: extractedColumns.filter((col: string) => {
+                      if (columnSummary && columnSummary.summary) {
+                        const item = columnSummary.summary.find((s: any) => s.column === col);
+                        if (item) {
+                          const dataType = String(item.data_type || '').toLowerCase();
+                          return !(dataType.includes('int') || dataType.includes('float') || dataType.includes('number'));
+                        }
+                      }
+                      return true;
+                    }),
+                    unique_values: (() => {
+                      const uniqueValues: Record<string, string[]> = {};
+                      if (columnSummary && columnSummary.summary) {
+                        columnSummary.summary.forEach((item: any) => {
+                          if (item.column && item.unique_values) {
+                            uniqueValues[item.column] = item.unique_values;
+                          }
+                        });
+                      }
+                      return uniqueValues;
+                    })(),
+                    uniqueValuesByColumn: (() => {
+                      const uniqueValues: Record<string, string[]> = {};
+                      if (columnSummary && columnSummary.summary) {
+                        columnSummary.summary.forEach((item: any) => {
+                          if (item.column && item.unique_values) {
+                            uniqueValues[item.column] = item.unique_values;
+                          }
+                        });
+                      }
+                      return uniqueValues;
+                    })(),
+                  };
+                }
+ 
                 // 2. If we have a file_id, try to reload file data FIRST to get fresh columns and unique values
                 // This is needed to map column names case-insensitively
                 let loadedFileData: any = null;

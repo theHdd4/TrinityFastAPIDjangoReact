@@ -627,6 +627,30 @@ class ChartMakerExecutor(BaseAtomExecutor):
         result_file = None
         file_id = primary_file
         
+        # 🔧 CRITICAL: Always load column summary (similar to pivot-table and feature-overview)
+        # This ensures column options for each dropdown are always up-to-date, even if filename is the same
+        # This is important because the file content might have changed
+        if primary_file:
+            logger.info(
+                f"📋 ChartMaker executor: Loading column summary for file '{primary_file}' "
+                f"(always loads to ensure column options are up-to-date)"
+            )
+            try:
+                from app.features.feature_overview.routes import column_summary
+                column_summary_result = await column_summary(primary_file)
+                
+                # Extract columns from column summary
+                summary = column_summary_result.get("summary", [])
+                columns = [item.get("column") for item in summary if item.get("column")]
+                
+                additional_results["column_summary"] = column_summary_result
+                additional_results["columns"] = columns
+                
+                logger.info(f"✅ ChartMaker executor: Loaded {len(columns)} columns for dropdown options")
+            except Exception as e:
+                logger.warning(f"⚠️ ChartMaker executor: Failed to load column summary: {e}")
+                # Don't fail the entire execution if column summary fails
+        
         # Execute load-saved-dataframe endpoint if it was called
         if has_load_dataframe and load_dataframe_endpoint:
             logger.info(
@@ -897,6 +921,48 @@ class CorrelationExecutor(BaseAtomExecutor):
         
         task_response = None
         additional_results = {}
+        
+        # 🔧 CRITICAL: Always load column summary (similar to pivot-table and feature-overview)
+        # This ensures filters and numerical columns are always up-to-date, even if filename is the same
+        # This is important because the file content might have changed
+        if primary_file:
+            logger.info(
+                f"📋 Correlation executor: Loading column summary for file '{primary_file}' "
+                f"(always loads to ensure filters/numerical columns are up-to-date)"
+            )
+            try:
+                from app.features.feature_overview.routes import column_summary
+                column_summary_result = await column_summary(primary_file)
+                
+                # Extract columns and filter options from column summary
+                summary = column_summary_result.get("summary", [])
+                columns = [item.get("column") for item in summary if item.get("column")]
+                filter_options: Dict[str, List[str]] = {}
+                numerical_columns: List[str] = []
+                
+                for item in summary:
+                    column = item.get("column")
+                    if column:
+                        # Extract filter options (unique values)
+                        unique_values = item.get("unique_values", [])
+                        if unique_values:
+                            filter_options[column] = unique_values
+                            filter_options[column.lower()] = unique_values
+                        
+                        # Identify numerical columns
+                        data_type = str(item.get("data_type", "")).lower()
+                        if any(num_type in data_type for num_type in ["int", "float", "number"]):
+                            numerical_columns.append(column)
+                
+                additional_results["column_summary"] = column_summary_result
+                additional_results["columns"] = columns
+                additional_results["filter_options"] = filter_options
+                additional_results["numerical_columns"] = numerical_columns
+                
+                logger.info(f"✅ Correlation executor: Loaded {len(columns)} columns, {len(numerical_columns)} numerical columns, and filter options")
+            except Exception as e:
+                logger.warning(f"⚠️ Correlation executor: Failed to load column summary: {e}")
+                # Don't fail the entire execution if column summary fails
         
         # Execute filter-and-correlate endpoint if it was called
         if has_filter_and_correlate and filter_and_correlate_endpoint:
@@ -1434,6 +1500,275 @@ class ConcatExecutor(BaseAtomExecutor):
 
 _concat_executor = ConcatExecutor()
 register_atom_executor(_concat_executor)
+
+
+class PivotTableExecutor(BaseAtomExecutor):
+    """Executor for pivot-table atom.
+    
+    Handles endpoints:
+    - /pivot/{config_id}/compute - Compute pivot table
+    - /pivot/{config_id}/save - Save pivot table results
+    """
+    
+    def get_atom_type(self) -> str:
+        return "pivot-table"
+    
+    async def execute(
+        self,
+        atom_instance_id: str,
+        card_id: str,
+        configuration: Dict[str, Any],
+        input_files: List[str],
+        api_calls: List[Dict[str, Any]],
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Execute pivot-table atom based on API calls from MongoDB."""
+        from app.features.pivot_table.routes import compute_pivot_endpoint, save_pivot_endpoint
+        from app.features.pivot_table.schemas import PivotComputeRequest, PivotSaveRequest
+        import json
+        
+        # Get primary input file
+        primary_file = input_files[0] if input_files else configuration.get("data_source", "")
+        
+        # Get original data_source from stored API calls to detect if file was replaced
+        original_data_source = None
+        for api_call in api_calls:
+            endpoint = api_call.get("endpoint", "")
+            if "/pivot" in endpoint.lower() and "/compute" in endpoint.lower():
+                params = api_call.get("params", {})
+                original_data_source = params.get("data_source", "")
+                break
+        
+        # Check which endpoints were called
+        has_compute = False
+        has_save = False
+        compute_endpoint = None
+        save_endpoint = None
+        
+        for api_call in api_calls:
+            endpoint = api_call.get("endpoint", "")
+            # Check for compute endpoint
+            if "/pivot" in endpoint.lower() and "/compute" in endpoint.lower():
+                has_compute = True
+                compute_endpoint = api_call
+            # Check for save endpoint
+            elif "/pivot" in endpoint.lower() and "/save" in endpoint.lower():
+                has_save = True
+                save_endpoint = api_call
+        
+        task_response = None
+        additional_results = {}
+        result_file = None
+        
+        # 🔧 CRITICAL: Always load column summary (similar to feature-overview identifiers/measures)
+        # This ensures columns and filter options are always up-to-date, even if filename is the same
+        # This is important because the file content might have changed
+        if primary_file:
+            logger.info(
+                f"📋 PivotTable executor: Loading column summary for file '{primary_file}' "
+                f"(always loads to ensure columns/filter options are up-to-date)"
+            )
+            try:
+                from app.features.feature_overview.routes import column_summary
+                column_summary_result = await column_summary(primary_file)
+                
+                # Extract columns and filter options from column summary
+                summary = column_summary_result.get("summary", [])
+                columns = [item.get("column") for item in summary if item.get("column")]
+                filter_options: Dict[str, List[str]] = {}
+                
+                for item in summary:
+                    column = item.get("column")
+                    if column:
+                        unique_values = item.get("unique_values", [])
+                        if unique_values:
+                            filter_options[column] = unique_values
+                            filter_options[column.lower()] = unique_values
+                
+                additional_results["column_summary"] = column_summary_result
+                additional_results["columns"] = columns
+                additional_results["filter_options"] = filter_options
+                
+                logger.info(f"✅ PivotTable executor: Loaded {len(columns)} columns and filter options for replacement file")
+            except Exception as e:
+                logger.warning(f"⚠️ PivotTable executor: Failed to load column summary for replacement file: {e}")
+                # Don't fail the entire execution if column summary fails
+        
+        # Execute compute endpoint if it was called
+        if has_compute and compute_endpoint:
+            logger.info(
+                f"🔄 PivotTable executor: Executing /compute for atom {atom_instance_id} "
+                f"with file: {primary_file}"
+            )
+            
+            try:
+                # Extract configuration from API call params
+                compute_config = compute_endpoint.get("params", {})
+                
+                # 🔧 CRITICAL: Always use replacement file (primary_file) instead of stored data_source
+                # Priority: 1. primary_file (replacement from pipeline), 2. configuration.data_source (updated by pipeline), 3. compute_config.data_source (original)
+                stored_data_source = compute_config.get("data_source", "")
+                config_data_source = configuration.get("data_source", "")
+                data_source = primary_file if primary_file else (config_data_source if config_data_source else stored_data_source)
+                if primary_file and primary_file != stored_data_source:
+                    logger.info(f"📋 PivotTable executor: Using replacement file '{data_source}' instead of stored '{stored_data_source}'")
+                elif config_data_source and config_data_source != stored_data_source:
+                    logger.info(f"📋 PivotTable executor: Using updated config data_source '{data_source}' instead of stored '{stored_data_source}'")
+                else:
+                    logger.info(f"📋 PivotTable executor: Using data_source '{data_source}'")
+                
+                # Build PivotComputeRequest from stored configuration
+                from app.features.pivot_table.schemas import PivotValueConfig, PivotFilterConfig
+                
+                # Convert values to PivotValueConfig objects
+                values = []
+                for v in compute_config.get("values", []):
+                    if isinstance(v, dict):
+                        values.append(PivotValueConfig(**v))
+                    else:
+                        values.append(v)
+                
+                # Convert filters to PivotFilterConfig objects
+                filters = []
+                for f in compute_config.get("filters", []):
+                    if isinstance(f, dict):
+                        filters.append(PivotFilterConfig(**f))
+                    else:
+                        filters.append(f)
+                
+                request = PivotComputeRequest(
+                    data_source=data_source,
+                    rows=compute_config.get("rows", []),
+                    columns=compute_config.get("columns", []),
+                    values=values,
+                    filters=filters,
+                    sorting=compute_config.get("sorting", {}),
+                    dropna=compute_config.get("dropna", True),
+                    fill_value=compute_config.get("fill_value"),
+                    limit=compute_config.get("limit"),
+                    grand_totals=compute_config.get("grand_totals", "off"),
+                )
+                
+                # Call compute_pivot_endpoint directly
+                result = await compute_pivot_endpoint(
+                    config_id=atom_instance_id,
+                    payload=request,
+                    client_name=kwargs.get("client_name"),
+                    app_name=kwargs.get("app_name"),
+                    project_name=kwargs.get("project_name"),
+                    card_id=card_id,
+                    canvas_position=kwargs.get("canvas_position", 0),
+                )
+                
+                # Convert Pydantic model to dict if needed
+                if hasattr(result, 'model_dump'):
+                    result_dict = result.model_dump()
+                elif hasattr(result, 'dict'):
+                    result_dict = result.dict()
+                elif isinstance(result, dict):
+                    result_dict = result
+                else:
+                    return {
+                        "status": "failed",
+                        "result_file": None,
+                        "message": "Pivot compute returned unexpected result type",
+                        "task_response": None,
+                        "additional_results": None
+                    }
+                
+                # Store pivot results in task_response for frontend to access
+                task_response = {
+                    "status": result_dict.get("status", "success"),
+                    "data": result_dict.get("data", []),
+                    "hierarchy": result_dict.get("hierarchy", []),
+                    "column_hierarchy": result_dict.get("column_hierarchy", []),
+                    "rows": result_dict.get("rows", 0),
+                    "updated_at": result_dict.get("updated_at"),
+                    "config_id": result_dict.get("config_id", atom_instance_id),
+                }
+                
+                # Also store in additional_results for pipeline endpoint
+                additional_results["pivot_results"] = result_dict.get("data", [])
+                additional_results["pivot_hierarchy"] = result_dict.get("hierarchy", [])
+                additional_results["pivot_column_hierarchy"] = result_dict.get("column_hierarchy", [])
+                additional_results["pivot_row_count"] = result_dict.get("rows", 0)
+                additional_results["pivot_updated_at"] = result_dict.get("updated_at")
+                
+            except Exception as e:
+                logger.error(f"❌ Error executing pivot-table compute: {e}", exc_info=True)
+                return {
+                    "status": "failed",
+                    "result_file": None,
+                    "message": f"Error executing pivot-table compute: {str(e)}",
+                    "task_response": None,
+                    "additional_results": None
+                }
+        
+        # Execute save endpoint if it was called
+        if has_save and save_endpoint:
+            logger.info(
+                f"💾 PivotTable executor: Executing /save for atom {atom_instance_id}"
+            )
+            
+            try:
+                # Extract configuration from API call params
+                save_config = save_endpoint.get("params", {})
+                filename = save_config.get("filename")
+                
+                # Build PivotSaveRequest
+                save_request = PivotSaveRequest(filename=filename) if filename else None
+                
+                # Call save_pivot_endpoint directly
+                save_result = await save_pivot_endpoint(
+                    config_id=atom_instance_id,
+                    payload=save_request,
+                    client_name=kwargs.get("client_name"),
+                    app_name=kwargs.get("app_name"),
+                    project_name=kwargs.get("project_name"),
+                    card_id=card_id,
+                    canvas_position=kwargs.get("canvas_position", 0),
+                )
+                
+                # Convert Pydantic model to dict if needed
+                if hasattr(save_result, 'model_dump'):
+                    save_result_dict = save_result.model_dump()
+                elif hasattr(save_result, 'dict'):
+                    save_result_dict = save_result.dict()
+                elif isinstance(save_result, dict):
+                    save_result_dict = save_result
+                else:
+                    logger.warning("⚠️ Pivot save returned unexpected result")
+                    save_result_dict = {}
+                
+                result_file = save_result_dict.get("object_name")
+                additional_results["saved_file"] = result_file
+                additional_results["save_result"] = save_result_dict
+                
+            except Exception as e:
+                logger.error(f"❌ Error executing pivot-table save: {e}", exc_info=True)
+                # Don't fail the whole execution if save fails
+                logger.warning("⚠️ Pivot save failed, but compute was successful")
+        
+        if has_compute:
+            return {
+                "status": "success",
+                "result_file": result_file,
+                "message": "Pivot table executed successfully",
+                "task_response": task_response,
+                "additional_results": additional_results if additional_results else None
+            }
+        else:
+            return {
+                "status": "failed",
+                "result_file": None,
+                "message": "No matching pivot-table endpoint found in API calls",
+                "task_response": None,
+                "additional_results": None
+            }
+
+
+_pivot_table_executor = PivotTableExecutor()
+register_atom_executor(_pivot_table_executor)
 
 
 async def execute_atom_step(

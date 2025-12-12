@@ -412,6 +412,59 @@ def get_data_upload_validate_router() -> Optional[APIRouter]:
         return None
 
 
+def get_metric_router() -> Optional[APIRouter]:
+    """
+    Get the metric agent router.
+    This is the main connection point for external systems.
+    
+    Returns:
+        APIRouter for metric agent, or None if not available
+    """
+    try:
+        # Ensure agents are initialized
+        initialize_all_agents()
+        
+        # Get metric router from registry
+        router = get_agent_router("metric")
+        
+        if router:
+            # Ensure main_app is imported to register routes
+            route_count_before = len(router.routes)
+            try:
+                # Try multiple import strategies to ensure routes are registered
+                try:
+                    import Agent_Metric.main_app
+                except ImportError:
+                    try:
+                        from Agent_Metric import main_app
+                    except ImportError:
+                        # Try absolute import
+                        import sys
+                        from pathlib import Path
+                        agent_dir = Path(__file__).resolve().parent
+                        if str(agent_dir) not in sys.path:
+                            sys.path.insert(0, str(agent_dir))
+                        import Agent_Metric.main_app
+                
+                route_count_after = len(router.routes)
+                logger.info(f"✅ Metric router retrieved successfully")
+                logger.info(f"  Routes before main_app import: {route_count_before}")
+                logger.info(f"  Routes after main_app import: {route_count_after}")
+                if route_count_after == 0:
+                    logger.warning("⚠️ Router has no routes after importing main_app!")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import main_app to register routes: {e}")
+                route_count = len(router.routes)
+                logger.info(f"✅ Metric router retrieved (has {route_count} routes)")
+        else:
+            logger.warning("⚠️ Metric router not found in registry")
+        
+        return router
+    except Exception as e:
+        logger.error(f"❌ Failed to get metric router: {e}", exc_info=True)
+        return None
+
+
 def get_fetch_atom_router() -> Optional[APIRouter]:
     """
     Get the fetch_atom agent router.

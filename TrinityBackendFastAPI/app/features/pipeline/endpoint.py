@@ -214,6 +214,9 @@ async def run_pipeline(
             if primary_input_file:
                 updated_config["file_key"] = primary_input_file
                 updated_config["object_names"] = primary_input_file
+                # For pivot-table atoms, also update data_source
+                if atom_type == "pivot-table":
+                    updated_config["data_source"] = primary_input_file
             
             # Get API calls from step for execution AND frontend access
             api_calls = step.get("api_calls", [])
@@ -350,6 +353,35 @@ async def run_pipeline(
                             log_entry["save_result"] = additional_results.get("save_result")
                         if additional_results.get("init_result"):
                             log_entry["init_result"] = additional_results.get("init_result")
+                        
+                        # Include pivot-table-specific results for frontend
+                        if additional_results.get("pivot_results"):
+                            log_entry["pivot_results"] = additional_results.get("pivot_results")
+                        if additional_results.get("pivot_hierarchy"):
+                            log_entry["pivot_hierarchy"] = additional_results.get("pivot_hierarchy")
+                        if additional_results.get("pivot_column_hierarchy"):
+                            log_entry["pivot_column_hierarchy"] = additional_results.get("pivot_column_hierarchy")
+                        if additional_results.get("pivot_row_count") is not None:
+                            log_entry["pivot_row_count"] = additional_results.get("pivot_row_count")
+                        if additional_results.get("pivot_updated_at"):
+                            log_entry["pivot_updated_at"] = additional_results.get("pivot_updated_at")
+                        if additional_results.get("saved_file"):
+                            log_entry["saved_file"] = additional_results.get("saved_file")
+                        # Include column summary for replacement files
+                        if additional_results.get("column_summary"):
+                            log_entry["column_summary"] = additional_results.get("column_summary")
+                        if additional_results.get("columns"):
+                            log_entry["columns"] = additional_results.get("columns")
+                        if additional_results.get("filter_options"):
+                            log_entry["filter_options"] = additional_results.get("filter_options")
+                        # Include column summary for correlation (filters and numerical columns)
+                        if additional_results.get("numerical_columns"):
+                            log_entry["numerical_columns"] = additional_results.get("numerical_columns")
+                        # Include column summary for chartmaker (column options for dropdowns)
+                        if additional_results.get("column_summary"):
+                            log_entry["column_summary"] = additional_results.get("column_summary")
+                        if additional_results.get("columns"):
+                            log_entry["columns"] = additional_results.get("columns")
                         
                         # Store all additional_results for frontend to access
                         log_entry["additional_results"] = additional_results

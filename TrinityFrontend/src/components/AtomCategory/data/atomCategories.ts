@@ -63,6 +63,7 @@ import dataframeOperations from '@/components/AtomList/atoms/dataframe-operation
 import clustering from '@/components/AtomList/atoms/clustering';
 import pivotTable from '@/components/AtomList/atoms/pivot-table';
 import unpivot from '@/components/AtomList/atoms/unpivot';
+import table from '@/components/AtomList/atoms/table';
 
 export interface Atom {
   id: string;
@@ -106,7 +107,8 @@ export const atomCategories: AtomCategory[] = [
       rowOperations,
       columnClassifier,
       createColumn,
-      dataframeOperations
+      dataframeOperations,
+      table
     ]
   },
   {
@@ -117,7 +119,8 @@ export const atomCategories: AtomCategory[] = [
       correlation,
       explore,
       descriptiveStats,
-      trendAnalysis
+      trendAnalysis,
+      table
     ]
   },
   {
@@ -172,7 +175,8 @@ export const atomCategories: AtomCategory[] = [
       basePriceEstimator,
       promoEstimator,
       pivotTable,
-      unpivot
+      unpivot,
+      table
     ]
   }
 ];

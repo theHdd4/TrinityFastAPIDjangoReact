@@ -13,7 +13,7 @@ import uuid
 import re
 import aiohttp
 from dataclasses import asdict
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -100,6 +100,15 @@ class GenerateSequenceRequest(BaseModel):
 class ExecuteSequenceRequest(BaseModel):
     sequence: Dict[str, Any]
     session_id: Optional[str] = None
+    mode: Optional[str] = None
+
+
+class ClarificationResponseRequest(BaseModel):
+    type: Literal["clarification_response"]
+    requestId: str
+    session_id: str
+    message: str
+    values: Optional[Dict[str, Any]] = None
 
 
 class ChatResponse(BaseModel):
@@ -670,8 +679,12 @@ async def execute_sequence(request: ExecuteSequenceRequest) -> ExecutionResponse
         session_id = request.session_id or f"stream_{uuid.uuid4().hex[:16]}"
         
         # Execute sequence (now async)
+        sequence_payload = dict(request.sequence)
+        if request.mode:
+            sequence_payload.setdefault("mode", request.mode)
+
         result = await orchestrator.execute_sequence(
-            request.sequence,
+            sequence_payload,
             session_id
         )
         
@@ -692,6 +705,31 @@ async def execute_sequence(request: ExecuteSequenceRequest) -> ExecutionResponse
             execution_result=None,
             error=str(e)
         )
+
+
+@router.post("/clarification/respond")
+async def respond_to_clarification(payload: ClarificationResponseRequest) -> Dict[str, Any]:
+    """Resume a paused laboratory sequence with user-provided clarification."""
+
+    if not STREAMAI_AVAILABLE or not orchestrator:
+        raise HTTPException(status_code=503, detail="Trinity AI not available")
+
+    accepted = await orchestrator.resume_clarification(
+        session_id=payload.session_id,
+        request_id=payload.requestId,
+        message=payload.message,
+        values=payload.values or {},
+    )
+
+    if not accepted:
+        raise HTTPException(status_code=404, detail="No matching clarification request found")
+
+    return {
+        "success": True,
+        "requestId": payload.requestId,
+        "session_id": payload.session_id,
+        "status": "resumed",
+    }
 
 
 @router.get("/status/{session_id}", response_model=StatusResponse)

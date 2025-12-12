@@ -371,6 +371,8 @@ services:
       - "traefik.http.routers.trinity-ai.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/trinityai`)"
       - "traefik.http.routers.trinity-ai.entrypoints=web"
       - "traefik.http.routers.trinity-ai.priority=100"
+      - "traefik.http.routers.trinity-ai.middlewares=trinity-ai-strip@docker"
+      - "traefik.http.middlewares.trinity-ai-strip.stripprefix.prefixes=/trinityai"
       - "traefik.http.services.trinity-ai.loadbalancer.server.port=8002"
       - "traefik.http.services.trinity-ai.loadbalancer.passhostheader=true"
     restart: always
@@ -381,6 +383,8 @@ services:
       dockerfile: Dockerfile
       args:
         - NODE_ENV=production  # 👈 ensures production React build (removes console.log)
+        - VITE_AI_PORT=8002  # 👈 Port for trinity-ai service (host port mapping)
+        - VITE_HOST_IP=${HOST_IP:-10.2.4.48}  # 👈 Host IP for accessing services
     environment:
       - NODE_ENV=production
     ports:

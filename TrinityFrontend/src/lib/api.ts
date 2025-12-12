@@ -2,11 +2,11 @@ import { resolveTaskResponse } from './taskQueue';
 
 const hostIp = import.meta.env.VITE_HOST_IP;
 const isDevStack =
-  (typeof window !== 'undefined' && window.location.port === '8081') ; //||
-  // import.meta.env.VITE_FRONTEND_PORT === '8081' ||
-  // (typeof window !== 'undefined' && window.location.hostname === '172.19.128.1') ||
-  // (typeof window !== 'undefined' && window.location.port === '8080') ||
-  // import.meta.env.VITE_ENVIRONMENT === 'development';
+  (typeof window !== 'undefined' && window.location.port === '8081'); //||
+// import.meta.env.VITE_FRONTEND_PORT === '8081' ||
+// (typeof window !== 'undefined' && window.location.hostname === '172.19.128.1') ||
+// (typeof window !== 'undefined' && window.location.port === '8080') ||
+// import.meta.env.VITE_ENVIRONMENT === 'development';
 
 const djangoPort =
   import.meta.env.VITE_DJANGO_PORT || (isDevStack ? '8003' : '8000');
@@ -42,8 +42,8 @@ const isDomainName = (hostname: string): boolean => {
 if (!backendOrigin) {
   if (hostIp) {
     // If accessing via localhost, use localhost for backend too (for cookie/session compatibility)
-    if (typeof window !== 'undefined' && 
-        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    if (typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
       backendOrigin = `${protocol}//${window.location.hostname}:${djangoPort}`;
     } else if (typeof window !== 'undefined' && isDomainName(window.location.hostname)) {
       // If accessing via domain name, use the same domain WITHOUT port (uses reverse proxy)
@@ -76,9 +76,9 @@ if (!backendOrigin) {
 }
 
 // If accessing via localhost but backendOrigin uses IP, switch to localhost for cookie compatibility
-if (typeof window !== 'undefined' && 
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
-    backendOrigin && !backendOrigin.includes('localhost') && !backendOrigin.includes('127.0.0.1')) {
+if (typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
+  backendOrigin && !backendOrigin.includes('localhost') && !backendOrigin.includes('127.0.0.1')) {
   // Replace IP address with localhost to ensure cookies work properly
   backendOrigin = backendOrigin.replace(/http:\/\/[\d.]+:/, `${protocol}//${window.location.hostname}:`);
 }
@@ -88,16 +88,16 @@ if (typeof window !== 'undefined' &&
 if (typeof window !== 'undefined') {
   const hostname = window.location.hostname;
   const isDomain = isDomainName(hostname);
-  
+
   if (isDomain) {
     // Force use of domain without port to enable reverse proxy routing
     // This ensures requests go through nginx at /admin/api/... instead of direct IP:port
     const currentOrigin = window.location.origin;
     const oldBackendOrigin = backendOrigin;
-    
+
     // ALWAYS override when accessing via domain - no conditions
     backendOrigin = currentOrigin;
-    
+
     // Log the override for debugging
     if (oldBackendOrigin !== currentOrigin) {
       console.warn(`[API Config] DOMAIN ACCESS DETECTED: Overriding backendOrigin`);
@@ -187,6 +187,10 @@ export const EXHIBITION_API =
 export const SHARE_LINKS_API =
   normalizeUrl(import.meta.env.VITE_SHARE_LINKS_API) ||
   `${backendOrigin}${djangoPrefix}/share-links`;
+
+export const DASHBOARD_API =
+  normalizeUrl(import.meta.env.VITE_DASHBOARD_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/dashboard`;
 
 export const IMAGES_API =
   normalizeUrl(import.meta.env.VITE_IMAGES_API) ||
@@ -290,7 +294,7 @@ export const AUTO_REGRESSIVE_API =
 export const SCENARIO_PLANNER_API =
   normalizeUrl(import.meta.env.VITE_SCENARIO_PLANNER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/scenario`;
- 
+
 export const SELECT_API =
   normalizeUrl(import.meta.env.VITE_SELECT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/select`;

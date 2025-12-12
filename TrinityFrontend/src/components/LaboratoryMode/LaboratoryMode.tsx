@@ -3,8 +3,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 // import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
-import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
+import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown, BarChart3, LayoutDashboard } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -12,6 +11,9 @@ import {
   sanitizeLabConfig,
   saveCurrentProject,
   persistLaboratoryConfig,
+  getWorkflowMoleculesKey,
+  getWorkflowSelectedAtomsKey,
+  getWorkflowDataKey,
 } from '@/utils/projectStorage';
 import CanvasArea, { CanvasAreaRef } from './components/CanvasArea';
 import AuxiliaryMenu from './components/AuxiliaryMenu';
@@ -19,10 +21,11 @@ import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
 import FloatingNavigationList from './components/FloatingNavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
-import { useLaboratoryStore, LayoutCard } from './store/laboratoryStore';
+import { useLaboratoryStore, LayoutCard, DASHBOARD_ALLOWED_ATOMS } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
-import { ShareDialog } from './components/ShareDialog';
+import { DashboardShareDialog } from './components/DashboardShareDialog';
+// import { ShareDialog } from './components/ShareDialog';
 import PipelineModal from './components/PipelineModal';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import {
@@ -60,7 +63,7 @@ const LaboratoryMode = () => {
     const saved = localStorage.getItem('trinity_ai_layout_preference');
     return (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
   });
-  
+
   // Listen for layout preference changes (from settings panel)
   useEffect(() => {
     const handleStorageChange = () => {
@@ -68,18 +71,18 @@ const LaboratoryMode = () => {
       const newLayout = (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
       setTrinityAILayout(newLayout);
     };
-    
+
     // Listen to custom event for same-tab updates
     const handleCustomStorageChange = () => handleStorageChange();
     window.addEventListener('trinity_ai_layout_changed', handleCustomStorageChange);
-    
+
     // Listen to storage events for cross-tab updates
     window.addEventListener('storage', (e) => {
       if (e.key === 'trinity_ai_layout_preference') {
         handleStorageChange();
       }
     });
-    
+
     return () => {
       window.removeEventListener('trinity_ai_layout_changed', handleCustomStorageChange);
       window.removeEventListener('storage', handleStorageChange);
@@ -88,7 +91,7 @@ const LaboratoryMode = () => {
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
   const [autosaveEnabled, setAutosaveEnabled] = useState(true); // Default to true, will be loaded from MongoDB
   const { toast } = useToast();
-  const { cards, setCards: setLabCards, auxiliaryMenuLeftOpen } = useLaboratoryStore();
+  const { cards, setCards: setLabCards, auxiliaryMenuLeftOpen, subMode, setSubMode } = useLaboratoryStore();
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
@@ -99,7 +102,7 @@ const LaboratoryMode = () => {
   const canvasAreaRef = useRef<CanvasAreaRef>(null);
   // Ref to track if initial cards have been loaded (to prevent autosave on initial load)
   const hasInitialCardsLoadedRef = useRef(false);
-  
+
   // Real-time collaborative sync
   const { isConnected: isSyncConnected, activeUsers, cardEditors, notifyCardFocus, notifyCardBlur } = useCollaborativeSync({
     enabled: canEdit && autosaveEnabled, // Only enable for users with edit permissions and when autosave is enabled
@@ -155,6 +158,29 @@ const LaboratoryMode = () => {
     }
   }, []);
 
+  // Load subMode from URL query param on mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const modeParam = urlParams.get('mode');
+    if (modeParam === 'dashboard' || modeParam === 'analytics') {
+      setSubMode(modeParam);
+    } else {
+      // Check localStorage for saved mode
+      const savedMode = localStorage.getItem('laboratory-submode');
+      if (savedMode === 'dashboard' || savedMode === 'analytics') {
+        setSubMode(savedMode);
+      }
+    }
+  }, [setSubMode]);
+
+  // Persist subMode to localStorage and URL when it changes
+  useEffect(() => {
+    localStorage.setItem('laboratory-submode', subMode);
+    const url = new URL(window.location.href);
+    url.searchParams.set('mode', subMode);
+    window.history.replaceState({}, '', url.toString());
+  }, [subMode]);
+
   useEffect(() => {
     if (isShareOpen) {
       setProjectContext(getActiveProjectContext());
@@ -206,11 +232,14 @@ const LaboratoryMode = () => {
       console.log('Successfully Loaded Existing Project State');
       toast({ title: 'Successfully Loaded Existing Project State' });
     }
-    
-    // Hide navigation list when switching from workflow mode
-    const hasWorkflowData = localStorage.getItem('workflow-data') || 
-                           localStorage.getItem('workflow-selected-atoms') || 
-                           localStorage.getItem('workflow-molecules');
+
+    // Hide navigation list when switching from workflow mode (check both mode-specific and legacy shared keys for migration)
+    const hasWorkflowData = localStorage.getItem(getWorkflowDataKey(subMode)) ||
+      localStorage.getItem('workflow-data') || // Legacy key for migration
+      localStorage.getItem(getWorkflowSelectedAtomsKey(subMode)) ||
+      localStorage.getItem('workflow-selected-atoms') || // Legacy key for migration
+      localStorage.getItem(getWorkflowMoleculesKey(subMode)) ||
+      localStorage.getItem('workflow-molecules'); // Legacy key for migration
     if (hasWorkflowData) {
       setShowFloatingNavigationList(false);
     }
@@ -259,70 +288,70 @@ const LaboratoryMode = () => {
     }
 
     const sortedCards: LayoutCard[] = [];
-    
+
     // Separate cards into workflow and standalone
     const workflowCards = cardsToSort.filter(card => card.moleculeId);
     const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
-    
+
     // Create a map of moleculeId to moleculeIndex for quick lookup
     const moleculeIndexMap = new Map<string, number>();
     workflowMolecules.forEach((molecule, index) => {
       moleculeIndexMap.set(molecule.moleculeId, index);
     });
-    
-         // Process each molecule and its associated cards
-     workflowMolecules.forEach((molecule, moleculeIndex) => {
-       // Add all workflow cards for this molecule first (maintain their relative order)
-       const moleculeCards = workflowCards
-         .filter(card => card.moleculeId === molecule.moleculeId)
-         .sort((a, b) => {
-           // Maintain original order within molecule
-           const indexA = cardsToSort.findIndex(c => c.id === a.id);
-           const indexB = cardsToSort.findIndex(c => c.id === b.id);
-           return indexA - indexB;
-         });
-       sortedCards.push(...moleculeCards);
-       
-       // Find standalone cards that should appear after this molecule
-       // Based on order field: order = (moleculeIndex * 1000) + subOrder
-       const cardsAfterThisMolecule = standaloneCards.filter(card => {
-         if (card.order !== undefined && typeof card.order === 'number') {
-           const cardMoleculeIndex = Math.floor(card.order / 1000);
-           return cardMoleculeIndex === moleculeIndex;
-         }
-         return false;
-       });
-       
-       // Sort standalone cards by subOrder
-       cardsAfterThisMolecule.sort((a, b) => {
-         const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
-         const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
-         return subOrderA - subOrderB;
-       });
-       
-       // Add standalone cards that appear after this molecule (between molecules)
-       sortedCards.push(...cardsAfterThisMolecule);
-     });
-    
+
+    // Process each molecule and its associated cards
+    workflowMolecules.forEach((molecule, moleculeIndex) => {
+      // Add all workflow cards for this molecule first (maintain their relative order)
+      const moleculeCards = workflowCards
+        .filter(card => card.moleculeId === molecule.moleculeId)
+        .sort((a, b) => {
+          // Maintain original order within molecule
+          const indexA = cardsToSort.findIndex(c => c.id === a.id);
+          const indexB = cardsToSort.findIndex(c => c.id === b.id);
+          return indexA - indexB;
+        });
+      sortedCards.push(...moleculeCards);
+
+      // Find standalone cards that should appear after this molecule
+      // Based on order field: order = (moleculeIndex * 1000) + subOrder
+      const cardsAfterThisMolecule = standaloneCards.filter(card => {
+        if (card.order !== undefined && typeof card.order === 'number') {
+          const cardMoleculeIndex = Math.floor(card.order / 1000);
+          return cardMoleculeIndex === moleculeIndex;
+        }
+        return false;
+      });
+
+      // Sort standalone cards by subOrder
+      cardsAfterThisMolecule.sort((a, b) => {
+        const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
+        const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
+        return subOrderA - subOrderB;
+      });
+
+      // Add standalone cards that appear after this molecule (between molecules)
+      sortedCards.push(...cardsAfterThisMolecule);
+    });
+
     // Add standalone cards that should appear after the last molecule (orphans)
     const placedStandaloneIds = new Set(sortedCards.map(c => c.id));
     const orphanCards = standaloneCards.filter(card => !placedStandaloneIds.has(card.id));
     sortedCards.push(...orphanCards);
-    
+
     // Add any remaining workflow cards that weren't in any molecule (shouldn't happen, but safety check)
     const allProcessedIds = new Set(sortedCards.map(c => c.id));
     const remaining = cardsToSort.filter(c => !allProcessedIds.has(c.id));
     sortedCards.push(...remaining);
-    
+
     return sortedCards;
   };
 
   // Autosave: Automatically save and sync when cards or auxiliaryMenuLeftOpen change
   useEffect(() => {
     if (!canEdit || !autosaveEnabled) return;
-    
+
     const hasInitialCards = cards && cards.length > 0;
-    
+
     // Skip autosave on initial load (wait for cards to be loaded)
     // But allow autosave for auxiliaryMenuLeftOpen changes even if no cards
     if (!hasInitialCards) {
@@ -345,13 +374,13 @@ const LaboratoryMode = () => {
     // Debounce autosave to avoid too frequent saves
     const autosaveTimer = setTimeout(async () => {
       console.log('🔄 [AUTOSAVE] Triggering autosave...');
-      
+
       try {
         const exhibitedCards = (cards || []).filter(card => card.isExhibited);
         setExhibitionCards(cards);
 
-        // Get workflow molecules to sort cards correctly
-        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        // Get workflow molecules to sort cards correctly (mode-specific)
+        const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
         let workflowMolecules: any[] = [];
         if (storedWorkflowMolecules) {
           try {
@@ -361,21 +390,31 @@ const LaboratoryMode = () => {
           }
         }
 
-        // Sort cards in workflow order before saving
-        const sortedCards = workflowMolecules.length > 0 
-          ? sortCardsInWorkflowOrder(cards || [], workflowMolecules)
-          : cards || [];
+        // CRITICAL FIX: Filter cards before saving to ensure mode-specific data separation
+        let cardsToSave = cards || [];
+        if (subMode === 'dashboard') {
+          // Dashboard mode: Filter out any analytics-only atoms before saving
+          const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+          cardsToSave = cardsToSave.map(card => {
+            const allowedAtoms = (card.atoms || []).filter(atom => 
+              allowedAtomIdsSet.has(atom.atomId as any)
+            );
+            return {
+              ...card,
+              atoms: allowedAtoms
+            };
+          }).filter(card => (card.atoms || []).length > 0); // Remove cards with no allowed atoms
+          
+          if (cardsToSave.length !== cards.length) {
+            console.warn(`[AUTOSAVE] Filtered out ${cards.length - cardsToSave.length} card(s) with non-dashboard atoms before saving to MongoDB`);
+          }
+        }
+        // Analytics mode: Save all cards (no filtering needed)
 
-        // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
-        const workflowMoleculesForSave = (sortedCards.length === 0) 
-          ? []
-          : workflowMolecules.map((molecule, index) => ({
-              moleculeId: molecule.moleculeId,
-              moleculeTitle: molecule.moleculeTitle,
-              atoms: molecule.atoms || [],
-              isActive: molecule.isActive !== false,
-              moleculeIndex: index
-            }));
+        // Sort cards in workflow order before saving
+        const sortedCards = workflowMolecules.length > 0
+          ? sortCardsInWorkflowOrder(cardsToSave, workflowMolecules)
+          : cardsToSave;
 
         // Save the current laboratory configuration with sorted cards
         const labConfig = {
@@ -388,6 +427,18 @@ const LaboratoryMode = () => {
         const projectContext = getActiveProjectContext();
         if (projectContext) {
           const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+          const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+          
+          console.log('🔍 [DIAGNOSIS] ========== AUTOSAVE START ==========');
+          console.log('🔍 [DIAGNOSIS] Autosave details:', {
+            subMode,
+            mode,
+            cardsCount: sanitized.cards?.length || 0,
+            workflowMoleculesCount: workflowMoleculesForSave.length,
+            cardAtomIds: sanitized.cards?.map((c: any) => c.atoms?.map((a: any) => a.atomId)).flat() || [],
+            timestamp: new Date().toISOString()
+          });
+          
           const payload = {
             client_name: projectContext.client_name,
             app_name: projectContext.app_name,
@@ -396,9 +447,17 @@ const LaboratoryMode = () => {
             workflow_molecules: workflowMoleculesForSave,
             auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true,
             autosaveEnabled: autosaveEnabled,
-            mode: 'laboratory',
+            mode: mode,
           };
 
+          console.log('🔍 [DIAGNOSIS] Payload being sent to MongoDB:', {
+            mode: payload.mode,
+            cardsCount: payload.cards.length,
+            cardDetails: payload.cards.map((c: any) => ({
+              id: c.id,
+              atoms: c.atoms?.map((a: any) => ({ atomId: a.atomId, title: a.title })) || []
+            }))
+          });
           console.log('🔄 [AUTOSAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
           try {
@@ -409,9 +468,22 @@ const LaboratoryMode = () => {
               body: JSON.stringify(payload),
             });
             if (!response.ok) {
-              console.error('[AUTOSAVE] Failed to persist configuration', await response.text());
+              const errorText = await response.text();
+              console.error('🔍 [DIAGNOSIS] ❌ [AUTOSAVE] Failed to persist configuration', {
+                status: response.status,
+                error: errorText,
+                mode,
+                subMode
+              });
             } else {
-              console.log('✅ [AUTOSAVE] Configuration saved successfully');
+              const responseData = await response.json().catch(() => ({}));
+              console.log('🔍 [DIAGNOSIS] ✅ [AUTOSAVE] Configuration saved successfully', {
+                mode,
+                subMode,
+                cardsCount: payload.cards.length,
+                response: responseData
+              });
+              console.log('🔍 [DIAGNOSIS] ========== AUTOSAVE COMPLETE ==========');
             }
           } catch (apiError) {
             console.error('[AUTOSAVE] Error while saving configuration', apiError);
@@ -438,8 +510,8 @@ const LaboratoryMode = () => {
           }
         }
 
-        persistLaboratoryConfig(sanitized);
-        
+        persistLaboratoryConfig(sanitized, subMode);
+
         // CRITICAL: Sync changes to Workflow collection during autosave
         console.log('🔄 [AUTOSAVE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
         if (canvasAreaRef.current) {
@@ -488,9 +560,9 @@ const LaboratoryMode = () => {
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ state: { laboratory_config: sanitized } }),
-          }).catch(() => {});
+          }).catch(() => { });
 
-          const storageSuccess = persistLaboratoryConfig(sanitized);
+          const storageSuccess = persistLaboratoryConfig(sanitized, subMode);
           if (!storageSuccess) {
             console.warn('Storage quota exceeded while caching undo state.');
             toast({
@@ -501,7 +573,7 @@ const LaboratoryMode = () => {
             });
           }
 
-          await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
+          await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => { });
           toast({ title: 'Undo', description: 'Last change reverted' });
         }
       }
@@ -531,7 +603,7 @@ const LaboratoryMode = () => {
     if (!canEdit) return;
     setSelectedCardId(cardId);
     setCardExhibited(exhibited);
-    
+
     // Auto-select the atom in the card if it exists
     const card = cards.find(c => c.id === cardId);
     if (card && Array.isArray(card.atoms) && card.atoms.length > 0) {
@@ -574,8 +646,8 @@ const LaboratoryMode = () => {
 
       setExhibitionCards(cards);
 
-      // Get workflow molecules to sort cards correctly
-      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+      // Get workflow molecules to sort cards correctly (mode-specific)
+      const storedWorkflowMolecules = localStorage.getItem(getWorkflowMoleculesKey(subMode));
       let workflowMolecules: any[] = [];
       if (storedWorkflowMolecules) {
         try {
@@ -585,10 +657,31 @@ const LaboratoryMode = () => {
         }
       }
 
+      // CRITICAL FIX: Filter cards before saving to ensure mode-specific data separation
+      let cardsToSave = cards || [];
+      if (subMode === 'dashboard') {
+        // Dashboard mode: Filter out any analytics-only atoms before saving
+        const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+        cardsToSave = cardsToSave.map(card => {
+          const allowedAtoms = (card.atoms || []).filter(atom => 
+            allowedAtomIdsSet.has(atom.atomId as any)
+          );
+          return {
+            ...card,
+            atoms: allowedAtoms
+          };
+        }).filter(card => (card.atoms || []).length > 0); // Remove cards with no allowed atoms
+        
+        if (cardsToSave.length !== cards.length) {
+          console.warn(`[MANUAL SAVE] Filtered out ${cards.length - cardsToSave.length} card(s) with non-dashboard atoms before saving to MongoDB`);
+        }
+      }
+      // Analytics mode: Save all cards (no filtering needed)
+
       // Sort cards in workflow order before saving (ensures order field reflects actual workflow position)
-      const sortedCards = workflowMolecules.length > 0 
-        ? sortCardsInWorkflowOrder(cards || [], workflowMolecules)
-        : cards || [];
+      const sortedCards = workflowMolecules.length > 0
+        ? sortCardsInWorkflowOrder(cardsToSave, workflowMolecules)
+        : cardsToSave;
 
       console.info('[Laboratory API] Sorting cards in workflow order before save:', {
         originalCount: cards?.length || 0,
@@ -606,21 +699,21 @@ const LaboratoryMode = () => {
       // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
       // moleculeIndex preserves the original order/position in the array
       // FIX: If there are no cards, clear workflow molecules to return to regular laboratory mode
-      const workflowMoleculesForSave = (sortedCards.length === 0) 
+      const workflowMoleculesForSave = (sortedCards.length === 0)
         ? [] // Clear workflow molecules when no cards remain
         : workflowMolecules.map((molecule, index) => ({
-            moleculeId: molecule.moleculeId,
-            moleculeTitle: molecule.moleculeTitle,
-            atoms: molecule.atoms || [],
-            isActive: molecule.isActive !== false, // Default to true if not specified
-            moleculeIndex: index // Preserve the original index/position
-          }));
+          moleculeId: molecule.moleculeId,
+          moleculeTitle: molecule.moleculeTitle,
+          atoms: molecule.atoms || [],
+          isActive: molecule.isActive !== false, // Default to true if not specified
+          moleculeIndex: index // Preserve the original index/position
+        }));
 
-      // FIX: Clear workflow-related localStorage items when no cards remain
+      // FIX: Clear workflow-related localStorage items when no cards remain (mode-specific)
       if (sortedCards.length === 0) {
-        localStorage.removeItem('workflow-molecules');
-        localStorage.removeItem('workflow-selected-atoms');
-        localStorage.removeItem('workflow-data');
+        localStorage.removeItem(getWorkflowMoleculesKey(subMode));
+        localStorage.removeItem(getWorkflowSelectedAtomsKey(subMode));
+        localStorage.removeItem(getWorkflowDataKey(subMode));
         console.info('[Laboratory API] Cleared workflow data from localStorage (no cards remaining)');
       }
 
@@ -647,6 +740,18 @@ const LaboratoryMode = () => {
       const projectContext = getActiveProjectContext();
       if (projectContext) {
         const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+        const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+        
+        console.log('🔍 [DIAGNOSIS] ========== MANUAL SAVE START ==========');
+        console.log('🔍 [DIAGNOSIS] Manual save details:', {
+          subMode,
+          mode,
+          cardsCount: sanitized.cards?.length || 0,
+          workflowMoleculesCount: workflowMoleculesForSave.length,
+          cardAtomIds: sanitized.cards?.map((c: any) => c.atoms?.map((a: any) => a.atomId)).flat() || [],
+          timestamp: new Date().toISOString()
+        });
+        
         const payload = {
           client_name: projectContext.client_name,
           app_name: projectContext.app_name,
@@ -655,9 +760,17 @@ const LaboratoryMode = () => {
           workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex (empty if no cards)
           auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true, // Include auxiliary menu left state
           autosaveEnabled: autosaveEnabled, // Include autosave toggle state
-          mode: 'laboratory',
+          mode: mode,
         };
 
+        console.log('🔍 [DIAGNOSIS] Payload being sent to MongoDB:', {
+          mode: payload.mode,
+          cardsCount: payload.cards.length,
+          cardDetails: payload.cards.map((c: any) => ({
+            id: c.id,
+            atoms: c.atoms?.map((a: any) => ({ atomId: a.atomId, title: a.title })) || []
+          }))
+        });
         console.log('💾 [MANUAL SAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
         const requestInit: RequestInit = {
@@ -678,9 +791,21 @@ const LaboratoryMode = () => {
           const response = await fetch(requestUrl, requestInit);
           if (!response.ok) {
             const message = await response.text();
-            console.error('[Laboratory API] Failed to persist configuration', message);
+            console.error('🔍 [DIAGNOSIS] ❌ [Laboratory API] Failed to persist configuration', {
+              status: response.status,
+              error: message,
+              mode,
+              subMode
+            });
           } else {
-            console.info('[Laboratory API] Configuration saved successfully');
+            const responseData = await response.json().catch(() => ({}));
+            console.info('🔍 [DIAGNOSIS] ✅ [Laboratory API] Configuration saved successfully', {
+              mode,
+              subMode,
+              cardsCount: payload.cards.length,
+              response: responseData
+            });
+            console.log('🔍 [DIAGNOSIS] ========== MANUAL SAVE COMPLETE ==========');
           }
         } catch (apiError) {
           console.error('[Laboratory API] Error while saving configuration', apiError);
@@ -709,8 +834,8 @@ const LaboratoryMode = () => {
         }
       }
 
-      const storageSuccess = persistLaboratoryConfig(sanitized);
-      
+      const storageSuccess = persistLaboratoryConfig(sanitized, subMode);
+
       // Sync changes to Workflow collection
       console.log('🔄 [LAB MODE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
       if (canvasAreaRef.current) {
@@ -726,7 +851,7 @@ const LaboratoryMode = () => {
       } else {
         console.warn('⚠️ [LAB MODE] canvasAreaRef.current is null, cannot sync workflow collection');
       }
-      
+
       if (storageSuccess) {
         toast({
           title: 'Configuration Saved',
@@ -781,7 +906,7 @@ const LaboratoryMode = () => {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        
+
         if (canEdit) {
           handleSave();
         }
@@ -890,7 +1015,7 @@ const LaboratoryMode = () => {
       className="h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col"
     >
       <Header />
-      
+
       {/* Laboratory Header */}
       <div
         data-lab-header="true"
@@ -905,13 +1030,13 @@ const LaboratoryMode = () => {
           {canEdit && activeUsers.length > 0 && (
             <div className="flex items-center">
               <div className="relative group">
-                <div className="flex -space-x-1.5">
+                <div className="flex -space-x-2">
                   {activeUsers.slice(0, 3).map((activeUser, index) => (
                     <div
                       key={activeUser.client_id}
-                      className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-semibold border-2 border-white shadow-sm"
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold border-2 border-white shadow-sm"
                       title={`${activeUser.name} (${activeUser.email})`}
-                      style={{ 
+                      style={{
                         zIndex: 10 - index,
                         backgroundColor: activeUser.color || '#3B82F6'
                       }}
@@ -921,7 +1046,7 @@ const LaboratoryMode = () => {
                   ))}
                   {activeUsers.length > 3 && (
                     <div
-                      className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 text-[9px] font-semibold border-2 border-white shadow-sm"
+                      className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 text-[10px] font-semibold border-2 border-white shadow-sm"
                       title={`+${activeUsers.length - 3} more`}
                     >
                       +{activeUsers.length - 3}
@@ -931,20 +1056,19 @@ const LaboratoryMode = () => {
               </div>
             </div>
           )}
-          
+
           {/* Undo */}
           <button
             onClick={handleUndo}
             disabled={!canEdit}
-            className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${
-              !canEdit ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
+            className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             title="Undo"
             type="button"
           >
             <Undo2 className="w-3.5 h-3.5" strokeWidth={2} />
           </button>
-          
+
           {/* Auto Save Toggle */}
           {canEdit && setAutosaveEnabled && (
             <div className="flex items-center">
@@ -956,15 +1080,14 @@ const LaboratoryMode = () => {
               />
             </div>
           )}
-          
+
           {/* Save */}
           {!autosaveEnabled && handleSave && (
             <button
               onClick={handleSave}
               disabled={!canEdit}
-              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${
-                !canEdit ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
+              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               title="Save"
               type="button"
               data-lab-save="true"
@@ -972,27 +1095,26 @@ const LaboratoryMode = () => {
               <Save className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
           )}
-          
+
           {/* Share */}
           {handleShareClick && (
             <button
               onClick={handleShareClick}
               disabled={!canEdit}
-              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${
-                !canEdit ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
+              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               title="Share"
               type="button"
             >
               <Share2 className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
           )}
-          
+
           {/* Run Pipeline */}
           <button
             disabled={!canEdit}
             onClick={() => setIsPipelineOpen(true)}
-            className={`w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-700 transition-all flex items-center justify-center text-white ${
+            className={`w-7 h-7 rounded-full bg-blue-600 hover:bg-blue-700 hover:shadow-md transition-all flex items-center justify-center text-white ${
               !canEdit ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             title="Run Pipeline"
@@ -1000,6 +1122,42 @@ const LaboratoryMode = () => {
           >
             <Play className="w-3.5 h-3.5" fill="white" />
           </button>
+
+          {/* Mode Toggle - Pill Style */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setSubMode('analytics')}
+              disabled={!canEdit}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all duration-200 ${
+                subMode === 'analytics'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              } ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              title="Analytics Mode"
+              type="button"
+            >
+              <div className="flex items-center gap-1.5">
+                <BarChart3 className="w-3 h-3" />
+                <span>Analytics</span>
+              </div>
+            </button>
+            <button
+              onClick={() => setSubMode('dashboard')}
+              disabled={!canEdit}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all duration-200 ${
+                subMode === 'dashboard'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              } ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              title="Dashboard Mode"
+              type="button"
+            >
+              <div className="flex items-center gap-1.5">
+                <LayoutDashboard className="w-3 h-3" />
+                <span>Dashboard</span>
+              </div>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1121,14 +1279,14 @@ const LaboratoryMode = () => {
                 />
               </div>
             </div>
-          )}
-        </div>
+        )}
+      </div>
 
-        <ShareDialog
-          open={isShareOpen}
-          onOpenChange={setIsShareOpen}
-          projectName={projectContext?.project_name ?? 'Laboratory Project'}
-        />
+      <DashboardShareDialog
+        open={isShareOpen}
+        onOpenChange={setIsShareOpen}
+        projectName={projectContext?.project_name ?? 'Dashboard Project'}
+      />
         
         <PipelineModal
           open={isPipelineOpen}

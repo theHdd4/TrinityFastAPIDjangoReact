@@ -42,6 +42,7 @@ import CorrelationProperties from '@/components/AtomList/atoms/correlation/compo
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
 import ClusteringProperties from '@/components/AtomList/atoms/clustering/components/properties/ClusteringProperties';
 import { ScenarioPlannerProperties } from '@/components/AtomList/atoms/scenario-planner/components/properties/ScenarioPlannerProperties';
+import TableProperties from '@/components/AtomList/atoms/table/components/properties/TableProperties';
 
 import ExploreProperties from '@/components/AtomList/atoms/explore/components/properties/ExploreProperties';
 import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
@@ -263,6 +264,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <ColumnClassifierProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'dataframe-operations' ? (
                     <DataFrameOperationsProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'table' ? (
+                    <TableProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'correlation' ? (
                     <CorrelationProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'clustering' ? (

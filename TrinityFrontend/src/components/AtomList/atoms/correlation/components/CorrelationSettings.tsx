@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { VALIDATE_API } from '@/lib/api';
 import type { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -649,6 +650,15 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ atomId, cardI
                 {isAnalyzingDates ? 'Analyzing date columns...' : 'Processing dataframe...'}
               </div>
             )}
+          </div>
+
+          {/* Show Note Box Toggle */}
+          <div className="flex items-center justify-between pt-4 border-t">
+            <Label className="text-xs">Show Note Box</Label>
+            <Switch
+              checked={data.showNote || false}
+              onCheckedChange={(checked) => onDataChange({ showNote: checked })}
+            />
           </div>
         </div>
       </div>

@@ -28,6 +28,7 @@ class Command(BaseCommand):
             {'atom_id': 'column-classifier', 'name': 'Column Classifier', 'description': 'Classify and categorize data columns', 'category': 'Data Processing'},
             {'atom_id': 'create-column', 'name': 'Create and Transform Features', 'description': 'Create or Transform new features using arithmetic operations on dataframe columns', 'category': 'Data Processing'},
             {'atom_id': 'dataframe-operations', 'name': 'DataFrame Operations', 'description': 'Perform operations on DataFrames', 'category': 'Data Processing'},
+            {'atom_id': 'table', 'name': 'Table', 'description': 'Display and manipulate data in table format with sorting, filtering, and aggregations', 'category': 'Data Processing'},
             
             # Analytics
             {'atom_id': 'correlation', 'name': 'Correlation', 'description': 'Calculate correlation between variables', 'category': 'Analytics'},

@@ -1,0 +1,23 @@
+{
+  "default": {
+    "enabled": true,
+    "input_repeat_threshold": 3,
+    "stall_threshold": 5,
+    "ratio_threshold": 3.0,
+    "window_seconds": 45.0,
+    "per_node_time_budget": 60.0,
+    "max_backtracks": 3,
+    "cooldown_seconds": 2.0,
+    "backtrack_time_budget": 180.0
+  },
+  "intents": {
+    "workstream_lab": {
+      "enabled": true,
+      "input_repeat_threshold": 2,
+      "window_seconds": 30.0,
+      "ratio_threshold": 2.5,
+      "max_backtracks": 4,
+      "cooldown_seconds": 3.0
+    }
+  }
+}

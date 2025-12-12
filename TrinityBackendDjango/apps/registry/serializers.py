@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 import logging
 
 from django.conf import settings
@@ -34,6 +35,13 @@ class ProjectSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    # Frontend-optimized fields
+    app_slug = serializers.CharField(source='app.slug', read_only=True)
+    app_name = serializers.CharField(source='app.name', read_only=True)
+    last_modified = serializers.DateTimeField(source='updated_at', read_only=True)
+    relative_time = serializers.SerializerMethodField()
+    modes = serializers.SerializerMethodField()
+    is_allowed = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
@@ -44,16 +52,101 @@ class ProjectSerializer(serializers.ModelSerializer):
             "description",
             "owner",
             "app",
+            "app_slug",
+            "app_name",
             "state",
+            "modes",
             "base_template",
             "base_template_id",
             "created_at",
             "updated_at",
+            "last_modified",
+            "relative_time",
+            "is_allowed",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at", "app_slug", "app_name", "last_modified", "modes", "relative_time", "is_allowed"]
 
     def get_base_template(self, obj):
         return obj.base_template.name if obj.base_template else None
+
+    def get_modes(self, obj):
+        """Calculate mode status from project.state for frontend display"""
+        state = obj.state or {}
+        workflow_config = state.get('workflow_config')
+        laboratory_config = state.get('laboratory_config')
+        exhibition_config = state.get('exhibition_config')
+        
+        # Match frontend logic: check if config exists and has cards with length > 0, or is non-empty object
+        def has_mode_content(config):
+            if not config:
+                return False
+            if isinstance(config, dict):
+                # Check if cards exist and have length > 0
+                cards = config.get('cards')
+                if cards and len(cards) > 0:
+                    return True
+                # Or check if config itself is non-empty
+                if len(config) > 0:
+                    return True
+            return False
+        
+        return {
+            'workflow': has_mode_content(workflow_config),
+            'laboratory': has_mode_content(laboratory_config),
+            'exhibition': has_mode_content(exhibition_config),
+        }
+
+    def get_relative_time(self, obj):
+        """Calculate relative time string (e.g., '11h ago', '2d ago')"""
+        if not obj.updated_at:
+            return ""
+        
+        now = timezone.now()
+        diff = now - obj.updated_at
+        
+        # Calculate differences
+        diff_seconds = diff.total_seconds()
+        diff_mins = int(diff_seconds / 60)
+        diff_hours = int(diff_seconds / 3600)
+        diff_days = int(diff_seconds / 86400)
+        
+        if diff_mins < 60:
+            return f"{diff_mins}m ago"
+        elif diff_hours < 24:
+            return f"{diff_hours}h ago"
+        elif diff_days < 7:
+            return f"{diff_days}d ago"
+        else:
+            # Return formatted date for older items
+            return obj.updated_at.strftime("%b %d, %Y")
+
+    def get_is_allowed(self, obj):
+        """Check if the project's app is in the user's allowed_apps"""
+        request = self.context.get('request')
+        if not request or not request.user:
+            return True  # Default to allowed if no user context
+        
+        user = request.user
+        
+        # Staff and superusers always have access
+        if user.is_staff or user.is_superuser:
+            return True
+        
+        try:
+            from apps.roles.models import UserRole
+            from apps.accounts.tenant_utils import switch_to_user_tenant
+            
+            # Query UserRole within tenant schema context
+            with switch_to_user_tenant(user):
+                role_obj = UserRole.objects.filter(user=user).first()
+                if role_obj and role_obj.allowed_apps:
+                    # Check if project's app_id is in allowed_apps
+                    return obj.app_id in role_obj.allowed_apps
+                # If no allowed_apps specified, default to False (restricted)
+                return False
+        except Exception:
+            # If roles don't exist or error, default to False (restricted)
+            return False
 
 
 class SessionSerializer(serializers.ModelSerializer):

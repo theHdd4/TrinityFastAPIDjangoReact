@@ -85,6 +85,7 @@ interface MatrixSettingsTrayProps {
   onOpenChange: (open: boolean) => void;
   settings: MatrixSettings;
   onSave: (settings: MatrixSettings) => void;
+  isMobile?: boolean; // Mobile-only optimizations
 }
 
 const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
@@ -93,6 +94,7 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
   onOpenChange,
   settings,
   onSave,
+  isMobile = false, // Default to desktop behavior
 }) => {
   const [localSettings, setLocalSettings] = useState<MatrixSettings>(settings);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
@@ -122,19 +124,111 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
     }
   }, [open, showColorSubmenu, onOpenChange]);
 
+  // MOBILE-ONLY: Prevent body scroll when menu is open (better focus)
+  // Desktop: No scroll lock (page scrolls normally)
+  useEffect(() => {
+    if (!open || !isMobile) return;
+    
+    // Lock body scroll
+    const originalBodyOverflow = document.body.style.overflow;
+    const originalBodyPosition = document.body.style.position;
+    const originalBodyWidth = document.body.style.width;
+    
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    
+    // Also lock root container (for React apps)
+    const rootContainer = document.getElementById('root');
+    const originalRootOverflow = rootContainer?.style.overflow;
+    if (rootContainer) {
+      rootContainer.style.overflow = 'hidden';
+    }
+    
+    // Prevent touch move on document (stops scrolling on mobile)
+    const preventTouch = (e: TouchEvent) => {
+      const target = e.target as Element;
+      // Allow scrolling within menu itself
+      if (target.closest('.matrix-settings-menu') || target.closest('.color-submenu')) {
+        return;
+      }
+      e.preventDefault();
+    };
+    
+    document.addEventListener('touchmove', preventTouch, { passive: false });
+    
+    return () => {
+      document.body.style.overflow = originalBodyOverflow;
+      document.body.style.position = originalBodyPosition;
+      document.body.style.width = originalBodyWidth;
+      if (rootContainer && originalRootOverflow !== undefined) {
+        rootContainer.style.overflow = originalRootOverflow;
+      }
+      document.removeEventListener('touchmove', preventTouch);
+    };
+  }, [open, isMobile]);
+
   if (!open || !position) return null;
 
   const handleColorThemeClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const submenuWidth = 220;
+    
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const padding = 10;
     const spacing = 4;
-    let x = rect.right + spacing;
-    if (window.innerWidth - rect.right < submenuWidth + 10) {
+    
+    // MOBILE-ONLY: Compact submenu width (160px vs 220px)
+    // Desktop keeps original 220px
+    const submenuWidth = isMobile 
+      ? Math.min(160, viewportWidth - (padding * 2)) // Mobile: compact 160px (was 180px)
+      : 220; // Desktop: unchanged
+    
+    const submenuMaxHeight = isMobile 
+      ? Math.min(220, viewportHeight - (padding * 2)) // Mobile: compact (was 240px)
+      : 280;
+    
+    let x: number;
+    let y: number = rect.top;
+    
+    // Horizontal positioning (same logic for both mobile and desktop)
+    x = rect.right + spacing;
+    
+    // Check if would overflow right edge
+    if (x + submenuWidth > viewportWidth - padding) {
+      // Try left side
       x = rect.left - submenuWidth - spacing;
+      
+      // If still overflows, position at right edge with padding
+      if (x < padding) {
+        x = viewportWidth - submenuWidth - padding;
+      }
     }
-    setColorSubmenuPos({ x, y: rect.top });
+    
+    // MOBILE-ONLY: Enhanced vertical positioning
+    // Desktop keeps simple top alignment
+    if (isMobile) {
+      // Try positioning below menu item (better for mobile thumb reach)
+      const spaceBelow = viewportHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      
+      if (spaceBelow >= submenuMaxHeight + padding) {
+        y = rect.bottom + spacing;
+      } else if (spaceAbove >= submenuMaxHeight + padding) {
+        y = rect.top - submenuMaxHeight - spacing;
+      } else {
+        y = viewportHeight - submenuMaxHeight - padding;
+      }
+    } else {
+      // Desktop: Keep original simple positioning
+      if (window.innerWidth - rect.right < submenuWidth + 10) {
+        // Already handled above
+      }
+    }
+    
+    setColorSubmenuPos({ x, y });
     setShowColorSubmenu(!showColorSubmenu);
   };
   const updateSettings = (updates: Partial<MatrixSettings>) => {
@@ -147,46 +241,66 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
 
   const menu = (
     <div
-      className="fixed z-[100000] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 matrix-settings-menu"
-      style={{ left: position.x, top: position.y }}
+      className="fixed z-[100000] bg-white border border-gray-200 rounded-lg shadow-lg matrix-settings-menu"
+      style={{ 
+        left: position.x, 
+        top: position.y,
+        // MOBILE-ONLY: Compact sizing and scrollable
+        // Desktop keeps original py-2 min-w-48
+        ...(isMobile ? {
+          padding: '0.25rem 0',
+          width: 'min(170px, calc(100vw - 20px))', // Compact 170px (was 200px) - matches position calc
+          maxHeight: 'calc(100vh - 40px)',
+          overflowY: 'auto' as const,
+        } : {
+          padding: '0.5rem 0',
+          width: '240px', // Explicit width to match position calculation
+        })
+      }}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {/* Color Theme Option */}
       <button
-        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
+        className={`w-full text-left hover:bg-gray-50 flex items-center text-gray-700 relative ${
+          isMobile ? 'px-2 py-1 text-xs gap-1' : 'px-4 py-2 text-sm gap-3'
+        }`}
         onClick={handleColorThemeClick}
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={isMobile ? 'w-3 h-3' : 'w-4 h-4'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
         </svg>
         <span>Color Theme</span>
-        <svg className="w-4 h-4 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={`ml-auto ${isMobile ? 'w-3 h-3' : 'w-4 h-4'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
       </button>
 
       {/* Axis Labels Toggle */}
       <button
-        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+        className={`w-full text-left hover:bg-gray-50 flex items-center text-gray-700 ${
+          isMobile ? 'px-2 py-1 text-xs gap-1' : 'px-4 py-2 text-sm gap-3'
+        }`}
         onClick={() =>
           updateSettings({ showAxisLabels: !localSettings.showAxisLabels })
         }
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={isMobile ? 'w-3 h-3' : 'w-4 h-4'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
         </svg>
         <span>Axis Labels</span>
         <div className="ml-auto">
           <div
-            className={`w-4 h-3 rounded border ${
+            className={`rounded border ${
+              isMobile ? 'w-2.5 h-2' : 'w-4 h-3'
+            } ${
               localSettings.showAxisLabels
                 ? 'bg-blue-500 border-blue-500'
                 : 'bg-gray-200 border-gray-300'
             }`}
           >
             {localSettings.showAxisLabels && (
-              <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <svg className={isMobile ? 'w-2.5 h-2' : 'w-4 h-3'} fill="currentColor" viewBox="0 0 20 20">
                 <path
                   fillRule="evenodd"
                   d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
@@ -200,25 +314,29 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
 
       {/* Data Labels Toggle */}
       <button
-        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+        className={`w-full text-left hover:bg-gray-50 flex items-center text-gray-700 ${
+          isMobile ? 'px-2 py-1 text-xs gap-1' : 'px-4 py-2 text-sm gap-3'
+        }`}
         onClick={() =>
           updateSettings({ showDataLabels: !localSettings.showDataLabels })
         }
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={isMobile ? 'w-3 h-3' : 'w-4 h-4'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <span>Data Labels</span>
         <div className="ml-auto">
           <div
-            className={`w-4 h-3 rounded border ${
+            className={`rounded border ${
+              isMobile ? 'w-2.5 h-2' : 'w-4 h-3'
+            } ${
               localSettings.showDataLabels
                 ? 'bg-blue-500 border-blue-500'
                 : 'bg-gray-200 border-gray-300'
             }`}
           >
             {localSettings.showDataLabels && (
-              <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <svg className={isMobile ? 'w-2.5 h-2' : 'w-4 h-3'} fill="currentColor" viewBox="0 0 20 20">
                 <path
                   fillRule="evenodd"
                   d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
@@ -232,25 +350,29 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
 
       {/* Legend Toggle */}
       <button
-        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+        className={`w-full text-left hover:bg-gray-50 flex items-center text-gray-700 ${
+          isMobile ? 'px-2 py-1 text-xs gap-1' : 'px-4 py-2 text-sm gap-3'
+        }`}
         onClick={() =>
           updateSettings({ showLegend: !localSettings.showLegend })
         }
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={isMobile ? 'w-3 h-3' : 'w-4 h-4'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
         </svg>
         <span>Legend</span>
         <div className="ml-auto">
           <div
-            className={`w-4 h-3 rounded border ${
+            className={`rounded border ${
+              isMobile ? 'w-2.5 h-2' : 'w-4 h-3'
+            } ${
               localSettings.showLegend
                 ? 'bg-blue-500 border-blue-500'
                 : 'bg-gray-200 border-gray-300'
             }`}
           >
             {localSettings.showLegend && (
-              <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <svg className={isMobile ? 'w-2.5 h-2' : 'w-4 h-3'} fill="currentColor" viewBox="0 0 20 20">
                 <path
                   fillRule="evenodd"
                   d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
@@ -269,24 +391,42 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
   const colorSubmenu = showColorSubmenu
     ? createPortal(
         <div
-          className="fixed z-[100001] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
+          className="fixed z-[100001] bg-white border border-gray-300 rounded-lg shadow-xl color-submenu"
           style={{
             left: colorSubmenuPos.x,
             top: colorSubmenuPos.y,
-            minWidth: '220px',
-            maxHeight: '280px',
-            overflowY: 'auto',
+            // MOBILE-ONLY: Compact, adaptive sizing
+            // Desktop keeps original 220px width
+            ...(isMobile ? {
+              width: 'min(160px, calc(100vw - 20px))', // Compact 160px (was 180px) - matches position calc
+              maxHeight: 'min(220px, calc(100vh - 40px))',
+              overflowY: 'auto' as const,
+              padding: '0.375rem', // Reduced padding (was 0.5rem)
+            } : {
+              width: '220px', // Explicit width to match position calculation
+              maxHeight: '280px',
+              overflowY: 'auto' as const,
+              padding: '0.75rem',
+            })
           }}
         >
-          <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-3">
+          {/* Header - Mobile-adaptive */}
+          <div className={`font-semibold text-gray-700 border-b border-gray-200 ${
+            isMobile ? 'px-1 py-0.5 text-xs mb-1.5' : 'px-2 py-2 text-sm mb-3'
+          }`}>
             Color Theme
           </div>
 
-          <div className="grid grid-cols-8 gap-1.5">
+          {/* KEY CHANGE: 5 columns on mobile, 8 on desktop */}
+          <div className={`grid ${
+            isMobile ? 'grid-cols-5 gap-1' : 'grid-cols-8 gap-1.5'
+          }`}>
             {Object.entries(COLOR_THEMES).map(([key, theme]) => (
               <button
                 key={key}
-                className={`w-6 h-6 rounded-md border-2 transition-all duration-200 hover:scale-110 hover:shadow-lg ${
+                className={`rounded-md border-2 transition-all duration-200 hover:scale-110 hover:shadow-lg ${
+                  isMobile ? 'w-4 h-4' : 'w-6 h-6'
+                } ${
                   localSettings.theme === key
                     ? 'border-blue-500 shadow-lg ring-2 ring-blue-200 ring-opacity-50'
                     : 'border-gray-300 hover:border-gray-400 hover:shadow-md'
@@ -307,8 +447,13 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
             ))}
           </div>
 
-          <div className="mt-3 pt-2 border-t border-gray-200">
-            <div className="text-xs text-gray-500 px-2">
+          {/* Footer - Mobile-adaptive */}
+          <div className={`border-t border-gray-200 ${
+            isMobile ? 'mt-1.5 pt-1' : 'mt-3 pt-2'
+          }`}>
+            <div className={`text-gray-500 ${
+              isMobile ? 'text-[11px] px-1' : 'text-xs px-2'
+            }`}>
               Click a color to select the theme
             </div>
           </div>
@@ -317,8 +462,19 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
       )
     : null;
 
+  // Mobile overlay for better UX (dims background, prevents interaction)
+  const overlay = isMobile && open ? createPortal(
+    <div 
+      className="fixed inset-0 bg-black/20 z-[99999] backdrop-blur-[2px]"
+      onClick={() => onOpenChange(false)}
+      style={{ touchAction: 'none' }}
+    />,
+    document.body
+  ) : null;
+
   return (
     <>
+      {overlay}
       {createPortal(menu, document.body)}
       {colorSubmenu}
     </>
