@@ -34,6 +34,30 @@ class TableUpdateRequest(BaseModel):
     project_id: Optional[str] = None  # Project ID for session tracking
 
 
+class TableMetadata(BaseModel):
+    """Table metadata including formatting, design, and layout settings"""
+    cell_formatting: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = Field(
+        default=None,
+        description="Cell-level formatting: { 'row_0': { 'column_name': { 'html': '...', 'bold': true, ... } } }"
+    )
+    design: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Design settings: theme, borderStyle, customColors, columnAlignment, columnFontStyles"
+    )
+    layout: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Layout settings: headerRow, totalRow, bandedRows, bandedColumns, firstColumn, lastColumn"
+    )
+    column_widths: Optional[Dict[str, int]] = Field(
+        default=None,
+        description="Column widths: { 'column_name': 150 }"
+    )
+    row_heights: Optional[Dict[int, int]] = Field(
+        default=None,
+        description="Row heights: { 0: 32, 1: 40 }"
+    )
+
+
 class TableSaveRequest(BaseModel):
     """Request to save table data to MinIO"""
     table_id: str
@@ -43,6 +67,10 @@ class TableSaveRequest(BaseModel):
     conditional_format_rules: Optional[List[Any]] = Field(
         default=None,
         description="Optional conditional formatting rules to evaluate and save with the table"
+    )
+    metadata: Optional[TableMetadata] = Field(
+        default=None,
+        description="Table metadata including formatting, design, and layout settings"
     )
     atom_id: Optional[str] = None  # Atom ID for session tracking
     project_id: Optional[str] = None  # Project ID for session tracking
@@ -60,6 +88,10 @@ class TableResponse(BaseModel):
     conditional_format_styles: Optional[Dict[str, Dict[str, Dict[str, str]]]] = Field(
         default=None,
         description="Conditional formatting styles loaded from saved table metadata"
+    )
+    metadata: Optional[TableMetadata] = Field(
+        default=None,
+        description="Table metadata including formatting, design, and layout settings"
     )
 
 

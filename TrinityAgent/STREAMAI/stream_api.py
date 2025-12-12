@@ -48,17 +48,72 @@ def _is_websocket_connected(websocket: WebSocket) -> bool:
     return True
 
 
-async def _safe_send_json(websocket: WebSocket, payload: dict) -> bool:
+def _get_ws_send_cache(websocket: WebSocket) -> dict:
+    """Return (and attach) a cache used to dedupe websocket messages."""
+
+    cache = getattr(websocket, "_trinity_sent_messages", None)
+    if cache is not None:
+        return cache
+
+    # If a websocket_session_id is already attached, reuse any shared cache to
+    # avoid duplicate sends when the browser reconnects mid-flow.
+    shared_key = getattr(websocket, "_trinity_ws_key", None)
+    if shared_key:
+        cache = _SHARED_WS_CACHES.get(shared_key)
+        if cache is None:
+            cache = {}
+            _SHARED_WS_CACHES[shared_key] = cache
+    else:
+        cache = {}
+
+    setattr(websocket, "_trinity_sent_messages", cache)
+    return cache
+
+
+def _normalized_message_signature(payload: dict | None) -> str | None:
+    """Return a normalized message-based signature for cross-module dedupe."""
+
+    if not isinstance(payload, dict):
+        return None
+
+    message = payload.get("message")
+    if not isinstance(message, str):
+        return None
+
+    normalized = re.sub(r"\s+", " ", message).strip().lower()
+    return f"msg::{normalized}" if normalized else None
+
+
+async def _safe_send_json(websocket: WebSocket, payload: dict, *, dedupe_signature: str | None = None) -> bool:
     """Send a JSON message if the websocket is still open.
 
     Returns False when the connection is no longer available so callers can
     gracefully stop sending additional messages.
     """
+    cache = _get_ws_send_cache(websocket)
+
+    signatures: list[str] = []
+    if dedupe_signature:
+        signatures.append(dedupe_signature)
+    else:
+        auto_signature = _build_dedupe_signature(payload)
+        if auto_signature:
+            signatures.append(auto_signature)
+
+    message_signature = _normalized_message_signature(payload)
+    if message_signature:
+        signatures.append(message_signature)
+
+    if any(cache.get(sig) for sig in signatures):
+        return True
+
     if not _is_websocket_connected(websocket):
         return False
 
     try:
         await websocket.send_text(json.dumps(payload))
+        for sig in signatures:
+            cache[sig] = True
         return True
     except WebSocketDisconnect:
         return False
@@ -68,6 +123,16 @@ async def _safe_send_json(websocket: WebSocket, payload: dict) -> bool:
     except Exception as send_error:  # pragma: no cover - defensive
         logger.warning(f"WebSocket send failed: {send_error}")
         return False
+
+
+def _build_dedupe_signature(payload: dict) -> str | None:
+    """Return a lightweight signature to avoid sending duplicate payloads."""
+
+    message = payload.get("message") if isinstance(payload, dict) else None
+    payload_type = payload.get("type") if isinstance(payload, dict) else None
+    if payload_type and message:
+        return f"{payload_type}::{message}"
+    return None
 
 
 async def _wait_for_clarification_response(websocket: WebSocket) -> dict | None:
@@ -134,6 +199,247 @@ def _compute_vagueness_score(prompt: str) -> float:
     score = min(1.0, score * (1 + min(0.2, sentence_count * 0.05)))
     return score
 
+
+def _compute_prerequisite_scores(prompt: str) -> dict:
+    """Return prerequisite readiness scores for laboratory atom execution.
+
+    The heuristic mirrors the lightweight vagueness detector while adding
+    signals for scope detectability so Trinity AI can decide
+    whether to execute a laboratory atom or keep the human in the loop.
+    """
+
+    if not prompt:
+        return {
+            "intent_clarity_score": 0.0,
+            "scope_detectability_score": 0.0,
+            "card_prerequisite_score": 0.0,
+        }
+
+    normalized = prompt.strip().lower()
+    vagueness_score = _compute_vagueness_score(prompt)
+    scope_detectability_threshold = 0.6
+
+    # Intent clarity mirrors vagueness score but rewards explicit objectives
+    intent_signals = len(re.findall(r"\b(analyze|build|create|train|summarize|compare)\b", normalized))
+    intent_clarity_score = min(1.0, vagueness_score * 0.7 + min(0.3, intent_signals * 0.1))
+
+    # Scope detectability favors dataset/file mentions and structural hints
+    scope_keywords = (
+        "dataset",
+        "dataframe",
+        "table",
+        "column",
+        "file",
+        "csv",
+        "json",
+        "parquet",
+        "chart",
+        "plot",
+        "model",
+        "merge",
+        "join",
+        "filter",
+    )
+    scope_hits = sum(1 for kw in scope_keywords if kw in normalized)
+    scope_detectability_score = min(1.0, vagueness_score * 0.5 + min(0.5, scope_hits * 0.08))
+
+    data_references = _extract_data_references(prompt)
+    insistence_patterns = (
+        r"\b(use|using|only|must|specifically|required|exactly)\b[^.]{0,80}\b(dataset|file|table|columns?)\b",
+        r"\b(in this|for this)\s+(dataset|file|table)\b",
+    )
+    insisted_scope = any(re.search(pattern, normalized) for pattern in insistence_patterns)
+    if data_references and re.search(r"\b(use|using|only|must|specifically|required|exactly)\b", normalized):
+        insisted_scope = True
+
+    if insisted_scope:
+        scope_detectability_score = max(scope_detectability_score, scope_detectability_threshold + 0.05)
+
+    card_prerequisite_score = round(
+        (intent_clarity_score + scope_detectability_score) / 2, 4
+    )
+
+    return {
+        "intent_clarity_score": round(intent_clarity_score, 4),
+        "scope_detectability_score": round(scope_detectability_score, 4),
+        "card_prerequisite_score": card_prerequisite_score,
+    }
+
+
+def _build_contextual_prompt(
+    latest_prompt: str,
+    atom_ai_context: dict | None = None,
+    history_summary: str | None = None,
+) -> str:
+    """Merge the latest prompt with previously captured context for scoring.
+
+    The contextual prompt pulls from Trinity AI context clarifications and any
+    available history summary so prerequisite and vagueness scores account for
+    the full conversation, not only the most recent user turn.
+    """
+
+    atom_ai_context = atom_ai_context or {}
+    clarifications = atom_ai_context.get("clarifications") or []
+
+    segments: list[str] = []
+    if history_summary:
+        segments.append(f"Conversation summary: {history_summary}")
+
+    initial_prompt = atom_ai_context.get("initial_prompt")
+    if initial_prompt and initial_prompt != latest_prompt:
+        segments.append(f"Initial request: {initial_prompt}")
+
+    if clarifications:
+        recent = clarifications[-3:]
+        formatted = []
+        for clarification in recent:
+            focus = clarification.get("focus") or clarification.get("type") or "context"
+            response = clarification.get("response") or clarification.get("message") or ""
+            values = clarification.get("values") or {}
+            if values:
+                response = f"{response} | " + " | ".join(
+                    f"{key}: {value}" for key, value in values.items()
+                )
+            formatted.append(f"{focus.title()} clarification: {response}".strip())
+
+        segments.append("; ".join(formatted))
+
+    segments.append(f"Latest prompt: {latest_prompt}")
+    return "\n\n".join(segment for segment in segments if segment).strip()
+
+
+def _extract_data_references(text: str) -> list[str]:
+    """Extract likely dataset or file references from free text."""
+
+    if not text:
+        return []
+
+    dataset_tokens = re.findall(r"\b[\w.-]+\.(?:csv|json|parquet|xlsx)\b", text, re.I)
+    named_sets = re.findall(r"dataset\s+([\w-]+)", text, re.I)
+    return list(dict.fromkeys(dataset_tokens + named_sets))
+
+
+def _collect_known_scope_details(
+    atom_ai_context: dict, available_files: list[str] | None, contextual_prompt: str
+) -> dict:
+    """Aggregate known scope details like datasets, columns, and filters."""
+
+    clarifications = atom_ai_context.get("clarifications") or []
+
+    datasets: list[str] = []
+    if available_files:
+        datasets.extend(available_files[:3])
+
+    for clarification in clarifications:
+        response = clarification.get("response", "")
+        values = clarification.get("values") or {}
+        datasets.extend(_extract_data_references(response))
+        datasets.extend(_extract_data_references(" ".join(map(str, values.values()))))
+
+    datasets.extend(_extract_data_references(contextual_prompt))
+    datasets = list(dict.fromkeys(datasets))
+
+    return {
+        "datasets": datasets,
+    }
+
+
+def _summarize_known_data(
+    atom_ai_context: dict,
+    available_files: list[str] | None,
+    initial_prompt: str,
+    contextual_prompt: str,
+) -> str:
+    """Generate a short summary of what is already known from the user."""
+
+    summaries: list[str] = []
+
+    if initial_prompt:
+        summaries.append(f"Initial intent: {initial_prompt.strip()[:120]}")
+
+    clarification_notes = atom_ai_context.get("clarifications") or []
+    if clarification_notes:
+        last_focus = clarification_notes[-1].get("focus") or clarification_notes[-1].get(
+            "type"
+        )
+        summaries.append(
+            f"Recent clarification ({last_focus}): {clarification_notes[-1].get('response', '')}".strip()
+        )
+
+    known_scope = _collect_known_scope_details(
+        atom_ai_context, available_files, contextual_prompt
+    )
+    datasets = known_scope.get("datasets") or []
+    if datasets:
+        dataset_list = ", ".join(datasets)
+        summaries.append(f"I’ll use: {dataset_list}")
+    elif available_files:
+        file_list = ", ".join(available_files[:3])
+        remaining = len(available_files) - min(3, len(available_files))
+        if remaining > 0:
+            file_list = f"{file_list} (+{remaining} more)"
+        summaries.append(f"Files shared: {file_list}")
+
+    return "; ".join(summaries) if summaries else "your latest request"
+
+
+def _build_conversational_clarification(
+    weakest_dimension: str,
+    card_score: float,
+    threshold: float,
+    atom_ai_context: dict,
+    available_files: list[str] | None,
+    initial_prompt: str,
+    scope_detectability_threshold: float,
+    contextual_prompt: str,
+) -> str:
+    """Craft a conversational clarification prompt that cites known context."""
+
+    known_summary = _summarize_known_data(
+        atom_ai_context, available_files, initial_prompt, contextual_prompt
+    )
+
+    known_scope = _collect_known_scope_details(
+        atom_ai_context, available_files, contextual_prompt
+    )
+    datasets = known_scope.get("datasets") or []
+
+    scope_detail_default = (
+        "which file or dataset to use, plus the columns and any filters or joins"
+    )
+    required_details = {
+        "intent clarity": (
+            "what success looks like, the exact deliverable (chart, table, cleaned file), and any must-have fields or metrics"
+        ),
+        "scope detectability": scope_detail_default,
+    }
+
+    if weakest_dimension == "scope detectability" and datasets:
+        dataset_hint = datasets[0] if len(datasets) == 1 else ", ".join(datasets[:2])
+        required_details["scope detectability"] = (
+            f"how to use {dataset_hint} — list the columns to focus on and any filters or joins"
+        )
+
+    request_detail = required_details.get(
+        weakest_dimension,
+        "the specific goal and the data or filters you want me to focus on",
+    )
+
+    scope_note = (
+        f" Scope detectability should be at least {scope_detectability_threshold:.2f} "
+        "so I can operate safely."
+        if weakest_dimension == "scope detectability"
+        else ""
+    )
+
+    return (
+        "I want to make sure I’m working with the right portion of your data. "
+        f"Here’s what I have so far: {known_summary}. "
+        f"Could you share {request_detail}? Once I have that, I’ll take care of the rest. "
+        f"(card_prerequisite_score={card_score:.2f}, threshold={threshold:.2f})."
+        f"{scope_note}"
+    )
+
 # Initialize components (will be set by main_api.py)
 rag_engine = None
 parameter_generator = None
@@ -149,6 +455,9 @@ except ImportError:
 
 # Track prior workflow sessions to allow resumption when intent stays on workflows
 _previous_workflow_sessions: dict[str, str] = {}
+
+# Reusable websocket caches keyed by websocket_session_id so reconnects do not re-send
+_SHARED_WS_CACHES: dict[str, dict[str, bool]] = {}
 
 
 @router.get("/health")
@@ -216,7 +525,20 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         message = json.loads(message_data)
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
-        vagueness_threshold = float(message.get("vagueness_threshold", 0.75))
+        vagueness_threshold = float(message.get("vagueness_threshold", 0.6))
+
+        # Extract session identifiers early for intent caching and websocket scoping
+        session_id = message.get("session_id", None)  # Frontend chat session ID
+        websocket_session_id = message.get("websocket_session_id") or message.get("websocketSessionId")
+        chat_id = message.get("chat_id", None)  # Frontend chat ID
+        if not session_id:
+            session_id = f"ws_{uuid.uuid4().hex[:8]}"
+        if not websocket_session_id:
+            websocket_session_id = session_id or f"ws_conn_{uuid.uuid4().hex[:12]}"
+
+        # Attach websocket key and cache immediately so downstream senders share dedupe across modules
+        setattr(websocket, "_trinity_ws_key", websocket_session_id)
+        setattr(websocket, "_trinity_sent_messages", _SHARED_WS_CACHES.setdefault(websocket_session_id, {}))
 
         # Start clarification response listener (non-blocking) so lab-mode clients can resume pauses
         orchestrator = ws_orchestrator
@@ -294,14 +616,6 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 async def _generate_text_reply_direct(prompt):
                     return "I apologize, but I couldn't process your request."
 
-        # Extract session identifiers early for intent caching and websocket scoping
-        session_id = message.get("session_id", None)  # Frontend chat session ID
-        websocket_session_id = message.get("websocket_session_id") or message.get("websocketSessionId")
-        chat_id = message.get("chat_id", None)  # Frontend chat ID
-        if not session_id:
-            session_id = f"ws_{uuid.uuid4().hex[:8]}"
-        if not websocket_session_id:
-            websocket_session_id = session_id or f"ws_conn_{uuid.uuid4().hex[:12]}"
         available_files = message.get("available_files", [])
         prior_workflow_session = _previous_workflow_sessions.get(session_id) or _previous_workflow_sessions.get(chat_id or "")
 
@@ -352,11 +666,16 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 )
 
                 if decision.clarifications:
-                    await _safe_send_json(websocket, {
+                    clarification_payload = {
                         "type": "clarification_required",
                         "message": "Please confirm: " + "; ".join(decision.clarifications),
                         "intent_record": intent_record.to_dict(),
-                    })
+                    }
+                    await _safe_send_json(
+                        websocket,
+                        clarification_payload,
+                        dedupe_signature=_build_dedupe_signature(clarification_payload),
+                    )
                     await _safe_send_json(websocket, {
                         "type": "status",
                         "status": "awaiting_clarification",
@@ -401,11 +720,16 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     # Continue execution without requesting user confirmation
 
                 if decision.requires_files and not available_files:
-                    await _safe_send_json(websocket, {
+                    clarification_payload = {
                         "type": "clarification_required",
                         "message": "I need a dataset or file to run Atom Agents. Upload a file and try again.",
                         "intent_record": intent_record.to_dict(),
-                    })
+                    }
+                    await _safe_send_json(
+                        websocket,
+                        clarification_payload,
+                        dedupe_signature=_build_dedupe_signature(clarification_payload),
+                    )
                     close_code = 1000
                     close_reason = "missing_files"
                     return
@@ -518,8 +842,29 @@ async def execute_workflow_websocket(websocket: WebSocket):
             )
             websocket_session_id = prior_workflow_session
 
+        project_context = message.get("project_context", {}) or {}
+        atom_ai_context = project_context.get("ATOM_AI_Context") or {}
+        if not isinstance(atom_ai_context, dict):
+            atom_ai_context = {}
+        atom_ai_context.setdefault("clarifications", [])
+        prompt_history = atom_ai_context.setdefault("prompt_history", [])
+        if user_prompt and (not prompt_history or prompt_history[-1] != user_prompt):
+            prompt_history.append(user_prompt)
+            atom_ai_context["prompt_history"] = prompt_history[-10:]
+        atom_ai_context.setdefault("initial_prompt", user_prompt)
+        history_summary = message.get("history_summary")
+        if history_summary:
+            atom_ai_context["history_summary"] = history_summary
+        atom_ai_context["available_files"] = available_files
+
+        contextual_prompt = _build_contextual_prompt(
+            user_prompt, atom_ai_context, history_summary
+        )
+        user_id = message.get("user_id", "default_user")
+        mentioned_files = message.get("mentioned_files") or []
+
         # Step 3b: Vagueness scoring only for workflow execution paths (after routing is fixed)
-        vagueness_score = _compute_vagueness_score(user_prompt)
+        vagueness_score = _compute_vagueness_score(contextual_prompt)
         logger.info(
             "🧭 Vagueness check -> score=%.2f threshold=%.2f (workflow path)",
             vagueness_score,
@@ -540,17 +885,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
         )
 
         while vagueness_score < vagueness_threshold:
+            clarification_payload = {
+                "type": "clarification_required",
+                "message": (
+                    "I need more details to proceed. Please provide additional context or specifics. "
+                    f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
+                ),
+                "vagueness_score": vagueness_score,
+                "vagueness_threshold": vagueness_threshold,
+            }
             await _safe_send_json(
                 websocket,
-                {
-                    "type": "clarification_required",
-                    "message": (
-                        "I need more details to proceed. Please provide additional context or specifics. "
-                        f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
-                    ),
-                    "vagueness_score": vagueness_score,
-                    "vagueness_threshold": vagueness_threshold,
-                },
+                clarification_payload,
+                dedupe_signature=_build_dedupe_signature(clarification_payload),
             )
             await _safe_send_json(
                 websocket,
@@ -584,7 +931,23 @@ async def execute_workflow_websocket(websocket: WebSocket):
             if clarification_parts:
                 user_prompt = f"{user_prompt}\n\nUser clarification: {'; '.join(clarification_parts)}"
 
-            vagueness_score = _compute_vagueness_score(user_prompt)
+            atom_ai_context["clarifications"].append(
+                {
+                    "prompt": "initial_vagueness_clarification",
+                    "response": clarification_response.get("message", ""),
+                    "values": values,
+                    "focus": "vagueness",
+                }
+            )
+            prompt_history = atom_ai_context.setdefault("prompt_history", [])
+            prompt_history.append(user_prompt)
+            atom_ai_context["prompt_history"] = prompt_history[-10:]
+
+            contextual_prompt = _build_contextual_prompt(
+                user_prompt, atom_ai_context, history_summary
+            )
+
+            vagueness_score = _compute_vagueness_score(contextual_prompt)
             logger.info(
                 "🧭 Recomputed vagueness score after clarification -> %.2f (threshold=%.2f)",
                 vagueness_score,
@@ -615,6 +978,207 @@ async def execute_workflow_websocket(websocket: WebSocket):
             },
         )
 
+        # Extract remaining parameters for workflow
+        # Note: session_id and chat_id already extracted above for intent caching
+
+        # Laboratory prerequisite scoring for atom execution
+        card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.6))
+        scope_detectability_threshold = float(message.get("scope_detectability_threshold", 0.6))
+        contextual_prompt = _build_contextual_prompt(
+            user_prompt, atom_ai_context, history_summary
+        )
+        atom_ai_context["contextual_prompt"] = contextual_prompt
+        prerequisite_scores = _compute_prerequisite_scores(contextual_prompt)
+        card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
+
+        await _safe_send_json(
+            websocket,
+            {
+                "type": "status",
+                "status": "prerequisite_check",
+                "message": (
+                    "Evaluating laboratory readiness for atom execution: "
+                    f"score={card_prerequisite_score:.2f}, threshold={card_prerequisite_threshold:.2f}"
+                ),
+                "prerequisite_scores": prerequisite_scores,
+                "card_prerequisite_threshold": card_prerequisite_threshold,
+                "scope_detectability_threshold": scope_detectability_threshold,
+            },
+        )
+
+        clarification_vagueness = vagueness_score
+        max_prerequisite_iterations = 6
+        iterations = 0
+        while (
+            card_prerequisite_score < card_prerequisite_threshold
+            or clarification_vagueness < vagueness_threshold
+            or prerequisite_scores.get("scope_detectability_score", 0.0)
+            < scope_detectability_threshold
+        ):
+            iterations += 1
+            weakest_dimension = min(
+                (
+                    ("intent clarity", prerequisite_scores.get("intent_clarity_score", 0.0)),
+                    ("scope detectability", prerequisite_scores.get("scope_detectability_score", 0.0)),
+                ),
+                key=lambda item: item[1],
+            )[0]
+
+            current_known_summary = _summarize_known_data(
+                atom_ai_context, available_files, user_prompt, contextual_prompt
+            )
+            atom_ai_context["latest_known_summary"] = current_known_summary
+
+            clarification_message = _build_conversational_clarification(
+                weakest_dimension,
+                card_prerequisite_score,
+                card_prerequisite_threshold,
+                atom_ai_context,
+                available_files,
+                user_prompt,
+                scope_detectability_threshold,
+                contextual_prompt,
+            )
+
+            clarification_payload = {
+                "type": "clarification_required",
+                "message": clarification_message,
+                "focus": weakest_dimension,
+                "prerequisite_scores": prerequisite_scores,
+                "card_prerequisite_threshold": card_prerequisite_threshold,
+                "scope_detectability_threshold": scope_detectability_threshold,
+                "vagueness_threshold": vagueness_threshold,
+            }
+            await _safe_send_json(
+                websocket,
+                clarification_payload,
+                dedupe_signature=_build_dedupe_signature(clarification_payload),
+            )
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "awaiting_clarification",
+                    "message": clarification_message,
+                    "focus": weakest_dimension,
+                },
+            )
+
+            clarification_response = await _wait_for_clarification_response(websocket)
+            if not clarification_response:
+                close_code = 1001
+                close_reason = "clarification_aborted"
+                return
+
+            response_message = clarification_response.get("message", "")
+            response_values = clarification_response.get("values") or {}
+            clarification_history.append(
+                {
+                    "message": response_message,
+                    "values": response_values,
+                    "focus": weakest_dimension,
+                    "type": "card_prerequisite",
+                }
+            )
+            atom_ai_context["clarifications"].append(
+                {
+                    "prompt": clarification_message,
+                    "response": response_message,
+                    "values": response_values,
+                    "focus": weakest_dimension,
+                }
+            )
+
+            clarification_parts = []
+            if response_message:
+                clarification_parts.append(response_message)
+            if response_values:
+                clarification_parts.append(" | ".join(f"{k}: {v}" for k, v in response_values.items()))
+
+            clarified_text = "; ".join(clarification_parts)
+            if clarified_text:
+                user_prompt = f"{user_prompt}\n\n{weakest_dimension.title()} clarification: {clarified_text}"
+
+            prompt_history = atom_ai_context.setdefault("prompt_history", [])
+            prompt_history.append(user_prompt)
+            atom_ai_context["prompt_history"] = prompt_history[-10:]
+            contextual_prompt = _build_contextual_prompt(
+                user_prompt, atom_ai_context, history_summary
+            )
+            atom_ai_context["contextual_prompt"] = contextual_prompt
+
+            clarification_vagueness = _compute_vagueness_score(clarified_text or response_message)
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "vagueness_check",
+                    "message": (
+                        "Evaluating clarification quality: "
+                        f"score={clarification_vagueness:.2f}, threshold={vagueness_threshold:.2f}"
+                    ),
+                    "vagueness_score": clarification_vagueness,
+                    "vagueness_threshold": vagueness_threshold,
+                },
+            )
+
+            prerequisite_scores = _compute_prerequisite_scores(contextual_prompt)
+            card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
+            await _safe_send_json(
+                websocket,
+                {
+                    "type": "status",
+                    "status": "prerequisite_check",
+                    "message": (
+                        "Re-evaluated laboratory readiness: "
+                        f"score={card_prerequisite_score:.2f}, threshold={card_prerequisite_threshold:.2f}"
+                    ),
+                    "prerequisite_scores": prerequisite_scores,
+                    "card_prerequisite_threshold": card_prerequisite_threshold,
+                    "scope_detectability_threshold": scope_detectability_threshold,
+                },
+            )
+
+            if iterations >= max_prerequisite_iterations and (
+                card_prerequisite_score < card_prerequisite_threshold
+                or clarification_vagueness < vagueness_threshold
+                or prerequisite_scores.get("scope_detectability_score", 0.0)
+                < scope_detectability_threshold
+            ):
+                clarification_payload = {
+                    "type": "clarification_required",
+                    "message": (
+                        "I'm still missing enough detail to execute atoms reliably after multiple attempts. "
+                        "Please provide a concise, specific description so we can continue."
+                    ),
+                    "prerequisite_scores": prerequisite_scores,
+                    "card_prerequisite_threshold": card_prerequisite_threshold,
+                    "scope_detectability_threshold": scope_detectability_threshold,
+                }
+                await _safe_send_json(
+                    websocket,
+                    clarification_payload,
+                    dedupe_signature=_build_dedupe_signature(clarification_payload),
+                )
+                close_code = 1001
+                close_reason = "prerequisite_threshold_not_met"
+                return
+
+        await _safe_send_json(
+            websocket,
+            {
+                "type": "status",
+                "status": "prerequisite_complete",
+                "message": "Card prerequisites satisfied. Proceeding to atom execution.",
+                "prerequisite_scores": prerequisite_scores,
+                "card_prerequisite_threshold": card_prerequisite_threshold,
+                "scope_detectability_threshold": scope_detectability_threshold,
+            },
+        )
+
+        atom_ai_context["latest_prerequisite_scores"] = prerequisite_scores
+        atom_ai_context["card_prerequisite_score"] = card_prerequisite_score
+
         # Step 4: Handle as workflow (intent already detected above - no need to detect again)
         logger.info("🔄 Routing to workflow handler")
         logger.info("ℹ️ Intent detection already done - proceeding with workflow execution (will NOT detect intent again)")
@@ -628,20 +1192,19 @@ async def execute_workflow_websocket(websocket: WebSocket):
             close_code = 1001
             close_reason = "client_disconnected"
             return
-        
-        # Extract remaining parameters for workflow
-        # Note: session_id and chat_id already extracted above for intent caching
-        available_files = message.get("available_files", [])
-        project_context = message.get("project_context", {})
-        user_id = message.get("user_id", "default_user")
-        history_summary = message.get("history_summary")
-        mentioned_files = message.get("mentioned_files") or []
 
         # Persist vagueness metadata for downstream execution
-        project_context = project_context or {}
-        project_context["vagueness_score"] = vagueness_score
-        project_context["vagueness_threshold"] = vagueness_threshold
-        project_context["clarification_history"] = clarification_history
+        prerequisite_metadata = {
+            "vagueness_score": vagueness_score,
+            "vagueness_threshold": vagueness_threshold,
+            "clarification_history": clarification_history,
+            "card_prerequisite_score": card_prerequisite_score,
+            "card_prerequisite_threshold": card_prerequisite_threshold,
+            "scope_detectability_threshold": scope_detectability_threshold,
+            "prerequisite_scores": prerequisite_scores,
+            "ATOM_AI_Context": atom_ai_context,
+        }
+        project_context.update(prerequisite_metadata)
         
         # 🔧 CRITICAL FIX: Extract project context from file paths if not provided or contains 'default' values
         # Check if project_context is missing, empty, or contains 'default' values
@@ -687,7 +1250,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         break
             
             if extracted_context:
-                project_context = extracted_context
+                project_context = {**extracted_context, **prerequisite_metadata}
             else:
                 # If still empty or contains 'default', try environment variables
                 import os
@@ -699,7 +1262,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         "client_name": env_client,
                         "app_name": env_app,
                         "project_name": env_project,
-                        "available_files": available_files
+                        "available_files": available_files,
+                        **prerequisite_metadata,
                     }
                     logger.info(f"✅ Using project context from environment variables: client={env_client}, app={env_app}, project={env_project}")
                 else:
@@ -711,7 +1275,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         "client_name": "",
                         "app_name": "",
                         "project_name": "",
-                        "available_files": available_files
+                        "available_files": available_files,
+                        **prerequisite_metadata,
                     }
         
         # Ensure available_files is included in project_context
@@ -749,9 +1314,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         # Execute workflow with real-time events (intent detection already done above - NOT called again)
         try:
+            workflow_prompt = atom_ai_context.get("contextual_prompt", user_prompt)
             await ws_orchestrator.execute_workflow_with_websocket(
                 websocket=websocket,
-                user_prompt=user_prompt,
+                user_prompt=workflow_prompt,
                 available_files=available_files,
                 project_context=project_context,
                 user_id=user_id,
