@@ -58,24 +58,50 @@ def _get_ws_send_cache(websocket: WebSocket) -> dict:
     return cache
 
 
+def _normalized_message_signature(payload: dict | None) -> str | None:
+    """Return a normalized message-based signature for cross-module dedupe."""
+
+    if not isinstance(payload, dict):
+        return None
+
+    message = payload.get("message")
+    if not isinstance(message, str):
+        return None
+
+    normalized = re.sub(r"\s+", " ", message).strip().lower()
+    return f"msg::{normalized}" if normalized else None
+
+
 async def _safe_send_json(websocket: WebSocket, payload: dict, *, dedupe_signature: str | None = None) -> bool:
     """Send a JSON message if the websocket is still open.
 
     Returns False when the connection is no longer available so callers can
     gracefully stop sending additional messages.
     """
+    cache = _get_ws_send_cache(websocket)
+
+    signatures: list[str] = []
     if dedupe_signature:
-        cache = _get_ws_send_cache(websocket)
-        if cache.get(dedupe_signature):
-            return True
+        signatures.append(dedupe_signature)
+    else:
+        auto_signature = _build_dedupe_signature(payload)
+        if auto_signature:
+            signatures.append(auto_signature)
+
+    message_signature = _normalized_message_signature(payload)
+    if message_signature:
+        signatures.append(message_signature)
+
+    if any(cache.get(sig) for sig in signatures):
+        return True
 
     if not _is_websocket_connected(websocket):
         return False
 
     try:
         await websocket.send_text(json.dumps(payload))
-        if dedupe_signature:
-            cache[dedupe_signature] = True
+        for sig in signatures:
+            cache[sig] = True
         return True
     except WebSocketDisconnect:
         return False

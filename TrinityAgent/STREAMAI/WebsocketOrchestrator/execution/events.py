@@ -37,11 +37,24 @@ class WorkflowEventsMixin:
     def _get_ws_send_cache(self, websocket) -> dict:
         """Return (and attach) a cache used to dedupe websocket messages."""
 
-        cache = getattr(websocket, "_trinity_sent_messages", None)
-        if cache is None:
-            cache = {}
-            setattr(websocket, "_trinity_sent_messages", cache)
-        return cache
+            cache = getattr(websocket, "_trinity_sent_messages", None)
+            if cache is None:
+                cache = {}
+                setattr(websocket, "_trinity_sent_messages", cache)
+            return cache
+
+    def _normalized_message_signature(self, payload) -> str | None:
+        """Return a normalized message-based signature for cross-module dedupe."""
+
+        if not isinstance(payload, dict):
+            return None
+
+        message = payload.get("message")
+        if not isinstance(message, str):
+            return None
+
+        normalized = re.sub(r"\s+", " ", message).strip().lower()
+        return f"msg::{normalized}" if normalized else None
 
     async def _safe_close_websocket(self, websocket, code: int = 1000, reason: str = "") -> None:
             """Close websocket with a status code while swallowing close errors."""
@@ -65,20 +78,27 @@ class WorkflowEventsMixin:
                     logger.warning(f"⚠️ WebSocket disconnected, skipping {context}")
                     raise WebSocketDisconnect(code=1006)
 
+                cache = self._get_ws_send_cache(websocket)
+                signatures = []
+
                 signature_parts = [event.event_type]
                 if isinstance(event.payload, dict):
                     message_value = event.payload.get("message")
                     if message_value:
                         signature_parts.append(str(message_value))
-                signature = "::".join(signature_parts)
+                signatures.append("::".join(signature_parts))
 
-                cache = self._get_ws_send_cache(websocket)
-                if cache.get(signature):
-                    logger.debug("Skipping duplicate event %s", signature)
+                msg_signature = self._normalized_message_signature(event.payload)
+                if msg_signature:
+                    signatures.append(msg_signature)
+
+                if any(cache.get(sig) for sig in signatures):
+                    logger.debug("Skipping duplicate event %s", " | ".join(signatures))
                     return
 
                 await websocket.send_text(event.to_json())
-                cache[signature] = True
+                for sig in signatures:
+                    cache[sig] = True
             except WebSocketDisconnect:
                 logger.info(f"🔌 WebSocket disconnected during {context}")
                 raise
