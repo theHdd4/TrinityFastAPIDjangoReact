@@ -21,25 +21,33 @@ class AtomAIContextStore:
     def __init__(
         self,
         mongo_client: Optional[MongoClient] = None,
-        collection_name: str = "ATOM_AI_CONTEXT",
+        collection_name: str = "Trinity_AI_Context",
     ) -> None:
         self.mongo_client = mongo_client or self._build_mongo_client()
-        database_name = settings.CONFIG_DB or getattr(settings, "MONGO_DB", None) or "trinity_db"
+        database_name = getattr(settings, "MONGO_DB", None) or settings.CONFIG_DB or "trinity_db"
         self.collection: Collection = self.mongo_client[database_name].get_collection(collection_name)
         self._ensure_indexes()
 
     @staticmethod
     def _build_mongo_client() -> MongoClient:
         if settings.MONGO_URI:
-            return MongoClient(settings.MONGO_URI)
+            return MongoClient(
+                settings.MONGO_URI,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=5000,
+            )
 
         auth_source = settings.MONGO_AUTH_SOURCE or settings.MONGO_AUTH_DB or "admin"
         uri = (
             f"mongodb://{settings.MONGO_HOST or settings.HOST_IP}:{settings.MONGO_PORT}/"
-            f"{settings.CONFIG_DB or getattr(settings, 'MONGO_DB', None) or 'trinity_db'}"
+            f"{getattr(settings, 'MONGO_DB', None) or settings.CONFIG_DB or 'trinity_db'}"
             f"?authSource={auth_source}"
         )
-        return MongoClient(uri)
+        return MongoClient(
+            uri,
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+        )
 
     def _ensure_indexes(self) -> None:
         try:
@@ -85,7 +93,7 @@ class AtomAIContextStore:
         prompt: Optional[str] = None,
         analysis: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Merge new metadata into the ATOM_AI_CONTEXT collection."""
+        """Merge new metadata into the Trinity_AI_Context collection."""
 
         if not files:
             return
