@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowRight, Star, Award, Flame } from 'lucide-react';
+import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -72,6 +72,8 @@ interface LayoutBox {
   comparisonIdentifier?: string; // Identifier to vary for comparison (e.g., "year", "brand")
   comparisonIdentifierValue?: string; // Value of the identifier to compare with
   growthRateValue?: number; // Calculated growth rate percentage
+  absoluteDifferenceValue?: number; // Calculated absolute difference
+  comparisonDisplayType?: 'growthRate' | 'absoluteDifference'; // Display type for comparison
   comparisonValue?: string; // Value of the comparison variable
   // Config variable fields
   variableId?: string;
@@ -474,6 +476,8 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                     comparisonIdentifier: box.comparisonIdentifier,
                     comparisonIdentifierValue: box.comparisonIdentifierValue,
                     growthRateValue: box.growthRateValue,
+                    absoluteDifferenceValue: box.absoluteDifferenceValue,
+                    comparisonDisplayType: box.comparisonDisplayType || 'growthRate',
                     comparisonValue: box.comparisonValue,
                     // Variable fields
                     variableId: box.variableId,
@@ -3755,15 +3759,22 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       const changePercentage = changeValue > 0 ? `+${changeValue}%` : `${changeValue}%`;
       const isPositive = changeType === 'positive';
       
-      // Calculate growth rate if enabled
+      // Calculate growth rate or absolute difference if enabled
       let growthRatePercentage: number | null = null;
+      let absoluteDifference: number | null = null;
       let isGrowthPositive = false;
+      let isDifferencePositive = false;
+      const comparisonDisplayType = box.comparisonDisplayType || 'growthRate';
+      
       if (showGrowthRate && box.variableNameKey && box.comparisonIdentifier && box.comparisonIdentifierValue) {
-        // Growth rate will be calculated and set via settings panel
+        // Growth rate or absolute difference will be calculated and set via settings panel
         // For now, use the stored value if available
-        if (box.growthRateValue !== undefined) {
+        if (comparisonDisplayType === 'growthRate' && box.growthRateValue !== undefined) {
           growthRatePercentage = box.growthRateValue;
           isGrowthPositive = growthRatePercentage > 0;
+        } else if (comparisonDisplayType === 'absoluteDifference' && box.absoluteDifferenceValue !== undefined) {
+          absoluteDifference = box.absoluteDifferenceValue;
+          isDifferencePositive = absoluteDifference > 0;
         }
       }
       
@@ -3980,19 +3991,39 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               </div>
             )}
 
-            {/* Growth Rate indicator */}
-            {showGrowthRate && growthRatePercentage !== null && (
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
-                isGrowthPositive ? 'bg-green-100' : 'bg-red-100'
-              }`}>
-                <TrendingUp 
-                  className={`w-4 h-4 ${isGrowthPositive ? 'text-green-600' : 'text-red-600 rotate-180'}`} 
-                />
-                <span className={`text-sm font-semibold ${
-                  isGrowthPositive ? 'text-green-700' : 'text-red-700'
-                }`}>
-                  {isGrowthPositive ? '+' : ''}{growthRatePercentage.toFixed(growthRateDecimalPlaces)}%
-                </span>
+            {/* Growth Rate / Absolute Difference indicator */}
+            {showGrowthRate && ((comparisonDisplayType === 'growthRate' && growthRatePercentage !== null) || 
+                                (comparisonDisplayType === 'absoluteDifference' && absoluteDifference !== null)) && (
+              <div className={`inline-flex items-center gap-1 px-1 py-0.5 rounded-lg w-fit ${
+                comparisonDisplayType === 'growthRate' 
+                  ? (isGrowthPositive ? 'bg-green-100' : 'bg-red-100')
+                  : (isDifferencePositive ? 'bg-green-100' : 'bg-red-100')
+              }`} style={{ width: 'fit-content' }}>
+                {comparisonDisplayType === 'growthRate' ? (
+                  <>
+                    <TrendingUp 
+                      className={`w-4 h-4 ${isGrowthPositive ? 'text-green-600' : 'text-red-600 rotate-180'}`} 
+                    />
+                    <span className={`text-sm font-semibold ${
+                      isGrowthPositive ? 'text-green-700' : 'text-red-700'
+                    }`}>
+                      {isGrowthPositive ? '+' : ''}{growthRatePercentage!.toFixed(growthRateDecimalPlaces)}%
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {isDifferencePositive ? (
+                      <ArrowUp className="w-4 h-4 text-green-600" />
+                    ) : (
+                      <ArrowDown className="w-4 h-4 text-red-600" />
+                    )}
+                    <span className={`text-sm font-semibold ${
+                      isDifferencePositive ? 'text-green-700' : 'text-red-700'
+                    }`}>
+                      {isDifferencePositive ? '+' : ''}{absoluteDifference!.toFixed(growthRateDecimalPlaces)}
+                    </span>
+                  </>
+                )}
               </div>
             )}
 

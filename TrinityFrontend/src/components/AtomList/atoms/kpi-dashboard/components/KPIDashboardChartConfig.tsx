@@ -276,6 +276,40 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
     }
   }, [selectedChartBox?.id]);
 
+  // Sync chart config when box's chartConfig changes (e.g., from global filters)
+  // This ensures the component reflects changes made outside (like global filter updates)
+  const previousBoxConfigRef = useRef<string>('');
+  useEffect(() => {
+    if (selectedChartBox?.chartConfig && selectedChartBox.id === previousBoxIdRef.current) {
+      const migrated = migrateLegacyChart(selectedChartBox.chartConfig as ChartMakerConfig);
+      const boxConfigString = JSON.stringify(migrated);
+      
+      // Only update if the box's config actually changed (to avoid infinite loops)
+      if (previousBoxConfigRef.current !== boxConfigString) {
+        previousBoxConfigRef.current = boxConfigString;
+        
+        // Check if filters changed specifically (global filter sync)
+        const currentFilters = JSON.stringify(chartConfig.filters || {});
+        const newFilters = JSON.stringify(migrated.filters || {});
+        
+        if (currentFilters !== newFilters) {
+          console.log('[Chart Config] Syncing filters from box (global filter update):', {
+            boxId: selectedChartBox.id,
+            oldFilters: chartConfig.filters,
+            newFilters: migrated.filters
+          });
+          // Reset the previous config ref to allow the update to propagate back
+          previousChartConfigRef.current = '';
+          setChartConfig(migrated);
+        }
+      }
+    } else if (selectedChartBox?.chartConfig) {
+      // Update ref when box changes
+      const migrated = migrateLegacyChart(selectedChartBox.chartConfig as ChartMakerConfig);
+      previousBoxConfigRef.current = JSON.stringify(migrated);
+    }
+  }, [selectedChartBox?.chartConfig, selectedChartBox?.id]);
+
   const getUniqueValues = (column: string) => {
     if (!chartData) return [];
     
@@ -371,14 +405,16 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
     setLoading(true);
     try {
       const traces = buildTracesForAPI(migratedChart);
-      const legacyFilters = migratedChart.isAdvancedMode ? {} : migratedChart.filters || {};
+      // Use filters directly from chart config - global filters are already synced to chartConfig.filters
+      // in KPIDashboardSettings.tsx when global filter values change
+      const mergedFilters = migratedChart.isAdvancedMode ? {} : migratedChart.filters || {};
 
       const chartRequest = {
         file_id: fileId,
         chart_type: migratedChart.type === 'stacked_bar' ? 'bar' : migratedChart.type,
         traces: traces,
         title: migratedChart.title,
-        filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
+        filters: Object.keys(mergedFilters).length > 0 ? mergedFilters : undefined,
       };
 
       const chartResponse = await chartMakerApi.generateChart(chartRequest);

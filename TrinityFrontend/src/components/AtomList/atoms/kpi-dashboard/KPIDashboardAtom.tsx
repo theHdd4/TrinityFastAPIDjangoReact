@@ -41,6 +41,11 @@ export interface KPIDashboardSettings {
   insights: string;
   layouts?: Layout[]; // Store layouts in settings
   selectedBoxId?: string; // ID of the currently selected box for per-element settings
+  globalFilters?: Record<string, {
+    values: string[];
+    applyToMetricCards?: boolean;
+    applyToCharts?: boolean;
+  }>; // Global filters with element type selection
 }
 
 interface KPIDashboardAtomProps {
@@ -58,7 +63,8 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
       metricColumns: [],
       changeColumns: [],
       insights: '',
-      layouts: []
+      layouts: [],
+      globalFilters: {} as Record<string, { values: string[]; applyToMetricCards?: boolean; applyToCharts?: boolean }>
     };
   }, [atom?.settings]);
   

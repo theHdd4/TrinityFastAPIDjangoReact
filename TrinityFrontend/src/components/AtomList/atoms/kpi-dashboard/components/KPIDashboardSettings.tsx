@@ -6,11 +6,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
-import { Plus, X, Upload, ImageIcon, BarChart3 } from 'lucide-react';
+import { Plus, X, Upload, ImageIcon, BarChart3, Filter } from 'lucide-react';
 import { VALIDATE_API, LABORATORY_API, IMAGES_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import type { KPIDashboardData, KPIDashboardSettings as KPISettings } from '../KPIDashboardAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { chartMakerApi } from '@/components/AtomList/atoms/chart-maker/services/chartMakerApi';
+import { migrateLegacyChart, buildTracesForAPI, validateChart } from '@/components/AtomList/atoms/chart-maker/utils/traceUtils';
 
 interface KPIDashboardSettingsProps {
   settings: KPISettings;
@@ -45,6 +47,10 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageUploadError, setImageUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // State for global filter variables
+  const [allVariablesForGlobalFilters, setAllVariablesForGlobalFilters] = useState<any[]>([]);
+  const [loadingGlobalFilterOptions, setLoadingGlobalFilterOptions] = useState(false);
+  const [renderingCharts, setRenderingCharts] = useState(false);
 
   // Fetch available dataframes from database
   useEffect(() => {
@@ -84,11 +90,19 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
 
       const data = await response.json();
       const frame = frames.find(f => f.object_name === fileId);
+      const fileName = frame?.arrow_name?.split('/').pop() || fileId;
+      
+      // Save selected file to settings so it's available for chart rendering
+      onSettingsChange({ 
+        ...settings,
+        selectedFile: fileId,
+        dataSource: fileName
+      } as any);
       
       onDataUpload({
         headers: data.headers || [],
         rows: data.rows || [],
-        fileName: frame?.arrow_name?.split('/').pop() || fileId,
+        fileName: fileName,
         metrics: []
       });
 
@@ -347,6 +361,50 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
     fetchVariableOptions();
   }, [selectedBox?.variableNameKey, selectedBox?.variableName]);
 
+  // Fetch all variables for global filters when layouts change
+  useEffect(() => {
+    const fetchAllVariables = async () => {
+      setLoadingGlobalFilterOptions(true);
+      try {
+        const projectContext = getActiveProjectContext();
+        if (!projectContext) return;
+
+        const params = new URLSearchParams({
+          clientId: projectContext.client_name,
+          appId: projectContext.app_name,
+          projectId: projectContext.project_name,
+        });
+
+        const response = await fetch(`${LABORATORY_API}/variables?${params.toString()}`, {
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.variables && Array.isArray(result.variables)) {
+            setAllVariablesForGlobalFilters(result.variables);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch variables for global filters:', error);
+      } finally {
+        setLoadingGlobalFilterOptions(false);
+      }
+    };
+
+    // Only fetch if we have metric cards or charts
+    const hasMetricCards = settings.layouts?.some(layout => 
+      layout.boxes.some(box => box.elementType === 'metric-card' && (box.variableNameKey || box.variableName))
+    );
+    const hasCharts = settings.layouts?.some(layout => 
+      layout.boxes.some(box => box.elementType === 'chart' && box.chartConfig?.filters)
+    );
+    
+    if (hasMetricCards || hasCharts) {
+      fetchAllVariables();
+    }
+  }, [settings.layouts]);
+
   // Find matching variable based on selected filters
   const findMatchingVariable = (filters: Record<string, string>) => {
     const activeFilters = Object.entries(filters).filter(([_, val]) => val !== '');
@@ -516,6 +574,718 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
           </p>
         </div>
       )}
+
+      {/* Global Filters */}
+      {(() => {
+        const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+        
+        // Extract ALL identifiers from metric cards
+        const allMetricCards = settings.layouts?.flatMap(layout => layout.boxes)
+          .filter(box => box.elementType === 'metric-card' && (box.variableNameKey || box.variableName)) || [];
+        
+        const metricCardIdentifiers = new Set<string>();
+        allMetricCards.forEach(box => {
+          const variableKey = box.variableNameKey || box.variableName || '';
+          if (variableKey) {
+            const parts = variableKey.split('_');
+            let i = 2; // Skip first 2 parts (measure and aggregation)
+            while (i < parts.length) {
+              const key = parts[i]?.toLowerCase();
+              if (identifierTypes.includes(key)) {
+                metricCardIdentifiers.add(key);
+                // Skip the value and move to next identifier
+                let nextIndex = i + 2;
+                while (nextIndex < parts.length) {
+                  const nextPart = parts[nextIndex]?.toLowerCase();
+                  if (!identifierTypes.includes(nextPart)) {
+                    nextIndex++;
+                  } else {
+                    break;
+                  }
+                }
+                i = nextIndex;
+              } else {
+                i++;
+              }
+            }
+          }
+        });
+
+        // Extract ALL identifiers from charts
+        // Also check chart data columns if available (for charts without filters yet)
+        const allCharts = settings.layouts?.flatMap(layout => layout.boxes)
+          .filter(box => box.elementType === 'chart' && box.chartConfig) || [];
+        
+        const chartIdentifiers = new Set<string>();
+        allCharts.forEach(box => {
+          if (box.chartConfig?.filters) {
+            Object.keys(box.chartConfig.filters).forEach(column => {
+              const normalizedColumn = column.toLowerCase();
+              if (identifierTypes.includes(normalizedColumn)) {
+                chartIdentifiers.add(normalizedColumn);
+              }
+            });
+          }
+          // Also check if chart has data with columns that match identifier types
+          // This helps identify identifiers even if no filters are set yet
+          if ((box.chartConfig as any)?.filteredData?.columns) {
+            const columns = (box.chartConfig as any).filteredData.columns;
+            columns.forEach((column: string) => {
+              const normalizedColumn = column.toLowerCase();
+              if (identifierTypes.includes(normalizedColumn)) {
+                chartIdentifiers.add(normalizedColumn);
+              }
+            });
+          }
+        });
+
+        // Combine all identifiers (union - all identifiers from both metric cards and charts)
+        const allIdentifiers = Array.from(new Set([...metricCardIdentifiers, ...chartIdentifiers]));
+        
+        // Note: State for global filters is declared at component level above
+
+        // Get unique values for each identifier from all available variables
+        const getGlobalFilterOptions = (identifier: string): string[] => {
+          const options = new Set<string>();
+          const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+          
+          // Get from all available variables (like individual filters do)
+          allVariablesForGlobalFilters.forEach((v: any) => {
+            const vKey = v.variableNameKey || v.variableName;
+            if (vKey) {
+              const parts = vKey.split('_');
+              
+              let i = 2; // Skip first 2 parts (measure and aggregation)
+              while (i < parts.length) {
+                const key = parts[i]?.toLowerCase();
+                if (key === identifier && i + 1 < parts.length) {
+                  let value = parts[i + 1];
+                  let nextIndex = i + 2;
+                  
+                  while (nextIndex < parts.length) {
+                    const nextPart = parts[nextIndex]?.toLowerCase();
+                    if (!identifierTypes.includes(nextPart)) {
+                      value += '_' + parts[nextIndex];
+                      nextIndex++;
+                    } else {
+                      break;
+                    }
+                  }
+                  options.add(value);
+                  i = nextIndex;
+                } else {
+                  i++;
+                }
+              }
+            }
+          });
+          
+          // Also get from charts (for chart-specific identifiers)
+          allCharts.forEach(box => {
+            if (box.chartConfig?.filters) {
+              const normalizedIdentifier = identifier.toLowerCase();
+              const filterValues = box.chartConfig.filters[normalizedIdentifier] || box.chartConfig.filters[identifier];
+              if (Array.isArray(filterValues)) {
+                filterValues.forEach(val => options.add(String(val)));
+              }
+            }
+          });
+          
+          return Array.from(options).sort();
+        };
+
+        if (allIdentifiers.length === 0) {
+          return null;
+        }
+
+        return (
+          <div className="space-y-3">
+            <Label className="text-sm font-medium">Global Filters</Label>
+            <Card className="p-4 space-y-4 bg-blue-50 border-blue-200">
+              <p className="text-xs text-blue-800 mb-2">
+                Select identifiers and choose which element types to apply filters to.
+              </p>
+              {allIdentifiers.map((identifier) => {
+                const options = getGlobalFilterOptions(identifier);
+                const currentFilter = settings.globalFilters?.[identifier];
+                const currentValues = currentFilter?.values || [];
+                const applyToMetricCards = currentFilter?.applyToMetricCards ?? metricCardIdentifiers.has(identifier);
+                const applyToCharts = currentFilter?.applyToCharts ?? chartIdentifiers.has(identifier);
+                
+                if (loadingGlobalFilterOptions && options.length === 0) {
+                  return (
+                    <div key={identifier} className="p-3 bg-white rounded-lg border border-blue-200">
+                      <p className="text-xs text-muted-foreground">Loading options for {identifier}...</p>
+                    </div>
+                  );
+                }
+                
+                return (
+                  <div key={identifier} className="space-y-3 p-3 bg-white rounded-lg border border-blue-200">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor={`global-filter-${identifier}`} className="text-xs font-semibold capitalize">
+                        {identifier} ({options.length} options)
+                      </Label>
+                      <div className="flex items-center gap-4 text-xs">
+                        <div className="flex items-center gap-1">
+                          <Checkbox
+                            id={`apply-metric-${identifier}`}
+                            checked={applyToMetricCards}
+                            disabled={!metricCardIdentifiers.has(identifier)}
+                            onCheckedChange={(checked) => {
+                              const newGlobalFilters = { ...(settings.globalFilters || {}) };
+                              if (!newGlobalFilters[identifier]) {
+                                newGlobalFilters[identifier] = { values: [], applyToMetricCards: false, applyToCharts: false };
+                              }
+                              newGlobalFilters[identifier].applyToMetricCards = checked as boolean;
+                              onSettingsChange({ globalFilters: newGlobalFilters });
+                            }}
+                          />
+                          <label htmlFor={`apply-metric-${identifier}`} className={metricCardIdentifiers.has(identifier) ? 'cursor-pointer' : 'text-gray-400 cursor-not-allowed'}>
+                            Metric Cards
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Checkbox
+                            id={`apply-chart-${identifier}`}
+                            checked={applyToCharts}
+                            disabled={!chartIdentifiers.has(identifier)}
+                            onCheckedChange={(checked) => {
+                              const newGlobalFilters = { ...(settings.globalFilters || {}) };
+                              if (!newGlobalFilters[identifier]) {
+                                newGlobalFilters[identifier] = { values: [], applyToMetricCards: false, applyToCharts: false };
+                              }
+                              newGlobalFilters[identifier].applyToCharts = checked as boolean;
+                              onSettingsChange({ globalFilters: newGlobalFilters });
+                            }}
+                          />
+                          <label htmlFor={`apply-chart-${identifier}`} className={chartIdentifiers.has(identifier) ? 'cursor-pointer' : 'text-gray-400 cursor-not-allowed'}>
+                            Charts
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                    <Select
+                      value={currentValues.length > 0 ? currentValues[0] : '__all__'}
+                      onValueChange={(value) => {
+                        const newGlobalFilters = { ...(settings.globalFilters || {}) };
+                        const currentFilter = newGlobalFilters[identifier] || { values: [], applyToMetricCards: applyToMetricCards, applyToCharts: applyToCharts };
+                        
+                        if (value === '__all__') {
+                          currentFilter.values = [];
+                        } else {
+                          currentFilter.values = [value];
+                        }
+                        
+                        newGlobalFilters[identifier] = currentFilter;
+                        
+                        // Apply filters automatically to charts when selected
+                        let updatedLayouts = settings.layouts;
+                        
+                        // Apply to charts if enabled - sync global filters to chart's individual filters
+                        if (currentFilter.applyToCharts) {
+                          updatedLayouts = settings.layouts?.map(layout => ({
+                            ...layout,
+                            boxes: layout.boxes.map(box => {
+                              if (box.elementType === 'chart' && box.chartConfig) {
+                                // Preserve the original chart config structure - don't migrate here as it might lose properties
+                                // Only migrate when we need to access filters, but keep original structure
+                                const originalChartConfig = box.chartConfig;
+                                const chartConfig = migrateLegacyChart(originalChartConfig);
+                                
+                                // Start with existing chart-specific filters (non-global ones)
+                                const chartSpecificFilters: Record<string, string[]> = {};
+                                const globalFilterIdentifiers = new Set(
+                                  Object.entries(newGlobalFilters)
+                                    .filter(([_, config]: [string, any]) => config.applyToCharts)
+                                    .map(([id]) => id.toLowerCase())
+                                );
+                                
+                                // Map to track original column names (case-preserved) for each identifier
+                                const identifierToColumnName = new Map<string, string>();
+                                
+                                // First pass: identify which existing filters are global filters and preserve their original case
+                                Object.entries(chartConfig.filters || {}).forEach(([key, val]) => {
+                                  const normalizedKey = key.toLowerCase();
+                                  if (globalFilterIdentifiers.has(normalizedKey)) {
+                                    // This is a global filter - preserve the original column name
+                                    identifierToColumnName.set(normalizedKey, key);
+                                  } else {
+                                    // This is a chart-specific filter - keep it
+                                    chartSpecificFilters[key] = val as string[];
+                                  }
+                                });
+                                
+                                // Add all active global filters for charts, using original column name if available
+                                Object.entries(newGlobalFilters).forEach(([id, filterConfig]) => {
+                                  const config = filterConfig as { values: string[]; applyToCharts?: boolean };
+                                  if (config.applyToCharts) {
+                                    // If values exist and not "__all__", add to chart filters
+                                    // This syncs global filters to chart's individual filters UI
+                                    if (config.values && config.values.length > 0 && !config.values.includes('__all__')) {
+                                      // Use original column name if we found one
+                                      let columnName = identifierToColumnName.get(id.toLowerCase());
+                                      
+                                      // If no existing filter found, try to find matching column name from chart data
+                                      if (!columnName && (chartConfig as any)?.filteredData?.columns) {
+                                        const columns = (chartConfig as any).filteredData.columns;
+                                        const matchingColumn = columns.find((col: string) => 
+                                          col.toLowerCase() === id.toLowerCase()
+                                        );
+                                        if (matchingColumn) {
+                                          columnName = matchingColumn;
+                                          identifierToColumnName.set(id.toLowerCase(), matchingColumn);
+                                        }
+                                      }
+                                      
+                                      // Fallback to lowercase identifier (backend handles case-insensitive matching)
+                                      if (!columnName) {
+                                        columnName = id;
+                                      }
+                                      
+                                      // Only add if we don't already have this filter (case-insensitive check)
+                                      const existingKey = Object.keys(chartSpecificFilters).find(key => 
+                                        key.toLowerCase() === columnName.toLowerCase()
+                                      );
+                                      
+                                      if (existingKey) {
+                                        // Update existing filter with same case
+                                        chartSpecificFilters[existingKey] = config.values;
+                                      } else {
+                                        // Add new filter with preserved or found column name
+                                        chartSpecificFilters[columnName] = config.values;
+                                      }
+                                    }
+                                    // If "__all__" or empty, the filter is removed (not added to chartSpecificFilters)
+                                  }
+                                });
+                                
+                                // Debug: Log the filter sync
+                                console.log(`[Global Filter] Syncing filters to chart ${box.id}:`, {
+                                  identifier,
+                                  value,
+                                  globalFilters: newGlobalFilters,
+                                  chartSpecificFilters,
+                                  originalFilters: chartConfig.filters,
+                                  preservingOriginalConfig: true
+                                });
+                                
+                                // Preserve ALL original chart config properties, only update filters
+                                return {
+                                  ...box,
+                                  chartConfig: {
+                                    ...originalChartConfig, // Preserve original structure first
+                                    ...chartConfig, // Then apply migrated structure
+                                    filters: chartSpecificFilters, // Sync global filters to individual filters
+                                    chartRendered: false // Mark as needing re-render
+                                  }
+                                };
+                              }
+                              return box;
+                            })
+                          }));
+                        }
+                        
+                        // Apply to metric cards if enabled (async)
+                        if (currentFilter.applyToMetricCards) {
+                          (async () => {
+                            // Use the already fetched variables or fetch if needed
+                            const variablesToUse = allVariablesForGlobalFilters.length > 0 
+                              ? allVariablesForGlobalFilters 
+                              : await (async () => {
+                                  try {
+                                    const projectContext = getActiveProjectContext();
+                                    if (!projectContext) return [];
+                                    
+                                    const params = new URLSearchParams({
+                                      clientId: projectContext.client_name,
+                                      appId: projectContext.app_name,
+                                      projectId: projectContext.project_name,
+                                    });
+
+                                    const response = await fetch(`${LABORATORY_API}/variables?${params.toString()}`, {
+                                      credentials: 'include',
+                                    });
+
+                                    if (response.ok) {
+                                      const result = await response.json();
+                                      return result.variables && Array.isArray(result.variables) ? result.variables : [];
+                                    }
+                                  } catch (error) {
+                                    console.error('Error fetching variables:', error);
+                                  }
+                                  return [];
+                                })();
+                            
+                            // Use updatedLayouts (which already has chart filter updates) as base for metric updates
+                            const metricUpdatedLayouts = updatedLayouts?.map(layout => ({
+                            ...layout,
+                            boxes: layout.boxes.map(box => {
+                              if (box.elementType === 'metric-card' && (box.variableNameKey || box.variableName)) {
+                                const variableKey = box.variableNameKey || box.variableName || '';
+                                if (variableKey) {
+                                  // Parse current identifiers from variable key
+                                  const parts = variableKey.split('_');
+                                  const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+                                  const currentIdentifiers: Record<string, string> = {};
+                                  
+                                  let i = 2; // Skip first 2 parts (measure and aggregation)
+                                  while (i < parts.length) {
+                                    const key = parts[i]?.toLowerCase();
+                                    if (identifierTypes.includes(key) && i + 1 < parts.length) {
+                                      let val = parts[i + 1];
+                                      let nextIndex = i + 2;
+                                      
+                                      while (nextIndex < parts.length) {
+                                        const nextPart = parts[nextIndex]?.toLowerCase();
+                                        if (!identifierTypes.includes(nextPart)) {
+                                          val += '_' + parts[nextIndex];
+                                          nextIndex++;
+                                        } else {
+                                          break;
+                                        }
+                                      }
+                                      
+                                      currentIdentifiers[key] = val;
+                                      i = nextIndex;
+                                    } else {
+                                      i++;
+                                    }
+                                  }
+                                  
+                                  // Update with global filter (replace the identifier value)
+                                  if (value !== '__all__') {
+                                    currentIdentifiers[identifier] = value;
+                                  } else {
+                                    delete currentIdentifiers[identifier];
+                                  }
+                                  
+                                  // Find base pattern (first 2 parts: measure and aggregation)
+                                  const basePattern = parts.slice(0, 2).join('_');
+                                  
+                                  // Find matching variable with same structure but new identifier value
+                                  const matchingVar = variablesToUse.find((v: any) => {
+                                    const vKey = v.variableNameKey || v.variableName;
+                                    if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                    
+                                    const vParts = vKey.split('_');
+                                    const vIdentifiers: Record<string, string> = {};
+                                    
+                                    let j = 2;
+                                    while (j < vParts.length) {
+                                      const key = vParts[j]?.toLowerCase();
+                                      if (identifierTypes.includes(key) && j + 1 < vParts.length) {
+                                        let val = vParts[j + 1];
+                                        let nextIndex = j + 2;
+                                        
+                                        while (nextIndex < vParts.length) {
+                                          const nextPart = vParts[nextIndex]?.toLowerCase();
+                                          if (!identifierTypes.includes(nextPart)) {
+                                            val += '_' + vParts[nextIndex];
+                                            nextIndex++;
+                                          } else {
+                                            break;
+                                          }
+                                        }
+                                        
+                                        vIdentifiers[key] = val;
+                                        j = nextIndex;
+                                      } else {
+                                        j++;
+                                      }
+                                    }
+                                    
+                                    // Check if all current identifiers match (including the updated one)
+                                    return Object.entries(currentIdentifiers).every(([key, val]) => 
+                                      vIdentifiers[key] === val
+                                    );
+                                  });
+                                  
+                                  if (matchingVar) {
+                                    return {
+                                      ...box,
+                                      variableId: matchingVar.id,
+                                      variableName: matchingVar.variableName,
+                                      variableNameKey: matchingVar.variableNameKey || matchingVar.variableName,
+                                      metricValue: matchingVar.value || '0',
+                                      value: matchingVar.value,
+                                    };
+                                  }
+                                }
+                              }
+                              return box;
+                            })
+                          }));
+                            
+                            updatedLayouts = updatedLayouts?.map(layout => ({
+                              ...layout,
+                              boxes: layout.boxes.map(box => {
+                                if (box.elementType === 'metric-card' && (box.variableNameKey || box.variableName)) {
+                                  const variableKey = box.variableNameKey || box.variableName || '';
+                                  if (variableKey) {
+                                    // Parse current identifiers from variable key
+                                    const parts = variableKey.split('_');
+                                    const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+                                    const currentIdentifiers: Record<string, string> = {};
+                                    
+                                    let i = 2; // Skip first 2 parts (measure and aggregation)
+                                    while (i < parts.length) {
+                                      const key = parts[i]?.toLowerCase();
+                                      if (identifierTypes.includes(key) && i + 1 < parts.length) {
+                                        let val = parts[i + 1];
+                                        let nextIndex = i + 2;
+                                        
+                                        while (nextIndex < parts.length) {
+                                          const nextPart = parts[nextIndex]?.toLowerCase();
+                                          if (!identifierTypes.includes(nextPart)) {
+                                            val += '_' + parts[nextIndex];
+                                            nextIndex++;
+                                          } else {
+                                            break;
+                                          }
+                                        }
+                                        
+                                        currentIdentifiers[key] = val;
+                                        i = nextIndex;
+                                      } else {
+                                        i++;
+                                      }
+                                    }
+                                    
+                                    // Update with global filter (replace the identifier value)
+                                    if (value !== '__all__') {
+                                      currentIdentifiers[identifier] = value;
+                                    } else {
+                                      delete currentIdentifiers[identifier];
+                                    }
+                                    
+                                    // Find base pattern (first 2 parts: measure and aggregation)
+                                    const basePattern = parts.slice(0, 2).join('_');
+                                    
+                                    // Find matching variable with same structure but new identifier value
+                                    const matchingVar = variablesToUse.find((v: any) => {
+                                      const vKey = v.variableNameKey || v.variableName;
+                                      if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                      
+                                      const vParts = vKey.split('_');
+                                      const vIdentifiers: Record<string, string> = {};
+                                      
+                                      let j = 2;
+                                      while (j < vParts.length) {
+                                        const key = vParts[j]?.toLowerCase();
+                                        if (identifierTypes.includes(key) && j + 1 < vParts.length) {
+                                          let val = vParts[j + 1];
+                                          let nextIndex = j + 2;
+                                          
+                                          while (nextIndex < vParts.length) {
+                                            const nextPart = vParts[nextIndex]?.toLowerCase();
+                                            if (!identifierTypes.includes(nextPart)) {
+                                              val += '_' + vParts[nextIndex];
+                                              nextIndex++;
+                                            } else {
+                                              break;
+                                            }
+                                          }
+                                          
+                                          vIdentifiers[key] = val;
+                                          j = nextIndex;
+                                        } else {
+                                          j++;
+                                        }
+                                      }
+                                      
+                                      // Check if all current identifiers match (including the updated one)
+                                      return Object.entries(currentIdentifiers).every(([key, val]) => 
+                                        vIdentifiers[key] === val
+                                      );
+                                    });
+                                    
+                                    if (matchingVar) {
+                                      return {
+                                        ...box,
+                                        variableId: matchingVar.id,
+                                        variableName: matchingVar.variableName,
+                                        variableNameKey: matchingVar.variableNameKey || matchingVar.variableName,
+                                        metricValue: matchingVar.value || '0',
+                                        value: matchingVar.value,
+                                      };
+                                    }
+                                  }
+                                }
+                                return box;
+                              })
+                            }));
+                            
+                            onSettingsChange({ 
+                              globalFilters: newGlobalFilters,
+                              layouts: metricUpdatedLayouts 
+                            });
+                          })();
+                        } else {
+                          // Just update global filters and chart layouts if not applying to metric cards
+                          onSettingsChange({ 
+                            globalFilters: newGlobalFilters,
+                            layouts: updatedLayouts 
+                          });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-full bg-white border-gray-300">
+                        <SelectValue placeholder={`Select ${identifier}...`} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All {identifier}s</SelectItem>
+                        {options.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {value.replace(/_/g, ' ')}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })}
+              
+              {/* Apply Filters and Render Charts Buttons */}
+              {(() => {
+                // Check if any global filters are set to apply to charts
+                const hasChartFilters = Object.values(settings.globalFilters || {}).some(
+                  (filter: any) => filter.applyToCharts && filter.values && filter.values.length > 0
+                );
+                const hasCharts = settings.layouts?.some(layout => 
+                  layout.boxes.some(box => box.elementType === 'chart' && box.chartConfig)
+                );
+                
+                if (!hasCharts) return null;
+                
+                // Function to render all charts (filters are already applied automatically)
+                const handleRenderAllCharts = async () => {
+                  setRenderingCharts(true);
+                  try {
+                    const allCharts = settings.layouts?.flatMap(layout => layout.boxes)
+                      .filter(box => box.elementType === 'chart' && box.chartConfig) || [];
+                    
+                    // Render each chart
+                    const renderedCharts = await Promise.all(
+                      allCharts.map(async (box) => {
+                        try {
+                          const chartConfig = migrateLegacyChart(box.chartConfig);
+                          
+                          // Validate chart
+                          if (!validateChart(chartConfig)) {
+                            console.warn(`Chart ${box.id} validation failed`);
+                            return { boxId: box.id, success: false, chartConfig: box.chartConfig };
+                          }
+                          
+                          // Get file ID from data source
+                          // Try multiple sources: settings, chart config, or data
+                          const dataSource = (settings as any).selectedFile || (settings as any).dataSource;
+                          const chartDataSource = (chartConfig as any)?.dataSource || (chartConfig as any)?.fileName;
+                          let objectName = dataSource || chartDataSource;
+                          
+                          // If still no data source, try to get from the data prop (if available in parent)
+                          if (!objectName && (chartConfig as any)?.filteredData?.fileName) {
+                            objectName = (chartConfig as any).filteredData.fileName;
+                          }
+                          
+                          if (!objectName) {
+                            console.warn(`No data source found for chart ${box.id}`, {
+                              settingsDataSource: dataSource,
+                              chartDataSource,
+                              chartConfig: Object.keys(chartConfig || {}),
+                              settings: Object.keys(settings || {})
+                            });
+                            return { boxId: box.id, success: false, chartConfig: box.chartConfig };
+                          }
+                          
+                          if (!objectName.endsWith('.arrow')) {
+                            objectName += '.arrow';
+                          }
+                          
+                          // Load dataframe
+                          const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
+                          const fileId = uploadResponse.file_id;
+                          
+                          // Build chart request with filters from chart config
+                          // Chart config filters already include global filters (synced in onValueChange)
+                          const traces = buildTracesForAPI(chartConfig);
+                          const mergedFilters = chartConfig.isAdvancedMode ? {} : chartConfig.filters || {};
+                          
+                          // Generate chart
+                          const chartRequest = {
+                            file_id: fileId,
+                            chart_type: chartConfig.type === 'stacked_bar' ? 'bar' : chartConfig.type,
+                            traces: traces,
+                            title: chartConfig.title,
+                            filters: Object.keys(mergedFilters).length > 0 ? mergedFilters : undefined,
+                          };
+                          
+                          const chartResponse = await chartMakerApi.generateChart(chartRequest);
+                          
+                          const updatedChart = {
+                            ...chartConfig,
+                            chartConfig: chartResponse.chart_config,
+                            filteredData: chartResponse.chart_config.data,
+                            chartRendered: true,
+                          };
+                          
+                          return { boxId: box.id, success: true, chartConfig: updatedChart };
+                        } catch (error) {
+                          console.error(`Error rendering chart ${box.id}:`, error);
+                          return { boxId: box.id, success: false, chartConfig: box.chartConfig };
+                        }
+                      })
+                    );
+                    
+                    // Update layouts with rendered charts
+                    const updatedLayouts = settings.layouts?.map(layout => ({
+                      ...layout,
+                      boxes: layout.boxes.map(box => {
+                        if (box.elementType === 'chart') {
+                          const rendered = renderedCharts.find(r => r.boxId === box.id);
+                          if (rendered && rendered.success && rendered.chartConfig) {
+                            return {
+                              ...box,
+                              chartConfig: rendered.chartConfig
+                            };
+                          }
+                        }
+                        return box;
+                      })
+                    }));
+                    
+                    onSettingsChange({ layouts: updatedLayouts });
+                  } catch (error) {
+                    console.error('Error rendering charts:', error);
+                  } finally {
+                    setRenderingCharts(false);
+                  }
+                };
+                
+                return (
+                  <div className="pt-3 border-t border-blue-200 space-y-2">
+                    <Button
+                      onClick={handleRenderAllCharts}
+                      disabled={renderingCharts}
+                      size="sm"
+                      className="w-full bg-blue-600 hover:bg-blue-700"
+                    >
+                      <BarChart3 className="w-3 h-3 mr-1" />
+                      {renderingCharts ? 'Rendering...' : 'Render All Charts'}
+                    </Button>
+                    <p className="text-xs text-blue-700 text-center">
+                      Filters are applied automatically. Click to render all charts with the selected filters.
+                    </p>
+                  </div>
+                );
+              })()}
+            </Card>
+            <p className="text-xs text-muted-foreground">
+              Select which element types to apply each filter to. Global filters are automatically synced to chart's individual filters. Click "Render All Charts" to see the changes.
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Element Format Setting - Only show when a metric card is selected */}
       {!selectedBox ? (
@@ -747,7 +1517,7 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
             </p>
           </div>
 
-          {/* Growth Rate */}
+          {/* Growth Rate / Absolute Difference */}
           <div className="space-y-3">
             <div className="flex items-center space-x-2">
               <Checkbox
@@ -762,7 +1532,7 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                             ...box, 
                             showGrowthRate: checked as boolean,
                             // Clear growth rate data if disabling
-                            ...(checked ? {} : { growthRateValue: undefined, comparisonValue: undefined })
+                            ...(checked ? {} : { growthRateValue: undefined, absoluteDifferenceValue: undefined, comparisonValue: undefined })
                           }
                         : box
                     )
@@ -771,12 +1541,40 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                 }}
               />
               <Label htmlFor="showGrowthRate" className="text-sm font-medium cursor-pointer">
-                Show Growth Rate
+                Show Comparison
               </Label>
             </div>
             
             {selectedBox.showGrowthRate && (
               <div className="space-y-2 pl-6">
+                {/* Comparison Display Type */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium">
+                    Display Type
+                  </Label>
+                  <Select
+                    value={selectedBox.comparisonDisplayType || 'growthRate'}
+                    onValueChange={(comparisonDisplayType) => {
+                      const updatedLayouts = settings.layouts?.map(layout => ({
+                        ...layout,
+                        boxes: layout.boxes.map(box => 
+                          box.id === settings.selectedBoxId 
+                            ? { ...box, comparisonDisplayType: comparisonDisplayType as 'growthRate' | 'absoluteDifference' }
+                            : box
+                        )
+                      }));
+                      onSettingsChange({ layouts: updatedLayouts });
+                    }}
+                  >
+                    <SelectTrigger className="w-full bg-white border-gray-300">
+                      <SelectValue placeholder="Select display type..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="growthRate">Growth Rate (%)</SelectItem>
+                      <SelectItem value="absoluteDifference">Absolute Difference</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Label htmlFor="comparisonIdentifier" className="text-xs font-medium">
                   Compare By Identifier
                 </Label>
@@ -787,7 +1585,7 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                       ...layout,
                       boxes: layout.boxes.map(box => 
                         box.id === settings.selectedBoxId 
-                          ? { ...box, comparisonIdentifier, comparisonIdentifierValue: undefined, growthRateValue: undefined, comparisonValue: undefined }
+                          ? { ...box, comparisonIdentifier, comparisonIdentifierValue: undefined, growthRateValue: undefined, absoluteDifferenceValue: undefined, comparisonValue: undefined }
                           : box
                       )
                     }));
@@ -823,7 +1621,7 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                             const currentKey = box.variableNameKey || box.variableName || '';
                             const comparisonIdentifier = box.comparisonIdentifier || '';
                             if (!currentKey || !comparisonIdentifier || !comparisonIdentifierValue) {
-                              return { ...box, comparisonIdentifierValue, growthRateValue: undefined, comparisonValue: undefined };
+                              return { ...box, comparisonIdentifierValue, growthRateValue: undefined, absoluteDifferenceValue: undefined, comparisonValue: undefined };
                             }
                             
                             // Find variable with same structure but different identifier value
@@ -922,18 +1720,20 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                               const currentValue = parseFloat(box.value || box.metricValue || '0');
                               const comparisonValueNum = parseFloat(comparisonVar.value || '0');
                               
-                              if (!isNaN(currentValue) && !isNaN(comparisonValueNum) && comparisonValueNum !== 0) {
-                                const growthRate = ((currentValue - comparisonValueNum) / comparisonValueNum) * 100;
+                              if (!isNaN(currentValue) && !isNaN(comparisonValueNum)) {
+                                const growthRate = comparisonValueNum !== 0 ? ((currentValue - comparisonValueNum) / comparisonValueNum) * 100 : 0;
+                                const absoluteDifference = currentValue - comparisonValueNum;
                                 return {
                                   ...box,
                                   comparisonIdentifierValue,
                                   growthRateValue: growthRate,
+                                  absoluteDifferenceValue: absoluteDifference,
                                   comparisonValue: comparisonVar.value
                                 };
                               }
                             }
                             
-                            return { ...box, comparisonIdentifierValue, growthRateValue: undefined, comparisonValue: undefined };
+                            return { ...box, comparisonIdentifierValue, growthRateValue: undefined, absoluteDifferenceValue: undefined, comparisonValue: undefined };
                           })
                         }));
                         onSettingsChange({ layouts: updatedLayouts });
@@ -953,11 +1753,23 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                   </div>
                 )}
                 
-                {selectedBox.growthRateValue !== undefined && (
+                {((selectedBox.comparisonDisplayType === 'growthRate' && selectedBox.growthRateValue !== undefined) || 
+                  (selectedBox.comparisonDisplayType === 'absoluteDifference' && selectedBox.absoluteDifferenceValue !== undefined)) && (
                   <div className="text-xs text-muted-foreground">
-                    Growth Rate: {selectedBox.growthRateValue > 0 ? '+' : ''}{selectedBox.growthRateValue.toFixed(selectedBox.growthRateDecimalPlaces !== undefined ? selectedBox.growthRateDecimalPlaces : 1)}%
-                    {selectedBox.comparisonValue && (
-                      <span className="ml-2">(vs {selectedBox.comparisonValue})</span>
+                    {selectedBox.comparisonDisplayType === 'growthRate' ? (
+                      <>
+                        Growth Rate: {selectedBox.growthRateValue! > 0 ? '+' : ''}{selectedBox.growthRateValue!.toFixed(selectedBox.growthRateDecimalPlaces !== undefined ? selectedBox.growthRateDecimalPlaces : 1)}%
+                        {selectedBox.comparisonValue && (
+                          <span className="ml-2">(vs {selectedBox.comparisonValue})</span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        Absolute Difference: {selectedBox.absoluteDifferenceValue! > 0 ? '+' : ''}{selectedBox.absoluteDifferenceValue!.toFixed(selectedBox.growthRateDecimalPlaces !== undefined ? selectedBox.growthRateDecimalPlaces : 1)}
+                        {selectedBox.comparisonValue && (
+                          <span className="ml-2">(vs {selectedBox.comparisonValue})</span>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
