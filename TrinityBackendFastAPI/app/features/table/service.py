@@ -116,9 +116,13 @@ def apply_table_settings(df: pl.DataFrame, settings: Dict[str, Any]) -> pl.DataF
         settings: Dictionary containing table settings
         
     Returns:
-        Processed DataFrame
+        Processed DataFrame with __original_row_index__ column added
     """
     logger.info(f"🔧 [TABLE] Applying settings to DataFrame")
+    
+    # CRITICAL FIX: Add original row index BEFORE filtering
+    # This allows frontend to map visible rows to actual rows in the full dataset
+    df = df.with_row_count("__original_row_index__")
     
     # Apply filters
     filters = settings.get("filters", {})
@@ -186,23 +190,27 @@ def apply_table_settings(df: pl.DataFrame, settings: Dict[str, Any]) -> pl.DataF
                 descending = direction == "desc"
                 df = df.sort(column, descending=descending)
     
-    # Select visible columns
+    # Select visible columns (but keep __original_row_index__)
     visible_columns = settings.get("visible_columns")
     if visible_columns:
-        # Ensure all visible columns exist
+        # Ensure all visible columns exist, plus keep __original_row_index__
         valid_columns = [col for col in visible_columns if col in df.columns]
         if valid_columns:
             logger.info(f"👁️ [TABLE] Selecting visible columns: {valid_columns}")
-            df = df.select(valid_columns)
+            # Keep __original_row_index__ even if not in visible_columns
+            columns_to_select = ["__original_row_index__"] + valid_columns
+            df = df.select(columns_to_select)
     
-    # Reorder columns if specified
+    # Reorder columns if specified (but keep __original_row_index__)
     column_order = settings.get("column_order")
     if column_order:
         # Filter to only existing columns
         valid_order = [col for col in column_order if col in df.columns]
-        if valid_order and len(valid_order) == len(df.columns):
+        if valid_order and len(valid_order) == len([c for c in df.columns if c != "__original_row_index__"]):
             logger.info(f"🔄 [TABLE] Reordering columns")
-            df = df.select(valid_order)
+            # Keep __original_row_index__ first, then reordered columns
+            columns_to_select = ["__original_row_index__"] + valid_order
+            df = df.select(columns_to_select)
     
     logger.info(f"✅ [TABLE] Settings applied: {df.shape[0]} rows, {df.shape[1]} columns")
     return df
@@ -342,12 +350,15 @@ def dataframe_to_response(df: pl.DataFrame, table_id: str,
     # Return all rows - frontend handles pagination (15 rows per page)
     # This ensures filter components have access to all unique values from entire dataset
     
+    # CRITICAL FIX: Exclude __original_row_index__ from columns list (but keep it in rows for frontend mapping)
+    columns = [col for col in df.columns if col != "__original_row_index__"]
+    
     response = {
         "table_id": table_id,
-        "columns": df.columns,
-        "rows": df.to_dicts(),  # Return all rows, not limited to 100
+        "columns": columns,  # Exclude __original_row_index__ from visible columns
+        "rows": df.to_dicts(),  # Return all rows with __original_row_index__ included for mapping
         "row_count": len(df),
-        "column_types": get_column_types(df)
+        "column_types": get_column_types(df.select(columns))  # Only get types for visible columns
     }
     
     if object_name:

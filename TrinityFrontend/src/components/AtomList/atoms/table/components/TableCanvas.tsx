@@ -20,7 +20,7 @@ import {
   updateTable
 } from '../services/tableApi';
 import { toast } from '@/components/ui/use-toast';
-import { ArrowUp, ArrowDown, Info, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, Info, X, Filter } from 'lucide-react';
 import CellRenderer from './CellRenderer';
 import { TableRichTextToolbar } from './rich-text';
 import type { TableCellFormatting } from './rich-text/types';
@@ -1138,11 +1138,17 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
   // Handle cell click to start editing
   const handleCellClick = (rowIdx: number, column: string) => {
-    // Calculate actual row index in the full dataset (no offset needed)
-    const actualRowIdx = startIdx + rowIdx;
     // Get the row and access value using column (column is from visibleColumns which matches data.columns)
     const row = visibleRows[rowIdx];
     const currentValue = row?.[column];
+    
+    // CRITICAL FIX: Use original row index from row data if available (when filters are applied)
+    // Otherwise fall back to calculated index (for unfiltered data)
+    const originalRowIndex = row?.__original_row_index__;
+    const actualRowIdx = originalRowIndex !== undefined 
+      ? originalRowIndex 
+      : (startIdx + rowIdx);
+    
     const rowKey = String(actualRowIdx);
     const cellFormat = settings.cellFormatting?.[rowKey]?.[column];
     const valueString = String(currentValue ?? '');
@@ -1770,9 +1776,12 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                           />
                         ) : (
                           <div className="flex items-center gap-1">
-                            {column}
+                            <span className="truncate">{column}</span>
                             {getSortIndicator(column) && (
-                              <span className="text-xs">{getSortIndicator(column)}</span>
+                              <span className="text-xs flex-shrink-0">{getSortIndicator(column)}</span>
+                            )}
+                            {settings.filters?.[column] && (
+                              <Filter className="w-3 h-3 text-blue-600 flex-shrink-0" />
                             )}
                           </div>
                         )}
@@ -1818,14 +1827,16 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                 <>
                   {/* All data rows - shown regardless of headerRow setting */}
                   {visibleRows.map((row, rowIdx) => {
-                    // Calculate actual row index in full dataset for banded rows styling
-                    const actualRowIdxForStyling = startIdx + rowIdx;
-                    // Actual row index in the full dataset (for CF styles lookup)
-                    const actualRowIdx = startIdx + rowIdx;
+                    // CRITICAL FIX: Use original row index from row data if available (when filters are applied)
+                    const originalRowIndex = row?.__original_row_index__;
+                    const actualRowIdx = originalRowIndex !== undefined 
+                      ? originalRowIndex 
+                      : (startIdx + rowIdx);
+                    const actualRowIdxForStyling = actualRowIdx;
                     
                     return (
                       <TableRow 
-                        key={startIdx + rowIdx} 
+                        key={actualRowIdx} 
                         ref={(el) => {
                           if (rowRefs.current && actualRowIdx !== undefined) {
                             rowRefs.current[actualRowIdx] = el;
@@ -1842,8 +1853,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                         {visibleColumns.map((column, colIdx) => {
                           const isFirstCol = colIdx === 0;
                           const isLastCol = colIdx === visibleColumns.length - 1;
-                          // Calculate actual row index first (for CF lookup)
-                          const actualRowIdx = startIdx + rowIdx;
+                          // Use the actualRowIdx calculated above (from original row index or calculated)
                           const cellStyle = getCellStyle(rowIdx, colIdx, column, false, false, actualRowIdx);
                           const isEditing = editingCell?.row === actualRowIdx && editingCell?.col === column;
                           
@@ -2387,8 +2397,8 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           portalTarget
         )}
 
-      {/* Rich Text Formatting Toolbar */}
-      {showToolbar && editingCell && toolbarCellRect && portalTarget &&
+      {/* Rich Text Formatting Toolbar - Commented out */}
+      {false && showToolbar && editingCell && toolbarCellRect && portalTarget &&
         createPortal(
           <TableRichTextToolbar
             formatting={cellFormatting}
