@@ -96,14 +96,14 @@ class WorkflowEventsMixin:
             cache = self._get_ws_send_cache(websocket)
             signatures = []
 
-            signature_parts = [event.event_type]
-            if isinstance(event.payload, dict):
-                message_value = event.payload.get("message")
+            signature_parts = [event.type]
+            if isinstance(event.data, dict):
+                message_value = event.data.get("message")
                 if message_value:
                     signature_parts.append(str(message_value))
             signatures.append("::".join(signature_parts))
 
-            msg_signature = self._normalized_message_signature(event.payload)
+            msg_signature = self._normalized_message_signature(event.data)
             if msg_signature:
                 signatures.append(msg_signature)
 
