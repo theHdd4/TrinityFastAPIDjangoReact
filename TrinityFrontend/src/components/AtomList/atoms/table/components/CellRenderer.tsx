@@ -1,6 +1,6 @@
 import React from 'react';
 import SimpleCellEditor from './SimpleCellEditor';
-import RichTextCellEditor from './RichTextCellEditor';
+// import { TableRichTextEditor } from './rich-text';
 
 interface RichTextFormatting {
   fontFamily?: string;
@@ -19,8 +19,8 @@ interface CellRendererProps {
   html?: string;
   formatting?: RichTextFormatting;
   isEditing: boolean;
-  enableRichText: boolean;
   onValueChange: (value: string, html?: string) => void;
+  onFormattingChange?: (fmt: Partial<RichTextFormatting>) => void;
   onCommit: (value: string, html?: string) => void;
   onCancel: () => void;
   onFocus?: () => void;
@@ -36,8 +36,8 @@ const CellRenderer: React.FC<CellRendererProps> = ({
   html,
   formatting,
   isEditing,
-  enableRichText,
   onValueChange,
+  onFormattingChange,
   onCommit,
   onCancel,
   onFocus,
@@ -47,26 +47,28 @@ const CellRenderer: React.FC<CellRendererProps> = ({
   className,
   style,
 }) => {
-  // Use RichTextCellEditor only if rich text is enabled AND formatting exists
-  if (enableRichText && (formatting || html)) {
-    return (
-      <RichTextCellEditor
-        value={value}
-        html={html}
-        formatting={formatting}
-        isEditing={isEditing}
-        onValueChange={(plainText, htmlText) => onValueChange(plainText, htmlText)}
-        onCommit={(plainText, htmlText) => onCommit(plainText, htmlText)}
-        onCancel={onCancel}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        className={className}
-        style={style}
-      />
-    );
-  }
+  // Rich text path temporarily disabled; use simple editor always
+  // if (formatting || html) {
+  //   return (
+  //     <TableRichTextEditor
+  //       value={value}
+  //       html={html}
+  //       formatting={formatting as any}
+  //       isEditing={isEditing}
+  //       onValueChange={(plainText, htmlText) => onValueChange(plainText, htmlText)}
+  //       onCommit={(plainText, htmlText) => onCommit(plainText, htmlText)}
+  //       onCancel={onCancel}
+  //       onFocus={onFocus}
+  //       onBlur={onBlur}
+  //       onFormattingChange={onFormattingChange as any}
+  //       onClick={onClick}
+  //       className={className}
+  //       style={style}
+  //     />
+  //   );
+  // }
   
-  // Default: Use SimpleCellEditor (like DataFrameOperations)
+  // Default: Use SimpleCellEditor for plain text cells
   return (
     <SimpleCellEditor
       value={value}

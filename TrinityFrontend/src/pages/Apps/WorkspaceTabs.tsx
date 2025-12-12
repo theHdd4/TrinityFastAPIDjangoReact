@@ -179,7 +179,7 @@ const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
 
       {/* Your Workspace Section - Independent rendering */}
       {activeTab === 'my-projects' && (
-        <section className="bg-muted/30 animate-fade-in" style={animationStyle(0.3)}>
+        <section className="animate-fade-in" style={animationStyle(0.3)}>
           <div className="max-w-7xl mx-auto px-6 py-8">
             {/* Workspace Content with Uniform Background */}
             <div className="relative mb-6">
@@ -303,7 +303,7 @@ const WorkspaceTabs: React.FC<WorkspaceTabsProps> = ({
 
       {/* Companies Workspace Section - Independent rendering */}
       {activeTab === 'workspace' && (
-        <section className="bg-muted/30 animate-fade-in" style={animationStyle(0.3)}>
+        <section className="animate-fade-in" style={animationStyle(0.3)}>
           <div className="max-w-7xl mx-auto px-6 py-8">
             {/* Workspace Content with Uniform Background */}
             <div className="relative mb-6">
