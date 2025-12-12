@@ -89,45 +89,81 @@ class AtomAIContextStore:
         *,
         session_id: str,
         project_context: Dict[str, Any],
-        files: Dict[str, Dict[str, Any]],
+        files: Optional[Dict[str, Dict[str, Any]]] = None,
         prompt: Optional[str] = None,
+        contextual_prompt: Optional[str] = None,
+        history_summary: Optional[str] = None,
+        available_files: Optional[Any] = None,
         analysis: Optional[Dict[str, Any]] = None,
+        conversation_summary: Optional[str] = None,
     ) -> None:
-        """Merge new metadata into the Trinity_AI_Context collection."""
-
-        if not files:
-            return
+        """Merge new metadata and prompt context into the Trinity_AI_Context collection."""
 
         filter_doc = self._context_filter(session_id, project_context)
 
         try:
             existing = self.collection.find_one(filter_doc) or {}
-            merged_files = {**(existing.get("files") or {}), **files}
+            merged_files = {**(existing.get("files") or {}), **(files or {})}
+
+            prompt_history = existing.get("prompt_history") or []
+            prompt_entry = {
+                "prompt": prompt,
+                "contextual_prompt": contextual_prompt,
+                "history_summary": history_summary,
+                "analysis": analysis,
+                "timestamp": datetime.utcnow(),
+            }
+            prompt_entry = {k: v for k, v in prompt_entry.items() if v}
+            if prompt_entry:
+                prompt_history.append(prompt_entry)
+                prompt_history = prompt_history[-25:]
+
+            analysis_history = existing.get("analysis_history") or []
+            if analysis:
+                analysis_history.append({
+                    "timestamp": datetime.utcnow(),
+                    "analysis": analysis,
+                })
+                analysis_history = analysis_history[-25:]
 
             update_doc: Dict[str, Any] = {
                 "$set": {
                     **filter_doc,
                     "mode": (project_context or {}).get("mode", "laboratory"),
-                    "files": merged_files,
                 },
                 "$currentDate": {"updated_at": True},
             }
 
+            if merged_files:
+                update_doc["$set"]["files"] = merged_files
+            if available_files is not None:
+                update_doc["$set"]["available_files"] = available_files
+            if prompt_history:
+                update_doc["$set"]["prompt_history"] = prompt_history
+            if contextual_prompt:
+                update_doc["$set"]["contextual_prompt"] = contextual_prompt
+            if history_summary:
+                update_doc["$set"]["history_summary"] = history_summary
+            if conversation_summary:
+                update_doc["$set"]["conversation_summary"] = conversation_summary
             if prompt:
                 update_doc["$set"]["last_prompt"] = prompt
             if analysis:
                 update_doc["$set"]["last_analysis"] = analysis
+            if analysis_history:
+                update_doc["$set"]["analysis_history"] = analysis_history
             if "created_at" not in existing:
                 update_doc.setdefault("$setOnInsert", {})["created_at"] = datetime.utcnow()
 
             self.collection.update_one(filter_doc, update_doc, upsert=True)
             logger.info(
-                "💾 Atom AI context persisted for %s/%s/%s (session=%s, files=%s)",
+                "💾 Atom AI context persisted for %s/%s/%s (session=%s, files=%s, prompts=%s)",
                 filter_doc.get("client_name"),
                 filter_doc.get("app_name"),
                 filter_doc.get("project_name"),
                 session_id,
-                len(files),
+                len(files or {}),
+                len(prompt_history),
             )
         except PyMongoError as exc:  # pragma: no cover - defensive write guard
             logger.warning("⚠️ Failed to upsert Atom AI context: %s", exc)
