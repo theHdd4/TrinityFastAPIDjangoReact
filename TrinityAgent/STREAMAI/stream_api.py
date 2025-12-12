@@ -266,6 +266,42 @@ def _compute_prerequisite_scores(prompt: str) -> dict:
     }
 
 
+def _format_scorecard(
+    prerequisite_scores: dict,
+    vagueness_score: float | None = None,
+    vagueness_threshold: float | None = None,
+    card_threshold: float | None = None,
+    scope_threshold: float | None = None,
+) -> str:
+    """Build a concise, user-facing summary of scoring signals."""
+
+    pieces: list[str] = []
+
+    if vagueness_score is not None and vagueness_threshold is not None:
+        pieces.append(f"vagueness {vagueness_score:.2f}/{vagueness_threshold:.2f}")
+
+    if "intent_clarity_score" in prerequisite_scores:
+        pieces.append(
+            f"intent clarity {prerequisite_scores.get('intent_clarity_score', 0.0):.2f}"
+        )
+
+    scope_score = prerequisite_scores.get("scope_detectability_score")
+    if scope_score is not None:
+        if scope_threshold is not None:
+            pieces.append(f"scope detectability {scope_score:.2f}/{scope_threshold:.2f}")
+        else:
+            pieces.append(f"scope detectability {scope_score:.2f}")
+
+    card_score = prerequisite_scores.get("card_prerequisite_score")
+    if card_score is not None:
+        if card_threshold is not None:
+            pieces.append(f"card readiness {card_score:.2f}/{card_threshold:.2f}")
+        else:
+            pieces.append(f"card readiness {card_score:.2f}")
+
+    return "Scores → " + ", ".join(pieces) if pieces else "Scores pending"
+
+
 def _build_contextual_prompt(
     latest_prompt: str,
     atom_ai_context: dict | None = None,
@@ -392,8 +428,13 @@ def _build_conversational_clarification(
     initial_prompt: str,
     scope_detectability_threshold: float,
     contextual_prompt: str,
+    vagueness_score: float | None = None,
+    vagueness_threshold: float | None = None,
+    prerequisite_scores: dict | None = None,
 ) -> str:
     """Craft a conversational clarification prompt that cites known context."""
+
+    prerequisite_scores = prerequisite_scores or {}
 
     known_summary = _summarize_known_data(
         atom_ai_context, available_files, initial_prompt, contextual_prompt
@@ -432,12 +473,25 @@ def _build_conversational_clarification(
         else ""
     )
 
+    scorecard = _format_scorecard(
+        prerequisite_scores,
+        vagueness_score=vagueness_score,
+        vagueness_threshold=vagueness_threshold,
+        card_threshold=threshold,
+        scope_threshold=scope_detectability_threshold,
+    )
+
+    guidance = (
+        "Quick reply template → 1) File or dataset name, 2) Columns plus any filters/joins, "
+        "3) Desired output (chart/table/summary)."
+    )
+
     return (
         "I want to make sure I’m working with the right portion of your data. "
         f"Here’s what I have so far: {known_summary}. "
         f"Could you share {request_detail}? Once I have that, I’ll take care of the rest. "
-        f"(card_prerequisite_score={card_score:.2f}, threshold={threshold:.2f})."
-        f"{scope_note}"
+        f"{scorecard}. (card_prerequisite_score={card_score:.2f}, threshold={threshold:.2f})."
+        f"{scope_note} {guidance}"
     )
 
 # Initialize components (will be set by main_api.py)
@@ -525,7 +579,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         message = json.loads(message_data)
         logger.info(f"📦 Parsed message keys: {list(message.keys())}")
-        vagueness_threshold = float(message.get("vagueness_threshold", 0.6))
+        vagueness_threshold = float(message.get("vagueness_threshold", 0.45))
 
         # Extract session identifiers early for intent caching and websocket scoping
         session_id = message.get("session_id", None)  # Frontend chat session ID
@@ -865,10 +919,11 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         # Step 3b: Vagueness scoring only for workflow execution paths (after routing is fixed)
         vagueness_score = _compute_vagueness_score(contextual_prompt)
+        current_vagueness_threshold = max(0.35, vagueness_threshold)
         logger.info(
             "🧭 Vagueness check -> score=%.2f threshold=%.2f (workflow path)",
             vagueness_score,
-            vagueness_threshold,
+            current_vagueness_threshold,
         )
         await _safe_send_json(
             websocket,
@@ -877,22 +932,23 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "status": "vagueness_check",
                 "message": (
                     "Calculating vagueness score for workflow routing: "
-                    f"score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f}"
+                    f"score={vagueness_score:.2f}, threshold={current_vagueness_threshold:.2f}"
                 ),
                 "vagueness_score": vagueness_score,
-                "vagueness_threshold": vagueness_threshold,
+                "vagueness_threshold": current_vagueness_threshold,
             },
         )
 
-        while vagueness_score < vagueness_threshold:
+        while vagueness_score < current_vagueness_threshold:
             clarification_payload = {
                 "type": "clarification_required",
                 "message": (
                     "I need more details to proceed. Please provide additional context or specifics. "
-                    f"(vagueness_score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f})"
+                    f"(vagueness_score={vagueness_score:.2f}, threshold={current_vagueness_threshold:.2f})"
+                    " Tip: mention the dataset/file, key columns, and the exact output you want."
                 ),
                 "vagueness_score": vagueness_score,
-                "vagueness_threshold": vagueness_threshold,
+                "vagueness_threshold": current_vagueness_threshold,
             }
             await _safe_send_json(
                 websocket,
@@ -951,7 +1007,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
             logger.info(
                 "🧭 Recomputed vagueness score after clarification -> %.2f (threshold=%.2f)",
                 vagueness_score,
-                vagueness_threshold,
+                current_vagueness_threshold,
             )
             await _safe_send_json(
                 websocket,
@@ -960,11 +1016,15 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     "status": "vagueness_check",
                     "message": (
                         "Recomputed vagueness score after clarification: "
-                        f"score={vagueness_score:.2f}, threshold={vagueness_threshold:.2f}"
+                        f"score={vagueness_score:.2f}, threshold={current_vagueness_threshold:.2f}"
                     ),
                     "vagueness_score": vagueness_score,
-                    "vagueness_threshold": vagueness_threshold,
+                    "vagueness_threshold": current_vagueness_threshold,
                 },
+            )
+
+            current_vagueness_threshold = max(
+                0.35, current_vagueness_threshold - 0.05
             )
 
         await _safe_send_json(
@@ -974,22 +1034,33 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "status": "clarification_complete",
                 "message": "Received enough details. Proceeding with execution.",
                 "vagueness_score": vagueness_score,
-                "vagueness_threshold": vagueness_threshold,
+                "vagueness_threshold": current_vagueness_threshold,
             },
         )
+
+        vagueness_threshold = current_vagueness_threshold
 
         # Extract remaining parameters for workflow
         # Note: session_id and chat_id already extracted above for intent caching
 
         # Laboratory prerequisite scoring for atom execution
-        card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.6))
-        scope_detectability_threshold = float(message.get("scope_detectability_threshold", 0.6))
+        card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.5))
+        scope_detectability_threshold = float(message.get("scope_detectability_threshold", 0.5))
         contextual_prompt = _build_contextual_prompt(
             user_prompt, atom_ai_context, history_summary
         )
         atom_ai_context["contextual_prompt"] = contextual_prompt
         prerequisite_scores = _compute_prerequisite_scores(contextual_prompt)
         card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
+        current_card_threshold = max(0.35, card_prerequisite_threshold)
+        current_scope_threshold = max(0.35, scope_detectability_threshold)
+        scorecard_summary = _format_scorecard(
+            prerequisite_scores,
+            vagueness_score=vagueness_score,
+            vagueness_threshold=vagueness_threshold,
+            card_threshold=current_card_threshold,
+            scope_threshold=current_scope_threshold,
+        )
 
         await _safe_send_json(
             websocket,
@@ -997,12 +1068,13 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "type": "status",
                 "status": "prerequisite_check",
                 "message": (
-                    "Evaluating laboratory readiness for atom execution: "
-                    f"score={card_prerequisite_score:.2f}, threshold={card_prerequisite_threshold:.2f}"
+                    "Evaluating laboratory readiness for atom execution. "
+                    f"{scorecard_summary}. If anything is low, I'll ask for a tiny follow-up."
                 ),
                 "prerequisite_scores": prerequisite_scores,
-                "card_prerequisite_threshold": card_prerequisite_threshold,
-                "scope_detectability_threshold": scope_detectability_threshold,
+                "card_prerequisite_threshold": current_card_threshold,
+                "scope_detectability_threshold": current_scope_threshold,
+                "scorecard_summary": scorecard_summary,
             },
         )
 
@@ -1010,10 +1082,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
         max_prerequisite_iterations = 6
         iterations = 0
         while (
-            card_prerequisite_score < card_prerequisite_threshold
+            card_prerequisite_score < current_card_threshold
             or clarification_vagueness < vagueness_threshold
             or prerequisite_scores.get("scope_detectability_score", 0.0)
-            < scope_detectability_threshold
+            < current_scope_threshold
         ):
             iterations += 1
             weakest_dimension = min(
@@ -1032,22 +1104,33 @@ async def execute_workflow_websocket(websocket: WebSocket):
             clarification_message = _build_conversational_clarification(
                 weakest_dimension,
                 card_prerequisite_score,
-                card_prerequisite_threshold,
+                current_card_threshold,
                 atom_ai_context,
                 available_files,
                 user_prompt,
-                scope_detectability_threshold,
+                current_scope_threshold,
                 contextual_prompt,
+                vagueness_score=clarification_vagueness,
+                vagueness_threshold=vagueness_threshold,
+                prerequisite_scores=prerequisite_scores,
             )
 
+            scorecard_summary = _format_scorecard(
+                prerequisite_scores,
+                vagueness_score=clarification_vagueness,
+                vagueness_threshold=vagueness_threshold,
+                card_threshold=current_card_threshold,
+                scope_threshold=current_scope_threshold,
+            )
             clarification_payload = {
                 "type": "clarification_required",
                 "message": clarification_message,
                 "focus": weakest_dimension,
                 "prerequisite_scores": prerequisite_scores,
-                "card_prerequisite_threshold": card_prerequisite_threshold,
-                "scope_detectability_threshold": scope_detectability_threshold,
+                "card_prerequisite_threshold": current_card_threshold,
+                "scope_detectability_threshold": current_scope_threshold,
                 "vagueness_threshold": vagueness_threshold,
+                "scorecard_summary": scorecard_summary,
             }
             await _safe_send_json(
                 websocket,
@@ -1124,26 +1207,38 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
             prerequisite_scores = _compute_prerequisite_scores(contextual_prompt)
             card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
+            scorecard_summary = _format_scorecard(
+                prerequisite_scores,
+                vagueness_score=clarification_vagueness,
+                vagueness_threshold=vagueness_threshold,
+                card_threshold=current_card_threshold,
+                scope_threshold=current_scope_threshold,
+            )
             await _safe_send_json(
                 websocket,
                 {
                     "type": "status",
                     "status": "prerequisite_check",
                     "message": (
-                        "Re-evaluated laboratory readiness: "
-                        f"score={card_prerequisite_score:.2f}, threshold={card_prerequisite_threshold:.2f}"
+                        "Re-evaluated laboratory readiness. "
+                        f"{scorecard_summary}."
                     ),
                     "prerequisite_scores": prerequisite_scores,
-                    "card_prerequisite_threshold": card_prerequisite_threshold,
-                    "scope_detectability_threshold": scope_detectability_threshold,
+                    "card_prerequisite_threshold": current_card_threshold,
+                    "scope_detectability_threshold": current_scope_threshold,
+                    "scorecard_summary": scorecard_summary,
                 },
             )
 
+            current_card_threshold = max(0.35, current_card_threshold - 0.05)
+            current_scope_threshold = max(0.35, current_scope_threshold - 0.05)
+            vagueness_threshold = max(0.35, vagueness_threshold - 0.03)
+
             if iterations >= max_prerequisite_iterations and (
-                card_prerequisite_score < card_prerequisite_threshold
+                card_prerequisite_score < current_card_threshold
                 or clarification_vagueness < vagueness_threshold
                 or prerequisite_scores.get("scope_detectability_score", 0.0)
-                < scope_detectability_threshold
+                < current_scope_threshold
             ):
                 clarification_payload = {
                     "type": "clarification_required",
@@ -1152,8 +1247,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         "Please provide a concise, specific description so we can continue."
                     ),
                     "prerequisite_scores": prerequisite_scores,
-                    "card_prerequisite_threshold": card_prerequisite_threshold,
-                    "scope_detectability_threshold": scope_detectability_threshold,
+                    "card_prerequisite_threshold": current_card_threshold,
+                    "scope_detectability_threshold": current_scope_threshold,
                 }
                 await _safe_send_json(
                     websocket,
@@ -1164,6 +1259,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 close_reason = "prerequisite_threshold_not_met"
                 return
 
+        vagueness_score = max(vagueness_score or 0.0, clarification_vagueness or 0.0)
+
         await _safe_send_json(
             websocket,
             {
@@ -1171,8 +1268,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "status": "prerequisite_complete",
                 "message": "Card prerequisites satisfied. Proceeding to atom execution.",
                 "prerequisite_scores": prerequisite_scores,
-                "card_prerequisite_threshold": card_prerequisite_threshold,
-                "scope_detectability_threshold": scope_detectability_threshold,
+                "card_prerequisite_threshold": current_card_threshold,
+                "scope_detectability_threshold": current_scope_threshold,
             },
         )
 
@@ -1199,8 +1296,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
             "vagueness_threshold": vagueness_threshold,
             "clarification_history": clarification_history,
             "card_prerequisite_score": card_prerequisite_score,
-            "card_prerequisite_threshold": card_prerequisite_threshold,
-            "scope_detectability_threshold": scope_detectability_threshold,
+            "card_prerequisite_threshold": current_card_threshold,
+            "scope_detectability_threshold": current_scope_threshold,
             "prerequisite_scores": prerequisite_scores,
             "ATOM_AI_Context": atom_ai_context,
         }
