@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, FileUp, FolderOpen, Sparkles, Database, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Upload, FileUp, FolderOpen, Sparkles, Database, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { GuidedUploadFlow } from './components/guided-upload';
 import { useLaboratoryStore, DataUploadSettings, createDefaultDataUploadSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { UPLOAD_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 interface DataUploadAtomProps {
   atomId: string;
@@ -18,8 +19,7 @@ interface SavedDataframe {
   last_modified?: string;
 }
 
-const DataUploadAtom: React.FC<DataUploadAtomProps> = ({ atomId }) => {
-  const atom = useLaboratoryStore((state) => state.getAtom(atomId));
+const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
   
   const settings = useLaboratoryStore((state) => {
@@ -30,109 +30,80 @@ const DataUploadAtom: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const [isGuidedFlowOpen, setIsGuidedFlowOpen] = useState(false);
   const [savedDataframes, setSavedDataframes] = useState<SavedDataframe[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [primedFiles, setPrimedFiles] = useState<string[]>([]);
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [initError, setInitError] = useState<string | null>(null);
+  const [primedFiles, setPrimedFiles] = useState<string[]>(() => {
+    // Initialize from settings if available
+    return settings.uploadedFiles || [];
+  });
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  
+  // Use ref to track if we've already synced from settings to prevent infinite loop
+  const lastSyncedFilesRef = useRef<string>(JSON.stringify(settings.uploadedFiles || []));
+  const hasFetchedRef = useRef(false);
 
-  // Fetch saved dataframes on mount with retry logic
+  // Sync primed files from settings only when they actually change
   useEffect(() => {
-    let cancelled = false;
-    let retryCount = 0;
-    const maxRetries = 3;
-    const retryDelay = 1000;
-
-    const initializeComponent = async () => {
-      // Wait for atom to be registered in the store
-      if (!atom) {
-        if (retryCount < maxRetries) {
-          retryCount++;
-          setTimeout(initializeComponent, retryDelay);
-          return;
-        } else {
-          // Atom still not available after retries, but continue anyway
-          // as settings will use default values
-          console.warn(`[DataUploadAtom] Atom ${atomId} not found after ${maxRetries} retries, using defaults`);
-        }
-      }
-
-      if (!cancelled) {
-        setIsInitialized(true);
-        fetchSavedDataframes();
-      }
-    };
-
-    initializeComponent();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [atomId, atom]);
-
-  // Track primed files from settings
-  useEffect(() => {
-    if (settings.uploadedFiles && settings.uploadedFiles.length > 0) {
-      setPrimedFiles(settings.uploadedFiles);
+    const currentFilesJson = JSON.stringify(settings.uploadedFiles || []);
+    if (currentFilesJson !== lastSyncedFilesRef.current) {
+      lastSyncedFilesRef.current = currentFilesJson;
+      setPrimedFiles(settings.uploadedFiles || []);
     }
   }, [settings.uploadedFiles]);
 
-  const fetchSavedDataframes = async () => {
+  // Memoized fetch function
+  const fetchSavedDataframes = useCallback(async () => {
+    setFetchError(null);
     setIsLoading(true);
-    setInitError(null);
+    
     try {
       const projectCtx = getActiveProjectContext();
       const params = new URLSearchParams();
-      if (projectCtx?.client_name) params.append('client_name', projectCtx.client_name);
-      if (projectCtx?.app_name) params.append('app_name', projectCtx.app_name);
-      if (projectCtx?.project_name) params.append('project_name', projectCtx.project_name);
+      if (projectCtx.client_name) params.append('client_name', projectCtx.client_name);
+      if (projectCtx.app_name) params.append('app_name', projectCtx.app_name);
+      if (projectCtx.project_name) params.append('project_name', projectCtx.project_name);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
       
-      try {
-        const response = await fetch(`${UPLOAD_API}/list_saved_dataframes?${params.toString()}`, {
-          signal: controller.signal,
-          credentials: 'include',
-        });
-        clearTimeout(timeoutId);
-        
-        if (response.ok) {
-          const data = await response.json();
-          setSavedDataframes(data.files || []);
-        } else {
-          // Non-OK response, but don't crash - just log and continue
-          console.warn(`[DataUploadAtom] list_saved_dataframes returned ${response.status}`);
-        }
-      } catch (fetchError: any) {
-        clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
-          console.warn('[DataUploadAtom] Fetch timed out');
-        } else {
-          throw fetchError;
-        }
+      const response = await fetch(`${UPLOAD_API}/list_saved_dataframes?${params.toString()}`, {
+        signal: controller.signal,
+        credentials: 'include',
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setSavedDataframes(data.files || []);
+      } else {
+        // Non-critical error - just log it, don't crash
+        console.warn('Failed to fetch saved dataframes:', response.status);
       }
-    } catch (error) {
-      console.error('[DataUploadAtom] Error fetching saved dataframes:', error);
-      // Don't set error state for network issues - just continue with empty list
-      // The user can still use the upload functionality
+    } catch (error: any) {
+      // Handle network errors gracefully - this is non-critical for the component to work
+      if (error.name === 'AbortError') {
+        console.warn('Fetch saved dataframes timed out');
+      } else {
+        console.error('Error fetching saved dataframes:', error);
+      }
+      // Set error only for display purposes, don't throw
+      setFetchError('Unable to fetch saved dataframes');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  // Show loading state while initializing
-  if (!isInitialized) {
-    return (
-      <Card className="h-full flex flex-col bg-gradient-to-br from-blue-50 to-white border-2 border-blue-200">
-        <div className="p-6 flex-1 flex flex-col items-center justify-center">
-          <div className="animate-pulse flex flex-col items-center">
-            <div className="w-16 h-16 rounded-full bg-blue-200 mb-4"></div>
-            <div className="h-4 w-32 bg-blue-200 rounded mb-2"></div>
-            <div className="h-3 w-48 bg-blue-100 rounded"></div>
-          </div>
-        </div>
-      </Card>
-    );
-  }
+  // Fetch saved dataframes after initial render (deferred, non-blocking)
+  useEffect(() => {
+    if (hasFetchedRef.current) return;
+    hasFetchedRef.current = true;
+    
+    // Delay the API call slightly to ensure the component renders first
+    const timeoutId = setTimeout(() => {
+      fetchSavedDataframes();
+    }, 100);
+    
+    return () => clearTimeout(timeoutId);
+  }, [fetchSavedDataframes]);
 
   const handleGuidedFlowComplete = (result: {
     uploadedFiles: any[];
@@ -211,6 +182,24 @@ const DataUploadAtom: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           </div>
         )}
 
+        {/* Error notice (non-blocking) */}
+        {fetchError && savedDataframes.length === 0 && (
+          <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <span className="text-sm text-amber-700">
+                Could not load saved dataframes. You can still upload files.
+              </span>
+              <button
+                onClick={fetchSavedDataframes}
+                className="ml-auto text-amber-700 hover:text-amber-800 text-sm underline"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Main Action Area */}
         <div className="flex-1 flex flex-col items-center justify-center">
           {primedFiles.length === 0 ? (
@@ -255,6 +244,43 @@ const DataUploadAtom: React.FC<DataUploadAtomProps> = ({ atomId }) => {
       />
     </Card>
   );
+};
+
+// Wrapper component with ErrorBoundary for crash protection
+const DataUploadAtom: React.FC<DataUploadAtomProps> = ({ atomId }) => {
+  try {
+    return (
+      <ErrorBoundary>
+        <DataUploadAtomContent atomId={atomId} />
+      </ErrorBoundary>
+    );
+  } catch (err) {
+    console.error('DataUploadAtom: Component error:', err);
+    return (
+      <Card className="h-full flex flex-col bg-gradient-to-br from-blue-50 to-white border-2 border-blue-200">
+        <div className="p-6 flex-1 flex flex-col items-center justify-center">
+          <div className="text-center">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center">
+              <AlertCircle className="w-8 h-8 text-amber-600" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-2">
+              Unable to Load Data Upload
+            </h3>
+            <p className="text-gray-600 mb-4 text-sm">
+              The component encountered an error. This might be due to network issues.
+            </p>
+            <Button
+              onClick={() => window.location.reload()}
+              className="bg-blue-500 hover:bg-blue-600 text-white"
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Reload Page
+            </Button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 };
 
 export default DataUploadAtom;

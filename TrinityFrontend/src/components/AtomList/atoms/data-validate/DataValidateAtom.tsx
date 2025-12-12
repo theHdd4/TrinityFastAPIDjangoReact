@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Info, Check, AlertCircle, Upload, Settings, ClipboardCheck, Eye, ChevronDown, Plus, Pencil } from 'lucide-react';
+import { Info, Check, AlertCircle, Upload, Settings, ClipboardCheck, Eye, ChevronDown, Plus, Pencil, RefreshCw } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 import ColumnClassifierCanvas from '../column-classifier/components/ColumnClassifierCanvas';
 import ColumnClassifierDimensionMapping from '../column-classifier/components/ColumnClassifierDimensionMapping';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 interface UploadedFileRef {
   name: string;
@@ -37,7 +38,7 @@ interface Props {
   atomId: string;
 }
 
-const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
+const DataUploadValidateAtomContent: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore((state) => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
   
@@ -52,32 +53,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFileRef[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
-
-  // Wait for atom to be registered in store before rendering
-  useEffect(() => {
-    let cancelled = false;
-    let retryCount = 0;
-    const maxRetries = 3;
-    const retryDelay = 500;
-
-    const checkAtom = () => {
-      if (cancelled) return;
-      
-      if (atom || retryCount >= maxRetries) {
-        setIsInitialized(true);
-      } else {
-        retryCount++;
-        setTimeout(checkAtom, retryDelay);
-      }
-    };
-
-    checkAtom();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [atom]);
   const [openSections, setOpenSections] = useState<string[]>(['setting1', 'fileValidation']);
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
@@ -2375,19 +2350,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     Object.values(validationResults).every(v => v.includes('Success'))
   );
 
-  // Show loading state while initializing
-  if (!isInitialized) {
-    return (
-      <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex items-center justify-center">
-        <div className="animate-pulse flex flex-col items-center">
-          <div className="w-16 h-16 rounded-full bg-blue-200 mb-4"></div>
-          <div className="h-4 w-32 bg-blue-200 rounded mb-2"></div>
-          <div className="h-3 w-48 bg-blue-100 rounded"></div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
       <div className="flex-1 flex flex-col">
@@ -2624,6 +2586,41 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       )}
     </div>
   );
+};
+
+// Wrapper component with ErrorBoundary for crash protection
+const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
+  try {
+    return (
+      <ErrorBoundary>
+        <DataUploadValidateAtomContent atomId={atomId} />
+      </ErrorBoundary>
+    );
+  } catch (err) {
+    console.error('DataUploadValidateAtom: Component error:', err);
+    return (
+      <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex items-center justify-center">
+        <div className="text-center p-6">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center">
+            <AlertCircle className="w-8 h-8 text-amber-600" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">
+            Unable to Load Data Validate
+          </h3>
+          <p className="text-gray-600 mb-4 text-sm max-w-sm">
+            The component encountered an error. This might be due to network issues or service unavailability.
+          </p>
+          <Button
+            onClick={() => window.location.reload()}
+            className="bg-blue-500 hover:bg-blue-600 text-white"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Reload Page
+          </Button>
+        </div>
+      </div>
+    );
+  }
 };
 
 export default DataUploadValidateAtom;
