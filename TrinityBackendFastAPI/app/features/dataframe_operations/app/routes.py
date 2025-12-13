@@ -28,6 +28,14 @@ from app.features.dataframe_operations.service import (
     load_dataframe_from_base64,
     sort_dataframe,
 )
+from app.features.shared.mongo_session import (
+    save_session_metadata,
+    get_session_metadata,
+    update_session_access_time,
+    queue_draft_save,
+    clear_draft,
+    mark_changes_applied,
+)
 
 router = APIRouter()
 logger = logging.getLogger("dataframe_operations.apply_formula")
@@ -485,7 +493,11 @@ async def cached_dataframe(object_name: str):
 
 
 @router.post("/load_cached")
-async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
+async def load_cached_dataframe(
+    object_name: str = Body(..., embed=True),
+    atom_id: Optional[str] = Body(None),
+    project_id: Optional[str] = Body(None)
+):
     """Load a cached dataframe by object key and create a session."""
     import logging
     logger = logging.getLogger("dataframe_operations.load")
@@ -522,6 +534,25 @@ async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     
     df_id = str(uuid.uuid4())
     SESSIONS[df_id] = df
+    
+    # Get project context for MongoDB storage
+    project_id_env = project_id or os.getenv("PROJECT_ID", os.getenv("PROJECT_NAME", "default_project"))
+    atom_id_env = atom_id or "unknown"
+    
+    # Save session metadata to MongoDB
+    metadata = {
+        "row_count": df.height,
+        "column_count": df.width,
+    }
+    await save_session_metadata(
+        session_id=df_id,
+        atom_id=atom_id_env,
+        project_id=project_id_env,
+        object_name=object_name,
+        session_type="dataframe",
+        has_unsaved_changes=False,
+        metadata=metadata
+    )
     
     logger.info(f"✅ [LOAD] DataFrame cached in session: {df_id}")
     
@@ -1189,9 +1220,6 @@ async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_na
         
         # Reorder the dataframe with the new column order
         df = df.select(all_columns)
-        
-        print(f"[Backend] Duplicated column '{name}' as '{new_name}' at position {insert_position}")
-        print(f"[Backend] New column order: {all_columns}")
         
     except HTTPException:
         raise  # Re-raise HTTP exceptions as-is

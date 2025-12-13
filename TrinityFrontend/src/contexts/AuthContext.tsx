@@ -51,9 +51,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<ProfileInfo | null>(null);
 
   const resolveRole = () => {
+    // Priority 1: Use role from UserRole table (tenant-specific)
+    // If role exists and is not 'viewer', return it directly
+    if (user?.role && user.role !== 'viewer') {
+      return user.role;
+    }
+    
+    // Priority 2: Backward compatibility - check is_superuser
     if (user?.is_superuser) return 'super_admin';
-    if (user?.role && user.role !== 'viewer') return user.role;
+    
+    // Priority 3: Backward compatibility - check is_staff
     if (user?.is_staff) return 'admin';
+    
+    // Priority 4: Return role if it exists (even if 'viewer'), otherwise undefined
     return user?.role;
   };
 

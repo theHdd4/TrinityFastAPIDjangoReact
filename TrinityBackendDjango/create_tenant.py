@@ -34,6 +34,17 @@ def main():
     projects_allowed = ["Demo Project"]
     admin_username = "neo"
     admin_email = f"{admin_username}@{primary_domain}"
+    
+    # List of allowed app slugs (will be resolved to usecase IDs)
+    # Empty list [] means grant access to ALL apps (backward compatibility)
+    # Since usecase IDs and registry.App IDs are the same, we can use either
+    TENANT_ALLOWED_APPS = [
+        # Add app slugs here, e.g.:
+        # "marketing-mix",
+        # "forecasting",
+        # "churn-prediction"
+        # Leave empty [] to grant all apps
+    ]
 
     print("→ 0) Making sure migrations are generated…")
     call_command("makemigrations", "registry", interactive=False, verbosity=1)
@@ -207,6 +218,74 @@ def main():
                         print(f"   → Error creating domain '{host}': {e}")
     print()
 
+    # Ensure trinity_v1_apps (UseCase) table is populated before resolving allowed apps
+    print(f"→ 2a) Ensuring trinity_v1_apps (UseCase) table is populated...")
+    from apps.usecase.models import UseCase
+    
+    total_usecases = UseCase.objects.count()
+    if total_usecases == 0:
+        print(f"   ⚠️  trinity_v1_apps table is empty, populating now...")
+        try:
+            call_command("populate_usecases")
+            total_usecases = UseCase.objects.count()
+            print(f"   ✅ Populated trinity_v1_apps table with {total_usecases} entries")
+        except Exception as exc:
+            print(f"   ❌ Failed to populate usecases: {exc}")
+            raise ValueError(f"Could not populate trinity_v1_apps table: {exc}")
+    else:
+        print(f"   ✅ trinity_v1_apps table already has {total_usecases} entries")
+    print()
+
+    # Resolve allowed apps to usecase IDs and update Tenant.allowed_apps
+    # This must happen BEFORE creating registry.App entries so we can filter them
+    # Flow: TENANT_ALLOWED_APPS (hardcoded list of slugs) → resolved to usecase IDs → stored in Tenant.allowed_apps
+    # If TENANT_ALLOWED_APPS is empty [], grants access to ALL apps (backward compatibility)
+    print(f"→ 2b) Resolving allowed apps and updating Tenant.allowed_apps...")
+    
+    # Table is now guaranteed to be populated (auto-populated above if needed)
+    total_usecases = UseCase.objects.count()
+    print(f"   Found {total_usecases} usecases in trinity_v1_apps table")
+    
+    if TENANT_ALLOWED_APPS:
+        # Resolve slugs to usecase IDs
+        print(f"   Requested slugs: {TENANT_ALLOWED_APPS}")
+        allowed_usecases = UseCase.objects.filter(slug__in=TENANT_ALLOWED_APPS)
+        allowed_usecase_ids = list(allowed_usecases.values_list('id', flat=True))
+        found_slugs = list(allowed_usecases.values_list('slug', flat=True))
+        print(f"   Resolved {len(allowed_usecase_ids)} allowed apps from {len(TENANT_ALLOWED_APPS)} slugs")
+        print(f"   Found slugs: {found_slugs}")
+        
+        if len(allowed_usecase_ids) < len(TENANT_ALLOWED_APPS):
+            missing = set(TENANT_ALLOWED_APPS) - set(found_slugs)
+            print(f"   ⚠️  Warning: {len(missing)} slugs not found in usecase table: {missing}")
+            
+            # Show available slugs for debugging
+            all_available_slugs = list(UseCase.objects.values_list('slug', flat=True))
+            print(f"   📋 Available slugs in usecase table ({len(all_available_slugs)} total):")
+            for slug in sorted(all_available_slugs):
+                print(f"      - {slug}")
+            
+            # Check for potential typos (case-insensitive or similar slugs)
+            print(f"   💡 Tip: Check for typos in TENANT_ALLOWED_APPS list")
+            for missing_slug in missing:
+                # Find similar slugs (case-insensitive match)
+                similar = [s for s in all_available_slugs if s.lower() == missing_slug.lower()]
+                if similar:
+                    print(f"      → '{missing_slug}' not found, but found similar: {similar}")
+    else:
+        # Empty list = grant all apps (backward compatibility)
+        allowed_usecase_ids = list(UseCase.objects.values_list('id', flat=True))
+        print(f"   No allowed apps specified - granting access to ALL {len(allowed_usecase_ids)} apps")
+    
+    # Update Tenant.allowed_apps BEFORE creating registry.App entries
+    # This ensures we can filter usecases based on Tenant.allowed_apps
+    # Use save() instead of update() to ensure JSONField is properly serialized
+    tenant_obj.allowed_apps = allowed_usecase_ids
+    tenant_obj.save(update_fields=['allowed_apps'])
+    print(f"   ✅ Updated Tenant.allowed_apps with {len(allowed_usecase_ids)} usecase IDs: {allowed_usecase_ids}")
+    print(f"   ✅ Verified: Tenant.allowed_apps = {tenant_obj.allowed_apps}")
+    print()
+
     print(f"→ 3) Running TENANT-SCHEMA migrations for '{tenant_schema}'…")
     # Switch into the tenant schema and apply all tenant apps there
     # `migrate_schemas` expects the schema name via the --schema flag.
@@ -279,15 +358,31 @@ def main():
         print(f"   ⚠️  Failed to assign molecules to use cases: {exc}")
 
     # Grant app access from public.usecase table
+    # Filter usecases based on Tenant.allowed_apps (which was set in step 2b)
+    # Flow: TENANT_ALLOWED_APPS (slugs) → resolved to usecase IDs → stored in Tenant.allowed_apps
+    #       → filtered here → only creates registry.App entries for allowed apps
     from apps.registry.models import App
-    from apps.usecase.models import UseCase
+    # UseCase is already imported from earlier step
 
     print(f"\n→ 4) Granting app access from public.usecase table...")
     
-    # Get ALL available usecases from public schema instead of hardcoded list
+    # Get usecases - filter by Tenant.allowed_apps if set
+    # Tenant.allowed_apps was populated earlier (step 2b) with usecase IDs
+    # Note: usecase IDs and registry.App IDs are the same, so we can use either
     try:
+        # Refresh tenant_obj to ensure we have the latest allowed_apps from database
+        tenant_obj.refresh_from_db()
+        print(f"   🔍 Debug: tenant_obj.allowed_apps = {tenant_obj.allowed_apps} (type: {type(tenant_obj.allowed_apps)})")
+        
         all_usecases = UseCase.objects.all()
-        print(f"   Found {all_usecases.count()} apps in public.usecase table")
+        if tenant_obj.allowed_apps and len(tenant_obj.allowed_apps) > 0:
+            # Filter to only allowed apps (usecase IDs stored in Tenant.allowed_apps)
+            all_usecases = all_usecases.filter(id__in=tenant_obj.allowed_apps)
+            print(f"   ✅ Filtering to {all_usecases.count()} allowed apps (from Tenant.allowed_apps: {tenant_obj.allowed_apps})")
+        else:
+            # Fallback: if allowed_apps is empty, use all (shouldn't happen after step 2b, but safety check)
+            print(f"   ⚠️  No allowed_apps filter - Tenant.allowed_apps is empty! Using all {all_usecases.count()} apps")
+        print(f"   Found {all_usecases.count()} apps in public.usecase table (after filtering)")
     except Exception as e:
         print(f"   ⚠️  Error fetching usecases: {e}")
         print(f"       Run: python manage.py populate_usecases")
@@ -334,19 +429,48 @@ def main():
             user = User.objects.get(username=username)
             UserRole.objects.update_or_create(
                 user=user,
-                client_id=tenant_client_id,
-                app_id=uuid.uuid4(),
                 defaults={
                     "role": role,
                     "allowed_apps": allowed_app_ids,
-                    "client_name": tenant_obj.name,
-                    "email": user.email,
                 },
             )
 
+    # Note: Tenant.allowed_apps was already updated earlier (step 2b) with usecase IDs
+    # The allowed_app_ids collected here should match since usecase IDs = registry.App IDs
+    # Only update users_in_use, not allowed_apps (to avoid overwriting with registry.App IDs)
     Tenant.objects.filter(id=tenant_obj.id).update(
-        allowed_apps=allowed_app_ids, users_in_use=len(role_users)
+        users_in_use=len(role_users)
     )
+
+    # Create UserTenant mappings for all users
+    print(f"\n→ 4b) Creating UserTenant mappings for all users...")
+    from apps.accounts.models import UserTenant
+    
+    # Check if this is the "Quant Matrix AI" tenant (primary tenant)
+    is_primary_tenant = tenant_name == "Quant Matrix AI"
+    
+    for user in User.objects.all():
+        try:
+            # Check if mapping already exists
+            user_tenant, created = UserTenant.objects.get_or_create(
+                user=user,
+                tenant=tenant_obj,
+                defaults={
+                    "is_primary": is_primary_tenant and not UserTenant.objects.filter(user=user, is_primary=True).exists()
+                }
+            )
+            if created:
+                print(f"   ✅ Created UserTenant mapping: {user.username} → {tenant_obj.name}")
+            else:
+                # Update is_primary if this is the primary tenant and user doesn't have one
+                if is_primary_tenant and not user_tenant.is_primary and not UserTenant.objects.filter(user=user, is_primary=True).exists():
+                    user_tenant.is_primary = True
+                    user_tenant.save()
+                    print(f"   ♻️  Updated UserTenant mapping (set as primary): {user.username} → {tenant_obj.name}")
+                else:
+                    print(f"   ℹ️  UserTenant mapping already exists: {user.username} → {tenant_obj.name}")
+        except Exception as exc:
+            print(f"   ⚠️  Failed to create UserTenant mapping for {user.username}: {exc}")
 
     # Set default tenant environment for all users
     print(f"\n→ 5) Setting default tenant environment for all users...")

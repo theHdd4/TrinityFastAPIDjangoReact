@@ -68,12 +68,9 @@ class AppViewSet(viewsets.ModelViewSet):
             try:
                 from apps.roles.models import UserRole
 
-                roles = UserRole.objects.filter(user=user)
-                allowed = set()
-                for role in roles:
-                    allowed.update(role.allowed_apps or [])
-                if allowed:
-                    qs = qs.filter(id__in=allowed)
+                role_obj = UserRole.objects.filter(user=user).first()
+                if role_obj and role_obj.allowed_apps:
+                    qs = qs.filter(id__in=role_obj.allowed_apps)
             except Exception:
                 # If roles don't exist or error, just show enabled apps
                 pass
@@ -86,13 +83,155 @@ class AppViewSet(viewsets.ModelViewSet):
             return [permissions.IsAdminUser()]
         return super().get_permissions()
 
+    def _enrich_app_data(self, app):
+        """
+        Helper method to enrich app data with modules, molecules, and atoms from public.usecase.
+        """
+        app_data = {
+            'id': app.id,
+            'name': app.name,
+            'slug': app.slug,
+            'description': app.description,
+            'usecase_id': app.usecase_id,
+            'modules': [],
+            'molecules': [],
+            'molecule_atoms': {},
+            'atoms_in_molecules': []
+        }
+        
+        # Fetch data from public.usecase if linked
+        if app.usecase_id:
+            try:
+                from django_tenants.utils import schema_context
+                from apps.trinity_v1_atoms.models import TrinityV1Atom
+                from apps.usecase.models import UseCase
+                
+                # Access UseCase from public schema
+                with schema_context('public'):
+                    usecase = UseCase.objects.prefetch_related('molecule_objects').get(id=app.usecase_id)
+                    app_data['modules'] = usecase.modules or []
+                    app_data['molecules'] = usecase.molecules or []
+                    
+                    # Build molecule_atoms and atoms_in_molecules from molecule_objects
+                    molecule_atoms = {}
+                    atoms_in_molecules = []
+                    
+                    for molecule in usecase.molecule_objects.all():
+                        atom_names = molecule.atoms or []
+                        matching_atoms = TrinityV1Atom.objects.filter(atom_id__in=atom_names)
+                        
+                        atoms_list = []
+                        for atom in matching_atoms:
+                            atom_data = {
+                                'id': atom.atom_id,
+                                'name': atom.name,
+                                'description': atom.description,
+                                'category': atom.category
+                            }
+                            atoms_list.append(atom_data)
+                            if atom.atom_id not in atoms_in_molecules:
+                                atoms_in_molecules.append(atom.atom_id)
+                        
+                        molecule_atoms[molecule.molecule_id] = {
+                            'id': molecule.molecule_id,
+                            'name': molecule.name,
+                            'atoms': atoms_list
+                        }
+                    
+                    app_data['molecule_atoms'] = molecule_atoms
+                    app_data['atoms_in_molecules'] = atoms_in_molecules
+            except UseCase.DoesNotExist:
+                logger.warning(f"UseCase {app.usecase_id} not found for app {app.slug}")
+            except Exception as e:
+                logger.error(f"Error enriching app {app.slug}: {e}")
+        
+        return app_data
+
+    def _enrich_usecase_data(self, usecase):
+        """
+        Helper method to enrich UseCase data with modules, molecules, and atoms.
+        Similar to _enrich_app_data but works directly with UseCase objects from public schema.
+        This method should be called within a public schema context.
+        """
+        try:
+            usecase_data = {
+                'usecase_id': usecase.id,  # Use usecase_id instead of id to avoid clashing
+                'name': usecase.name or '',
+                'slug': usecase.slug or '',
+                'description': usecase.description or '',
+                'modules': usecase.modules or [],
+                'molecules': usecase.molecules or [],
+                'molecule_atoms': {},
+                'atoms_in_molecules': []
+            }
+        except Exception as e:
+            logger.error(f"Error extracting basic UseCase data: {e}")
+            return {
+                'usecase_id': getattr(usecase, 'id', 0),
+                'name': getattr(usecase, 'name', 'Unknown'),
+                'slug': getattr(usecase, 'slug', 'unknown'),
+                'description': getattr(usecase, 'description', ''),
+                'modules': [],
+                'molecules': [],
+                'molecule_atoms': {},
+                'atoms_in_molecules': []
+            }
+        
+        try:
+            from apps.trinity_v1_atoms.models import TrinityV1Atom
+            from django_tenants.utils import schema_context
+            
+            # Ensure we're in public schema context for accessing TrinityV1Atom
+            with schema_context('public'):
+                # Build molecule_atoms and atoms_in_molecules from molecule_objects
+                molecule_atoms = {}
+                atoms_in_molecules = []
+                
+                # UseCase already has prefetch_related('molecule_objects') if called correctly
+                try:
+                    for molecule in usecase.molecule_objects.all():
+                        atom_names = molecule.atoms or []
+                        if atom_names:
+                            matching_atoms = TrinityV1Atom.objects.filter(atom_id__in=atom_names)
+                            
+                            atoms_list = []
+                            for atom in matching_atoms:
+                                atom_data = {
+                                    'id': atom.atom_id,
+                                    'name': atom.name,
+                                    'description': atom.description,
+                                    'category': atom.category
+                                }
+                                atoms_list.append(atom_data)
+                                if atom.atom_id not in atoms_in_molecules:
+                                    atoms_in_molecules.append(atom.atom_id)
+                            
+                            molecule_atoms[molecule.molecule_id] = {
+                                'id': molecule.molecule_id,
+                                'name': molecule.name,
+                                'atoms': atoms_list
+                            }
+                except Exception as e:
+                    logger.warning(f"Error processing molecules for UseCase {usecase.slug}: {e}")
+                
+                usecase_data['molecule_atoms'] = molecule_atoms
+                usecase_data['atoms_in_molecules'] = atoms_in_molecules
+        except Exception as e:
+            logger.error(f"Error enriching UseCase {getattr(usecase, 'slug', 'unknown')}: {e}")
+        
+        return usecase_data
+
     def list(self, request, *args, **kwargs):
         """
         List apps accessible to this tenant with full molecule/atom data from public.usecase
         Uses API-level tenant switching based on user's environment variables.
+        
+        Query Parameters:
+        - include_restricted: If 'true', returns both allowed and restricted apps with is_allowed flag.
+                             Restricted apps are apps in tenant registry but not accessible to user.
+                             Default: 'false' (only returns allowed apps for backward compatibility).
         """
         from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
-        from apps.usecase.models import UseCase
         
         # Get user's tenant schema
         schema_name = get_user_tenant_schema(request.user)
@@ -102,89 +241,131 @@ class AppViewSet(viewsets.ModelViewSet):
         
         logger.info(f"🔄 Switching to tenant schema: {schema_name} for user {request.user.username}")
         
+        # Check if we should include restricted apps
+        include_restricted = request.query_params.get('include_restricted', 'false').lower() == 'true'
+        
         # Switch to user's tenant schema
         with switch_to_user_tenant(request.user):
             logger.info(f"✅ Now in tenant schema: {schema_name}")
-            # Get apps from the user's tenant schema
-            queryset = self.filter_queryset(self.get_queryset())
-            logger.info(f"📊 Queryset count: {queryset.count()}")
             
-            enriched_apps = []
-            for app in queryset:
-                app_data = {
-                    'id': app.id,
-                    'name': app.name,
-                    'slug': app.slug,
-                    'description': app.description,
-                    'modules': [],
-                    'molecules': [],
-                    'molecule_atoms': {},
-                    'atoms_in_molecules': []
-                }
+            if include_restricted:
+                # Get all tenant apps (no permission filtering)
+                all_tenant_apps = App.objects.all().order_by('name')
                 
-                # Fetch data from public.usecase if linked
-                if app.usecase_id:
-                    try:
-                        from django_tenants.utils import schema_context
-                        from apps.trinity_v1_atoms.models import TrinityV1Atom
-                        
-                        # Access UseCase from public schema
-                        with schema_context('public'):
-                            usecase = UseCase.objects.prefetch_related('molecule_objects').get(id=app.usecase_id)
-                            app_data['modules'] = usecase.modules or []
-                            app_data['molecules'] = usecase.molecules or []
-                            
-                            # Build molecule_atoms and atoms_in_molecules from molecule_objects
-                            molecule_atoms = {}
-                            atoms_in_molecules = []
-                            
-                            for molecule in usecase.molecule_objects.all():
-                                atom_names = molecule.atoms or []
-                                matching_atoms = TrinityV1Atom.objects.filter(atom_id__in=atom_names)
-                                
-                                atoms_list = []
-                                for atom in matching_atoms:
-                                    atom_data = {
-                                        'id': atom.atom_id,
-                                        'name': atom.name,
-                                        'description': atom.description,
-                                        'category': atom.category
-                                    }
-                                    atoms_list.append(atom_data)
-                                    if atom.atom_id not in atoms_in_molecules:
-                                        atoms_in_molecules.append(atom.atom_id)
-                                
-                                molecule_atoms[molecule.molecule_id] = {
-                                    'id': molecule.molecule_id,
-                                    'name': molecule.name,
-                                    'atoms': atoms_list
-                                }
-                            
-                            app_data['molecule_atoms'] = molecule_atoms
-                            app_data['atoms_in_molecules'] = atoms_in_molecules
-                    except UseCase.DoesNotExist:
-                        logger.warning(f"UseCase {app.usecase_id} not found for app {app.slug}")
+                # Get allowed app IDs using current filtering logic
+                allowed_queryset = self.filter_queryset(self.get_queryset())
+                allowed_ids = set(allowed_queryset.values_list('id', flat=True))
                 
-                enriched_apps.append(app_data)
-            
-            logger.info(f"Found {len(enriched_apps)} apps for tenant {schema_name}")
-            return Response(enriched_apps)
+                # Get restricted apps (all apps not in allowed set, excluding custom apps)
+                restricted_apps = all_tenant_apps.exclude(id__in=allowed_ids).exclude(slug='blank')
+                
+                # Enrich allowed apps
+                enriched_allowed = []
+                for app in allowed_queryset:
+                    app_data = self._enrich_app_data(app)
+                    app_data['is_allowed'] = True
+                    enriched_allowed.append(app_data)
+                
+                # Enrich restricted apps
+                enriched_restricted = []
+                for app in restricted_apps:
+                    app_data = self._enrich_app_data(app)
+                    app_data['is_allowed'] = False
+                    enriched_restricted.append(app_data)
+                
+                # Combine and return
+                all_enriched = enriched_allowed + enriched_restricted
+                logger.info(f"Found {len(enriched_allowed)} allowed and {len(enriched_restricted)} restricted apps for tenant {schema_name}")
+                return Response(all_enriched)
+            else:
+                # Default behavior: return only allowed apps (backward compatible)
+                queryset = self.filter_queryset(self.get_queryset())
+                logger.info(f"📊 Queryset count: {queryset.count()}")
+                
+                enriched_apps = []
+                for app in queryset:
+                    app_data = self._enrich_app_data(app)
+                    enriched_apps.append(app_data)
+                
+                logger.info(f"Found {len(enriched_apps)} apps for tenant {schema_name}")
+                return Response(enriched_apps)
     
     def retrieve(self, request, *args, **kwargs):
-        load_env_vars(request.user)
-        app_obj = self.get_object()
-        os.environ["APP_NAME"] = app_obj.slug
-        os.environ["APP_ID"] = os.environ.get("APP_ID") or f"{app_obj.slug}_{app_obj.id}"
-        print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
-        save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
-        save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
-        save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
-        save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
-        print("Current env vars after app select", get_env_dict(request.user))
-        serializer = self.get_serializer(app_obj)
-        data = serializer.data
-        data["environment"] = get_env_dict(request.user)
-        return Response(data)
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response({"detail": "No tenant found for user"}, status=status.HTTP_404_NOT_FOUND)
+        
+        logger.info(f"🔄 Switching to tenant schema: {schema_name} for app retrieve (user: {request.user.username})")
+        
+        # Switch to user's tenant schema before getting app object
+        with switch_to_user_tenant(request.user):
+            logger.info(f"✅ Now in tenant schema: {schema_name}")
+            load_env_vars(request.user)
+            app_obj = self.get_object()
+            os.environ["APP_NAME"] = app_obj.slug
+            os.environ["APP_ID"] = os.environ.get("APP_ID") or f"{app_obj.slug}_{app_obj.id}"
+            print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
+            save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+            save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
+            save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+            save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
+            print("Current env vars after app select", get_env_dict(request.user))
+            serializer = self.get_serializer(app_obj)
+            data = serializer.data
+            data["environment"] = get_env_dict(request.user)
+            return Response(data)
+
+    @action(detail=False, methods=['get'])
+    def unavailable(self, request):
+        """
+        Get apps from public.trinity_v1_apps (UseCase) that are not in tenant registry.
+        Returns apps with usecase_id (not id) to avoid clashing with registry app IDs.
+        """
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        from django_tenants.utils import schema_context
+        from apps.usecase.models import UseCase
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response([])
+        
+        logger.info(f"🔄 Fetching unavailable apps for tenant {schema_name} (user: {request.user.username})")
+        
+        # Step 1: Get all registry app usecase_ids from tenant schema
+        with switch_to_user_tenant(request.user):
+            # Get all registry apps (including disabled ones) to see what usecase_ids are already in registry
+            registry_apps = App.objects.exclude(usecase_id__isnull=True).exclude(usecase_id=0)
+            registry_usecase_ids = set(registry_apps.values_list('usecase_id', flat=True))
+            logger.info(f"📊 Found {len(registry_usecase_ids)} usecase_ids in tenant registry")
+        
+        # Step 2: Query all UseCase objects from public schema and filter out ones in registry
+        enriched_unavailable = []
+        try:
+            with schema_context('public'):
+                # Get all UseCase objects, excluding those already in tenant registry
+                unavailable_usecases = UseCase.objects.exclude(id__in=registry_usecase_ids).prefetch_related('molecule_objects').order_by('name')
+                logger.info(f"📊 Found {unavailable_usecases.count()} unavailable UseCases")
+                
+                # Step 3: Enrich each UseCase with modules, molecules, and atoms
+                for usecase in unavailable_usecases:
+                    try:
+                        usecase_data = self._enrich_usecase_data(usecase)
+                        if usecase_data and usecase_data.get('usecase_id'):
+                            enriched_unavailable.append(usecase_data)
+                    except Exception as e:
+                        logger.error(f"Error enriching UseCase {getattr(usecase, 'id', 'unknown')}: {e}")
+                        continue
+        except Exception as e:
+            logger.error(f"Error fetching unavailable apps from public schema: {e}")
+        
+        logger.info(f"✅ Returning {len(enriched_unavailable)} unavailable apps for tenant {schema_name}")
+        return Response(enriched_unavailable)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -224,20 +405,26 @@ class ProjectViewSet(viewsets.ModelViewSet):
         with switch_to_user_tenant(user):
             qs = self.queryset
 
+            # Handle scope parameter for filtering projects
+            # scope=tenant: Returns all tenant projects (not filtered by allowed_apps for non-staff)
+            # scope=user: Returns projects where owner=user OR user appears in ProjectModificationHistory (filtered by allowed_apps)
+            scope = self.request.query_params.get("scope", "tenant")  # default to tenant
+            
             if not user.is_staff:
-                try:
-                    from apps.roles.models import UserRole
+                # For user scope, filter by allowed_apps (existing behavior)
+                # For tenant scope, don't filter by allowed_apps (show all tenant projects)
+                if scope == "user":
+                    try:
+                        from apps.roles.models import UserRole
 
-                    roles = UserRole.objects.filter(user=user)
-                    allowed = set()
-                    for role in roles:
-                        allowed.update(role.allowed_apps or [])
-                    if allowed:
-                        qs = qs.filter(app_id__in=allowed)
-                    else:
+                        role_obj = UserRole.objects.filter(user=user).first()
+                        if role_obj and role_obj.allowed_apps:
+                            qs = qs.filter(app_id__in=role_obj.allowed_apps)
+                        else:
+                            return Project.objects.none()
+                    except Exception:
                         return Project.objects.none()
-                except Exception:
-                    return Project.objects.none()
+                # For tenant scope, skip allowed_apps filtering - show all tenant projects
 
             app_param = self.request.query_params.get("app")
             if app_param:
@@ -246,10 +433,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 else:
                     qs = qs.filter(app__slug=app_param)
 
-            # Handle scope parameter for filtering projects
-            # scope=tenant: Returns all tenant projects (default, existing behavior)
-            # scope=user: Returns projects where owner=user OR user appears in ProjectModificationHistory
-            scope = self.request.query_params.get("scope", "tenant")  # default to tenant
             if scope == "user":
                 # Get project IDs from modification history where user has modified
                 modified_project_ids = list(
@@ -293,81 +476,116 @@ class ProjectViewSet(viewsets.ModelViewSet):
         - ordering: Sort order (e.g., "-updated_at", "name")
         - app: Filter by app ID or slug
         """
-        from apps.accounts.tenant_utils import get_user_tenant_schema
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
         
-        # Get the queryset
-        queryset = self.filter_queryset(self.get_queryset())
-        
-        # Get user and client info for logging
+        # Get user's tenant schema
         user = request.user
         schema_name = get_user_tenant_schema(user)
-        scope = request.query_params.get("scope", "tenant")
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {user.username}")
+            return Response([])
         
-        # Console logging for debugging
-        logger.info(
-            f"📋 Projects API Request - "
-            f"User: {user.username} | "
-            f"Client/Tenant: {schema_name} | "
-            f"Scope: {scope} | "
-            f"Total projects: {queryset.count()}"
-        )
+        logger.info(f"🔄 Switching to tenant schema: {schema_name} for projects list (user: {user.username})")
         
-        # Log project details for debugging
-        if queryset.exists():
-            projects_list = list(queryset.values('id', 'name', 'owner__username', 'app__slug', 'updated_at')[:10])
-            logger.info(f"📊 Sample projects (first 10): {projects_list}")
-        
-        # Handle limit and offset parameters (for pagination)
-        limit_param = request.query_params.get("limit")
-        offset_param = request.query_params.get("offset")
+        # Switch to user's tenant schema - wrap entire method logic inside context
+        # This ensures queryset evaluation happens in the correct schema
+        with switch_to_user_tenant(user):
+            logger.info(f"✅ Now in tenant schema: {schema_name}")
+            
+            # Get the queryset inside tenant context
+            queryset = self.filter_queryset(self.get_queryset())
+            
+            scope = request.query_params.get("scope", "tenant")
+            
+            # Console logging for debugging
+            logger.info(
+                f"📋 Projects API Request - "
+                f"User: {user.username} | "
+                f"Client/Tenant: {schema_name} | "
+                f"Scope: {scope} | "
+                f"Total projects: {queryset.count()}"
+            )
+            
+            # Log project details for debugging
+            if queryset.exists():
+                projects_list = list(queryset.values('id', 'name', 'owner__username', 'app__slug', 'updated_at')[:10])
+                logger.info(f"📊 Sample projects (first 10): {projects_list}")
+            
+            # Handle limit and offset parameters (for pagination)
+            limit_param = request.query_params.get("limit")
+            offset_param = request.query_params.get("offset")
 
-        if limit_param or offset_param:
-            try:
-                limit = int(limit_param) if limit_param else None
-                offset = int(offset_param) if offset_param else 0
-                
-                # Validate values
-                if limit is not None and limit <= 0:
-                    limit = None
-                if offset < 0:
-                    offset = 0
-                
-                # Apply pagination
-                if limit is not None:
-                    # Both limit and offset provided
-                    paginated_queryset = list(queryset[offset:offset+limit])
-                    logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, limit={limit})")
-                elif offset > 0:
-                    # Only offset provided (no limit)
-                    paginated_queryset = list(queryset[offset:])
-                    logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, no limit)")
-                else:
-                    # Only limit provided (no offset)
-                    paginated_queryset = list(queryset[:limit])
-                    logger.info(f"✅ Returning {len(paginated_queryset)} projects (limit={limit})")
-                
-                serializer = self.get_serializer(paginated_queryset, many=True)
-                return Response(serializer.data)
-            except (ValueError, TypeError):
-                # Invalid parameter, ignore it and continue with normal pagination
-                pass
-        
-        # Normal pagination flow when no limit is provided
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            logger.info(f"✅ Returning paginated projects (page size: {len(page)})")
-            return self.get_paginated_response(serializer.data)
-        
-        serializer = self.get_serializer(queryset, many=True)
-        logger.info(f"✅ Returning {len(serializer.data)} projects (all)")
-        return Response(serializer.data)
+            if limit_param or offset_param:
+                try:
+                    limit = int(limit_param) if limit_param else None
+                    offset = int(offset_param) if offset_param else 0
+                    
+                    # Validate values
+                    if limit is not None and limit <= 0:
+                        limit = None
+                    if offset < 0:
+                        offset = 0
+                    
+                    # Apply pagination
+                    if limit is not None:
+                        # Both limit and offset provided
+                        paginated_queryset = list(queryset[offset:offset+limit])
+                        logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, limit={limit})")
+                    elif offset > 0:
+                        # Only offset provided (no limit)
+                        paginated_queryset = list(queryset[offset:])
+                        logger.info(f"✅ Returning {len(paginated_queryset)} projects (offset={offset}, no limit)")
+                    else:
+                        # Only limit provided (no offset)
+                        paginated_queryset = list(queryset[:limit])
+                        logger.info(f"✅ Returning {len(paginated_queryset)} projects (limit={limit})")
+                    
+                    serializer = self.get_serializer(paginated_queryset, many=True)
+                    return Response(serializer.data)
+                except (ValueError, TypeError):
+                    # Invalid parameter, ignore it and continue with normal pagination
+                    pass
+            
+            # Normal pagination flow when no limit is provided
+            page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                logger.info(f"✅ Returning paginated projects (page size: {len(page)})")
+                return self.get_paginated_response(serializer.data)
+            
+            serializer = self.get_serializer(queryset, many=True)
+            logger.info(f"✅ Returning {len(serializer.data)} projects (all)")
+            return Response(serializer.data)
 
     def _can_edit(self, user):
-        # Temporarily allow all authenticated users to edit for debugging
-        if user.is_authenticated:
-            return True
+        """
+        Check if user can edit projects.
+        First checks UserRole table (within tenant schema), then falls back to is_staff.
+        """
+        if not user.is_authenticated:
+            return False
         
+        # Check UserRole table first (tenant-specific)
+        try:
+            from apps.roles.models import UserRole
+            from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+            
+            schema_name = get_user_tenant_schema(user)
+            if schema_name:
+                # Query UserRole within tenant schema context
+                with switch_to_user_tenant(user):
+                    role_obj = UserRole.objects.filter(user=user).first()
+                    if role_obj:
+                        # Admin and editor roles can edit
+                        if role_obj.role in [UserRole.ROLE_ADMIN, UserRole.ROLE_EDITOR]:
+                            return True
+                        # Viewer role cannot edit
+                        return False
+        except Exception:
+            # If UserRole query fails, fall back to is_staff check
+            pass
+        
+        # Fallback to is_staff for backward compatibility
         perms = [
             "permissions.workflow_edit",
             "permissions.laboratory_edit",
@@ -530,17 +748,51 @@ class ProjectViewSet(viewsets.ModelViewSet):
             
             load_env_vars(request.user)
             project_obj = self.get_object()
-            os.environ["PROJECT_NAME"] = project_obj.name
-            os.environ["PROJECT_ID"] = f"{project_obj.name}_{project_obj.id}"
+
+            # Get app information from project object (not from os.environ)
+            app_obj = project_obj.app
+            app_name = app_obj.slug
+            app_id = f"{app_obj.slug}_{app_obj.id}"
+
+            # Get client info from environment or tenant
+            client_name = os.environ.get("CLIENT_NAME", "")
+            client_id = os.environ.get("CLIENT_ID", "")
+
+            # Set project info
+            project_name = project_obj.name
+            project_id = f"{project_obj.name}_{project_obj.id}"
+
+            # Set in os.environ for backward compatibility
+            os.environ["APP_NAME"] = app_name
+            os.environ["APP_ID"] = app_id
+            os.environ["PROJECT_NAME"] = project_name
+            os.environ["PROJECT_ID"] = project_id
+
             print(
-                f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
+                f"✅ project selected: PROJECT_ID={project_id} PROJECT_NAME={project_name} "
+                f"APP_NAME={app_name} APP_ID={app_id}"
             )
-            save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
-            save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
-            save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
-            save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
-            save_env_var(request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
-            save_env_var(request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
+
+            # Save all env vars
+            save_env_var(request.user, "CLIENT_NAME", client_name)
+            save_env_var(request.user, "CLIENT_ID", client_id)
+            save_env_var(request.user, "APP_NAME", app_name)
+            save_env_var(request.user, "APP_ID", app_id)
+            save_env_var(request.user, "PROJECT_NAME", project_name)
+            save_env_var(request.user, "PROJECT_ID", project_id)
+
+            # Explicitly update Redis currentenv to ensure all fields are stored
+            from redis_store.env_cache import set_current_env
+            set_current_env(
+                str(request.user.id),
+                client_id=client_id,
+                app_id=app_id,
+                project_id=project_id,
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            )
+
             print("Current env vars after project select", get_env_dict(request.user))
             serializer = self.get_serializer(project_obj)
             data = serializer.data
@@ -767,11 +1019,11 @@ class TemplateViewSet(viewsets.ModelViewSet):
             try:
                 from apps.roles.models import UserRole
 
-                roles = UserRole.objects.filter(user=user)
-                allowed = set()
-                for role in roles:
-                    allowed.update(role.allowed_apps or [])
-                qs = qs.filter(app_id__in=allowed) if allowed else Template.objects.none()
+                role_obj = UserRole.objects.filter(user=user).first()
+                if role_obj and role_obj.allowed_apps:
+                    qs = qs.filter(app_id__in=role_obj.allowed_apps)
+                else:
+                    return Template.objects.none()
             except Exception:
                 return Template.objects.none()
         app_param = self.request.query_params.get("app")
@@ -792,6 +1044,34 @@ class TemplateViewSet(viewsets.ModelViewSet):
             instance.save(update_fields=["template_projects"])
 
     def _can_edit(self, user):
+        """
+        Check if user can edit templates.
+        First checks UserRole table (within tenant schema), then falls back to is_staff.
+        """
+        if not user.is_authenticated:
+            return False
+        
+        # Check UserRole table first (tenant-specific)
+        try:
+            from apps.roles.models import UserRole
+            from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+            
+            schema_name = get_user_tenant_schema(user)
+            if schema_name:
+                # Query UserRole within tenant schema context
+                with switch_to_user_tenant(user):
+                    role_obj = UserRole.objects.filter(user=user).first()
+                    if role_obj:
+                        # Admin and editor roles can edit
+                        if role_obj.role in [UserRole.ROLE_ADMIN, UserRole.ROLE_EDITOR]:
+                            return True
+                        # Viewer role cannot edit
+                        return False
+        except Exception:
+            # If UserRole query fails, fall back to is_staff check
+            pass
+        
+        # Fallback to is_staff for backward compatibility
         perms = [
             "permissions.workflow_edit",
             "permissions.laboratory_edit",
