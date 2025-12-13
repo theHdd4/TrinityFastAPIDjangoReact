@@ -200,6 +200,7 @@ interface Props {
   captureId?: string;
   forceSingleAxis?: boolean; // Force rendering multiple series on single axis instead of dual axes
   stackBars?: boolean; // Enable stacked bar chart when legendField is present
+  showNote?: boolean; // Show note box below chart
   // Series settings props for persistence
   seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>; // Per-series settings from parent
   onSeriesSettingsChange?: (settings: Record<string, { color?: string; showDataLabels?: boolean }>) => void; // Callback to update series settings
@@ -534,6 +535,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   chartsPerRow,
   captureId,
   forceSingleAxis = false,
+  showNote = false,
   stackBars = false,
   seriesSettings: propSeriesSettings, // Series settings from parent
   onSeriesSettingsChange, // Callback to update series settings
@@ -5295,15 +5297,17 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
       <div
         className="w-full h-full relative flex-1 min-w-0"
-        style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%' }}
+        style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%', maxWidth: '100%', maxHeight: '100%', overflow: 'hidden' }}
       >
         <div 
-          className="w-full h-full transition-all duration-500 ease-in-out overflow-visible chart-scroll-container"
+          className="w-full h-full transition-all duration-500 ease-in-out overflow-hidden chart-scroll-container"
           style={{ 
             paddingBottom: '0px',  // Removed: handled by chart margins
             paddingTop: '0px',     // Removed: handled by chart margins
             maxWidth: '100%',
-            width: '100%'
+            width: '100%',
+            maxHeight: '100%',
+            overflow: 'hidden'
           }}
           onContextMenu={handleContextMenu}
           ref={chartRef}
@@ -5314,7 +5318,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
               minHeight: '300px',
               maxWidth: '100%',
               width: '100%',
-              overflow: 'visible',
+              maxHeight: '100%',
+              overflow: 'hidden',
               display: type === 'pie_chart' ? 'flex' : 'block',
               alignItems: type === 'pie_chart' ? 'center' : 'stretch',
               justifyContent: type === 'pie_chart' ? 'center' : 'flex-start'
@@ -5446,6 +5451,17 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Note Box */}
+        {showNote && (
+          <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <textarea
+              placeholder="Add your notes here..."
+              className="w-full min-h-[80px] p-2 text-sm border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              style={{ fontFamily: 'inherit' }}
+            />
           </div>
         )}
 

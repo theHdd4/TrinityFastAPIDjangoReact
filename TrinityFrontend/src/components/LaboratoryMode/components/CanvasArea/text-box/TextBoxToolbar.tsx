@@ -25,13 +25,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { TextAlignOption } from './types';
+import type { TextAlignOption, TextStyleOption } from './types';
 import {
   FONT_CATEGORY_LOOKUP,
   FONT_FILTER_CHIPS,
   FONT_MENU_SECTIONS,
   FONT_OPTIONS,
   TEXT_STYLE_PRESETS,
+  TEXT_STYLE_OPTIONS,
   type FontFilterChipId,
   type FontMenuSection,
 } from './constants';
@@ -84,6 +85,8 @@ interface TextBoxToolbarProps {
   onIncreaseFontSize: () => void;
   onDecreaseFontSize: () => void;
   onApplyTextStyle: (preset: TextStylePreset) => void;
+  textStyle?: TextStyleOption;
+  onTextStyleChange?: (style: TextStyleOption) => void;
   bold: boolean;
   italic: boolean;
   underline: boolean;
@@ -110,6 +113,8 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   onIncreaseFontSize,
   onDecreaseFontSize,
   onApplyTextStyle,
+  textStyle,
+  onTextStyleChange,
   bold,
   italic,
   underline,
@@ -469,6 +474,73 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           </div>
         </PopoverContent>
       </Popover>
+
+      {onTextStyleChange && (
+        <>
+          <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
+          
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                className="relative h-8 min-w-[100px] justify-between rounded-full border border-border/50 px-3 text-[11px] font-medium text-foreground hover:bg-muted/40"
+                onMouseDown={handleToolbarMouseDown}
+              >
+                <span className="truncate">
+                  {TEXT_STYLE_OPTIONS.find(s => s.value === textStyle)?.label || 'Style'}
+                </span>
+                <ChevronDown className="ml-2 h-3.5 w-3.5 text-muted-foreground" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              side="bottom"
+              align="start"
+              className="z-[4000] w-[200px] rounded-2xl border border-border/60 bg-background/95 p-0 shadow-[0_24px_60px_-28px_rgba(15,23,42,0.55)] backdrop-blur-xl"
+              data-text-toolbar-root
+            >
+              <div className="p-2">
+                {TEXT_STYLE_OPTIONS.map(styleOption => {
+                  const isActive = textStyle === styleOption.value;
+                  return (
+                    <button
+                      key={styleOption.value}
+                      type="button"
+                      className={cn(
+                        'flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-colors',
+                        isActive
+                          ? 'bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/40'
+                          : 'bg-transparent text-foreground hover:bg-muted/40',
+                      )}
+                      onClick={() => {
+                        onTextStyleChange(styleOption.value);
+                      }}
+                      onMouseDown={handleToolbarMouseDown}
+                    >
+                      <div className="flex flex-col">
+                        <span
+                          className="font-semibold leading-tight"
+                          style={{
+                            fontFamily: cssFontFamily,
+                            fontSize: `${Math.min(styleOption.fontSize, 20)}px`,
+                            fontWeight: styleOption.bold ? 600 : 400,
+                            color: styleOption.color,
+                          }}
+                        >
+                          {styleOption.label}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{styleOption.fontSize}px</span>
+                      </div>
+                      {isActive ? <Check className="h-4 w-4 text-emerald-500" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+        </>
+      )}
 
       <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 

@@ -129,7 +129,7 @@ from app.DataStorageRetrieval.db import (
     delete_arrow_dataset,
     arrow_dataset_exists,
 )
-from app.DataStorageRetrieval.arrow_client import upload_dataframe
+from app.DataStorageRetrieval.arrow_client import upload_dataframe, download_table_bytes
 from app.DataStorageRetrieval.flight_registry import (
     set_ticket,
     get_ticket_by_key,
@@ -2679,6 +2679,73 @@ async def download_dataframe(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/load_dataframe_by_key")
+async def load_dataframe_by_key(request: Request):
+    """
+    Load a dataframe by object key and return headers and rows.
+    This endpoint is used by the KPI Dashboard to load dataframes.
+    
+    Request body:
+    {
+        "key": "full/path/to/file.arrow"
+    }
+    
+    Returns:
+    {
+        "headers": ["col1", "col2", ...],
+        "rows": [{"col1": "value1", "col2": "value2"}, ...]
+    }
+    """
+    try:
+        body = await request.json()
+        object_name = body.get("key", "")
+        
+        if not object_name:
+            raise HTTPException(status_code=400, detail="key is required")
+        
+        # Decode URL-encoded object_name if needed
+        object_name = unquote(object_name)
+        
+        # Validate object_name ends with .arrow
+        if not object_name.endswith(".arrow"):
+            raise HTTPException(status_code=400, detail="Only .arrow files are supported")
+        
+        # Validate object_name is within the allowed prefix
+        prefix = await get_object_prefix()
+        if not object_name.startswith(prefix):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid object name: file must be within the current project prefix"
+            )
+        
+        # Load dataframe from Arrow Flight
+        try:
+            data = download_table_bytes(object_name)
+            df = pl.read_ipc(io.BytesIO(data))
+        except Exception as e:
+            logger.error(f"Failed to load dataframe '{object_name}': {str(e)}")
+            raise HTTPException(status_code=404, detail=f"Failed to load dataframe: {str(e)}")
+        
+        # Convert to the expected format
+        headers = list(df.columns)
+        rows = df.to_dicts()
+        
+        logger.info(
+            f"data_upload.load_dataframe_by_key.success object_name={object_name} rows={len(rows)} cols={len(headers)}"
+        )
+        
+        return {
+            "headers": headers,
+            "rows": rows
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"data_upload.load_dataframe_by_key.error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error loading dataframe: {str(e)}")
+
+
 @router.post("/load-saved-dataframe")
 async def load_saved_dataframe(
     request: Request,
@@ -3082,7 +3149,15 @@ async def get_workbook_metadata_endpoint(object_name: str = Query(...)):
     try:
         metadata = _load_workbook_metadata(decoded)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Workbook metadata not found")
+        # Return default metadata for files without workbook metadata (e.g., single-sheet files)
+        # This prevents 404 errors in logs for normal operation
+        return {
+            "has_multiple_sheets": False,
+            "sheet_names": [],
+            "selected_sheet": None,
+            "workbook_path": None,
+            "flight_path": None
+        }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return metadata
