@@ -1,15 +1,16 @@
 /**
- * Table Rich Text Editor Hook
+ * Chart Note Rich Text Editor Hook
  * 
- * Encapsulates editor logic for table cell rich text editing
+ * Encapsulates editor logic for chart note rich text editing
+ * Adapted for multi-line editing with 3-line height constraint
  */
 
 import { useRef, useCallback, useEffect } from 'react';
-import { TableRichTextEditorProps, TableCellFormatting } from '../types';
+import { ChartNoteEditorProps, ChartNoteFormatting } from '../types';
 import { isToolbarElement, isFocusInToolbar } from '../utils/focusUtils';
 import { applyFormattingToEditor, applyFormattingViaCommand, getPlainTextFromHtml } from '../utils/formattingUtils';
 
-export const useTableRichTextEditor = ({
+export const useChartNoteEditor = ({
   value,
   html,
   formatting,
@@ -18,7 +19,7 @@ export const useTableRichTextEditor = ({
   onCommit,
   onCancel,
   onFormattingChange: onFormattingChangeProp = () => { },
-}: TableRichTextEditorProps) => {
+}: ChartNoteEditorProps) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtmlRef = useRef<string>('');
   const isCommittingRef = useRef(false);
@@ -53,16 +54,12 @@ export const useTableRichTextEditor = ({
     if (!editorRef.current || !isEditing) return;
 
     const editor = editorRef.current;
-
-    // Apply formatting immediately for visual feedback
     applyFormattingToEditor(editor, formatting);
   }, [isEditing, formatting]);
 
   // Focus when editing starts
   useEffect(() => {
     if (isEditing && editorRef.current) {
-      // Use setTimeout instead of requestAnimationFrame for more reliable focus after layout updates
-      // This fixes the "double click to edit" issue by ensuring the element is fully ready
       const timerId = setTimeout(() => {
         if (!editorRef.current) return;
 
@@ -104,7 +101,7 @@ export const useTableRichTextEditor = ({
           selection.removeAllRanges();
           selection.addRange(selectionRef.current);
         } catch (e) {
-          // Selection might be invalid or disconnected, fallback to failing gracefully
+          // Selection might be invalid or disconnected
         }
       }
     }
@@ -122,7 +119,7 @@ export const useTableRichTextEditor = ({
     }
   }, [onValueChange]);
 
-  // Handle blur - commit cell if focus moved away (but not to toolbar)
+  // Handle blur - commit note if focus moved away (but not to toolbar)
   const handleBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
     const relatedTarget = e.relatedTarget as HTMLElement;
 
@@ -154,9 +151,10 @@ export const useTableRichTextEditor = ({
     }, 200); // Delay for toolbar interactions
   }, [onCommit, isEditing]);
 
-  // Handle key down
+  // Handle key down - Enter creates new line, Ctrl+Enter commits
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Ctrl+Enter or Cmd+Enter commits
+    if ((e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
       e.preventDefault();
       e.stopPropagation();
 
@@ -173,6 +171,9 @@ export const useTableRichTextEditor = ({
       }
       return;
     }
+
+    // Regular Enter creates new line (default behavior for contentEditable)
+    // No need to prevent default
 
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -182,23 +183,6 @@ export const useTableRichTextEditor = ({
       } catch (error) {
         // Error handling
       }
-      return;
-    }
-
-    // Allow Tab to work normally (will be handled by parent)
-    if (e.key === 'Tab') {
-      if (editorRef.current && !isCommittingRef.current) {
-        try {
-          const currentHtml = editorRef.current.innerHTML;
-          const plainText = getPlainTextFromHtml(currentHtml);
-
-          isCommittingRef.current = true;
-          onCommit(plainText, currentHtml);
-        } catch (error) {
-          isCommittingRef.current = false;
-        }
-      }
-      // Don't prevent default - let Tab work normally
       return;
     }
   }, [onCommit, onCancel]);
@@ -225,7 +209,7 @@ export const useTableRichTextEditor = ({
   }, []);
 
   // Apply formatting change
-  const applyFormatting = useCallback((newFormatting: Partial<TableCellFormatting>) => {
+  const applyFormatting = useCallback((newFormatting: Partial<ChartNoteFormatting>) => {
     if (!editorRef.current) return;
 
     preserveSelection();

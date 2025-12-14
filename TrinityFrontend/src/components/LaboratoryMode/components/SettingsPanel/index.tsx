@@ -116,16 +116,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // Initialize mainTab based on initial selection state
   const [mainTab, setMainTab] = useState<'settings' | 'metrics'>(() => {
-    // If no atom or card is selected, default to metrics
-    if (!selectedAtomId && !selectedCardId) {
-      return 'metrics';
+    // Prioritize atom selection: if atom is selected, show settings tab
+    if (selectedAtomId) {
+      return 'settings';
     }
-    // If card is selected (with or without atom), default to metrics
+    // If only card is selected (no atom), default to metrics
     if (selectedCardId) {
       return 'metrics';
     }
-    // Only atom selected (no card) - default to settings
-    return 'settings';
+    // No selection - default to metrics
+    return 'metrics';
   });
 
   const settings:
@@ -175,18 +175,19 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     // On initial mount or when selection changes
     if (isInitialMount.current || selectionChanged) {
       // Only set defaults when selection actually changes (initial selection)
-      if (selectedCardId) {
-        // When card is selected (with or without atom), default to Metrics tab
+      // Priority: selectedAtomId > selectedCardId
+      if (selectedAtomId) {
+        // Atom selected → Settings tab (prioritize atom selection)
+        setMainTab('settings');
+      } else if (selectedCardId) {
+        // Only card selected (no atom) → Metrics tab
         // Only set to 'input' if current tab is 'exhibition' (invalid state)
         if (tab === 'exhibition') {
           setTab('input');
         }
         setMainTab('metrics');
-      } else if (selectedAtomId) {
-        // Only atom selected (no card) - default to Settings tab
-        setMainTab('settings');
       } else {
-        // No card or atom selected - force to Metrics tab
+        // No card or atom selected → Metrics tab
         setMainTab('metrics');
       }
       
@@ -197,32 +198,55 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // Set context for metric operations (for table atom auto-display)
   useEffect(() => {
-    if (mainTab === 'metrics') {
-      // Get the atom ID - prefer selectedAtomId, otherwise get first atom from selectedCard
-      const contextAtomId = selectedAtomId || (selectedCard?.atoms && selectedCard.atoms.length > 0 
-        ? selectedCard.atoms[0].id 
-        : undefined);
+    // Get the atom ID - prefer selectedAtomId, otherwise get first atom from selectedCard
+    const contextAtomId = selectedAtomId || (selectedCard?.atoms && selectedCard.atoms.length > 0 
+      ? selectedCard.atoms[0].id 
+      : undefined);
+    
+    // Get card ID - prefer selectedCardId, otherwise find card containing the atom
+    const contextCardId = selectedCardId || (selectedAtomId && selectedCard
+      ? selectedCard.id
+      : undefined);
+    
+    // Get current context once at the start
+    const currentContextCardId = metricsInputs.contextCardId;
+    const currentContextAtomId = metricsInputs.contextAtomId;
+    
+    // IMPORTANT: Only update context when there's an explicit selection
+    // Don't clear context when there's no selection - this preserves auto-set context from Condition 3
+    // Context will only be cleared when user explicitly clicks empty space (handled in CanvasArea)
+    if (contextCardId && contextAtomId && mainTab === 'metrics') {
+      // Only set context when Metrics tab is active and there's a selection
+      // Check if context actually needs to change
+      const willChange = currentContextCardId !== (contextCardId || undefined) || 
+                         currentContextAtomId !== (contextAtomId || undefined);
       
-      // Get card ID - prefer selectedCardId, otherwise find card containing the atom
-      const contextCardId = selectedCardId || (selectedAtomId && selectedCard
-        ? selectedCard.id
-        : undefined);
-      
-      // Always set context when metrics tab is active (even if no selection, clear it)
-      updateMetricsInputs({
-        contextCardId: contextCardId || undefined,
-        contextAtomId: contextAtomId || undefined,
-      });
-      
-      // console.log('📋 [Metrics Context] Updated context:', {
-      //   mainTab,
-      //   contextCardId,
-      //   contextAtomId,
-      //   selectedCardId,
-      //   selectedAtomId,
-      //   hasSelectedCard: !!selectedCard
-      // });
+      if (willChange) {
+        console.log('📋 [Settings Panel] Updating context (user selection):', {
+          beforeContext: {
+            contextCardId: currentContextCardId,
+            contextAtomId: currentContextAtomId
+          },
+          newContext: {
+            contextCardId: contextCardId || undefined,
+            contextAtomId: contextAtomId || undefined
+          },
+          mainTab,
+          selectedCardId,
+          selectedAtomId,
+          hasSelectedCard: !!selectedCard
+        });
+        
+        updateMetricsInputs({
+          contextCardId: contextCardId || undefined,
+          contextAtomId: contextAtomId || undefined,
+        });
+      }
     }
+    // Note: We don't clear context when there's no selection - this allows auto-set context to persist
+    // Context will be cleared when user clicks empty space (handled in CanvasArea onClick)
+    // Remove metricsInputs from dependencies to prevent infinite loop
+    // We only want to react to selection changes, not context changes
   }, [mainTab, selectedCardId, selectedAtomId, selectedCard, updateMetricsInputs]);
 
   return (

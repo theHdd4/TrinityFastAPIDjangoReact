@@ -1,17 +1,17 @@
 /**
- * Focus Management Utilities
+ * Focus Management Utilities for Chart Notes
  * 
  * Utilities for detecting toolbar elements and managing focus
  */
 
 /**
- * Check if an element is part of the table rich text toolbar
+ * Check if an element is part of the chart note rich text toolbar
  */
 export const isToolbarElement = (element: HTMLElement | null): boolean => {
   if (!element) return false;
   
   return !!(
-    element.closest('[data-table-rich-text-toolbar]') ||
+    element.closest('[data-chart-note-toolbar]') ||
     element.closest('[data-text-toolbar-root]') ||
     element.closest('[role="popover"]') ||
     element.closest('[data-radix-popover-content]') ||
@@ -23,7 +23,7 @@ export const isToolbarElement = (element: HTMLElement | null): boolean => {
     element.closest('button[aria-haspopup]') ||
     element.closest('[aria-expanded="true"]') ||
     (element.tagName === 'INPUT' && element.getAttribute('type') === 'color') ||
-    (element.tagName === 'BUTTON' && element.closest('[data-table-rich-text-toolbar]'))
+    (element.tagName === 'BUTTON' && element.closest('[data-chart-note-toolbar]'))
   );
 };
 
@@ -45,9 +45,5 @@ export const isContentEditableElement = (element: HTMLElement | null): boolean =
   return element.hasAttribute('contenteditable') || 
          element.closest('[contenteditable="true"]') !== null;
 };
-
-
-
-
 
 

@@ -5242,6 +5242,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             <div data-lab-cards-container="true" className="p-2 space-y-6" onClick={(e) => {
               // Handle clicks on the empty space in the canvas
               if (e.target === e.currentTarget) {
+                // Clear selection when clicking empty space (for Condition 3 context clearing)
+                // This allows users to create a new Table by clearing context
+                if (onAtomSelect) {
+                  // Pass empty string to clear atom selection (handler will convert to undefined)
+                  onAtomSelect('');
+                }
+                
                 if (onOpenSettingsPanel) {
                   onOpenSettingsPanel();
                 }
