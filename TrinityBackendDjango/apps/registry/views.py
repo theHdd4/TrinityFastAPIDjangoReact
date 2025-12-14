@@ -92,6 +92,7 @@ class AppViewSet(viewsets.ModelViewSet):
             'name': app.name,
             'slug': app.slug,
             'description': app.description,
+            'usecase_id': app.usecase_id,
             'modules': [],
             'molecules': [],
             'molecule_atoms': {},

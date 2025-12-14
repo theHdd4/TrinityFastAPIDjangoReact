@@ -297,6 +297,47 @@ class WorkflowCoreMixin:
 
         return scope_alias, scoped_path, validated_scope, available_files, scoped_prompt
 
+    async def _persist_atom_ai_context(
+        self,
+        *,
+        sequence_id: str,
+        project_context: Dict[str, Any],
+        available_files: List[str],
+        user_prompt: str,
+        effective_prompt: str,
+        history_summary: Optional[str],
+    ) -> None:
+        """Persist per-turn laboratory context without blocking the event loop."""
+
+        atom_ai_store = getattr(self, "atom_ai_context_store", None)
+        if not atom_ai_store:
+            return
+
+        try:
+            files_metadata: Dict[str, Dict[str, Any]] = {}
+            if available_files:
+                files_metadata = await asyncio.to_thread(
+                    self._get_file_metadata,
+                    available_files,
+                    sequence_id,
+                    project_context,
+                    user_prompt,
+                )
+
+            await asyncio.to_thread(
+                atom_ai_store.upsert_metadata,
+                session_id=sequence_id,
+                project_context=project_context,
+                files=files_metadata,
+                prompt=user_prompt,
+                contextual_prompt=effective_prompt,
+                history_summary=history_summary,
+                available_files=available_files,
+                conversation_summary=history_summary,
+            )
+        except Exception as ctx_exc:
+            logger.debug("⚠️ Could not persist Atom AI context: %s", ctx_exc)
+
     async def execute_workflow_with_websocket(
             self,
             websocket,
@@ -430,6 +471,15 @@ class WorkflowCoreMixin:
                 self._chat_file_mentions[sequence_id] = file_focus
                 effective_user_prompt = self._append_file_focus_note(effective_user_prompt, file_focus)
                 logger.info("📁 Tracking %d file references from chat context", len(file_focus))
+
+            await self._persist_atom_ai_context(
+                sequence_id=sequence_id,
+                project_context=project_context,
+                available_files=available_files,
+                user_prompt=user_prompt,
+                effective_prompt=effective_user_prompt,
+                history_summary=history_summary,
+            )
 
             if laboratory_mode and self.lab_context_builder:
                 lab_envelope = self.lab_context_builder.build_envelope(

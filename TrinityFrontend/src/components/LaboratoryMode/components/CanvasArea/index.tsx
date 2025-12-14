@@ -67,6 +67,7 @@ import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAto
 import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import PivotTableAtom from '@/components/AtomList/atoms/pivot-table/PivotTableAtom';
 import UnpivotAtom from '@/components/AtomList/atoms/unpivot/UnpivotAtom';
+import KPIDashboardAtom from '@/components/AtomList/atoms/kpi-dashboard/KPIDashboardAtom';
 import TableAtom from '@/components/AtomList/atoms/table/TableAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
@@ -5563,8 +5564,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     <ColumnClassifierAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'dataframe-operations' ? (
                                                     <DataFrameOperationsAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'table' ? (
-                                      <TableAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'table' ? (
+                                                    <TableAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'create-column' ? (
                                                     <CreateColumnAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'groupby-wtg-avg' ? (
@@ -5589,6 +5590,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     <ClusteringAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'scenario-planner' ? (
                                                     <ScenarioPlannerAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'kpi-dashboard' ? (
+                                                    <KPIDashboardAtom atomId={atom.id} />
                                                   ) : (
                                                     <div>
                                                       <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -5884,6 +5887,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                     <BuildModelFeatureBasedAtom atomId={atom.id} />
                                   ) : atom.atomId === 'scenario-planner' ? (
                                     <ScenarioPlannerAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'kpi-dashboard' ? (
+                                    <KPIDashboardAtom atomId={atom.id} />
                                   ) : atom.atomId === 'select-models-feature' ? (
                                     <SelectModelsFeatureAtom atomId={atom.id} />
                                   ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -6040,7 +6045,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                                 <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
                               </div>
-                            {/* <button
+                              {/* <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleDeleteAtomClick(card.id, atom.id, atom.title || '');
@@ -6087,6 +6092,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <BuildModelFeatureBasedAtom atomId={atom.id} />
                               ) : atom.atomId === 'scenario-planner' ? (
                                 <ScenarioPlannerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'kpi-dashboard' ? (
+                                <KPIDashboardAtom atomId={atom.id} />
                               ) : atom.atomId === 'select-models-feature' ? (
                                 <SelectModelsFeatureAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -6367,72 +6374,74 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 </button>
                       </div> */}
 
-                              {/* Atom Content */}
-                              {atom.atomId === 'text-box' ? (
-                                <TextBoxEditor textId={atom.id} />
-                              ) : atom.atomId === 'data-upload-validate' ? (
-                                <DataUploadValidateAtom atomId={atom.id} />
-                              ) : atom.atomId === 'feature-overview' ? (
-                                <FeatureOverviewAtom atomId={atom.id} />
-                              ) : atom.atomId === 'clustering' ? (
-                                <ClusteringAtom atomId={atom.id} />
-                              ) : atom.atomId === 'explore' ? (
-                                <ExploreAtom atomId={atom.id} />
-                              ) : atom.atomId === 'chart-maker' ? (
-                                <ChartMakerAtom atomId={atom.id} />
-                              ) : atom.atomId === 'pivot-table' ? (
-                                <PivotTableAtom atomId={atom.id} />
-                              ) : atom.atomId === 'unpivot' ? (
-                                <UnpivotAtom atomId={atom.id} />
-                              ) : atom.atomId === 'concat' ? (
-                                <ConcatAtom atomId={atom.id} />
-                              ) : atom.atomId === 'merge' ? (
-                                <MergeAtom atomId={atom.id} />
-                              ) : atom.atomId === 'column-classifier' ? (
-                                <ColumnClassifierAtom atomId={atom.id} />
-                              ) : atom.atomId === 'dataframe-operations' ? (
-                                <DataFrameOperationsAtom atomId={atom.id} />
-                              ) : atom.atomId === 'table' ? (
-                                <TableAtom atomId={atom.id} />
-                              ) : atom.atomId === 'create-column' ? (
-                                <CreateColumnAtom atomId={atom.id} />
-                              ) : atom.atomId === 'groupby-wtg-avg' ? (
-                                <GroupByAtom atomId={atom.id} />
-                              ) : atom.atomId === 'build-model-feature-based' ? (
-                                <BuildModelFeatureBasedAtom atomId={atom.id} />
-                              ) : atom.atomId === 'scenario-planner' ? (
-                                <ScenarioPlannerAtom atomId={atom.id} />
-                              ) : atom.atomId === 'select-models-feature' ? (
-                                <SelectModelsFeatureAtom atomId={atom.id} />
-                              ) : atom.atomId === 'evaluate-models-feature' ? (
-                                <EvaluateModelsFeatureAtom atomId={atom.id} />
-                              ) : atom.atomId === 'scope-selector' ? (
-                                <ScopeSelectorAtom atomId={atom.id} />
-                              ) : atom.atomId === 'correlation' ? (
-                                <CorrelationAtom atomId={atom.id} />
-                              ) : atom.atomId === 'auto-regressive-models' ? (
-                                <AutoRegressiveModelsAtom atomId={atom.id} />
-                              ) : atom.atomId === 'select-models-auto-regressive' ? (
-                                <SelectModelsAutoRegressiveAtom atomId={atom.id} />
-                              ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
-                                <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
-                              ) : (
-                                <div>
-                                  <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
-                                  <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
-                                  <p className="text-xs text-gray-500">
-                                    Configure this atom for your application
-                                  </p>
-                                </div>
-                              )}
-                            </AtomBox>
-                          ))}
+                      {/* Atom Content */}
+                      {atom.atomId === 'text-box' ? (
+                        <TextBoxEditor textId={atom.id} />
+                      ) : atom.atomId === 'data-upload-validate' ? (
+                        <DataUploadValidateAtom atomId={atom.id} />
+                      ) : atom.atomId === 'feature-overview' ? (
+                        <FeatureOverviewAtom atomId={atom.id} />
+                      ) : atom.atomId === 'clustering' ? (
+                        <ClusteringAtom atomId={atom.id} />
+                      ) : atom.atomId === 'explore' ? (
+                        <ExploreAtom atomId={atom.id} />
+                      ) : atom.atomId === 'chart-maker' ? (
+                        <ChartMakerAtom atomId={atom.id} />
+                      ) : atom.atomId === 'pivot-table' ? (
+                        <PivotTableAtom atomId={atom.id} />
+                      ) : atom.atomId === 'unpivot' ? (
+                        <UnpivotAtom atomId={atom.id} />
+                      ) : atom.atomId === 'concat' ? (
+                        <ConcatAtom atomId={atom.id} />
+                      ) : atom.atomId === 'merge' ? (
+                        <MergeAtom atomId={atom.id} />
+                      ) : atom.atomId === 'column-classifier' ? (
+                        <ColumnClassifierAtom atomId={atom.id} />
+                      ) : atom.atomId === 'dataframe-operations' ? (
+                        <DataFrameOperationsAtom atomId={atom.id} />
+                      ) : atom.atomId === 'table' ? (
+                        <TableAtom atomId={atom.id} />
+                      ) : atom.atomId === 'create-column' ? (
+                        <CreateColumnAtom atomId={atom.id} />
+                      ) : atom.atomId === 'groupby-wtg-avg' ? (
+                        <GroupByAtom atomId={atom.id} />
+                      ) : atom.atomId === 'build-model-feature-based' ? (
+                        <BuildModelFeatureBasedAtom atomId={atom.id} />
+                      ) : atom.atomId === 'scenario-planner' ? (
+                        <ScenarioPlannerAtom atomId={atom.id} />
+                      ) : atom.atomId === 'kpi-dashboard' ? (
+                        <KPIDashboardAtom atomId={atom.id} />
+                      ) : atom.atomId === 'select-models-feature' ? (
+                        <SelectModelsFeatureAtom atomId={atom.id} />
+                      ) : atom.atomId === 'evaluate-models-feature' ? (
+                        <EvaluateModelsFeatureAtom atomId={atom.id} />
+                      ) : atom.atomId === 'scope-selector' ? (
+                        <ScopeSelectorAtom atomId={atom.id} />
+                      ) : atom.atomId === 'correlation' ? (
+                        <CorrelationAtom atomId={atom.id} />
+                      ) : atom.atomId === 'auto-regressive-models' ? (
+                        <AutoRegressiveModelsAtom atomId={atom.id} />
+                      ) : atom.atomId === 'select-models-auto-regressive' ? (
+                        <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                      ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                        <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                      ) : (
+                        <div>
+                          <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
+                          <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
+                          <p className="text-xs text-gray-500">
+                            Configure this atom for your application
+                          </p>
                         </div>
                       )}
-          {renderCardTextBox(card)}
-                      {renderAppendedVariables(card)}
-                    </div>
-                  </Card>
+                    </AtomBox>
+                  ))}
+                </div>
+              )}
+              {renderCardTextBox(card)}
+              {renderAppendedVariables(card)}
+            </div>
+          </Card>
                   {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
                     <div className="flex justify-center my-4">
                       <button
@@ -6595,6 +6604,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <BuildModelFeatureBasedAtom atomId={atom.id} />
                               ) : atom.atomId === 'scenario-planner' ? (
                                 <ScenarioPlannerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'kpi-dashboard' ? (
+                                <KPIDashboardAtom atomId={atom.id} />
                               ) : atom.atomId === 'select-models-feature' ? (
                                 <SelectModelsFeatureAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -6603,6 +6614,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <ScopeSelectorAtom atomId={atom.id} />
                               ) : atom.atomId === 'correlation' ? (
                                 <CorrelationAtom atomId={atom.id} />
+                              ) : atom.atomId === 'auto-regressive-models' ? (
+                                <AutoRegressiveModelsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>

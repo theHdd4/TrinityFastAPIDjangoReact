@@ -1302,6 +1302,7 @@ class WorkflowContextSectionsMixin:
             file_paths: List[str],
             sequence_id: Optional[str] = None,
             project_context: Optional[Dict[str, Any]] = None,
+            user_prompt: Optional[str] = None,
         ) -> Dict[str, Dict[str, Any]]:
             """
             Retrieve file metadata (including column names) for given file paths.
@@ -1318,6 +1319,17 @@ class WorkflowContextSectionsMixin:
                 resolved_context = self._sequence_project_context.get(sequence_id, {})
             if not resolved_context:
                 resolved_context = self._resolve_project_context_for_files(file_paths)
+
+            # Preload any stored metadata to avoid re-computation
+            atom_ai_store = getattr(self, "atom_ai_context_store", None)
+            if atom_ai_store and sequence_id:
+                try:
+                    cached_metadata = atom_ai_store.load_metadata(sequence_id, resolved_context)
+                    if cached_metadata:
+                        metadata_dict.update(cached_metadata)
+                        logger.info("🧠 Loaded %s file metadata entries from Atom AI context", len(cached_metadata))
+                except Exception as ctx_exc:
+                    logger.debug("⚠️ Could not hydrate Atom AI context: %s", ctx_exc)
 
             try:
                 # Use BaseAgent.FileReader (standardized file handler for all agents)
@@ -1338,20 +1350,17 @@ class WorkflowContextSectionsMixin:
                 file_names = []
                 path_to_filename = {}
                 for file_path in file_paths:
-                    # Extract filename from path
                     filename = file_path.split('/')[-1] if '/' in file_path else file_path
                     filename = filename.split('\\')[-1] if '\\' in filename else filename
                     file_names.append(filename)
                     path_to_filename[file_path] = filename
 
                 # Get file details using BaseAgent.FileReader (standardized)
+                file_details_dict: Dict[str, Dict[str, Any]] = {}
                 if file_names:
-                    file_details_dict = {}
                     try:
                         file_reader = FileReader()
 
-                        # Update prefix using the resolved project context to avoid
-                        # falling back to the MinIO root between atoms/steps
                         if client_name and app_name and project_name:
                             try:
                                 file_reader._maybe_update_prefix(client_name, app_name, project_name)
@@ -1366,7 +1375,6 @@ class WorkflowContextSectionsMixin:
 
                         for file_path in file_paths:
                             filename = path_to_filename[file_path]
-                            # Try full path first (keeps folder context), then fallback to filename
                             for candidate in [file_path, filename]:
                                 try:
                                     columns = file_reader.get_file_columns(candidate)
@@ -1399,23 +1407,59 @@ class WorkflowContextSectionsMixin:
                         logger.debug(f"⚠️ Failed to get file metadata using FileReader: {e}")
                         file_details_dict = {}
 
-                    if file_details_dict:
-                        # Map back to original file paths
-                        for file_path, metadata in file_details_dict.items():
-                            metadata_dict[file_path] = metadata
+                if file_details_dict:
+                    for file_path, metadata in file_details_dict.items():
+                        metadata_dict[file_path] = {**metadata_dict.get(file_path, {}), **metadata}
 
-                        # Log what metadata was retrieved
-                        for file_path, metadata in metadata_dict.items():
-                            has_stats = bool(metadata.get("column_stats") or metadata.get("statistics"))
-                            has_cols = bool(metadata.get("columns"))
-                            logger.debug(f"📊 File {file_path}: columns={has_cols}, statistics={has_stats}")
+                # Enrich with detailed statistics when FileAnalyzer is available
+                file_analyzer = getattr(self, "file_analyzer", None)
+                if file_analyzer:
+                    try:
+                        analysis_results = file_analyzer.analyze_specific_files(file_paths)
+                        for file_path in file_paths:
+                            basename = os.path.basename(file_path)
+                            analysis = analysis_results.get(basename) or analysis_results.get(file_path)
+                            if not analysis:
+                                continue
 
-                        logger.info(f"✅ Retrieved metadata for {len(metadata_dict)}/{len(file_paths)} files")
-                    else:
-                        logger.warning(f"⚠️ Could not retrieve metadata for files: {file_names}")
+                            # Normalize analysis structure for downstream prompts
+                            normalized_columns = analysis.get("columns") or {}
+                            column_list = list(normalized_columns.keys()) if isinstance(normalized_columns, dict) else []
+                            metadata_dict[file_path] = {
+                                **metadata_dict.get(file_path, {}),
+                                "columns": metadata_dict.get(file_path, {}).get("columns") or column_list,
+                                "column_types": analysis.get("data_types") or {},
+                                "column_details": normalized_columns if isinstance(normalized_columns, dict) else {},
+                                "statistical_summary": analysis.get("statistical_summary") or {},
+                                "row_count": analysis.get("total_rows"),
+                                "file_size": analysis.get("file_size_bytes"),
+                            }
+                    except Exception as analysis_exc:
+                        logger.warning("⚠️ Failed to analyze files for Atom AI context: %s", analysis_exc)
+
+                if metadata_dict:
+                    for file_path, metadata in metadata_dict.items():
+                        has_stats = bool(metadata.get("column_stats") or metadata.get("statistics") or metadata.get("statistical_summary"))
+                        has_cols = bool(metadata.get("columns"))
+                        logger.debug(f"📊 File {file_path}: columns={has_cols}, statistics={has_stats}")
+
+                    logger.info(f"✅ Retrieved metadata for {len(metadata_dict)}/{len(file_paths)} files")
+                elif file_names:
+                    logger.warning(f"⚠️ Could not retrieve metadata for files: {file_names}")
             except Exception as e:
-                # Log as debug since this is non-critical (files can still be accessed via FileReader)
                 logger.debug(f"⚠️ Failed to get file metadata: {e} (non-critical - files accessible via other means)")
+
+            # Persist enriched metadata back to Mongo for deterministic reuse
+            if atom_ai_store and sequence_id and metadata_dict and resolved_context:
+                try:
+                    atom_ai_store.upsert_metadata(
+                        session_id=sequence_id,
+                        project_context=resolved_context,
+                        files=metadata_dict,
+                        prompt=user_prompt,
+                    )
+                except Exception as persist_exc:
+                    logger.debug("⚠️ Could not persist Atom AI context: %s", persist_exc)
 
             return metadata_dict
 
