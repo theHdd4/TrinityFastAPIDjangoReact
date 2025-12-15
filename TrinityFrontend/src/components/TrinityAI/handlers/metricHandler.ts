@@ -1532,11 +1532,13 @@ export const metricHandler: AtomHandler = {
         console.log('  - basePath:', basePath);
         
         // Update atom settings
+        // Note: saveResult might have file_id or result_file depending on response structure
+        const fileId = saveResult?.file_id || saveResult?.result_file || objectName;
         updateAtomSettings(atomId, {
           operationType: 'column_ops',
           operationConfig,
           operationCompleted: true,
-          fileId: saveResult.file_id,
+          fileId: fileId,
           objectName,
           dataSource: objectName, // Use saved file as new data source
           file_key: objectName,
@@ -1583,7 +1585,8 @@ export const metricHandler: AtomHandler = {
           }
           
           // Update DataFrame Operations atom if it exists
-          if (saveResult.file_id) {
+          const fileIdForDfOps = saveResult?.file_id || saveResult?.result_file || objectName;
+          if (fileIdForDfOps) {
             try {
               const store = useLaboratoryStore.getState();
               const cards = store?.cards || [];
@@ -1596,7 +1599,7 @@ export const metricHandler: AtomHandler = {
                 dataSource: objectName,
                 selectedDataSource: objectName,
                 fileName: getFilename(objectName),
-                  fileId: saveResult.file_id
+                  fileId: fileIdForDfOps
                 });
                 try {
                   const fileLoadedMsg = createSuccessMessage('File loaded', {
@@ -1618,6 +1621,144 @@ export const metricHandler: AtomHandler = {
               console.warn('Failed to update DataFrame Operations atom:', dfOpsError);
             }
           }
+        }
+
+        // ========================================================================
+        // AUTO-DISPLAY IN TABLE ATOM
+        // ========================================================================
+        // After successful column operation save, automatically display in Table atom
+        const hasValidResult = objectName && (saveResult?.file_id || saveResult?.result_file || saveResult?.status === 'SUCCESS');
+        
+        // console.log('🎯 [Table Atom Auto-Display] Entry check:', {
+        //   hasObjectName: !!objectName,
+        //   objectName,
+        //   hasFileId: !!saveResult?.file_id,
+        //   fileId: saveResult?.file_id,
+        //   hasResultFile: !!saveResult?.result_file,
+        //   resultFile: saveResult?.result_file,
+        //   status: saveResult?.status,
+        //   hasValidResult,
+        //   fullSaveResult: saveResult
+        // });
+        
+        if (hasValidResult) {
+          try {
+            const store = useLaboratoryStore.getState();
+            const metricsInputs = store.metricsInputs;
+            
+            // Get context from metrics settings
+            const contextCardId = metricsInputs.contextCardId;
+            const contextAtomId = metricsInputs.contextAtomId;
+            
+            // console.log('🎯 [Table Atom Auto-Display] Checking context:', {
+            //   contextCardId,
+            //   contextAtomId,
+            //   objectName,
+            //   allMetricsInputs: metricsInputs
+            // });
+            
+            if (contextCardId && contextAtomId) {
+              // Context available - check atom type
+              const card = store.findCardByAtomId?.(contextAtomId);
+              const currentAtom = card?.atoms.find(a => a.id === contextAtomId);
+              
+              // console.log('🎯 [Table Atom Auto-Display] Context found:', {
+              //   cardFound: !!card,
+              //   cardId: card?.id,
+              //   currentAtomType: currentAtom?.atomId,
+              //   currentAtomId: currentAtom?.id
+              // });
+              
+              if (currentAtom?.atomId === 'table') {
+                // Update existing Table atom
+                // console.log('✅ [Table Atom Auto-Display] Updating existing Table atom');
+                await store.updateTableAtomWithFile?.(contextAtomId, objectName);
+                
+                const tableMsg = createSuccessMessage('Table updated', {
+                  message: 'The updated dataframe has been displayed in the Table atom',
+                  fileName: getFilename(objectName)
+                });
+                setMessages((prev: Message[]) => {
+                  if (!Array.isArray(prev)) return [tableMsg];
+                  return [...prev, tableMsg];
+                });
+              } else if (currentAtom) {
+                // Replace atom with Table, move original to next card
+                // console.log('🔄 [Table Atom Auto-Display] Replacing atom with Table, moving original to next card');
+                const result = await store.replaceAtomWithTable?.(
+                  contextCardId,
+                  contextAtomId,
+                  objectName
+                );
+                
+                if (result.success && result.tableAtomId) {
+                  // console.log('✅ [Table Atom Auto-Display] Atom replaced successfully');
+                  
+                  const tableMsg = createSuccessMessage('Data displayed in Table', {
+                    message: 'The updated dataframe has been displayed in a Table atom. The original atom has been moved to the next card.',
+                    fileName: getFilename(objectName)
+                  });
+                  setMessages((prev: Message[]) => {
+                    if (!Array.isArray(prev)) return [tableMsg];
+                    return [...prev, tableMsg];
+                  });
+                } else {
+                  console.warn('⚠️ [Table Atom Auto-Display] Failed to replace atom:', result.error);
+                }
+              } else {
+                console.warn('⚠️ [Table Atom Auto-Display] Atom not found in card, creating new card');
+                // Atom not found, create new card
+                const tableAtomId = await store.createCardWithTableAtom?.(objectName);
+                if (tableAtomId) {
+                  // console.log('✅ [Table Atom Auto-Display] Created new card with Table atom');
+                  
+                  const tableMsg = createSuccessMessage('Data displayed in Table', {
+                    message: 'The updated dataframe has been displayed in a new Table atom',
+                    fileName: getFilename(objectName)
+                  });
+                  setMessages((prev: Message[]) => {
+                    if (!Array.isArray(prev)) return [tableMsg];
+                    return [...prev, tableMsg];
+                  });
+                }
+              }
+            } else {
+              // No context - create new card with Table atom
+              // console.log('🆕 [Table Atom Auto-Display] No context, creating new card');
+              const tableAtomId = await store.createCardWithTableAtom?.(objectName);
+              if (tableAtomId) {
+                // console.log('✅ [Table Atom Auto-Display] Created new card with Table atom');
+                
+                const tableMsg = createSuccessMessage('Data displayed in Table', {
+                  message: 'The updated dataframe has been displayed in a new Table atom',
+                  fileName: getFilename(objectName)
+                });
+                setMessages((prev: Message[]) => {
+                  if (!Array.isArray(prev)) return [tableMsg];
+                  return [...prev, tableMsg];
+                });
+              } else {
+                console.warn('⚠️ [Table Atom Auto-Display] Failed to create new card');
+              }
+            }
+          } catch (tableError) {
+            console.error('❌ [Table Atom Auto-Display] Error:', tableError);
+            // Don't fail the metric operation if table display fails, but always create a card as fallback
+            try {
+              // console.log('🔄 [Table Atom Auto-Display] Attempting fallback: create new card');
+              const store = useLaboratoryStore.getState();
+              const tableAtomId = await store.createCardWithTableAtom?.(objectName);
+              if (tableAtomId) {
+                // console.log('✅ [Table Atom Auto-Display] Fallback succeeded - created card');
+              } else {
+                console.error('❌ [Table Atom Auto-Display] Fallback also failed');
+              }
+            } catch (fallbackError) {
+              console.error('❌ [Table Atom Auto-Display] Fallback error:', fallbackError);
+            }
+          }
+        } else {
+          console.warn('⚠️ [Table Atom Auto-Display] Skipped - missing objectName or file_id');
         }
         
         // Generate insight

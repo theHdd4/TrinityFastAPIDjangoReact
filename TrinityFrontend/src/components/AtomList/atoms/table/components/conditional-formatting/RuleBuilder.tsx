@@ -63,17 +63,14 @@ const RuleBuilder: React.FC<RuleBuilderProps> = ({
     // For color scale, we don't need operator
     if (ruleType === 'color_scale') {
       if (!selectedColumn || !minColor || !maxColor) {
-        console.warn('❌ [RULE-BUILDER] Cannot save color scale: missing column or colors', { selectedColumn, minColor, maxColor });
         return;
       }
       if (useThreeColor && !midColor) {
-        console.warn('❌ [RULE-BUILDER] Cannot save 3-color scale: missing mid color', { midColor });
         return;
       }
     } else {
       // For highlight rules, we need column and operator
       if (!selectedColumn || !operator) {
-        console.warn('❌ [RULE-BUILDER] Cannot save highlight rule: missing column or operator', { selectedColumn, operator });
         return;
       }
 

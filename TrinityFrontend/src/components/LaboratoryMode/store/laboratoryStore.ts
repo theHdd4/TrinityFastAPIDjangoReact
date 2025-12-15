@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
 import { atoms as allAtoms } from "@/components/AtomList/data";
 import { ClarificationRequestMessage as ClarificationRequest } from "@/types/streaming";
+import { LABORATORY_API } from "@/lib/api";
+import type { UploadStage, GuidedUploadFlowState } from "@/components/AtomList/atoms/data-upload/components/guided-upload/useGuidedUploadFlow";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -1947,6 +1949,9 @@ export interface MetricsInputSettings {
   columnOpsSelectedIdentifiers?: string[]; // Filtered identifiers (date columns removed) for display
   columnOpsSelectedIdentifiersForBackend?: string[]; // Selected identifiers for backend operations
   columnOpsIdentifiersListOpen?: boolean;
+  // Context for table atom auto-display
+  contextCardId?: string; // Card ID when metric operation is initiated
+  contextAtomId?: string; // Atom ID when metric operation is initiated
 }
 
 export const DEFAULT_METRICS_INPUT_SETTINGS: MetricsInputSettings = {
@@ -1965,6 +1970,8 @@ export const DEFAULT_METRICS_INPUT_SETTINGS: MetricsInputSettings = {
   columnOpsSelectedIdentifiers: [],
   columnOpsSelectedIdentifiersForBackend: [],
   columnOpsIdentifiersListOpen: false,
+  contextCardId: undefined,
+  contextAtomId: undefined,
 };
 
 // Mode constants
@@ -1974,7 +1981,9 @@ export type LaboratorySubMode = 'analytics' | 'dashboard';
 export const DASHBOARD_ALLOWED_ATOMS = [
   'dataframe-operations',
   'chart-maker',
-  'correlation'
+  'correlation',
+  'table',
+  'kpi-dashboard'
 ] as const;
 
 // Helper function to get allowed atoms based on mode
@@ -1995,6 +2004,8 @@ interface LaboratoryStore {
   subMode: LaboratorySubMode;
   isLaboratorySession: boolean;
   pendingClarification?: ClarificationRequest | null;
+  activeGuidedFlows: Record<string, { atomId: string; currentStage: UploadStage; state: Partial<GuidedUploadFlowState> }>;
+  globalGuidedModeEnabled: boolean;
 
   // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
@@ -2025,6 +2036,33 @@ interface LaboratoryStore {
   addMetricsOperation: (operation: MetricsOperation) => void;
   updateMetricsOperation: (operationId: string, updates: Partial<MetricsOperation>) => void;
   removeMetricsOperation: (operationId: string) => void;
+
+  // --- Table Atom Auto-Display Actions ---
+  replaceAtomWithTable: (
+    cardId: string,
+    currentAtomId: string,
+    newDataframePath: string
+  ) => Promise<{ success: boolean; tableAtomId?: string; error?: string }>;
+  createCardWithTableAtom: (
+    objectName: string,
+    position?: number
+  ) => Promise<string | null>;
+  updateTableAtomWithFile: (
+    atomId: string,
+    objectName: string
+  ) => Promise<void>;
+  findCardByAtomId: (atomId: string) => LayoutCard | undefined;
+  findCardIndex: (cardId: string) => number;
+
+  // --- Guided Flow Actions ---
+  setActiveGuidedFlow: (atomId: string, currentStage: UploadStage, state?: Partial<GuidedUploadFlowState>) => void;
+  updateGuidedFlowStage: (atomId: string, stage: UploadStage) => void;
+  removeActiveGuidedFlow: (atomId: string) => void;
+  
+  // --- Guided Mode Toggle Actions ---
+  setGlobalGuidedMode: (enabled: boolean) => void;
+  toggleAtomGuidedMode: (atomId: string) => void;
+  isGuidedModeActiveForAtom: (atomId: string) => boolean;
 }
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
@@ -2048,6 +2086,8 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     : null,
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   subMode: 'analytics',  // Default to analytics mode
+  activeGuidedFlows: {},
+  globalGuidedModeEnabled: false,
   setCards: (cards: LayoutCard[]) => {
     const currentSubMode = get().subMode;
     
@@ -2366,11 +2406,340 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     }));
   },
 
+  // --- Table Atom Auto-Display Functions ---
+  findCardByAtomId: (atomId: string) => {
+    const cards = get().cards;
+    if (!Array.isArray(cards)) return undefined;
+    return cards.find(card =>
+      Array.isArray(card.atoms) && card.atoms.some(atom => atom.id === atomId)
+    );
+  },
+
+  findCardIndex: (cardId: string) => {
+    const cards = get().cards;
+    if (!Array.isArray(cards)) return -1;
+    return cards.findIndex(card => card.id === cardId);
+  },
+
+  updateTableAtomWithFile: async (atomId: string, objectName: string) => {
+    // Update atom settings to trigger auto-load
+    // We need to explicitly set sourceFile and mode, and ensure tableData is cleared
+    // so the auto-load mechanism will trigger
+    
+    const currentAtom = get().getAtom(atomId);
+    if (!currentAtom) {
+      console.error('❌ [updateTableAtomWithFile] Atom not found:', atomId);
+      return;
+    }
+    
+    const currentSettings = (currentAtom.settings as any) || {};
+    const currentSourceFile = currentSettings.sourceFile;
+    const isOverwrite = currentSourceFile === objectName; // Same file = overwrite
+    
+    // Create new settings object with tableData explicitly set to null
+    // This ensures the merged settings will have tableData: null (not undefined)
+    // Also add reloadTrigger to force useEffect to trigger even if sourceFile is same
+    const reloadTrigger = Date.now();
+    const newSettings: any = {
+      ...currentSettings,
+      sourceFile: objectName,
+      mode: 'load',
+      tableData: null,  // Explicitly set to null to clear existing data
+      reloadTrigger: reloadTrigger,  // Force reload even if sourceFile is same (for overwrite case)
+    };
+    
+    console.log('🔄 [updateTableAtomWithFile] Updating atom settings:', {
+      atomId,
+      objectName,
+      currentSourceFile,
+      isOverwrite,
+      mode: 'load',
+      tableDataCleared: true,
+      reloadTrigger: reloadTrigger,
+      hadTableData: currentSettings.tableData !== undefined && currentSettings.tableData !== null
+    });
+    
+    get().updateAtomSettings(atomId, newSettings);
+    
+    console.log('✅ [updateTableAtomWithFile] Settings updated, waiting for useEffect to trigger reload');
+  },
+
+  createCardWithTableAtom: async (objectName: string, position?: number) => {
+    try {
+      // console.log('🆕 [createCardWithTableAtom] Starting:', { objectName, position });
+      // console.log('🆕 [createCardWithTableAtom] LABORATORY_API:', LABORATORY_API);
+      
+      const response = await fetch(`${LABORATORY_API}/cards`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          atomId: 'table',
+          source: 'ai'
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ [createCardWithTableAtom] API error:', response.status, errorText);
+        throw new Error(`Failed to create card: ${response.statusText}`);
+      }
+      
+      const payload = await response.json();
+      // console.log('✅ [createCardWithTableAtom] API response:', payload);
+      
+      const tableAtomInfo = allAtoms.find(a => a.id === 'table');
+      
+      // Build atom with proper structure
+      const atomPayload = Array.isArray(payload.atoms) && payload.atoms.length > 0
+        ? payload.atoms[0]
+        : { atomId: 'table', id: `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` };
+      
+      const newTableAtom: DroppedAtom = {
+        id: atomPayload.id || `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        atomId: atomPayload.atomId || 'table',
+        title: tableAtomInfo?.title || 'Table',
+        category: tableAtomInfo?.category || 'Atom',
+        color: tableAtomInfo?.color || 'bg-teal-500',
+        source: atomPayload.source || 'ai',
+        settings: {
+          sourceFile: objectName,
+          mode: 'load',
+          // Don't set tableData - let auto-load mechanism handle it
+          visibleColumns: [],
+          columnOrder: [],
+          columnWidths: {},
+          rowHeight: 24,
+          rowHeights: {},
+          showRowNumbers: true,
+          showSummaryRow: false,
+          frozenColumns: 0,
+          filters: {},
+          sortConfig: [],
+          currentPage: 1,
+          pageSize: 15,
+        }
+      };
+      
+      // console.log('🆕 [createCardWithTableAtom] Created Table atom:', {
+      //   id: newTableAtom.id,
+      //   sourceFile: objectName
+      // });
+      
+      // Build card from API payload
+      const newCard: LayoutCard = {
+        id: payload.id,
+        atoms: [newTableAtom],
+        isExhibited: payload.isExhibited || false,
+        moleculeId: payload.molecule_id,
+        variables: []
+      };
+      
+      // Add card to store
+      const currentCards = get().cards;
+      const insertIndex = position !== undefined && position >= 0 
+        ? Math.min(position, currentCards.length)
+        : currentCards.length;
+      const updatedCards = [
+        ...currentCards.slice(0, insertIndex),
+        newCard,
+        ...currentCards.slice(insertIndex)
+      ];
+      
+      // console.log('💾 [createCardWithTableAtom] Updating cards:', {
+      //   currentCount: currentCards.length,
+      //   newCount: updatedCards.length,
+      //   insertIndex
+      // });
+      
+      set({ cards: updatedCards });
+      
+      // console.log('✅ [createCardWithTableAtom] Successfully created card with Table atom');
+      return newTableAtom.id;
+    } catch (error) {
+      console.error('❌ [createCardWithTableAtom] Error:', error);
+      return null;
+    }
+  },
+
+  replaceAtomWithTable: async (
+    cardId: string,
+    currentAtomId: string,
+    newDataframePath: string
+  ) => {
+    const cards = get().cards;
+    if (!Array.isArray(cards)) {
+      console.error('❌ [replaceAtomWithTable] Cards array is invalid');
+      return { success: false, error: 'Cards array is invalid' };
+    }
+
+    const cardIndex = cards.findIndex(c => c.id === cardId);
+    
+    if (cardIndex === -1) {
+      console.error('❌ [replaceAtomWithTable] Card not found:', cardId);
+      return { success: false, error: 'Card not found' };
+    }
+    
+    const card = cards[cardIndex];
+    const currentAtom = Array.isArray(card.atoms) 
+      ? card.atoms.find(a => a.id === currentAtomId)
+      : undefined;
+    
+    if (!currentAtom) {
+      console.error('❌ [replaceAtomWithTable] Atom not found in card:', currentAtomId);
+      return { success: false, error: 'Atom not found in card' };
+    }
+    
+    // console.log('🔄 [replaceAtomWithTable] Processing:', {
+    //   cardId,
+    //   currentAtomId,
+    //   currentAtomType: currentAtom.atomId,
+    //   newDataframePath
+    // });
+    
+    // Check if current atom is already Table
+    if (currentAtom.atomId === 'table') {
+      // Just update the existing Table atom
+      // console.log('✅ [replaceAtomWithTable] Atom is already Table, updating file');
+      await get().updateTableAtomWithFile(currentAtomId, newDataframePath);
+      return { success: true, tableAtomId: currentAtomId };
+    }
+    
+    // Get Table atom info from registry
+    const tableAtomInfo = allAtoms.find(a => a.id === 'table');
+    if (!tableAtomInfo) {
+      console.error('❌ [replaceAtomWithTable] Table atom not found in registry');
+      return { success: false, error: 'Table atom not found in registry' };
+    }
+    
+    // Create new Table atom
+    const newTableAtomId = `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newTableAtom: DroppedAtom = {
+      id: newTableAtomId,
+      atomId: 'table',
+      title: tableAtomInfo.title || 'Table',
+      category: tableAtomInfo.category || 'Atom',
+      color: tableAtomInfo.color || 'bg-teal-500',
+      source: 'ai' as const,
+      settings: {
+        sourceFile: newDataframePath,
+        mode: 'load',
+        // Don't set tableData - let auto-load mechanism handle it
+        visibleColumns: [],
+        columnOrder: [],
+        columnWidths: {},
+        rowHeight: 24,
+        rowHeights: {},
+        showRowNumbers: true,
+        showSummaryRow: false,
+        frozenColumns: 0,
+        filters: {},
+        sortConfig: [],
+        currentPage: 1,
+        pageSize: 15,
+      }
+    };
+    
+    // console.log('🆕 [replaceAtomWithTable] Created new Table atom:', {
+    //   id: newTableAtomId,
+    //   sourceFile: newDataframePath
+    // });
+    
+    // Create new card for original atom at position cardIndex + 1
+    const newCardId = `card-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newCard: LayoutCard = {
+      id: newCardId,
+      atoms: [currentAtom], // Move original atom here
+      isExhibited: false,
+      variables: card.variables || [],
+      // Preserve molecule info if exists
+      moleculeId: card.moleculeId,
+      moleculeTitle: card.moleculeTitle,
+    };
+    
+    // Update cards array:
+    // 1. Replace atom in Card N with Table atom
+    // 2. Insert new card at position N+1
+    const updatedCards = [
+      ...cards.slice(0, cardIndex),
+      {
+        ...card,
+        atoms: [newTableAtom] // Replace with Table atom
+      },
+      newCard, // Insert at N+1
+      ...cards.slice(cardIndex + 1) // Shift rest
+    ];
+    
+    // console.log('💾 [replaceAtomWithTable] Updating cards array:', {
+    //   totalCards: updatedCards.length,
+    //   cardIndex,
+    //   newCardInsertedAt: cardIndex + 1
+    // });
+    
+    set({ cards: updatedCards });
+    
+    // console.log('✅ [replaceAtomWithTable] Successfully replaced atom');
+    return { success: true, tableAtomId: newTableAtomId };
+  },
+
+  // --- Guided Flow Actions ---
+  setActiveGuidedFlow: (atomId: string, currentStage: UploadStage, state?: Partial<GuidedUploadFlowState>) => {
+    set((prev) => ({
+      activeGuidedFlows: {
+        ...prev.activeGuidedFlows,
+        [atomId]: {
+          atomId,
+          currentStage,
+          state: state || {},
+        },
+      },
+    }));
+  },
+
+  updateGuidedFlowStage: (atomId: string, stage: UploadStage) => {
+    set((prev) => {
+      const flow = prev.activeGuidedFlows[atomId];
+      if (!flow) return prev;
+      return {
+        activeGuidedFlows: {
+          ...prev.activeGuidedFlows,
+          [atomId]: {
+            ...flow,
+            currentStage: stage,
+          },
+        },
+      };
+    });
+  },
+
+  removeActiveGuidedFlow: (atomId: string) => {
+    set((prev) => {
+      const { [atomId]: removed, ...rest } = prev.activeGuidedFlows;
+      return { activeGuidedFlows: rest };
+    });
+  },
+
+  // --- Guided Mode Toggle Actions ---
+  setGlobalGuidedMode: (enabled: boolean) => {
+    set({ globalGuidedModeEnabled: enabled });
+  },
+
+
+
+  isGuidedModeActiveForAtom: (atomId: string) => {
+    const state = get();
+    // When global guided mode is enabled, it applies to ALL atoms
+    // Individual atom overrides are ignored to maintain global consistency
+    return state.globalGuidedModeEnabled;
+  },
+
   reset: () => {
     set({
       cards: [],
       metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
       pendingClarification: null,
+      activeGuidedFlows: {},
+      globalGuidedModeEnabled: false,
     });
     if (typeof window !== 'undefined') {
       localStorage.removeItem('trinity_lab_pending_clarification');

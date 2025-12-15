@@ -99,11 +99,11 @@ def ensure_minio_bucket():
     try:
         if not minio_client.bucket_exists(MINIO_BUCKET):
             minio_client.make_bucket(MINIO_BUCKET)
-            print(f"📁 Created MinIO bucket '{MINIO_BUCKET}' for feature overview")
+            print(f"[CREATED] Created MinIO bucket '{MINIO_BUCKET}' for feature overview")
         else:
-            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview")
+            print(f"[OK] MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview")
     except Exception as e:
-        print(f"⚠️ MinIO connection error: {e}")
+        print(f"[WARNING] MinIO connection error: {e}")
 
 
 ensure_minio_bucket()
@@ -151,7 +151,7 @@ async def column_summary(object_name: str):
     )
     if not object_name.startswith(prefix):
         print(
-            f"⚠️ column_summary prefix mismatch: {object_name} (expected {prefix})"
+            f"[WARNING] column_summary prefix mismatch: {object_name} (expected {prefix})"
         )
     try:
         flight_path = get_flight_path_for_csv(object_name)
@@ -168,7 +168,7 @@ async def column_summary(object_name: str):
                 df = download_dataframe(flight_path)
             except Exception as e:
                 print(
-                    f"⚠️ column_summary flight download failed for {object_name}: {e}"
+                    f"[WARNING] column_summary flight download failed for {object_name}: {e}"
                 )
         if df is None:
             if not object_name.endswith(".arrow"):
@@ -249,7 +249,7 @@ async def column_summary(object_name: str):
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ column_summary error for {object_name}: {e}")
+        print(f"[WARNING] column_summary error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -278,7 +278,7 @@ async def cached_dataframe(object_name: str):
     )
     if not object_name.startswith(prefix):
         print(
-            f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {prefix})"
+            f"[WARNING] cached_dataframe prefix mismatch: {object_name} (expected {prefix})"
         )
     try:
         try:
@@ -286,7 +286,7 @@ async def cached_dataframe(object_name: str):
             csv_text = df.to_csv(index=False)
             return Response(csv_text, media_type="text/csv")
         except Exception as exc:
-            print(f"⚠️ flight dataframe error for {object_name}: {exc}")
+            print(f"[WARNING] flight dataframe error for {object_name}: {exc}")
 
         def _load_object() -> bytes:
             response = minio_client.get_object(MINIO_BUCKET, object_name)
@@ -327,7 +327,7 @@ async def cached_dataframe(object_name: str):
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ cached_dataframe error for {object_name}: {e}")
+        print(f"[WARNING] cached_dataframe error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -359,13 +359,13 @@ async def flight_table(object_name: str):
             print(f"🗄 restored ticket for {object_name}: {flight_path}")
     print(f"➡️ flight_table request: {object_name} path={flight_path}")
     if not flight_path:
-        print(f"⚠️ flight path not found for {object_name}; using object name")
+        print(f"[WARNING] flight path not found for {object_name}; using object name")
         flight_path = object_name
     try:
         data = download_table_bytes(flight_path)
         return Response(data, media_type="application/vnd.apache.arrow.file")
     except Exception as e:
-        print(f"⚠️ flight_table error for {object_name}: {e}")
+        print(f"[WARNING] flight_table error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -403,11 +403,11 @@ async def dimension_mapping(req: DimensionMappingRequest):
         cached_env = redis_client.get(file_env_key)
         if cached_env:
             found_file_specific = True
-            print(f"✅ found file-specific env in redis: {file_env_key}")
+            print(f"[OK] found file-specific env in redis: {file_env_key}")
     if cached_env is None:
         cached_env = redis_client.get(env_key)
         if cached_env:
-            print(f"✅ found general env in redis: {env_key}")
+            print(f"[OK] found general env in redis: {env_key}")
     if cached_env:
         try:
             env = json.loads(cached_env)
@@ -423,12 +423,12 @@ async def dimension_mapping(req: DimensionMappingRequest):
             if isinstance(identifiers, list) and len(identifiers) > 0:
                 # Create mapping from identifiers array: {"identifiers": [col1, col2, ...]}
                 mapping = {"identifiers": identifiers}
-                print(f"✅ returning identifiers from redis: {len(identifiers)} identifiers")
+                print(f"[OK] returning identifiers from redis: {len(identifiers)} identifiers")
                 return {"mapping": mapping, "config": env, "source": "env"}
             else:
-                print(f"⚠️ redis env found but no valid identifiers (got: {type(identifiers)})")
+                print(f"[WARNING] redis env found but no valid identifiers (got: {type(identifiers)})")
         except Exception as exc:  # pragma: no cover
-            print(f"⚠️ dimension_mapping env parse error: {exc}")
+            print(f"[WARNING] dimension_mapping env parse error: {exc}")
     else:
         print("🔍 env not in redis")
 
@@ -444,29 +444,29 @@ async def dimension_mapping(req: DimensionMappingRequest):
         has_measures = bool(mongo_cfg.get("measures"))
         has_dimensions = bool(mongo_cfg.get("dimensions"))
         
-        print(f"📦 MongoDB config found: has_identifiers={has_identifiers}, has_measures={has_measures}, has_dimensions={has_dimensions}")
+        print(f"[STORED] MongoDB config found: has_identifiers={has_identifiers}, has_measures={has_measures}, has_dimensions={has_dimensions}")
         
         # Return config if identifiers, measures, or dimensions exist
         if has_identifiers or has_measures or has_dimensions:
-            print("📦 loaded mapping from MongoDB")
+            print("[STORED] loaded mapping from MongoDB")
             try:
                 redis_client.setex(env_key, 3600, json.dumps(mongo_cfg, default=str))
                 if file_env_key:
                     redis_client.setex(file_env_key, 3600, json.dumps(mongo_cfg, default=str))
-                    print(f"✅ cached MongoDB config to Redis: {file_env_key}")
+                    print(f"[OK] cached MongoDB config to Redis: {file_env_key}")
             except Exception as exc:
-                print(f"⚠️ failed to cache to Redis: {exc}")
+                print(f"[WARNING] failed to cache to Redis: {exc}")
             # Create mapping from identifiers array instead of dimensions
             identifiers = mongo_cfg.get("identifiers", [])
             if isinstance(identifiers, list) and len(identifiers) > 0:
                 mapping = {"identifiers": identifiers}
-                print(f"✅ returning identifiers from MongoDB: {len(identifiers)} identifiers")
+                print(f"[OK] returning identifiers from MongoDB: {len(identifiers)} identifiers")
             else:
                 mapping = {}
-                print("⚠️ MongoDB config found but no identifiers")
+                print("[WARNING] MongoDB config found but no identifiers")
             return {"mapping": mapping, "config": mongo_cfg}
     else:
-        print("❌ no MongoDB config found")
+        print("[ERROR] no MongoDB config found")
 
     raise HTTPException(status_code=404, detail="Mapping not found")
 
@@ -480,7 +480,7 @@ def _load_polars_frame(object_name: str, flight_path: str | None = None) -> pl.D
             if pandas_df is not None:
                 return pl.from_pandas(pandas_df)
         except Exception as exc:
-            print(f"⚠️ polars load via flight failed for {flight_path}: {exc}")
+            print(f"[WARNING] polars load via flight failed for {flight_path}: {exc}")
 
     if not object_name.endswith(".arrow"):
         raise ValueError("Unsupported file format")
@@ -508,7 +508,7 @@ def _load_polars_frame(object_name: str, flight_path: str | None = None) -> pl.D
     try:
         return pl.read_ipc(io.BytesIO(content))
     except Exception as exc:
-        print(f"⚠️ polars read_ipc failed for {object_name}: {exc}")
+        print(f"[WARNING] polars read_ipc failed for {object_name}: {exc}")
         reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
         table = reader.read_all()
         pandas_df = table.to_pandas()
@@ -653,7 +653,7 @@ async def sku_stats(
         client_name=client, app_name=app, project_name=project
     )
     if not object_name.startswith(prefix):
-        print(f"⚠️ sku_stats prefix mismatch: {object_name} (expected {prefix})")
+        print(f"[WARNING] sku_stats prefix mismatch: {object_name} (expected {prefix})")
     try:
         combo = json.loads(combination)
     except Exception as e:
@@ -737,7 +737,7 @@ async def sku_stats(
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ sku_stats error for {object_name}: {e}")
+        print(f"[WARNING] sku_stats error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 

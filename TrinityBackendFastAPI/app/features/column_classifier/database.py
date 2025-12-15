@@ -65,8 +65,8 @@ try:
 
     # Test connection
     mongo_client.admin.command('ping')
-    print(f"✅ Connected to MongoDB: {DATABASE_NAME}")
-    print(f"✅ Config DB: {CONFIG_DB_NAME}")
+    print(f"[OK] Connected to MongoDB: {DATABASE_NAME}")
+    print(f"[OK] Config DB: {CONFIG_DB_NAME}")
     try:  # pragma: no cover - best effort to ensure collection exists
         if (
             COLLECTIONS["CLASSIFIER_CONFIGS"]
@@ -74,7 +74,7 @@ try:
         ):
             config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
             print(
-                f"✅ Created collection {COLLECTIONS['CLASSIFIER_CONFIGS']} in {CONFIG_DB_NAME}"
+                f"[OK] Created collection {COLLECTIONS['CLASSIFIER_CONFIGS']} in {CONFIG_DB_NAME}"
             )
     except Exception as exc:
         logging.warning(
@@ -82,7 +82,7 @@ try:
         )
     
 except Exception as e:
-    print(f"❌ MongoDB connection failed: {e}")
+    print(f"[ERROR] MongoDB connection failed: {e}")
     mongo_client = None
     db = None
     config_db = None
@@ -191,7 +191,7 @@ def save_classification_to_mongo(
             upsert=True
         )
         print(
-            f"📦 Stored in {COLLECTIONS['COLUMN_CLASSIFICATIONS']}: {document}"
+            f"[STORED] Stored in {COLLECTIONS['COLUMN_CLASSIFICATIONS']}: {document}"
         )
         
         return {
@@ -242,7 +242,7 @@ def save_business_dimension_to_mongo(
         
         # Save to business_dimensions collection
         result = db[COLLECTIONS["BUSINESS_DIMENSIONS"]].insert_one(document)
-        print(f"📦 Stored in {COLLECTIONS['BUSINESS_DIMENSIONS']}: {document}")
+        print(f"[STORED] Stored in {COLLECTIONS['BUSINESS_DIMENSIONS']}: {document}")
 
         return {
             "status": "success",
@@ -325,21 +325,21 @@ def save_business_dimensions_to_mongo(
             "updated_at": datetime.utcnow(),
         }
         
-        # ✅ Save to business_dimensions_with_assignments collection
+        # Save to business_dimensions_with_assignments collection
         result = db["business_dimensions_with_assignments"].replace_one(
             {"_id": document_id},
             document,
             upsert=True
         )
         print(
-            f"📦 Stored in business_dimensions_with_assignments: {document}"
+            f"[STORED] Stored in business_dimensions_with_assignments: {document}"
         )
         
         return {
             "status": "success", 
             "mongo_id": document_id,
             "operation": "inserted" if result.upserted_id else "updated",
-            "collection": "business_dimensions_with_assignments"  # ✅ Updated collection name
+            "collection": "business_dimensions_with_assignments"  # Updated collection name
         }
         
     except Exception as e:
@@ -405,7 +405,7 @@ def update_business_dimensions_assignments_in_mongo(
             {"$set": update_data}
         )
         print(
-            f"📦 Stored in business_dimensions_with_assignments: {update_data}"
+            f"[STORED] Stored in business_dimensions_with_assignments: {update_data}"
         )
         
         return {
@@ -443,7 +443,7 @@ def save_project_dimension_mapping(
         result = db["project_dimension_mappings"].replace_one(
             {"_id": document_id}, document, upsert=True
         )
-        print(f"📦 Stored in project_dimension_mappings: {document}")
+        print(f"[STORED] Stored in project_dimension_mappings: {document}")
         return {
             "status": "success",
             "mongo_id": document_id,

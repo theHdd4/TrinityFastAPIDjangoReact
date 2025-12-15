@@ -95,7 +95,7 @@ function stripCards(cards: any[]): any[] {
         };
       }
 
-      if (atom.atomId === 'data-upload-validate' && atom.settings) {
+      if (atom.atomId === 'data-validate' && atom.settings) {
         const {
           uploadedFiles = [],
           fileMappings = {},

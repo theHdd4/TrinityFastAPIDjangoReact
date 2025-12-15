@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X, Wrench, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API, CLASSIFIER_API, SHARE_LINKS_API } from '@/lib/api';
@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
-import { CheckboxTemplate } from '@/templates/checkbox';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Plus } from 'lucide-react';
 import ColumnClassifierDimensionMapping from '@/components/AtomList/atoms/column-classifier/components/ColumnClassifierDimensionMapping';
 import { fetchDimensionMapping } from '@/lib/dimensions';
@@ -26,6 +26,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
+import { getActiveProjectContext } from '@/utils/projectEnv';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface Props {
   isOpen: boolean;
@@ -91,6 +94,20 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     last_modified?: string;
     size?: number;
   }
+  interface ExcelSheet {
+    object_name: string;
+    sheet_name: string;
+    arrow_name: string;
+    csv_name: string;
+    last_modified?: string;
+    size?: number;
+  }
+  interface ExcelFolder {
+    name: string;
+    path: string;
+    type: "excel_folder";
+    sheets: ExcelSheet[];
+  }
   interface ProcessingColumnConfig {
     name: string;
     newName: string;
@@ -112,6 +129,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     path: string;
     children?: TreeNode[];
     frame?: Frame;
+    isExcelFolder?: boolean;
+    sheets?: ExcelSheet[];
   }
 
   interface EnvTarget {
@@ -121,7 +140,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   }
 
   const [files, setFiles] = useState<Frame[]>([]);
+  const [excelFolders, setExcelFolders] = useState<ExcelFolder[]>([]);
   const [prefix, setPrefix] = useState('');
+  const [filePrimingStatus, setFilePrimingStatus] = useState<Record<string, {
+    isPrimed: boolean;
+    isInProgress: boolean;
+    currentStage?: string;
+    completedSteps?: string[];
+    missingSteps?: string[];
+  }>>({});
   const [openDirs, setOpenDirs] = useState<Record<string, boolean>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -166,11 +193,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [pendingFilesQueue, setPendingFilesQueue] = useState<File[]>([]);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [sheetOptions, setSheetOptions] = useState<string[]>([]);
-  const [selectedSheet, setSelectedSheet] = useState('');
+  const [selectedSheets, setSelectedSheets] = useState<string[]>([]); // Changed to array for multi-select
   const [uploadingFile, setUploadingFile] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [hasMultipleSheets, setHasMultipleSheets] = useState(false);
-  const [tempUploadMeta, setTempUploadMeta] = useState<{ file_path: string; file_name: string; workbook_path?: string | null } | null>(null);
+  const [tempUploadMeta, setTempUploadMeta] = useState<{ 
+    file_path: string; 
+    file_name: string; 
+    workbook_path?: string | null;
+    upload_session_id?: string;
+    sheetNameMap?: Record<string, string>; // Maps original sheet names to normalized names
+  } | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [pendingProcessFiles, setPendingProcessFiles] = useState<string[]>([]);
   const [sheetChangeTarget, setSheetChangeTarget] = useState<Frame | null>(null);
@@ -184,6 +217,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [processingLoading, setProcessingLoading] = useState(false);
   const [processingSaving, setProcessingSaving] = useState(false);
   const [processingError, setProcessingError] = useState('');
+  const [viewTarget, setViewTarget] = useState<Frame | null>(null);
+  const [viewColumns, setViewColumns] = useState<ProcessingColumnConfig[]>([]);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [viewError, setViewError] = useState('');
+  const [isGuidedUploadFlowOpen, setIsGuidedUploadFlowOpen] = useState(false);
+  const [guidedFlowInitialFile, setGuidedFlowInitialFile] = useState<{ name: string; path: string; size?: number } | undefined>(undefined);
+  const [guidedFlowInitialStage, setGuidedFlowInitialStage] = useState<'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7'>('U1');
 
   const getProcessingDtypeOptions = (currentDtype: string) => {
     const baseOptions = [
@@ -535,7 +575,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const resetUploadState = () => {
     setPendingFile(null);
     setSheetOptions([]);
-    setSelectedSheet('');
+    setSelectedSheets([]);
     setUploadingFile(false);
     setUploadError('');
     setHasMultipleSheets(false);
@@ -558,8 +598,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         tempUploadMeta?.workbook_path
           ? [
               {
-                sheet_names: sheetOptions.length ? sheetOptions : [selectedSheet || ''],
-                selected_sheet: selectedSheet || sheetOptions[0] || '',
+                sheet_names: sheetOptions.length ? sheetOptions : selectedSheets.length > 0 ? selectedSheets : [],
+                selected_sheet: selectedSheets.length > 0 ? selectedSheets[0] : sheetOptions[0] || '',
                 original_filename: pendingFile?.name || tempUploadMeta.file_name || '',
               },
             ]
@@ -593,60 +633,74 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     }
   };
 
-  const uploadSelectedFile = async (file: File, sheet?: string) => {
+  const finalizeSaveMultiSheet = async (fileName: string, uploadSessionId: string, sheetsToSave: string[]) => {
     setUploadingFile(true);
-    setUploadError('');
     try {
-      // Replace spaces with underscores in filename
-      const sanitizedFileName = file.name.replace(/\s+/g, '_');
-      const sanitizedFile = sanitizedFileName !== file.name 
-        ? new File([file], sanitizedFileName, { type: file.type, lastModified: file.lastModified })
-        : file;
+      const excelFolderName = fileName.replace(/\.[^.]+$/, '').replace(/\s+/g, '_').replace(/\./g, '_');
       
-      const form = new FormData();
-      form.append('file', sanitizedFile);
-      if (sheet) {
-        form.append('sheet_name', sheet);
+      for (const sheetName of sheetsToSave) {
+        try {
+          // Get normalized sheet name from mapping or normalize it
+          const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || 
+            sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
+          
+          // Use the convert endpoint to save sheet directly
+          const convertForm = new FormData();
+          convertForm.append('upload_session_id', uploadSessionId);
+          convertForm.append('sheet_name', normalizedSheetName);
+          convertForm.append('original_filename', fileName);
+          convertForm.append('use_folder_structure', 'true');
+          appendEnvFields(convertForm);
+          
+          const convertRes = await fetch(`${VALIDATE_API}/convert-session-sheet-to-arrow`, {
+            method: 'POST',
+            body: convertForm,
+            credentials: 'include'
+          });
+          
+          if (!convertRes.ok) {
+            const errorData = await convertRes.json().catch(() => null);
+            const errorText = errorData?.detail || await convertRes.text().catch(() => '');
+            console.warn(`Failed to convert sheet ${sheetName}:`, errorText);
+            setUploadError(`Failed to save sheet "${sheetName}": ${errorText}`);
+            continue;
+          }
+          
+          const convertData = await convertRes.json();
+          const sheetPath = convertData.file_path || '';
+          
+          if (!sheetPath) {
+            console.warn(`No file path returned for sheet ${sheetName}`);
+            continue;
+          }
+          
+          // Trigger refresh of SavedDataFramesPanel
+          window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+            detail: { filePath: sheetPath, fileName: `${fileName} (${sheetName})` } 
+          }));
+        } catch (err: any) {
+          console.error(`Error saving sheet ${sheetName}:`, err);
+          setUploadError(`Error saving sheet "${sheetName}": ${err.message || 'Unknown error'}`);
+        }
       }
-      appendEnvFields(form);
-      const res = await fetch(`${VALIDATE_API}/upload-file`, {
-      method: 'POST',
-      body: form,
-        credentials: 'include'
+      
+      toast({ 
+        title: 'Files uploaded successfully', 
+        description: `Saved ${sheetsToSave.length} sheet${sheetsToSave.length > 1 ? 's' : ''} from ${fileName}.`,
       });
-      const payload = await res.json().catch(() => null);
-      if (!res.ok || !payload) {
-        const detail = payload?.detail || (typeof payload === 'string' ? payload : '');
-        throw new Error(detail || 'Upload failed');
-      }
-      const data = await waitForTaskResult(payload);
-      setTempUploadMeta({
-        file_path: data.file_path,
-        file_name: data.file_name || sanitizedFileName,
-        workbook_path: data.workbook_path || null,
-      });
-      const sheetNames = Array.isArray(data.sheet_names) ? data.sheet_names : [];
-      const multi = Boolean(data.has_multiple_sheets && sheetNames.length > 1);
-      setSheetOptions(sheetNames.length ? sheetNames : data.selected_sheet ? [data.selected_sheet] : []);
-      setSelectedSheet(data.selected_sheet || sheetNames[0] || '');
-      setHasMultipleSheets(multi);
-
-      if (multi && !sheet) {
-        setUploadingFile(false);
-        setIsUploadModalOpen(true);
-        return;
-      }
-      await finalizeSave({ file_path: data.file_path, file_name: data.file_name || sanitizedFileName });
-      // Process next file in queue if any - wait for finalizeSave to fully complete first
+      
+      resetUploadState();
+      setReloadToken(prev => prev + 1);
+      
+      // Process next file in queue if any
       setPendingFilesQueue(prev => {
         if (prev.length > 0) {
           const nextFile = prev[0];
-          // Process next file after current one is fully saved
           setTimeout(() => {
             setPendingFile(nextFile);
             setUploadError('');
             setSheetOptions([]);
-            setSelectedSheet('');
+            setSelectedSheets([]);
             setHasMultipleSheets(false);
             setTempUploadMeta(null);
             setIsUploadModalOpen(true);
@@ -656,6 +710,129 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         }
         return prev;
       });
+    } catch (err: any) {
+      setUploadError(err.message || 'Failed to save sheets');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const uploadSelectedFile = async (file: File, sheets?: string[]) => {
+    setUploadingFile(true);
+    setUploadError('');
+    try {
+      // Replace spaces with underscores in filename
+      const sanitizedFileName = file.name.replace(/\s+/g, '_');
+      const sanitizedFile = sanitizedFileName !== file.name 
+        ? new File([file], sanitizedFileName, { type: file.type, lastModified: file.lastModified })
+        : file;
+      
+      // Check if it's an Excel file - use multi-sheet endpoint
+      const isExcelFile = sanitizedFileName.toLowerCase().endsWith('.xlsx') || 
+                         sanitizedFileName.toLowerCase().endsWith('.xls');
+      
+      if (isExcelFile) {
+        // Use multi-sheet Excel upload endpoint
+        const form = new FormData();
+        form.append('file', sanitizedFile);
+        appendEnvFields(form);
+        
+        const res = await fetch(`${VALIDATE_API}/upload-excel-multi-sheet`, {
+          method: 'POST',
+          body: form,
+          credentials: 'include'
+        });
+        
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => null);
+          const detail = errorData?.detail || (typeof errorData === 'string' ? errorData : '');
+          throw new Error(detail || 'Upload failed');
+        }
+        
+        const data = await res.json();
+        const sheetNames = Array.isArray(data.sheets) ? data.sheets : [];
+        const sheetDetails = Array.isArray(data.sheet_details) ? data.sheet_details : [];
+        const uploadSessionId = data.upload_session_id || data.session_id;
+        const fileName = data.file_name || sanitizedFileName;
+        
+        if (sheetNames.length === 0) {
+          throw new Error('No sheets found in Excel file');
+        }
+        
+        // Create a map of original sheet names to normalized names
+        const sheetNameMap = new Map<string, string>();
+        sheetDetails.forEach((detail: any) => {
+          if (detail.original_name && detail.normalized_name) {
+            sheetNameMap.set(detail.original_name, detail.normalized_name);
+          }
+        });
+        
+        // If no details, normalize names ourselves
+        if (sheetNameMap.size === 0) {
+          sheetNames.forEach((name: string) => {
+            const normalized = name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
+            sheetNameMap.set(name, normalized);
+          });
+        }
+        
+        setTempUploadMeta({
+          file_path: data.original_file_path || '',
+          file_name: fileName,
+          workbook_path: data.original_file_path || null,
+          upload_session_id: uploadSessionId,
+          sheetNameMap: Object.fromEntries(sheetNameMap),
+        });
+        
+        setSheetOptions(sheetNames);
+        setSelectedSheets(sheets || sheetNames); // Default to all sheets
+        setHasMultipleSheets(sheetNames.length > 1);
+        
+        if (sheetNames.length > 1 && !sheets) {
+          // Show modal to select sheets
+          setUploadingFile(false);
+          setIsUploadModalOpen(true);
+          return;
+        }
+        
+        // Save all selected sheets
+        await finalizeSaveMultiSheet(fileName, uploadSessionId, sheets || sheetNames);
+      } else {
+        // CSV or other file - use regular upload endpoint
+        const form = new FormData();
+        form.append('file', sanitizedFile);
+        appendEnvFields(form);
+        const res = await fetch(`${VALIDATE_API}/upload-file`, {
+          method: 'POST',
+          body: form,
+          credentials: 'include'
+        });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || !payload) {
+          const detail = payload?.detail || (typeof payload === 'string' ? payload : '');
+          throw new Error(detail || 'Upload failed');
+        }
+        const data = await waitForTaskResult(payload);
+        await finalizeSave({ file_path: data.file_path, file_name: data.file_name || sanitizedFileName });
+        
+        // Process next file in queue if any
+        setPendingFilesQueue(prev => {
+          if (prev.length > 0) {
+            const nextFile = prev[0];
+            setTimeout(() => {
+              setPendingFile(nextFile);
+              setUploadError('');
+              setSheetOptions([]);
+              setSelectedSheets([]);
+              setHasMultipleSheets(false);
+              setTempUploadMeta(null);
+              setIsUploadModalOpen(true);
+              void uploadSelectedFile(nextFile);
+            }, 100);
+            return prev.slice(1);
+          }
+          return prev;
+        });
+      }
     } catch (err: any) {
       setUploadError(err.message || 'Upload failed');
       setUploadingFile(false);
@@ -667,8 +844,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   };
 
   const handleSheetConfirm = () => {
-    if (!pendingFile || !selectedSheet) return;
-    uploadSelectedFile(pendingFile, selectedSheet);
+    if (!pendingFile || selectedSheets.length === 0) return;
+    if (!tempUploadMeta?.upload_session_id) {
+      // Fallback to single sheet upload
+      uploadSelectedFile(pendingFile, [selectedSheets[0]]);
+      return;
+    }
+    finalizeSaveMultiSheet(
+      tempUploadMeta.file_name,
+      tempUploadMeta.upload_session_id,
+      selectedSheets
+    );
   };
 
   const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -687,7 +873,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     setPendingFile(firstFile);
     setUploadError('');
     setSheetOptions([]);
-    setSelectedSheet('');
+    setSelectedSheets([]);
     setHasMultipleSheets(false);
     setTempUploadMeta(null);
     setIsUploadModalOpen(true);
@@ -701,6 +887,149 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     setProcessingError('');
     setProcessingLoading(false);
     setProcessingSaving(false);
+  };
+
+  const closeViewModal = () => {
+    setViewTarget(null);
+    setViewColumns([]);
+    setViewError('');
+    setViewLoading(false);
+  };
+
+  const openViewModal = async (frame: Frame) => {
+    setViewTarget(frame);
+    setViewColumns([]);
+    setViewError('');
+    setViewLoading(true);
+    try {
+      const res = await fetch(`${VALIDATE_API}/file-metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ file_path: frame.object_name })
+      });
+      
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || 'Failed to load dataframe metadata');
+      }
+      
+      const data = await res.json();
+      
+      // Load saved config from mongo to get classification
+      let savedConfig: { identifiers: string[]; measures: string[] } | null = null;
+      const fileName = frame.object_name || '';
+      
+      try {
+        const envStr = localStorage.getItem('env');
+        const env = envStr ? JSON.parse(envStr) : {};
+        
+        const queryParams = new URLSearchParams({
+          client_name: env.CLIENT_NAME || '',
+          app_name: env.APP_NAME || '',
+          project_name: env.PROJECT_NAME || '',
+          bypass_cache: 'true',
+        });
+        if (fileName) {
+          queryParams.append('file_name', fileName);
+        }
+        
+        const configRes = await fetch(`${CLASSIFIER_API}/get_config?${queryParams.toString()}`, {
+          credentials: 'include'
+        });
+        
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          if (configData?.data) {
+            savedConfig = {
+              identifiers: Array.isArray(configData.data.identifiers) ? configData.data.identifiers : [],
+              measures: Array.isArray(configData.data.measures) ? configData.data.measures : []
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching saved config for view modal:', err);
+      }
+      
+      // Get default classification if no saved config
+      let base: { identifiers: string[]; measures: string[]; unclassified: string[] } | null = null;
+      const hasSavedConfig = savedConfig && (savedConfig.identifiers.length > 0 || savedConfig.measures.length > 0);
+      
+      if (!hasSavedConfig) {
+        if (!classifyData[frame.object_name]) {
+          base = await runClassification(frame.object_name);
+        } else {
+          base = classifyData[frame.object_name];
+        }
+      }
+      
+      const baseSet = base || { identifiers: [], measures: [], unclassified: [] };
+      const idSet = new Set<string>(savedConfig?.identifiers || baseSet.identifiers || []);
+      const msSet = new Set<string>(savedConfig?.measures || baseSet.measures || []);
+      
+      const allColumns = (data.columns || []).map((col: any) => col.name || '').filter(Boolean);
+      const classificationMap: Record<string, 'identifiers' | 'measures' | 'unclassified'> = {};
+      
+      const idMap = new Map<string, string>();
+      const msMap = new Map<string, string>();
+      idSet.forEach(id => {
+        idMap.set(id.toLowerCase(), id);
+      });
+      msSet.forEach(ms => {
+        msMap.set(ms.toLowerCase(), ms);
+      });
+      
+      allColumns.forEach((colName: string) => {
+        const colLower = colName.toLowerCase();
+        if (idSet.has(colName)) {
+          classificationMap[colName] = 'identifiers';
+        } else if (msSet.has(colName)) {
+          classificationMap[colName] = 'measures';
+        } else if (idMap.has(colLower)) {
+          classificationMap[colName] = 'identifiers';
+        } else if (msMap.has(colLower)) {
+          classificationMap[colName] = 'measures';
+        } else {
+          classificationMap[colName] = 'unclassified';
+        }
+      });
+      
+      const cols: ProcessingColumnConfig[] = (data.columns || []).map((col: any) => {
+        const dtype = typeof col.dtype === 'string' && col.dtype ? col.dtype : 'object';
+        return {
+          name: col.name || '',
+          newName: col.name || '',
+          originalDtype: dtype,
+          selectedDtype: dtype,
+          sampleValues: Array.isArray(col.sample_values)
+            ? col.sample_values.map((val: unknown) => (val === null || val === undefined ? '' : String(val)))
+            : [],
+          missingCount: typeof col.missing_count === 'number' ? col.missing_count : 0,
+          missingPercentage: typeof col.missing_percentage === 'number' ? col.missing_percentage : 0,
+          missingStrategy: 'none',
+          missingCustomValue: '',
+          datetimeFormat: undefined,
+          formatDetecting: false,
+          formatFailed: false,
+          dropColumn: false,
+          classification: classificationMap[col.name || ''] || 'unclassified',
+        };
+      });
+      
+      // Sort columns by classification
+      const sortedCols = cols.sort((a, b) => {
+        const rank = { identifiers: 0, measures: 1, unclassified: 2 } as const;
+        const aRank = rank[a.classification || 'unclassified'];
+        const bRank = rank[b.classification || 'unclassified'];
+        return aRank - bRank;
+      });
+      
+      setViewColumns(sortedCols);
+    } catch (err: any) {
+      setViewError(err.message || 'Failed to load dataframe metadata');
+    } finally {
+      setViewLoading(false);
+    }
   };
 
   const normalizeFillValue = (value: string, dtype: string) => {
@@ -1176,6 +1505,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     setSheetChangeLoading(true);
     try {
       const query = new URLSearchParams({ object_name: frame.object_name }).toString();
+      // Skip workbook_metadata for Arrow files - they don't have workbook metadata
+      if (frame.object_name.toLowerCase().endsWith('.arrow')) {
+        throw new Error('Arrow files do not have workbook metadata');
+      }
+      
       const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
         credentials: 'include',
       });
@@ -1234,14 +1568,33 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
+    
+    // Listen for dataframe-saved events to trigger refresh
+    const handleDataframeSaved = (event?: Event) => {
+      if (!cancelled) {
+        console.log('[SavedDataFramesPanel] dataframe-saved event received, refreshing...', event);
+        setReloadToken(prev => prev + 1);
+      }
+    };
+    
+    window.addEventListener('dataframe-saved', handleDataframeSaved);
 
     const load = async () => {
       setLoading(true);
       try {
         let attempt = 0;
+        let lastReloadToken = reloadToken; // Track reload token to force immediate refresh when changed
         while (!cancelled) {
           attempt += 1;
           const { env: storedEnv, target } = readExpectedContext();
+          
+          // If reloadToken changed, reset attempt counter to force immediate refresh
+          if (reloadToken !== lastReloadToken) {
+            console.log('[SavedDataFramesPanel] Reload token changed, forcing immediate refresh');
+            attempt = 0;
+            lastReloadToken = reloadToken;
+          }
+          
           const waitForNextPoll = async () => {
             const delay = Math.min(2000, 200 + attempt * 200);
             if (!cancelled) {
@@ -1388,41 +1741,164 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               })
             : [];
 
+          const excelFoldersData = Array.isArray(data?.excel_folders)
+            ? data.excel_folders.filter((folder: ExcelFolder) => {
+                if (!effectivePrefix) return true;
+                return folder.path?.startsWith(effectivePrefix);
+              })
+            : [];
+
           if (!cancelled) {
+            console.log('[SavedDataFramesPanel] Setting files and excelFolders:', {
+              filesCount: filtered.length,
+              excelFoldersCount: excelFoldersData.length,
+              excelFolders: excelFoldersData
+            });
             setFiles(filtered);
+            setExcelFolders(excelFoldersData);
             setOpenDirs({});
             setContextMenu(null);
             setRenameTarget(null);
             
-            // Check workbook metadata for files to determine if they have multiple sheets
-            const checkWorkbookMetadata = async () => {
+            // Check workbook metadata and priming status for files
+            const checkFileMetadata = async () => {
               const metadataChecks: Record<string, boolean> = {};
+              const primingStatusChecks: Record<string, {
+                isPrimed: boolean;
+                isInProgress: boolean;
+                currentStage?: string;
+                completedSteps?: string[];
+                missingSteps?: string[];
+              }> = {};
+              
               for (const f of filtered) {
-                // Check if workbook metadata exists (which means it was uploaded from a multi-sheet Excel file)
+                // Check workbook metadata
                 try {
                   const query = new URLSearchParams({ object_name: f.object_name }).toString();
-                  const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
-                    credentials: 'include',
-                  });
-                  if (res.ok) {
-                    const metaData = await res.json();
-                    const sheetNames = Array.isArray(metaData.sheet_names) ? metaData.sheet_names : [];
-                    // Check if has_multiple_sheets is true, or if sheet_names has more than 1 sheet
-                    metadataChecks[f.object_name] = Boolean(
-                      metaData.has_multiple_sheets === true || sheetNames.length > 1
-                    );
+                  // Skip workbook_metadata for Arrow files - they don't have workbook metadata
+                  if (!f.object_name.toLowerCase().endsWith('.arrow')) {
+                    const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
+                      credentials: 'include',
+                    });
+                    if (res.ok) {
+                      const metaData = await res.json();
+                      const sheetNames = Array.isArray(metaData.sheet_names) ? metaData.sheet_names : [];
+                      metadataChecks[f.object_name] = Boolean(
+                        metaData.has_multiple_sheets === true || sheetNames.length > 1
+                      );
+                    } else {
+                      metadataChecks[f.object_name] = false;
+                    }
                   } else {
-                    metadataChecks[f.object_name] = false;
+                    metadataChecks[f.object_name] = false; // Arrow files don't have multiple sheets
                   }
                 } catch {
                   metadataChecks[f.object_name] = false;
                 }
+                
+                // Check priming status
+                try {
+                  const projectContext = getActiveProjectContext();
+                  if (projectContext) {
+                    const queryParams = new URLSearchParams({
+                      client_name: projectContext.client_name || '',
+                      app_name: projectContext.app_name || '',
+                      project_name: projectContext.project_name || '',
+                      file_name: f.object_name,
+                    }).toString();
+
+                    const primingRes = await fetch(
+                      `${VALIDATE_API}/check-priming-status?${queryParams}`,
+                      { credentials: 'include' }
+                    );
+
+                    let isPrimed = false;
+                    let currentStage: string | undefined;
+                    let completedSteps: string[] = [];
+                    let missingSteps: string[] = [];
+                    let isInProgressFromBackend = false;
+
+                    if (primingRes.ok) {
+                      const primingData = await primingRes.json();
+                      isPrimed = primingData?.completed === true || primingData?.is_primed === true;
+                      currentStage = primingData?.current_stage;
+                      completedSteps = Array.isArray(primingData?.completed_steps) ? primingData.completed_steps : [];
+                      missingSteps = Array.isArray(primingData?.missing_steps) ? primingData.missing_steps : [];
+                      // Use backend's is_in_progress value directly
+                      isInProgressFromBackend = primingData?.is_in_progress === true;
+                    }
+
+                    // Also check classifier config
+                    let hasClassifierConfig = false;
+                    try {
+                      const configQueryParams = new URLSearchParams({
+                        client_name: projectContext.client_name || '',
+                        app_name: projectContext.app_name || '',
+                        project_name: projectContext.project_name || '',
+                        file_name: f.object_name,
+                        bypass_cache: 'true',
+                      }).toString();
+
+                      const configRes = await fetch(
+                        `${CLASSIFIER_API}/get_config?${configQueryParams}`,
+                        { credentials: 'include' }
+                      );
+
+                      if (configRes.ok) {
+                        const configData = await configRes.json();
+                        if (configData?.data) {
+                          const hasIdentifiers = Array.isArray(configData.data.identifiers) && configData.data.identifiers.length > 0;
+                          const hasMeasures = Array.isArray(configData.data.measures) && configData.data.measures.length > 0;
+                          hasClassifierConfig = hasIdentifiers || hasMeasures;
+                          // If classifier config exists, U4 (column names) and U5 (data types) are likely done
+                          if (hasClassifierConfig && !completedSteps.includes('U4')) {
+                            completedSteps.push('U4', 'U5');
+                          }
+                        }
+                      }
+                    } catch (err) {
+                      console.warn('Failed to check classifier config for priming status', err);
+                    }
+
+                    // File is primed only if all 7 steps completed AND has classifier config
+                    const allStepsCompleted = completedSteps.includes('U7') || (completedSteps.length >= 7 && currentStage === 'U7');
+                    isPrimed = allStepsCompleted && hasClassifierConfig;
+
+                    // Recalculate missing steps
+                    const allSteps = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+                    missingSteps = allSteps.filter(s => !completedSteps.includes(s));
+
+                    // Use backend's is_in_progress value directly
+                    // Backend logic: Red (U0/U1), Yellow (U2-U6), Green (U7)
+                    // If backend didn't provide is_in_progress, calculate it: U2-U6 are in progress
+                    const isInProgress = isInProgressFromBackend || 
+                      (currentStage && currentStage !== 'U7' && currentStage !== 'U0' && currentStage !== 'U1' && !isPrimed);
+
+                    primingStatusChecks[f.object_name] = {
+                      isPrimed,
+                      isInProgress: !!isInProgress,
+                      currentStage,
+                      completedSteps,
+                      missingSteps,
+                    };
+                  }
+                } catch (err) {
+                  console.warn('Failed to check priming status for', f.object_name, err);
+                  primingStatusChecks[f.object_name] = {
+                    isPrimed: false,
+                    isInProgress: false,
+                    completedSteps: [],
+                    missingSteps: ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'],
+                  };
+                }
               }
+              
               if (!cancelled) {
                 setHasMultipleSheetsByFile(metadataChecks);
+                setFilePrimingStatus(primingStatusChecks);
               }
             };
-            void checkWorkbookMetadata();
+            void checkFileMetadata();
           }
 
           console.log(
@@ -1447,6 +1923,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
 
     return () => {
       cancelled = true;
+      window.removeEventListener('dataframe-saved', handleDataframeSaved);
     };
   }, [isOpen, user, reloadToken]);
 
@@ -1637,24 +2114,78 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     if (confirmDelete.type === 'all') {
       await fetch(`${VALIDATE_API}/delete_all_dataframes`, { method: 'DELETE' });
       setFiles([]);
+      setExcelFolders([]);
     } else if (confirmDelete.type === 'folder') {
       const folderPath = confirmDelete.target;
       // Ensure folder path ends with / for proper matching
       const normalizedPath = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+      
+      // Check if this is an Excel folder
+      const excelFolder = excelFolders.find(folder => {
+        const folderPathNormalized = folder.path.endsWith('/') ? folder.path : folder.path + '/';
+        return folderPathNormalized === normalizedPath || folder.path === folderPath;
+      });
+      
       // Find all files that belong to this folder (files that start with the folder path)
       const filesToDelete = files.filter(f => 
         f.object_name.startsWith(normalizedPath)
       );
+      
+      // If it's an Excel folder, also get all sheets to delete
+      const sheetsToDelete = excelFolder?.sheets || [];
+      
       // Delete all files in the folder
       await Promise.all(
         filesToDelete.map(f =>
           fetch(
             `${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(f.object_name)}`,
-            { method: 'DELETE' }
+            { method: 'DELETE', credentials: 'include' }
           )
         )
       );
+      
+      // Delete all sheets in the Excel folder
+      await Promise.all(
+        sheetsToDelete.map(sheet =>
+          fetch(
+            `${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(sheet.object_name)}`,
+            { method: 'DELETE', credentials: 'include' }
+          )
+        )
+      );
+      
+      // Update files state immediately
       setFiles(prev => prev.filter(f => !f.object_name.startsWith(normalizedPath)));
+      
+      // Remove Excel folder from excelFolders state if it matches
+      setExcelFolders(prev => prev.filter(folder => {
+        // Check if folder path matches (with or without trailing slash)
+        const folderPathNormalized = folder.path.endsWith('/') ? folder.path : folder.path + '/';
+        const targetPathNormalized = normalizedPath;
+        // Remove if exact match or if folder is inside the deleted path
+        return folderPathNormalized !== targetPathNormalized && 
+               folder.path !== folderPath &&
+               !folder.path.startsWith(normalizedPath);
+      }));
+      
+      // Close any open directories for this folder
+      setOpenDirs(prev => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach(key => {
+          if (key.startsWith(normalizedPath) || key === folderPath) {
+            delete updated[key];
+          }
+        });
+        return updated;
+      });
+      
+      // Trigger immediate reload to sync with backend
+      setReloadToken(prev => prev + 1);
+      
+      toast({
+        title: 'Folder deleted',
+        description: `Folder and all its contents have been deleted.`,
+      });
     } else {
       const obj = confirmDelete.target;
       await fetch(
@@ -1662,6 +2193,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         { method: 'DELETE' }
       );
       setFiles(prev => prev.filter(f => f.object_name !== obj));
+      // Also check if this file was part of an Excel folder and update accordingly
+      setExcelFolders(prev => prev.map(folder => ({
+        ...folder,
+        sheets: folder.sheets.filter(sheet => sheet.object_name !== obj)
+      })).filter(folder => folder.sheets.length > 0)); // Remove empty folders
+      // Trigger immediate reload to sync with backend
+      setReloadToken(prev => prev + 1);
     }
     setConfirmDelete(null);
   };
@@ -1796,7 +2334,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     }
   };
 
-  const handleContextMenuAction = (action: 'edit' | 'delete' | 'classify' | 'downloadCSV' | 'downloadExcel' | 'copy' | 'share' | 'process' | 'changeSheet') => {
+  const handleContextMenuAction = (action: 'edit' | 'delete' | 'classify' | 'downloadCSV' | 'downloadExcel' | 'copy' | 'share' | 'process' | 'view' | 'changeSheet') => {
     if (!contextMenu) return;
     
     if (action === 'edit') {
@@ -1816,6 +2354,10 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     } else if (action === 'process') {
       if (contextMenu.frame) {
         openProcessingModal(contextMenu.frame);
+      }
+    } else if (action === 'view') {
+      if (contextMenu.frame) {
+        openViewModal(contextMenu.frame);
       }
     // } else if (action === 'downloadCSV') {
     //   if (contextMenu.frame) {
@@ -1873,15 +2415,281 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     return toArr(root);
   };
 
+  // Build tree from regular files
   const tree = buildTree(files, prefix);
+  
+  // Add Excel folders to the tree
+  const excelFolderNodes: TreeNode[] = excelFolders.map(folder => ({
+    name: folder.name,
+    path: folder.path,
+    isExcelFolder: true,
+    sheets: folder.sheets.map(sheet => ({
+      object_name: sheet.object_name,
+      sheet_name: sheet.sheet_name,
+      arrow_name: sheet.arrow_name,
+      csv_name: sheet.csv_name,
+      last_modified: sheet.last_modified,
+      size: sheet.size,
+    })),
+    children: []
+  }));
+  
+  // Combine regular tree with Excel folders
+  const combinedTree = [...tree, ...excelFolderNodes];
 
   const toggleDir = (path: string) => {
     setOpenDirs(prev => ({ ...prev, [path]: !prev[path] }));
   };
 
+  // Helper function to get step name
+  const getStepName = (step: string): string => {
+    const stepNames: Record<string, string> = {
+      'U0': 'Upload',
+      'U1': 'Scan',
+      'U2': 'Understand',
+      'U3': 'Headers',
+      'U4': 'Columns',
+      'U5': 'Types',
+      'U6': 'Missing',
+      'U7': 'Summary',
+    };
+    return stepNames[step] || step;
+  };
+
+  // Helper function to generate priming status tooltip content
+  const getPrimingStatusTooltip = (status: {
+    isPrimed?: boolean;
+    isInProgress?: boolean;
+    currentStage?: string;
+    completedSteps?: string[];
+    missingSteps?: string[];
+  }): string => {
+    if (status.isPrimed) {
+      return '✅ Fully primed - All 7 steps completed';
+    }
+    
+    const allSteps = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+    const completed = status.completedSteps || [];
+    const missing = status.missingSteps || allSteps.filter(s => !completed.includes(s));
+    
+    if (missing.length === 0) {
+      return '✅ All steps completed';
+    }
+    
+    const completedNames = completed.map(getStepName).join(', ');
+    const missingNames = missing.map(getStepName).join(', ');
+    
+    let tooltip = `📊 Data Priming Status:\n\n`;
+    tooltip += `✅ Completed: ${completedNames || 'None'}\n\n`;
+    tooltip += `❌ Missing: ${missingNames}\n\n`;
+    tooltip += `Click the wrench icon to complete missing steps.`;
+    
+    return tooltip;
+  };
+
   const renderNode = (node: TreeNode, level = 0): React.ReactNode => {
+    // Handle Excel folders with expandable sheets
+    if (node.isExcelFolder && node.sheets) {
+      const isOpen = openDirs[node.path];
+      return (
+        <div key={node.path} style={{ marginLeft: level * 12 }} className="mt-1">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => toggleDir(node.path)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  target: node.path,
+                  folderPath: node.path
+                });
+              }}
+              className="flex items-center text-xs text-gray-700 hover:text-gray-900 font-medium"
+            >
+              {isOpen ? (
+                <ChevronDown className="w-3.5 h-3.5 mr-1" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 mr-1" />
+              )}
+              <span>{node.name}</span>
+              <span className="ml-2 text-xs text-gray-500 font-normal">
+                ({node.sheets.length} sheet{node.sheets.length !== 1 ? 's' : ''})
+              </span>
+            </button>
+            <Trash2
+              className="w-3.5 h-3.5 text-gray-400 cursor-pointer ml-2 hover:text-red-500"
+              onClick={(e) => {
+                e.stopPropagation();
+                promptDeleteFolder(node.path);
+              }}
+            />
+          </div>
+          {isOpen && (
+            <div className="ml-4 mt-1 space-y-0.5">
+              {node.sheets.map((sheet: ExcelSheet) => {
+                const sheetStatus = filePrimingStatus[sheet.object_name];
+                const sheetTooltipContent = sheetStatus ? getPrimingStatusTooltip(sheetStatus) : 'Status unknown';
+                return (
+                  <div
+                    key={sheet.object_name}
+                    className="flex items-center justify-between border p-1.5 rounded hover:bg-gray-50 overflow-hidden"
+                  >
+                    <TooltipProvider>
+                      <div className="flex-1 min-w-0 mr-2 flex items-center gap-2">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => handleOpen(sheet.object_name)}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                handleContextMenu(e, {
+                                  object_name: sheet.object_name,
+                                  csv_name: sheet.csv_name,
+                                  arrow_name: sheet.arrow_name,
+                                  last_modified: sheet.last_modified,
+                                  size: sheet.size
+                                });
+                              }}
+                              className={`text-xs hover:underline text-left flex-1 truncate overflow-hidden text-ellipsis whitespace-nowrap flex items-center gap-1 ${
+                                sheetStatus?.isPrimed
+                                  ? 'text-green-600 font-medium'
+                                  : sheetStatus?.isInProgress
+                                  ? 'text-yellow-600 font-medium'
+                                  : 'text-red-600 font-medium'
+                              }`}
+                            >
+                              <FileText className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                              <span>{sheet.sheet_name}</span>
+                              <span className="text-gray-400 font-normal">(.arrow)</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs whitespace-pre-line text-xs">
+                            <div className="font-semibold mb-1">{sheet.sheet_name}</div>
+                            <div className="border-t pt-1 mt-1">{sheetTooltipContent}</div>
+                          </TooltipContent>
+                        </Tooltip>
+                        {sheetStatus && (
+                          <div
+                            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                              sheetStatus.isPrimed
+                                ? 'bg-green-500'
+                                : sheetStatus.isInProgress
+                                ? 'bg-yellow-500'
+                                : 'bg-red-500'
+                            }`}
+                          />
+                        )}
+                      </div>
+                    </TooltipProvider>
+                    <div className="flex items-center space-x-2 ml-2 flex-shrink-0">
+                      <Pencil
+                        className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
+                        onClick={() => startRename(sheet.object_name, sheet.arrow_name || sheet.csv_name)}
+                        title="Rename"
+                      />
+                      <SlidersHorizontal
+                        className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
+                        onClick={() => openProcessingModal({
+                          object_name: sheet.object_name,
+                          csv_name: sheet.csv_name,
+                          arrow_name: sheet.arrow_name,
+                          last_modified: sheet.last_modified,
+                          size: sheet.size
+                        })}
+                        title="Process columns"
+                      />
+                      <Wrench
+                        className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-[#458EE2]"
+                        onClick={async () => {
+                          // Check priming status to determine initial stage
+                          const projectContext = getActiveProjectContext();
+                          let startStage: 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' = 'U1';
+                          
+                          if (projectContext) {
+                            try {
+                              const queryParams = new URLSearchParams({
+                                client_name: projectContext.client_name || '',
+                                app_name: projectContext.app_name || '',
+                                project_name: projectContext.project_name || '',
+                                file_name: sheet.object_name,
+                              }).toString();
+
+                              const primingCheckRes = await fetch(
+                                `${VALIDATE_API}/check-priming-status?${queryParams}`,
+                                { credentials: 'include' }
+                              );
+
+                              if (primingCheckRes.ok) {
+                                const primingData = await primingCheckRes.json();
+                                const currentStage = primingData?.current_stage;
+                                if (currentStage && ['U1', 'U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+                                  startStage = currentStage as 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+                                }
+                              }
+                            } catch (err) {
+                              console.warn('Failed to check priming status', err);
+                            }
+                          }
+
+                          setGuidedFlowInitialFile({
+                            name: sheet.arrow_name || sheet.csv_name || sheet.sheet_name,
+                            path: sheet.object_name,
+                            size: sheet.size || 0,
+                          });
+                          setGuidedFlowInitialStage(startStage);
+                          setIsGuidedUploadFlowOpen(true);
+                        }}
+                        title="Open guided flow"
+                      />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="p-0 border-0 bg-transparent cursor-pointer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Download
+                              className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-blue-600"
+                              title="Download dataframe"
+                            />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          <DropdownMenuItem
+                            onClick={() => handleDownloadCSV(sheet.object_name, sheet.arrow_name || sheet.csv_name)}
+                            className="cursor-pointer"
+                          >
+                            <span>Download as CSV</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleDownloadExcel(sheet.object_name, sheet.arrow_name || sheet.csv_name)}
+                            className="cursor-pointer"
+                          >
+                            <span>Download as Excel</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <Trash2
+                        className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-red-500"
+                        onClick={() => promptDeleteOne(sheet.object_name)}
+                        title="Delete"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
     if (node.frame) {
       const f = node.frame;
+      const status = filePrimingStatus[f.object_name];
+      const tooltipContent = status ? getPrimingStatusTooltip(status) : 'Status unknown';
+      
       return (
         <>
         <div
@@ -1903,16 +2711,52 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               className="h-5 text-xs flex-1 mr-2 min-w-0"
             />
           ) : (
-            <div className="flex-1 min-w-0 mr-2">
-              <button
-                onClick={() => handleOpen(f.object_name)}
-                onContextMenu={(e) => handleContextMenu(e, f)}
-                className="text-xs text-blue-600 hover:underline text-left w-full truncate overflow-hidden text-ellipsis whitespace-nowrap"
-                title={f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
-              >
-                {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
-              </button>
-            </div>
+            <TooltipProvider>
+              <div className="flex-1 min-w-0 mr-2 flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => handleOpen(f.object_name)}
+                      onContextMenu={(e) => handleContextMenu(e, f)}
+                      className={`text-xs hover:underline text-left flex-1 truncate overflow-hidden text-ellipsis whitespace-nowrap ${
+                        status?.isPrimed
+                          ? 'text-green-600 font-medium'
+                          : status?.isInProgress
+                          ? 'text-yellow-600 font-medium'
+                          : 'text-red-600 font-medium'
+                      }`}
+                    >
+                      {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs whitespace-pre-line text-xs">
+                    <div className="font-semibold mb-1">
+                      {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+                    </div>
+                    <div className="border-t pt-1 mt-1">
+                      {tooltipContent}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+                {/* Status indicator dot */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                        status?.isPrimed
+                          ? 'bg-green-500'
+                          : status?.isInProgress
+                          ? 'bg-yellow-500'
+                          : 'bg-red-500'
+                      }`}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs whitespace-pre-line text-xs">
+                    {tooltipContent}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
           )}
           <div className="flex items-center space-x-2 ml-2 flex-shrink-0">
             {/* COMMENTED OUT - 'for classification' button/icon */}
@@ -1936,6 +2780,49 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
               onClick={() => openProcessingModal(f)}
               title="Process columns"
+            />
+            <Wrench
+              className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-[#458EE2]"
+              onClick={async () => {
+                // Check priming status to determine initial stage
+                const projectContext = getActiveProjectContext();
+                let startStage: 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' = 'U1';
+                
+                if (projectContext) {
+                  try {
+                    const queryParams = new URLSearchParams({
+                      client_name: projectContext.client_name || '',
+                      app_name: projectContext.app_name || '',
+                      project_name: projectContext.project_name || '',
+                      file_name: f.object_name,
+                    }).toString();
+
+                    const primingCheckRes = await fetch(
+                      `${VALIDATE_API}/check-priming-status?${queryParams}`,
+                      { credentials: 'include' }
+                    );
+
+                    if (primingCheckRes.ok) {
+                      const primingData = await primingCheckRes.json();
+                      const currentStage = primingData?.current_stage;
+                      if (currentStage && ['U1', 'U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+                        startStage = currentStage as 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+                      }
+                    }
+                  } catch (err) {
+                    console.warn('Failed to check priming status for wrench icon', err);
+                  }
+                }
+                
+                setGuidedFlowInitialFile({
+                  name: f.arrow_name || f.csv_name || f.object_name,
+                  path: f.object_name,
+                  size: f.size,
+                });
+                setGuidedFlowInitialStage(startStage);
+                setIsGuidedUploadFlowOpen(true);
+              }}
+              title="Guided upload flow with rule-based checking"
             />
             {hasMultipleSheetsByFile[f.object_name] && (
               <Layers
@@ -2385,7 +3272,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             className="p-1 h-8 w-8"
             title="Upload dataframe"
           >
-            <Upload className={`w-4 h-4 ${tree.length === 0 && !loading ? 'rainbow-bounce-icon' : ''}`} />
+            <Upload className={`w-4 h-4 ${combinedTree.length === 0 && excelFolders.length === 0 && !loading ? 'rainbow-bounce-icon' : ''}`} />
           </Button>
           <Button
             variant="ghost"
@@ -2412,8 +3299,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           </div>
         ) : (
           <>
-            {tree.length === 0 && <p className="text-sm text-gray-600">No saved dataframes</p>}
-            {tree.map(node => renderNode(node))}
+            {combinedTree.length === 0 && excelFolders.length === 0 && <p className="text-sm text-gray-600">No saved dataframes</p>}
+            {combinedTree.map(node => renderNode(node))}
           </>
         )}
       </div>
@@ -2484,10 +3371,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 <span>Rename</span>
               </button>
               <button
-                onClick={() => handleContextMenuAction('process')}
+                onClick={() => handleContextMenuAction('view')}
                 className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
               >
                 <SlidersHorizontal className="w-4 h-4" />
+                <span>View properties</span>
+              </button>
+              <button
+                onClick={() => handleContextMenuAction('process')}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+              >
+                <Wrench className="w-4 h-4" />
                 <span>Process columns</span>
               </button>
               {contextMenu.frame && hasMultipleSheetsByFile[contextMenu.frame.object_name] && (
@@ -2563,20 +3457,36 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             {uploadError && <p className="text-xs text-red-500 mt-2">{uploadError}</p>}
             {hasMultipleSheets ? (
               <div className="mt-4">
-                <Label className="text-xs text-gray-600 mb-1 block">Select worksheet</Label>
-                <Select value={selectedSheet} onValueChange={setSelectedSheet}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select sheet" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sheetOptions.map(sheet => (
-                      <SelectItem key={sheet} value={sheet}>
+                <Label className="text-xs text-gray-600 mb-2 block">
+                  Select worksheets to upload (all selected by default)
+                </Label>
+                <div className="max-h-64 overflow-y-auto border rounded p-2 space-y-2">
+                  {sheetOptions.map(sheet => (
+                    <div key={sheet} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`sheet-${sheet}`}
+                        checked={selectedSheets.includes(sheet)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedSheets(prev => [...prev, sheet]);
+                          } else {
+                            setSelectedSheets(prev => prev.filter(s => s !== sheet));
+                          }
+                        }}
+                      />
+                      <label
+                        htmlFor={`sheet-${sheet}`}
+                        className="text-sm text-gray-700 cursor-pointer flex-1"
+                      >
                         {sheet}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-    </div>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  {selectedSheets.length} of {sheetOptions.length} sheet{sheetOptions.length !== 1 ? 's' : ''} selected
+                </p>
+              </div>
             ) : (
               <div className="mt-4 text-sm text-gray-600">
                 {uploadingFile ? 'Processing file…' : 'Preparing upload…'}
@@ -2595,9 +3505,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 <Button
                   size="sm"
                   onClick={handleSheetConfirm}
-                  disabled={uploadingFile || !selectedSheet}
+                  disabled={uploadingFile || selectedSheets.length === 0}
                 >
-                  Upload Sheet
+                  Upload {selectedSheets.length} Sheet{selectedSheets.length !== 1 ? 's' : ''}
                 </Button>
               )}
             </div>
@@ -2926,7 +3836,314 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         </div>,
         document.body
       )}
-      
+
+      {/* View-only Modal - Shows dataframe properties (read-only) */}
+      {viewTarget && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-[1000px] max-w-[98vw] p-4 max-h-[90vh] flex flex-col">
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">Dataframe Profiling (Verify details)</h4>
+            <p className="text-sm text-gray-600">
+              {viewTarget.arrow_name || viewTarget.csv_name || viewTarget.object_name}
+            </p>
+            {viewError && <p className="text-xs text-red-500 mt-2">{viewError}</p>}
+            <div className="mt-4 flex-1 min-h-0 flex flex-col">
+              {viewLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+                </div>
+              ) : viewColumns.length === 0 ? (
+                <p className="text-sm text-gray-600">No columns available.</p>
+              ) : (
+                <div className="border rounded-lg h-full flex flex-col overflow-hidden">
+                  <div className="flex-1 min-h-0 overflow-auto">
+                    <table className="w-full min-w-full">
+                      <thead className="bg-gradient-to-r from-blue-50 to-blue-100">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Column Name
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Rename
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Current Type
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Change Type
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Missing Values
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Strategy
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Classification
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Drop Column
+                            </th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {viewColumns
+                          .map((col, idx) => {
+                            const hasMissingValues = col.missingCount > 0;
+                            return (
+                              <tr key={`view-${col.name}-${idx}`}>
+                                <td className="px-3 py-2 align-top">
+                                  <div>
+                                    <p className="font-medium text-xs text-gray-900">{col.name}</p>
+                                    {col.sampleValues && col.sampleValues.length > 0 && (
+                                      <p className="text-xs text-gray-500 mt-0.5">
+                                        {col.sampleValues.slice(0, 5).join(', ')}
+                                        {col.sampleValues.length > 5 && '...'}
+                                      </p>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <Input
+                                    value={col.newName}
+                                    className="h-7 text-xs bg-gray-50"
+                                    placeholder="Rename column"
+                                    disabled
+                                    readOnly
+                                  />
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getProcessingDtypeBadgeColor(col.originalDtype)}`}>
+                                    {col.originalDtype}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <div className="space-y-2 opacity-50 pointer-events-none">
+                                    <Select
+                                      value={col.selectedDtype}
+                                      disabled
+                                    >
+                                      <SelectTrigger className="w-full h-7 text-xs">
+                                        <SelectValue placeholder="Select dtype" />
+                                      </SelectTrigger>
+                                    </Select>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  {hasMissingValues ? (
+                                    <div className="flex items-center gap-1.5 text-xs">
+                                      <span className="inline-flex items-center rounded-full border border-red-300 text-red-600 px-2 py-0.5 text-[11px] font-semibold">
+                                        {col.missingCount}
+                                      </span>
+                                      <span className="text-gray-500">
+                                        ({col.missingPercentage.toFixed(1)}%)
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-gray-500">None</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  {hasMissingValues ? (
+                                    <div className="space-y-1 opacity-50 pointer-events-none">
+                                      <Select
+                                        value={col.missingStrategy}
+                                        disabled
+                                      >
+                                        <SelectTrigger className="w-full h-7 text-xs">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                      </Select>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">N/A</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <div className="opacity-50 pointer-events-none">
+                                    <Select
+                                      value={col.classification || 'unclassified'}
+                                      disabled
+                                    >
+                                      <SelectTrigger className={`w-full h-7 text-xs ${
+                                        col.classification === 'identifiers' ? 'text-blue-600 border-blue-300' :
+                                        col.classification === 'measures' ? 'text-green-600 border-green-300' :
+                                        'text-yellow-600 border-yellow-300'
+                                      }`}>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                    </Select>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <label className="flex items-center gap-2 text-xs text-gray-700 opacity-50">
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4 accent-red-600"
+                                      checked={col.dropColumn}
+                                      disabled
+                                      readOnly
+                                    />
+                                    Drop column
+                                  </label>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-gray-200 bg-white">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={closeViewModal}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Guided Upload Flow - For rule-based checking workflow */}
+      {isGuidedUploadFlowOpen && guidedFlowInitialFile && (
+        <GuidedUploadFlow
+          open={isGuidedUploadFlowOpen}
+          onOpenChange={(open) => {
+            setIsGuidedUploadFlowOpen(open);
+            if (!open) {
+              setGuidedFlowInitialFile(undefined);
+              setGuidedFlowInitialStage('U1');
+            }
+          }}
+          existingDataframe={guidedFlowInitialFile}
+          initialStage={guidedFlowInitialStage}
+          onComplete={async (result) => {
+            try {
+              // Convert guided flow result to processing format
+              const fileName = guidedFlowInitialFile.name;
+              const columnNameEdits = result.columnNameEdits[fileName] || [];
+              const dataTypeSelections = result.dataTypeSelections[fileName] || [];
+              const missingValueStrategies = result.missingValueStrategies[fileName] || [];
+              const headerSelections = result.headerSelections[fileName];
+              
+              // Fetch current metadata to get original column info
+              const res = await fetch(`${VALIDATE_API}/file-metadata`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ file_path: guidedFlowInitialFile.path })
+              });
+              
+              if (!res.ok) {
+                throw new Error('Failed to load dataframe metadata');
+              }
+              
+              const metadata = await res.json();
+              const columns = metadata.columns || [];
+              
+              // Build processing instructions from flow results
+              const processingInstructions: any[] = [];
+              
+              columns.forEach((col: any) => {
+                const nameEdit = columnNameEdits.find(e => e.originalName === col.name);
+                const typeSelection = dataTypeSelections.find(t => t.columnName === (nameEdit?.editedName || col.name));
+                const missingStrategy = missingValueStrategies.find(s => s.columnName === (nameEdit?.editedName || col.name));
+                
+                const instruction: Record<string, any> = { column: col.name };
+                
+                if (nameEdit && nameEdit.editedName !== col.name) {
+                  instruction.new_name = nameEdit.editedName;
+                }
+                
+                if (typeSelection && typeSelection.selectedType !== col.dtype) {
+                  instruction.dtype = typeSelection.selectedType;
+                  if (typeSelection.format) {
+                    instruction.datetime_format = typeSelection.format;
+                  }
+                }
+                
+                if (missingStrategy && missingStrategy.strategy !== 'none') {
+                  instruction.missing_strategy = missingStrategy.strategy;
+                  if (missingStrategy.value) {
+                    instruction.custom_value = missingStrategy.value;
+                  }
+                }
+                
+                if (Object.keys(instruction).length > 1) {
+                  processingInstructions.push(instruction);
+                }
+              });
+              
+              // Process dataframe with instructions
+              if (processingInstructions.length > 0) {
+                const processRes = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'include',
+                  body: JSON.stringify({
+                    object_name: guidedFlowInitialFile.path,
+                    instructions: processingInstructions,
+                    header_row_index: headerSelections?.headerRowIndex,
+                    header_row_count: headerSelections?.headerRowCount || 1,
+                  }),
+                });
+                
+                if (!processRes.ok) {
+                  const errorData = await processRes.json().catch(() => ({}));
+                  throw new Error(errorData.detail || 'Failed to process dataframe');
+                }
+              }
+              
+              toast({
+                title: 'Success',
+                description: `${fileName} updated successfully through guided flow.`,
+              });
+              
+              setIsGuidedUploadFlowOpen(false);
+              setGuidedFlowInitialFile(undefined);
+              setGuidedFlowInitialStage('U1');
+              setReloadToken(prev => prev + 1);
+              // Refresh priming status after flow completes
+              setTimeout(() => {
+                const projectContext = getActiveProjectContext();
+                if (projectContext && guidedFlowInitialFile) {
+                  const queryParams = new URLSearchParams({
+                    client_name: projectContext.client_name || '',
+                    app_name: projectContext.app_name || '',
+                    project_name: projectContext.project_name || '',
+                    file_name: guidedFlowInitialFile.path,
+                  }).toString();
+
+                  fetch(`${VALIDATE_API}/check-priming-status?${queryParams}`, {
+                    credentials: 'include'
+                  }).then(res => res.json()).then(data => {
+                    setFilePrimingStatus(prev => ({
+                      ...prev,
+                      [guidedFlowInitialFile.path]: {
+                        isPrimed: data?.completed === true,
+                        isInProgress: false,
+                        currentStage: data?.current_stage,
+                      },
+                    }));
+                  }).catch(() => {});
+                }
+              }, 1000);
+            } catch (err: any) {
+              toast({
+                title: 'Error',
+                description: err.message || 'Failed to process dataframe',
+                variant: 'destructive',
+              });
+            }
+          }}
+        />
+      )}
+
       {/* Share Dialog */}
       <Dialog
         open={shareDialog?.open || false}

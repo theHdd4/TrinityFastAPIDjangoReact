@@ -27,7 +27,8 @@ import {
   LayoutCard,
 } from '../../store/laboratoryStore';
 
-import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
+import DataValidateProperties from '@/components/AtomList/atoms/data-validate/components/properties/DataUploadValidateProperties';
+import DataUploadProperties from '@/components/AtomList/atoms/data-upload/components/properties/DataUploadProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
 import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
 import ConcatProperties from '@/components/AtomList/atoms/concat/components/properties/ConcatProperties';
@@ -49,6 +50,7 @@ import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-mo
 import EvaluateModelsFeatureProperties from '@/components/AtomList/atoms/evaluate-models-feature/components/properties/EvaluateModelsFeatureProperties';
 import PivotTableProperties from '@/components/AtomList/atoms/pivot-table/components/PivotTableProperties';
 import { UnpivotProperties } from '@/components/AtomList/atoms/unpivot';
+import KPIDashboardProperties from '@/components/AtomList/atoms/kpi-dashboard/components/properties/KPIDashboardProperties';
 import AtomSettingsTabs from './AtomSettingsTabs';
 import CardSettingsTabs from './metricstabs/CardSettingsTabs';
 
@@ -145,7 +147,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_CLUSTERING_SETTINGS }
       : atom?.atomId === 'scenario-planner'
       ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
-      : atom?.atomId === 'data-upload-validate'
+      : atom?.atomId === 'data-validate'
+      ? createDefaultDataUploadSettings()
+      : atom?.atomId === 'data-upload'
       ? createDefaultDataUploadSettings()
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
@@ -195,7 +199,35 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   }, [selectedAtomId, selectedCardId, tab, setTab]);
 
-
+  // Set context for metric operations (for table atom auto-display)
+  useEffect(() => {
+    if (mainTab === 'metrics') {
+      // Get the atom ID - prefer selectedAtomId, otherwise get first atom from selectedCard
+      const contextAtomId = selectedAtomId || (selectedCard?.atoms && selectedCard.atoms.length > 0 
+        ? selectedCard.atoms[0].id 
+        : undefined);
+      
+      // Get card ID - prefer selectedCardId, otherwise find card containing the atom
+      const contextCardId = selectedCardId || (selectedAtomId && selectedCard
+        ? selectedCard.id
+        : undefined);
+      
+      // Always set context when metrics tab is active (even if no selection, clear it)
+      updateMetricsInputs({
+        contextCardId: contextCardId || undefined,
+        contextAtomId: contextAtomId || undefined,
+      });
+      
+      // console.log('📋 [Metrics Context] Updated context:', {
+      //   mainTab,
+      //   contextCardId,
+      //   contextAtomId,
+      //   selectedCardId,
+      //   selectedAtomId,
+      //   hasSelectedCard: !!selectedCard
+      // });
+    }
+  }, [mainTab, selectedCardId, selectedAtomId, selectedCard, updateMetricsInputs]);
 
   return (
     <div
@@ -230,8 +262,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <TabsContent value="settings" className="flex-1 mt-0">
               {selectedAtomId ? (
                 <>
-                  {atom?.atomId === 'data-upload-validate' ? (
-                    <DataUploadValidateProperties atomId={selectedAtomId} />
+                  {atom?.atomId === 'data-validate' ? (
+                    <DataValidateProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'data-upload' ? (
+                    <DataUploadProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'feature-overview' ? (
                     <FeatureOverviewProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'groupby-wtg-avg' ? (
@@ -272,6 +306,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <ClusteringProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'scenario-planner' ? (
                     <ScenarioPlannerProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'kpi-dashboard' ? (
+                    <KPIDashboardProperties atomId={selectedAtomId} />
                   ) : (
                     <AtomSettingsTabs
                       tab={tab}
@@ -296,6 +332,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 card={cardForMetrics}
                 tab={tab}
                 setTab={setTab}
+                onUpdateCard={updateCard}
                 onAddVariable={addCardVariable}
                 onUpdateVariable={updateCardVariable}
                 onDeleteVariable={deleteCardVariable}

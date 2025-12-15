@@ -49,10 +49,8 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
               .map((f: any) => ({ object_name: f.object_name, arrow_name: f.arrow_name }))
           : [];
         setFrames(framesList);
-        console.log('📁 [TABLE-INPUTS] Available files:', framesList.length);
       })
       .catch((err) => {
-        console.error('❌ [TABLE-INPUTS] Failed to fetch frames:', err);
         setFrames([]);
       });
   }, []);
@@ -67,17 +65,9 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
     }
 
     setLoading(true);
-    console.log('🔍 [TABLE-INPUTS] Loading file:', fileId);
 
     try {
       const data = await loadTable(fileId);
-      console.log('✅ [TABLE-INPUTS] File loaded:', data);
-      console.log('📊 [TABLE-INPUTS] Data shape:', {
-        table_id: data.table_id,
-        columns: data.columns?.length,
-        rows: data.rows?.length,
-        row_count: data.row_count
-      });
 
       const newSettings = {
         sourceFile: fileId,
@@ -88,22 +78,10 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
         columnOrder: data.columns
       };
 
-      console.log('💾 [TABLE-INPUTS] Updating settings with:', {
-        sourceFile: newSettings.sourceFile,
-        tableId: newSettings.tableId,
-        mode: newSettings.mode,
-        hasTableData: !!newSettings.tableData,
-        tableDataKeys: newSettings.tableData ? Object.keys(newSettings.tableData) : [],
-        columnsCount: newSettings.visibleColumns?.length
-      });
-
       // ✅ Store data in Zustand settings (like dataframe-operations)
       updateSettings(atomId, newSettings);
-      
-      console.log('✅ [TABLE-INPUTS] Settings updated successfully');
 
     } catch (err: any) {
-      console.error('❌ [TABLE-INPUTS] Load error:', err);
       setError(err.message || 'Failed to load file');
     } finally {
       setLoading(false);
@@ -111,11 +89,9 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
   };
 
   const handleCreateBlankTable = async () => {
-    const rows = gridRows > 0 ? gridRows : manualRows;
-    const cols = gridCols > 0 ? gridCols : manualCols;
-    
-    console.log(`🔨 [TABLE-INPUTS] Creating blank table: ${rows}×${cols}`);
-    console.log(`📐 [TABLE-INPUTS] Using dimensions - gridRows: ${gridRows}, gridCols: ${gridCols}, manualRows: ${manualRows}, manualCols: ${manualCols}`);
+    // Use manual dimensions when the manual input toggle is on; otherwise use grid selection
+    const rows = showManualInputs ? manualRows : gridRows;
+    const cols = showManualInputs ? manualCols : gridCols;
     
     if (rows < 1 || cols < 1) {
       setError('Please enter valid dimensions (minimum 1×1)');
@@ -130,17 +106,7 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
       const currentSettings = atom?.settings || {};
       const useHeaderRow = currentSettings.layout?.headerRow || false;
       
-      console.log(`🌐 [TABLE-INPUTS] Calling createBlankTable API with use_header_row=${useHeaderRow}...`);
       const data = await createBlankTable(rows, cols, useHeaderRow);
-      console.log('✅ [TABLE-INPUTS] Blank table created from backend:', data);
-      console.log('📊 [TABLE-INPUTS] Backend response:', {
-        table_id: data.table_id,
-        column_names: data.column_names,
-        use_header_row: data.use_header_row,
-        columns_count: data.columns || data.column_names?.length,
-        row_count: data.rows || rows,
-        has_column_types: !!data.column_types
-      });
 
       // ✅ Create tableData structure and store in settings
       // Note: column_names are internal identifiers (col_0, col_1, etc.), not displayed
@@ -151,14 +117,6 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
         row_count: rows,
         column_types: data.column_types || {},
       };
-
-      console.log('📦 [TABLE-INPUTS] Created blankTableData:', {
-        table_id: blankTableData.table_id,
-        columns: blankTableData.columns,
-        rows_length: blankTableData.rows.length,
-        row_count: blankTableData.row_count,
-        column_types: blankTableData.column_types
-      });
 
       const newSettings = {
         tableId: data.table_id,
@@ -180,27 +138,10 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
         }
       };
 
-      console.log('💾 [TABLE-INPUTS] Updating settings with:', {
-        tableId: newSettings.tableId,
-        mode: newSettings.mode,
-        hasTableData: !!newSettings.tableData,
-        tableDataColumns: newSettings.tableData?.columns,
-        blankTableConfigCreated: newSettings.blankTableConfig?.created,
-        useHeaderRow: newSettings.layout?.headerRow,
-        visibleColumnsCount: newSettings.visibleColumns?.length
-      });
-
       // Update atom settings with data
       updateSettings(atomId, newSettings);
-      
-      console.log('✅ [TABLE-INPUTS] Settings updated successfully for blank table');
 
     } catch (err: any) {
-      console.error('❌ [TABLE-INPUTS] Create blank error:', err);
-      console.error('❌ [TABLE-INPUTS] Error details:', {
-        message: err.message,
-        stack: err.stack
-      });
       setError(err.message || 'Failed to create blank table');
     } finally {
       setCreatingBlank(false);

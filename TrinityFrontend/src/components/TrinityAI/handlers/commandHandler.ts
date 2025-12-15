@@ -28,7 +28,7 @@ const ATOM_ENDPOINTS: Record<string, string> = {
   'explore': `${TRINITY_AI_API}/explore`,
   'correlation': `${TRINITY_AI_API}/correlation`,
   'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
-  'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
+  'data-validate': `${TRINITY_AI_API}/df-validate`,
 };
 
 // Atom type to display name mapping
@@ -42,7 +42,7 @@ const ATOM_DISPLAY_NAMES: Record<string, string> = {
   'explore': 'Explore',
   'correlation': 'Correlation',
   'dataframe-operations': 'DataFrame Operations',
-  'data-upload-validate': 'Data Upload Validate',
+  'data-validate': 'Data Validate',
 };
 
 /**
@@ -322,7 +322,7 @@ export const COMMAND_REGISTRY: Record<string, {
     description: 'Perform dataframe operations'
   },
   'validate': {
-    handler: (args, context) => handleAtomCommand('data-upload-validate', args, context),
+    handler: (args, context) => handleAtomCommand('data-validate', args, context),
     indicatorColor: '#458EE2',
     description: 'Validate uploaded data'
   },

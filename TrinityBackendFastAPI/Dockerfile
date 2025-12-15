@@ -39,10 +39,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Ensure Playwright stores browsers in a predictable, cacheable location
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# Configure pip to handle network issues better
+ENV PIP_DEFAULT_TIMEOUT=1000
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
 # Copy requirements and install them
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --timeout 1000 -r requirements.txt && \
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    (pip install --no-cache-dir --timeout 1000 -r requirements.txt || \
+     (echo "First attempt failed, retrying with fresh pip cache..." && \
+      pip cache purge && \
+      sleep 10 && \
+      pip install --no-cache-dir --timeout 1000 -r requirements.txt) || \
+     (echo "Second attempt failed, retrying with increased timeout..." && \
+      sleep 20 && \
+      pip install --no-cache-dir --timeout 2000 -r requirements.txt) || \
+     (echo "Third attempt failed, trying with even longer timeout..." && \
+      sleep 30 && \
+      pip install --no-cache-dir --timeout 3000 -r requirements.txt)) && \
     python -m playwright install chromium && \
     rm -rf /var/lib/apt/lists/*
 

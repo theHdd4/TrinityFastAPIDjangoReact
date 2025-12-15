@@ -59,7 +59,8 @@ const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
       'chart-maker': '📈',
       'correlation': '📉',
       'explore': '🔍',
-      'data-upload-validate': '📁'
+      'data-upload': '📤',
+      'data-validate': '✅'
     };
     return icons[atomId] || '⚡';
   };
@@ -74,7 +75,8 @@ const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
       'chart-maker': 'from-indigo-500 to-indigo-600',
       'correlation': 'from-red-500 to-red-600',
       'explore': 'from-yellow-500 to-yellow-600',
-      'data-upload-validate': 'from-gray-500 to-gray-600'
+      'data-upload': 'from-blue-500 to-blue-600',
+      'data-validate': 'from-green-500 to-green-600'
     };
     return colors[atomId] || 'from-[#41C185] to-[#3AB077]';
   };

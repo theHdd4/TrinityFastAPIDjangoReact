@@ -582,7 +582,7 @@ export const dfValidateHandler: AtomHandler = {
     const operationCompleted = currentSettings?.operationCompleted || false;
     
     if (operationCompleted) {
-      console.log('🔍 STEP 2b: Generating insight for data-upload-validate (after operation completes)');
+      console.log('🔍 STEP 2b: Generating insight for data-validate (after operation completes)');
       
       // Prepare enhanced data with validation/transformation results for insight generation
       const enhancedDataForInsight = {
@@ -607,7 +607,7 @@ export const dfValidateHandler: AtomHandler = {
       // The queue manager automatically handles text box updates with retry logic
       generateAtomInsight({
         data: enhancedDataForInsight,
-        atomType: 'data-upload-validate',
+        atomType: 'data-validate',
         sessionId: context.sessionId,
         atomId, // Pass atomId so queue manager can track and complete this insight
       }).catch((error) => {

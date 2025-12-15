@@ -45,7 +45,9 @@ import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 import { AtomSuggestion } from '@/components/AtomSuggestion';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
-import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
+import DataValidateAtom from '@/components/AtomList/atoms/data-validate/DataValidateAtom';
+import DataUploadAtom from '@/components/AtomList/atoms/data-upload/DataUploadAtom';
+import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
@@ -67,6 +69,7 @@ import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAto
 import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import PivotTableAtom from '@/components/AtomList/atoms/pivot-table/PivotTableAtom';
 import UnpivotAtom from '@/components/AtomList/atoms/unpivot/UnpivotAtom';
+import KPIDashboardAtom from '@/components/AtomList/atoms/kpi-dashboard/KPIDashboardAtom';
 import TableAtom from '@/components/AtomList/atoms/table/TableAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
@@ -197,6 +200,7 @@ interface CanvasAreaProps {
 
 interface CanvasAreaRef {
   syncWorkflowCollection: () => Promise<void>;
+  addNewCardWithAtom: (atomId: string, moleculeId?: string, position?: number) => Promise<void>;
 }
 
 
@@ -212,7 +216,8 @@ const LLM_MAP: Record<string, string> = {
   'correlation': 'Agent Correlation',
   'dataframe-operations': 'Agent DataFrame Operations',
   'pivot-table': 'Agent Pivot Table',
-  'data-upload-validate': 'Agent Data Validation',
+  'data-upload': 'Agent Data Upload',
+  'data-validate': 'Agent Data Validation',
 };
 
 const hydrateDroppedAtom = (atom: any): DroppedAtom => {
@@ -1233,7 +1238,16 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   onCardFocus,
   onCardBlur,
 }, ref) => {
-  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen, subMode } = useLaboratoryStore();
+  const { 
+    cards: layoutCards, 
+    setCards: setLayoutCards, 
+    updateAtomSettings, 
+    setAuxiliaryMenuLeftOpen, 
+    subMode,
+    activeGuidedFlows,
+    isGuidedModeActiveForAtom,
+    removeActiveGuidedFlow
+  } = useLaboratoryStore();
 
   // Calculate allowed atom IDs based on current mode
   const allowedAtomIds = useMemo(() => {
@@ -1242,6 +1256,39 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
     return undefined; // undefined = show all atoms for analytics mode
   }, [subMode]);
+
+  // Helper function to render inline guided flow for an atom
+  const renderInlineGuidedFlow = (atom: DroppedAtom) => {
+    if (!activeGuidedFlows[atom.id] || !isGuidedModeActiveForAtom(atom.id)) {
+      return null;
+    }
+    
+    return (
+      <div className="mt-4">
+        <GuidedUploadFlowInline
+          atomId={atom.id}
+          onComplete={(result) => {
+            // Handle completion - update atom settings
+            const fileNames = result.uploadedFiles.map((f: any) => f.name);
+            const filePathMap: Record<string, string> = {};
+            result.uploadedFiles.forEach((f: any) => {
+              filePathMap[f.name] = f.path;
+            });
+            
+            updateAtomSettings(atom.id, {
+              uploadedFiles: fileNames,
+              filePathMap: filePathMap,
+            });
+          }}
+          onClose={() => {
+            removeActiveGuidedFlow(atom.id);
+          }}
+          savedState={activeGuidedFlows[atom.id]?.state}
+          initialStage={activeGuidedFlows[atom.id]?.currentStage}
+        />
+      </div>
+    );
+  };
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
@@ -1649,7 +1696,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             };
             break outer;
           }
-          if (a.atomId === 'data-upload-validate') {
+          if (a.atomId === 'data-validate') {
             const req = a.settings?.requiredFiles?.[0];
             const validatorId = a.settings?.validatorId;
             if (req) {
@@ -3011,23 +3058,25 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         settings:
           atom.id === 'text-box'
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
-            : atom.id === 'data-upload-validate'
+            : atom.id === 'data-upload'
               ? createDefaultDataUploadSettings()
-              : atom.id === 'feature-overview'
-                ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-                : atom.id === 'explore'
-                  ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
-                  : atom.id === 'chart-maker'
-                    ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-                    : atom.id === 'pivot-table'
-                      ? { ...DEFAULT_PIVOT_TABLE_SETTINGS }
-                      : atom.id === 'dataframe-operations'
-                        ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
-                        : atom.id === 'select-models-feature'
-                          ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
-                          : atom.id === 'auto-regressive-models'
-                            ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
-                            : undefined,
+              : atom.id === 'data-validate'
+                ? createDefaultDataUploadSettings()
+                : atom.id === 'feature-overview'
+                  ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+                  : atom.id === 'explore'
+                    ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
+                    : atom.id === 'chart-maker'
+                      ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+                      : atom.id === 'pivot-table'
+                        ? { ...DEFAULT_PIVOT_TABLE_SETTINGS }
+                        : atom.id === 'dataframe-operations'
+                          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+                          : atom.id === 'select-models-feature'
+                            ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
+                            : atom.id === 'auto-regressive-models'
+                              ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
+                              : undefined,
       };
 
       // Calculate position accounting for existing workflow molecule atoms
@@ -3690,7 +3739,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     switch (atomId) {
       case 'text-box':
         return { ...DEFAULT_TEXTBOX_SETTINGS };
-      case 'data-upload-validate':
+      case 'data-upload':
+        return createDefaultDataUploadSettings();
+      case 'data-validate':
         return createDefaultDataUploadSettings();
       case 'feature-overview':
         return { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
@@ -4005,7 +4056,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
     const card = arr.find(c => c.id === cardId);
     const atom = card?.atoms.find(a => a.id === atomId);
-    if (atom?.atomId === 'data-upload-validate') {
+    if (atom?.atomId === 'data-validate') {
       const vid = (atom.settings as DataUploadSettings)?.validatorId;
       if (vid) {
         fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
@@ -4197,7 +4248,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       card.atoms.forEach(atom => {
         if (atom.atomId === 'text-box') {
           fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
-        } else if (atom.atomId === 'data-upload-validate') {
+        } else if (atom.atomId === 'data-upload') {
+          // TODO: Add cleanup logic for data-upload atoms if needed
+        } else if (atom.atomId === 'data-validate') {
           const vid = (atom.settings as DataUploadSettings)?.validatorId;
           if (vid) {
             fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
@@ -4435,7 +4488,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         card.atoms.forEach(atom => {
           if (atom.atomId === 'text-box') {
             fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
-          } else if (atom.atomId === 'data-upload-validate') {
+          } else if (atom.atomId === 'data-upload') {
+            // TODO: Add cleanup logic for data-upload atoms if needed
+          } else if (atom.atomId === 'data-validate') {
             const vid = (atom.settings as DataUploadSettings)?.validatorId;
             if (vid) {
               fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
@@ -5165,8 +5220,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
   // Expose sync function to parent component via ref
   React.useImperativeHandle(ref, () => ({
-    syncWorkflowCollection: syncWorkflowCollectionOnLaboratorySave
-  }), [pendingChanges, layoutCards]);
+    syncWorkflowCollection: syncWorkflowCollectionOnLaboratorySave,
+    addNewCardWithAtom: addNewCardWithAtom
+  }), [pendingChanges, layoutCards, addNewCardWithAtom]);
 
   if (isCanvasLoading) {
     return (
@@ -5491,8 +5547,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                 }`}
                                             >
                                               {card.atoms.map(atom => (
+                                                <React.Fragment key={atom.id}>
                                                 <AtomBox
-                                                  key={atom.id}
                                                   className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                                   onClick={(e) => handleAtomClick(e, atom.id)}
                                                 >
@@ -5536,8 +5592,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
                                                   {atom.atomId === 'text-box' ? (
                                                     <TextBoxEditor textId={atom.id} />
-                                                  ) : atom.atomId === 'data-upload-validate' ? (
-                                                    <DataUploadValidateAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'data-upload' ? (
+                                                    <DataUploadAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'data-validate' ? (
+                                                    <DataValidateAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'feature-overview' ? (
                                                     <FeatureOverviewAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'explore' ? (
@@ -5556,8 +5614,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     <ColumnClassifierAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'dataframe-operations' ? (
                                                     <DataFrameOperationsAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'table' ? (
-                                      <TableAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'table' ? (
+                                                    <TableAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'create-column' ? (
                                                     <CreateColumnAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'groupby-wtg-avg' ? (
@@ -5582,6 +5640,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     <ClusteringAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'scenario-planner' ? (
                                                     <ScenarioPlannerAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'kpi-dashboard' ? (
+                                                    <KPIDashboardAtom atomId={atom.id} />
                                                   ) : (
                                                     <div>
                                                       <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -5590,6 +5650,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     </div>
                                                   )}
                                                 </AtomBox>
+                                                
+                                                {/* Inline Guided Flow - Renders below atom when active */}
+                                                {renderInlineGuidedFlow(atom)}
+                                              </React.Fragment>
                                               ))}
                                             </div>
                                           )}
@@ -5796,8 +5860,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 }`}
                             >
                               {card.atoms.map((atom) => (
+                                <React.Fragment key={atom.id}>
                                 <AtomBox
-                                  key={atom.id}
                                   className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                   onClick={(e) => handleAtomClick(e, atom.id)}
                                 >
@@ -5845,8 +5909,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
                                   {atom.atomId === 'text-box' ? (
                                     <TextBoxEditor textId={atom.id} />
-                                  ) : atom.atomId === 'data-upload-validate' ? (
-                                    <DataUploadValidateAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'data-upload' ? (
+                                    <DataUploadAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'data-validate' ? (
+                                    <DataValidateAtom atomId={atom.id} />
                                   ) : atom.atomId === 'feature-overview' ? (
                                     <FeatureOverviewAtom atomId={atom.id} />
                                   ) : atom.atomId === 'clustering' ? (
@@ -5877,6 +5943,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                     <BuildModelFeatureBasedAtom atomId={atom.id} />
                                   ) : atom.atomId === 'scenario-planner' ? (
                                     <ScenarioPlannerAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'kpi-dashboard' ? (
+                                    <KPIDashboardAtom atomId={atom.id} />
                                   ) : atom.atomId === 'select-models-feature' ? (
                                     <SelectModelsFeatureAtom atomId={atom.id} />
                                   ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -5899,6 +5967,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                     </div>
                                   )}
                                 </AtomBox>
+                                {/* Inline Guided Flow - Renders below atom when active */}
+                                {renderInlineGuidedFlow(atom)}
+                              </React.Fragment>
                               ))}
                             </div>
                           )}
@@ -6023,8 +6094,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     ) : (
                       <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                         {card.atoms.map((atom) => (
+                          <React.Fragment key={`${atom.id}-expanded`}>
                           <AtomBox
-                            key={`${atom.id}-expanded`}
                             className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                           >
                             {/* Atom Header */}
@@ -6033,7 +6104,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                                 <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
                               </div>
-                            {/* <button
+                              {/* <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleDeleteAtomClick(card.id, atom.id, atom.title || '');
@@ -6048,8 +6119,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                             <div className="w-full flex-1 overflow-visible">
                               {atom.atomId === 'text-box' ? (
                                 <TextBoxEditor textId={atom.id} />
-                              ) : atom.atomId === 'data-upload-validate' ? (
-                                <DataUploadValidateAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-upload' ? (
+                                <DataUploadAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-validate' ? (
+                                <DataValidateAtom atomId={atom.id} />
                               ) : atom.atomId === 'feature-overview' ? (
                                 <FeatureOverviewAtom atomId={atom.id} />
                               ) : atom.atomId === 'clustering' ? (
@@ -6080,6 +6153,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <BuildModelFeatureBasedAtom atomId={atom.id} />
                               ) : atom.atomId === 'scenario-planner' ? (
                                 <ScenarioPlannerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'kpi-dashboard' ? (
+                                <KPIDashboardAtom atomId={atom.id} />
                               ) : atom.atomId === 'select-models-feature' ? (
                                 <SelectModelsFeatureAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -6105,6 +6180,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               )}
                             </div>
                           </AtomBox>
+                          {/* Inline Guided Flow - Renders below atom when active */}
+                          {renderInlineGuidedFlow(atom)}
+                        </React.Fragment>
                         ))}
                       </div>
                     );
@@ -6312,8 +6390,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                             }`}
                         >
                           {card.atoms.map((atom) => (
+                            <React.Fragment key={atom.id}>
                             <AtomBox
-                              key={atom.id}
                               className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                               onClick={(e) => handleAtomClick(e, atom.id)}
                             >
@@ -6363,8 +6441,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               {/* Atom Content */}
                               {atom.atomId === 'text-box' ? (
                                 <TextBoxEditor textId={atom.id} />
-                              ) : atom.atomId === 'data-upload-validate' ? (
-                                <DataUploadValidateAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-upload' ? (
+                                <DataUploadAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-validate' ? (
+                                <DataValidateAtom atomId={atom.id} />
                               ) : atom.atomId === 'feature-overview' ? (
                                 <FeatureOverviewAtom atomId={atom.id} />
                               ) : atom.atomId === 'clustering' ? (
@@ -6395,6 +6475,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <BuildModelFeatureBasedAtom atomId={atom.id} />
                               ) : atom.atomId === 'scenario-planner' ? (
                                 <ScenarioPlannerAtom atomId={atom.id} />
+                      ) : atom.atomId === 'kpi-dashboard' ? (
+                        <KPIDashboardAtom atomId={atom.id} />
                               ) : atom.atomId === 'select-models-feature' ? (
                                 <SelectModelsFeatureAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -6419,6 +6501,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 </div>
                               )}
                             </AtomBox>
+                    {/* Inline Guided Flow - Renders below atom when active */}
+                    {renderInlineGuidedFlow(atom)}
+                  </React.Fragment>
                           ))}
                         </div>
                       )}
@@ -6531,8 +6616,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     ) : (
                       <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                         {card.atoms.map((atom) => (
+                          <React.Fragment key={`${atom.id}-expanded`}>
                           <AtomBox
-                            key={`${atom.id}-expanded`}
                             className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                           >
                             {/* Atom Header */}
@@ -6556,8 +6641,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                             <div className="w-full flex-1 overflow-visible">
                               {atom.atomId === 'text-box' ? (
                                 <TextBoxEditor textId={atom.id} />
-                              ) : atom.atomId === 'data-upload-validate' ? (
-                                <DataUploadValidateAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-upload' ? (
+                                <DataUploadAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-validate' ? (
+                                <DataValidateAtom atomId={atom.id} />
                               ) : atom.atomId === 'feature-overview' ? (
                                 <FeatureOverviewAtom atomId={atom.id} />
                               ) : atom.atomId === 'clustering' ? (
@@ -6588,6 +6675,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <BuildModelFeatureBasedAtom atomId={atom.id} />
                               ) : atom.atomId === 'scenario-planner' ? (
                                 <ScenarioPlannerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'kpi-dashboard' ? (
+                                <KPIDashboardAtom atomId={atom.id} />
                               ) : atom.atomId === 'select-models-feature' ? (
                                 <SelectModelsFeatureAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -6596,6 +6685,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <ScopeSelectorAtom atomId={atom.id} />
                               ) : atom.atomId === 'correlation' ? (
                                 <CorrelationAtom atomId={atom.id} />
+                              ) : atom.atomId === 'auto-regressive-models' ? (
+                                <AutoRegressiveModelsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
@@ -6607,6 +6702,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               )}
                             </div>
                           </AtomBox>
+                          {/* Inline Guided Flow - Renders below atom when active */}
+                          {renderInlineGuidedFlow(atom)}
+                        </React.Fragment>
                         ))}
                       </div>
                     );

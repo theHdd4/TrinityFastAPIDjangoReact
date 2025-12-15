@@ -61,7 +61,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
   onSave,
   onShare,
   showFloatingNavigationList = true,
-  setShowFloatingNavigationList
+  setShowFloatingNavigationList,
 }) => {
   const [internalActive, setInternalActive] = useState<
     'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null

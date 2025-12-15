@@ -110,8 +110,8 @@ async def load_table(request: TableLoadRequest):
         raise HTTPException(status_code=400, detail=error_msg)
     
     try:
-        # Load DataFrame from MinIO (returns tuple with styles)
-        df, conditional_format_styles = load_table_from_minio(object_name)
+        # Load DataFrame from MinIO (returns tuple with styles and metadata)
+        df, conditional_format_styles, table_metadata = load_table_from_minio(object_name)
         
         # Create session
         table_id = str(uuid.uuid4())
@@ -122,7 +122,7 @@ async def load_table(request: TableLoadRequest):
         atom_id = request.atom_id or atom_id
         project_id = request.project_id or project_id
         
-        # Save session metadata to MongoDB
+        # Save session metadata to MongoDB (include table_metadata if available)
         metadata = {
             "row_count": df.height,
             "column_count": df.width,
@@ -133,12 +133,15 @@ async def load_table(request: TableLoadRequest):
             project_id=project_id,
             object_name=object_name,
             has_unsaved_changes=False,
-            metadata=metadata
+            metadata=metadata,
+            table_metadata=table_metadata
         )
         
         logger.info(f"✅ [TABLE-LOAD] Session created: {table_id}, shape: {df.shape}")
         if conditional_format_styles:
             logger.info(f"🎨 [TABLE-LOAD] Loaded conditional formatting styles for {len(conditional_format_styles)} rows")
+        if table_metadata:
+            logger.info(f"📋 [TABLE-LOAD] Loaded table metadata (formatting, design, layout)")
         
         # Convert to response format
         response = dataframe_to_response(
@@ -147,8 +150,10 @@ async def load_table(request: TableLoadRequest):
             object_name=object_name
         )
         
-        # Add conditional formatting styles to response
+        # Add conditional formatting styles and metadata to response
         response['conditional_format_styles'] = conditional_format_styles
+        if table_metadata:
+            response['metadata'] = table_metadata
         
         return TableResponse(**response)
         
@@ -199,20 +204,24 @@ async def update_table(request: TableUpdateRequest):
         metadata = await get_session_metadata(request.table_id)
         object_name = metadata.get("object_name") if metadata else ""
         
-        # Apply settings (filters, sorting, column selection)
+        # Apply settings (filters, sorting, column selection) for response only
+        # NOTE: Do NOT update session with filtered data - session should always contain
+        # original unfiltered data. Filters are view operations, not data changes.
         processed_df = apply_table_settings(
             df=df,
             settings=request.settings.dict()
         )
         
-        # Update session with processed DataFrame
-        SESSIONS[request.table_id] = processed_df
+        # ❌ REMOVED: Don't update session with filtered data
+        # Session should remain as original unfiltered data
+        # Filters are applied only when generating response, not stored in session
+        # This ensures filter options always show all unique values from entire dataset
         
-        # Queue draft save (debounced)
+        # Queue draft save (debounced) - save original data, not filtered
         if object_name:
             await queue_draft_save(
                 table_id=request.table_id,
-                df=processed_df,
+                df=df,  # Save original data, not filtered
                 atom_id=atom_id,
                 project_id=project_id,
                 object_name=object_name
@@ -278,7 +287,7 @@ async def restore_session(request: RestoreSessionRequest):
         if has_unsaved_changes and draft_object_name:
             # Load draft from MinIO
             try:
-                df, _ = load_table_from_minio(draft_object_name)
+                df, _, draft_table_metadata = load_table_from_minio(draft_object_name)
                 
                 # Restore session
                 SESSIONS[request.table_id] = df
@@ -295,6 +304,12 @@ async def restore_session(request: RestoreSessionRequest):
                     table_id=request.table_id,
                     object_name=metadata.get("object_name")
                 )
+                
+                # Include table metadata if available (from draft or MongoDB)
+                if draft_table_metadata:
+                    response_data['metadata'] = draft_table_metadata
+                elif metadata.get("table_metadata"):
+                    response_data['metadata'] = metadata.get("table_metadata")
                 
                 logger.info(f"✅ [RESTORE] Restored session {request.table_id} from draft ({len(changes)} unsaved changes)")
                 
@@ -314,7 +329,7 @@ async def restore_session(request: RestoreSessionRequest):
             object_name = metadata.get("object_name")
             if object_name:
                 try:
-                    df, _ = load_table_from_minio(object_name)
+                    df, _, table_metadata_from_file = load_table_from_minio(object_name)
                     SESSIONS[request.table_id] = df
                     
                     await update_session_access_time(request.table_id)
@@ -324,6 +339,12 @@ async def restore_session(request: RestoreSessionRequest):
                         table_id=request.table_id,
                         object_name=object_name
                     )
+                    
+                    # Include table metadata if available (from file or MongoDB)
+                    if table_metadata_from_file:
+                        response_data['metadata'] = table_metadata_from_file
+                    elif metadata.get("table_metadata"):
+                        response_data['metadata'] = metadata.get("table_metadata")
                     
                     logger.info(f"✅ [RESTORE] Restored session {request.table_id} from original file")
                     
@@ -510,66 +531,45 @@ async def save_table(request: TableSaveRequest):
                 logger.warning(f"⚠️ [TABLE-SAVE] Failed to evaluate conditional formatting: {cf_err}")
                 # Continue without styles if evaluation fails
         
-        # Write DataFrame to Arrow format with optional metadata
+        # Prepare table metadata from request
+        table_metadata_dict = None
+        if request.metadata:
+            # Convert Pydantic model to dict
+            table_metadata_dict = request.metadata.dict(exclude_none=True)
+            logger.info(f"📋 [TABLE-SAVE] Saving table metadata (formatting, design, layout)")
+        
+        # Save table to MinIO with metadata using service function
         logger.info(f"🔄 [TABLE-SAVE] Writing DataFrame to Arrow format...")
         logger.info(f"📊 [TABLE-SAVE] DataFrame shape: {df.shape}, columns: {df.columns}")
         
         try:
+            # Use save_table_to_minio service function which handles metadata
+            import io
             import pyarrow as pa
             import pyarrow.ipc as ipc
-            import json
             
-            # Convert Polars DataFrame to PyArrow Table
-            table = df.to_arrow()
+            # Save using service function (handles metadata internally)
+            saved_object_name = save_table_to_minio(
+                df=df,
+                object_name=object_name,
+                conditional_format_styles=conditional_format_styles,
+                table_metadata=table_metadata_dict
+            )
             
-            # Add conditional formatting styles to metadata if available
-            if conditional_format_styles:
-                try:
-                    # Convert styles dict to JSON string
-                    styles_json = json.dumps(conditional_format_styles)
-                    
-                    # Get existing metadata (if any)
-                    metadata = table.schema.metadata or {}
-                    
-                    # Add conditional formatting styles to metadata
-                    metadata[b'conditional_formatting'] = styles_json.encode('utf-8')
-                    
-                    # Recreate table with new metadata
-                    table = table.replace_schema_metadata(metadata)
-                    
-                    logger.info(f"🎨 [TABLE-SAVE] Added conditional formatting styles to metadata ({len(styles_json)} bytes)")
-                except Exception as meta_err:
-                    logger.warning(f"⚠️ [TABLE-SAVE] Failed to add conditional formatting metadata: {meta_err}")
+            # Download saved file for Redis cache
+            from app.DataStorageRetrieval.arrow_client import download_table_bytes
+            arrow_bytes = download_table_bytes(saved_object_name)
             
-            # Write Arrow file with metadata
-            arrow_buffer = pa.BufferOutputStream()
-            with ipc.new_file(arrow_buffer, table.schema) as writer:
-                writer.write_table(table)
-            arrow_bytes = arrow_buffer.getvalue().to_pybytes()
+            # Cache in Redis (like dataframe-operations)
+            try:
+                redis_client.setex(saved_object_name, 3600, arrow_bytes)
+                logger.info(f"💾 [TABLE-SAVE] Cached in Redis: {saved_object_name}")
+            except Exception as redis_err:
+                logger.warning(f"⚠️ [TABLE-SAVE] Redis cache failed (non-critical): {redis_err}")
             
-            logger.info(f"✅ [TABLE-SAVE] Arrow write successful")
-            logger.info(f"📦 [TABLE-SAVE] Arrow buffer size: {len(arrow_bytes)} bytes")
-        except Exception as write_err:
-            logger.error(f"❌ [TABLE-SAVE] Arrow write failed: {write_err}")
-            raise Exception(f"Failed to write DataFrame to Arrow format: {write_err}") from write_err
-        
-        # Upload to MinIO
-        logger.info(f"⬆️ [TABLE-SAVE] Uploading to MinIO...")
-        minio_client.put_object(
-            MINIO_BUCKET,
-            object_name,
-            data=io.BytesIO(arrow_bytes),
-            length=len(arrow_bytes),
-            content_type="application/octet-stream",
-        )
-        logger.info(f"✅ [TABLE-SAVE] Upload successful: {object_name}")
-        
-        # Cache in Redis (like dataframe-operations)
-        try:
-            redis_client.setex(object_name, 3600, arrow_bytes)
-            logger.info(f"💾 [TABLE-SAVE] Cached in Redis: {object_name}")
-        except Exception as redis_err:
-            logger.warning(f"⚠️ [TABLE-SAVE] Redis cache failed (non-critical): {redis_err}")
+        except Exception as save_err:
+            logger.error(f"❌ [TABLE-SAVE] Failed to save table: {save_err}")
+            raise Exception(f"Failed to save table: {save_err}") from save_err
         
         # Clear draft and update metadata
         project_id, atom_id = _get_project_context()
@@ -579,7 +579,7 @@ async def save_table(request: TableSaveRequest):
         # Clear draft (if exists)
         await clear_draft(request.table_id)
         
-        # Update metadata with new object_name
+        # Update metadata with new object_name and table_metadata
         metadata = {
             "row_count": df.height,
             "column_count": df.width,
@@ -590,7 +590,8 @@ async def save_table(request: TableSaveRequest):
             project_id=project_id,
             object_name=object_name,
             has_unsaved_changes=False,
-            metadata=metadata
+            metadata=metadata,
+            table_metadata=table_metadata_dict
         )
         
         return TableSaveResponse(

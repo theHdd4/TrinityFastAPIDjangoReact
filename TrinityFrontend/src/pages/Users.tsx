@@ -55,6 +55,7 @@ interface App {
   id: number;
   name: string;
   usecase_id?: number;
+  usecase_id?: number;
 }
 
 const Users = () => {
@@ -577,6 +578,7 @@ const Users = () => {
                   </label>
                   <div className="w-full max-h-[200px] overflow-y-auto border border-gray-200 rounded-md p-3 space-y-2 bg-white">
                     {apps
+                      .filter((a) => !a.usecase_id || tenantAppIds.includes(a.usecase_id))
                       .filter((a) => !a.usecase_id || tenantAppIds.includes(a.usecase_id))
                       .map((a) => (
                         <label
