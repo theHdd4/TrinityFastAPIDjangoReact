@@ -14,7 +14,7 @@ const ChartMaker: React.FC<ChartMakerProps> = ({ metadata, variant = 'full' }) =
   // If multiple charts, render each separately with numbering
   if (hasMultipleCharts) {
     return (
-      <div className="flex flex-col gap-6 sm:gap-8">
+      <div className="flex flex-col">
         {chartsArray.map((chart: any, index: number) => {
           // Create metadata for this specific chart
           const chartMetadata = {
@@ -62,7 +62,18 @@ const ChartMaker: React.FC<ChartMakerProps> = ({ metadata, variant = 'full' }) =
             variant: (variant === 'compact' || variant === 'full') ? variant : 'full',
           };
 
-          return <ChartMakerChart key={chart.id || index} {...componentProps} />;
+          const hasNote = typeof chart.note === 'string' && chart.note.trim().length > 0;
+          const isLastChart = index === chartsArray.length - 1;
+
+          return (
+            <div key={chart.id || index}>
+              <ChartMakerChart {...componentProps} />
+              {/* Separator line between chart+note groups (not after the last one) */}
+              {!isLastChart && (
+                <div className="mt-6 sm:mt-8 pt-6 sm:pt-8 border-t border-white/10" />
+              )}
+            </div>
+          );
         })}
       </div>
     );

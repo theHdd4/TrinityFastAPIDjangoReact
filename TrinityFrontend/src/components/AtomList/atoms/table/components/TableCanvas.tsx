@@ -20,11 +20,20 @@ import {
   updateTable
 } from '../services/tableApi';
 import { toast } from '@/components/ui/use-toast';
-import { ArrowUp, ArrowDown, Info, X, Filter } from 'lucide-react';
+import { ArrowUp, ArrowDown, Info, X, Filter, Plus } from 'lucide-react';
 import CellRenderer from './CellRenderer';
-import { TableRichTextToolbar } from './rich-text';
-import type { TableCellFormatting } from './rich-text/types';
+import { GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import TableTemplate from '@/templates/tables/table';
+import { TextBoxToolbar } from '@/components/LaboratoryMode/components/CanvasArea/text-box/TextBoxToolbar';
+import type { TextAlignOption, TextStylePreset } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
 import { htmlMatchesValue, getPlainTextFromHtml } from './rich-text/utils/formattingUtils';
+import type { TableCellFormatting } from './rich-text/types';
 import NumberFilterComponent from './filters/NumberFilterComponent';
 import TextFilterComponent from './filters/TextFilterComponent';
 
@@ -69,6 +78,13 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       clearEditingState();
     }
   }, [clearEditingState, settings.sortConfig, settings.filters, settings.currentPage]);
+
+  // Reset toolbar mounted state when editing stops
+  useEffect(() => {
+    if (!editingCell) {
+      setToolbarMounted(false);
+    }
+  }, [editingCell]);
   
   // Rich text formatting state for current editing cell
   const [cellFormatting, setCellFormatting] = useState<TableCellFormatting>({
@@ -86,6 +102,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   // Toolbar visibility
   const [showToolbar, setShowToolbar] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const [toolbarMounted, setToolbarMounted] = useState(false);
 
   // Header editing state (for inline rename)
   const [editingHeader, setEditingHeader] = useState<string | null>(null);
@@ -135,6 +152,17 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     startY: number;
     startHeight: number;
   } | null>(null);
+
+  // Cardinality View state
+  const [cardinalityData, setCardinalityData] = useState<any[]>([]);
+  const [cardinalityLoading, setCardinalityLoading] = useState(false);
+  const [cardinalityError, setCardinalityError] = useState<string | null>(null);
+  
+  // Get cardinality view state from settings
+  const showCardinalityView = settings.showCardinalityView || false;
+  const sortColumn = settings.cardinalitySortColumn || 'unique_count';
+  const sortDirection = settings.cardinalitySortDirection || 'desc';
+  const columnFilters = settings.cardinalityColumnFilters || {};
 
   // Get layout and design settings with defaults
   const layout = settings.layout || {
@@ -1164,13 +1192,28 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     editingCellValueRef.current = valueString;
     editingCellHtmlRef.current = cellFormat?.html || valueString;
     
-    // Load formatting for this cell
+    // Load formatting for this cell (from saved settings or defaults)
     const formatting = getCellFormatting(actualRowIdx, column);
-    setCellFormatting(formatting);
+    // CRITICAL: Always set formatting state, even if empty (ensures toolbar works on first edit)
+    // If cell has saved formatting, use it; otherwise use defaults
+    const formattingToUse = formatting && Object.keys(formatting).length > 0 
+      ? formatting 
+      : {
+          fontFamily: 'Arial',
+          fontSize: 12,
+          bold: false,
+          italic: false,
+          underline: false,
+          strikethrough: false,
+          textColor: '#000000',
+          backgroundColor: 'transparent',
+          textAlign: 'left',
+        };
+    setCellFormatting(formattingToUse);
     
     // If row height not set, calculate from font size
     if (!settings.rowHeights?.[actualRowIdx]) {
-      const calculatedHeight = calculateRowHeightFromFontSize(formatting.fontSize);
+      const calculatedHeight = calculateRowHeightFromFontSize(formattingToUse.fontSize);
       const currentRowHeights = settings.rowHeights || {};
       onSettingsChange({
         rowHeights: {
@@ -1204,6 +1247,198 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       return reloadedData.table_id;
     } catch (error) {
       throw error;
+    }
+  };
+
+  // Fetch cardinality data
+  const fetchCardinalityData = useCallback(async () => {
+    if (!settings.sourceFile) return;
+    
+    setCardinalityLoading(true);
+    setCardinalityError(null);
+    
+    try {
+      // Construct full path if needed
+      let fullDataSource = settings.sourceFile;
+      
+      // Get environment context to construct full path
+      const envStr = localStorage.getItem('env');
+      if (envStr && settings.sourceFile && !settings.sourceFile.includes('/')) {
+        try {
+          const env = JSON.parse(envStr);
+          const clientName = env.CLIENT_NAME || '';
+          const appName = env.APP_NAME || '';
+          const projectName = env.PROJECT_NAME || '';
+          
+          if (clientName && appName && projectName) {
+            fullDataSource = `${clientName}/${appName}/${projectName}/${settings.sourceFile}`;
+          }
+        } catch (e) {
+          console.warn('Failed to construct full path for cardinality:', e);
+        }
+      }
+      
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(fullDataSource)}`;
+      const res = await fetch(url);
+      let payload: any = {};
+      try {
+        payload = await res.json();
+      } catch {}
+      
+      if (!res.ok) {
+        const detail = typeof payload?.detail === 'string' ? payload.detail : res.statusText;
+        throw new Error(detail || 'Failed to fetch cardinality data');
+      }
+      
+      const data = (await resolveTaskResponse(payload)) || {};
+      
+      if (data.status === 'SUCCESS' && data.cardinality) {
+        setCardinalityData(data.cardinality);
+      } else {
+        setCardinalityError(data.error || 'Failed to fetch cardinality data');
+      }
+    } catch (e: any) {
+      setCardinalityError(e.message || 'Error fetching cardinality data');
+    } finally {
+      setCardinalityLoading(false);
+    }
+  }, [settings.sourceFile]);
+
+  // Fetch cardinality data when sourceFile changes or showCardinalityView is enabled
+  useEffect(() => {
+    if (showCardinalityView && settings.sourceFile) {
+      fetchCardinalityData();
+    }
+  }, [settings.sourceFile, showCardinalityView, fetchCardinalityData]);
+
+  // Cardinality filtering and sorting logic
+  const displayedCardinality = useMemo(() => {
+    let filtered = Array.isArray(cardinalityData) ? cardinalityData : [];
+    
+    // Filter out columns with unique_count = 0
+    filtered = filtered.filter(c => c.unique_count > 0);
+    
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, filterValues]) => {
+      if (filterValues && filterValues.length > 0) {
+        filtered = filtered.filter(row => {
+          const cellValue = String(row[column.toLowerCase()] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+    
+    // Apply sorting
+    if (sortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[sortColumn.toLowerCase()];
+        const bVal = b[sortColumn.toLowerCase()];
+        if (aVal === bVal) return 0;
+        let comparison = 0;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          comparison = aVal - bVal;
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
+        }
+        return sortDirection === 'desc' ? -comparison : comparison;
+      });
+    }
+    
+    return filtered;
+  }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
+
+  const getUniqueColumnValues = (column: string): string[] => {
+    if (!Array.isArray(cardinalityData) || cardinalityData.length === 0) return [];
+    
+    let filteredData = Array.isArray(cardinalityData) ? cardinalityData : [];
+    filteredData = filteredData.filter(c => c.unique_count > 0);
+    
+    // Apply all other column filters except the current one
+    Object.entries(columnFilters).forEach(([col, filterValues]) => {
+      if (col !== column && filterValues && filterValues.length > 0) {
+        filteredData = filteredData.filter(row => {
+          const cellValue = String(row[col.toLowerCase()] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+    
+    const values = filteredData.map(row => String(row[column.toLowerCase()] || '')).filter(Boolean);
+    return Array.from(new Set(values)).sort();
+  };
+
+  const handleCardinalitySort = (column: string, direction?: 'asc' | 'desc') => {
+    if (sortColumn === column) {
+      if (sortDirection === 'asc') {
+        onSettingsChange({ cardinalitySortDirection: 'desc' });
+      } else if (sortDirection === 'desc') {
+        onSettingsChange({ cardinalitySortColumn: '', cardinalitySortDirection: 'asc' });
+      }
+    } else {
+      onSettingsChange({ cardinalitySortColumn: column, cardinalitySortDirection: direction || 'asc' });
+    }
+  };
+
+  const handleCardinalityColumnFilter = (column: string, values: string[]) => {
+    onSettingsChange({
+      cardinalityColumnFilters: {
+        ...columnFilters,
+        [column]: values
+      }
+    });
+  };
+
+  const clearCardinalityColumnFilter = (column: string) => {
+    const newFilters = { ...columnFilters };
+    delete newFilters[column];
+    onSettingsChange({ cardinalityColumnFilters: newFilters });
+  };
+
+  const FilterMenu = ({ column }: { column: string }) => {
+    const uniqueValues = getUniqueColumnValues(column);
+    const current = columnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+    
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+    
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+    
+    const apply = () => handleCardinalityColumnFilter(column, temp);
+    
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Handle opening the source file in a new tab
+  const handleViewDataClick = () => {
+    if (settings.sourceFile) {
+      window.open(`/dataframe?name=${encodeURIComponent(settings.sourceFile)}`, '_blank');
     }
   };
 
@@ -1359,26 +1594,28 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       htmlToSave = valueToSave;
     }
     
-    // Save formatting to settings
+    // CRITICAL: Save formatting to settings - use current cellFormatting state (includes all real-time toolbar changes)
     const rowKey = String(globalRowIdx);
     const currentFormatting = settings.cellFormatting || {};
     const rowFormatting = currentFormatting[rowKey] || {};
     
+    // Use cellFormatting state which contains all real-time toolbar updates
+    // This ensures all formatting changes made via toolbar are persisted
     const updatedFormatting = {
       ...currentFormatting,
       [rowKey]: {
         ...rowFormatting,
         [column]: {
           html: htmlToSave,
-          fontFamily: cellFormatting.fontFamily,
-          fontSize: cellFormatting.fontSize,
-          bold: cellFormatting.bold,
-          italic: cellFormatting.italic,
-          underline: cellFormatting.underline,
-          strikethrough: cellFormatting.strikethrough,
-          textColor: cellFormatting.textColor,
-          backgroundColor: cellFormatting.backgroundColor,
-          // textAlign removed - not supported in table cells
+          fontFamily: cellFormatting.fontFamily || 'Arial',
+          fontSize: cellFormatting.fontSize || 12,
+          bold: cellFormatting.bold || false,
+          italic: cellFormatting.italic || false,
+          underline: cellFormatting.underline || false,
+          strikethrough: cellFormatting.strikethrough || false,
+          textColor: cellFormatting.textColor || '#000000',
+          backgroundColor: cellFormatting.backgroundColor || 'transparent',
+          textAlign: cellFormatting.textAlign || 'left', // Include textAlign for persistence
         },
       },
     };
@@ -1434,10 +1671,103 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     }
   };
 
-  // Toolbar positioning - position near editing cell
+  // Toolbar positioning - position near editing cell with boundary detection
   const [toolbarPosition, setToolbarPosition] = useState<{ top: number; left: number } | null>(null);
   const [toolbarCellRect, setToolbarCellRect] = useState<{ top: number; left: number; width: number } | null>(null);
   
+  // Function to calculate toolbar position with boundary detection
+  const calculateToolbarPosition = useCallback(() => {
+    if (!editingCell || !showToolbar) {
+      return null;
+    }
+
+    // Find the editor element directly (more reliable than cell element)
+    const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+    
+    // Fallback: Try to find the cell element if editor not found
+    const cellElement = editorElement?.closest('td') || 
+      document.querySelector(
+        `[data-table-cell-row="${editingCell.row}"][data-table-cell-col="${editingCell.col}"]`
+      ) as HTMLElement;
+
+    if (!cellElement && !editorElement) {
+      return null;
+    }
+
+    try {
+      // Use editor element if available, otherwise use cell element
+      const targetElement = editorElement || cellElement;
+      const rect = targetElement.getBoundingClientRect();
+      
+      // Get toolbar dimensions for boundary calculations
+      // Use actual dimensions if toolbar is rendered, otherwise use fallback
+      let toolbarWidth = 400; // Fallback width
+      let toolbarHeight = 50; // Fallback height
+      if (toolbarRef.current) {
+        try {
+          const toolbarRect = toolbarRef.current.getBoundingClientRect();
+          toolbarWidth = toolbarRect.width || 400;
+          toolbarHeight = toolbarRect.height || 50;
+        } catch (e) {
+          // Toolbar not fully rendered yet, use fallback
+        }
+      }
+      
+      // Viewport dimensions
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const padding = 10; // Minimum padding from screen edges
+      
+      // Calculate preferred position (above cell, centered)
+      let top = rect.top - toolbarHeight - 10; // 10px gap above cell
+      let left = rect.left + rect.width / 2; // Center horizontally
+      
+      // Boundary detection and adjustment
+      // Check if toolbar would go off top of screen
+      if (top < padding) {
+        // Position below cell instead
+        top = rect.bottom + 10;
+      }
+      
+      // Check if toolbar would go off bottom of screen
+      if (top + toolbarHeight > viewportHeight - padding) {
+        // Try to position above cell, but ensure it doesn't go off top
+        top = Math.max(padding, rect.top - toolbarHeight - 10);
+        // If still doesn't fit, position it at the top of viewport
+        if (top + toolbarHeight > viewportHeight - padding) {
+          top = padding;
+        }
+      }
+      
+      // Check if toolbar would go off left of screen
+      if (left - toolbarWidth / 2 < padding) {
+        left = padding + toolbarWidth / 2;
+      }
+      
+      // Check if toolbar would go off right of screen
+      if (left + toolbarWidth / 2 > viewportWidth - padding) {
+        left = viewportWidth - padding - toolbarWidth / 2;
+      }
+      
+      // Ensure left is never less than toolbarWidth/2
+      left = Math.max(toolbarWidth / 2, left);
+      
+      return {
+        top,
+        left,
+        cellRect: {
+          top: rect.top + window.scrollY,
+          left: rect.left + window.scrollX,
+          width: rect.width,
+        }
+      };
+    } catch (error) {
+      console.error('Error calculating toolbar position:', error);
+      return null;
+    }
+  }, [editingCell, showToolbar]);
+  
+  // Update toolbar position on mount, scroll, resize, and when editing cell changes
   useEffect(() => {
     if (!editingCell || !showToolbar) {
       setToolbarPosition(null);
@@ -1445,66 +1775,93 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       return;
     }
 
-    // Use requestAnimationFrame to ensure DOM is updated
-    requestAnimationFrame(() => {
-      // Double-check editingCell still exists (might have been cleared)
-      if (!editingCell) {
-        setToolbarPosition(null);
-        setToolbarCellRect(null);
-        return;
-      }
-
-      // Find the cell element
-      const cellElement = document.querySelector(
-        `[data-table-cell-row="${editingCell.row}"][data-table-cell-col="${editingCell.col}"]`
-      ) as HTMLElement;
-
-      if (cellElement) {
-        try {
-          const rect = cellElement.getBoundingClientRect();
-          setToolbarPosition({
-            top: Math.max(10, rect.top - 60), // Position above the cell, but not off-screen
-            left: rect.left + rect.width / 2, // Center horizontally
-          });
-          setToolbarCellRect({
-            top: rect.top + window.scrollY,
-            left: rect.left + window.scrollX,
-            width: rect.width,
-          });
-        } catch (error) {
+    // Initial position calculation
+    const updatePosition = () => {
+      requestAnimationFrame(() => {
+        if (!editingCell || !showToolbar) {
           setToolbarPosition(null);
           setToolbarCellRect(null);
+          return;
         }
-      } else {
-        // Cell element not found - might be scrolled out of view or re-rendered
-        // Try again after a short delay
-        setTimeout(() => {
-          if (editingCell && showToolbar) {
-            const retryElement = document.querySelector(
-              `[data-table-cell-row="${editingCell.row}"][data-table-cell-col="${editingCell.col}"]`
-            ) as HTMLElement;
-            if (retryElement) {
-              try {
-                const rect = retryElement.getBoundingClientRect();
-                setToolbarPosition({
-                  top: Math.max(10, rect.top - 60),
-                  left: rect.left + rect.width / 2,
-                });
-                setToolbarCellRect({
-                  top: rect.top + window.scrollY,
-                  left: rect.left + window.scrollX,
-                  width: rect.width,
-                });
-              } catch (error) {
-                setToolbarPosition(null);
-                setToolbarCellRect(null);
-              }
+
+        const position = calculateToolbarPosition();
+        if (position) {
+          setToolbarPosition({ top: position.top, left: position.left });
+          setToolbarCellRect(position.cellRect);
+        } else {
+          // Retry if element not found
+          let retryCount = 0;
+          const maxRetries = 5;
+          
+          const retryFind = () => {
+            if (retryCount >= maxRetries || !editingCell || !showToolbar) {
+              return;
             }
-          }
-        }, 100);
+            
+            retryCount++;
+            const position = calculateToolbarPosition();
+            if (position) {
+              setToolbarPosition({ top: position.top, left: position.left });
+              setToolbarCellRect(position.cellRect);
+            } else if (retryCount < maxRetries) {
+              setTimeout(retryFind, 100);
+            }
+          };
+          
+          setTimeout(retryFind, 100);
+        }
+      });
+    };
+
+    // Initial update with delay to ensure DOM is ready
+    const initialTimeout = setTimeout(() => {
+      updatePosition();
+    }, 0);
+
+    // Update position on scroll and resize for sticky behavior
+    window.addEventListener('scroll', updatePosition, true); // Use capture phase for all scroll events
+    window.addEventListener('resize', updatePosition);
+    
+    // Also listen to scroll events on the table container if it exists
+    const tableContainer = document.querySelector('.table-wrapper') || document.querySelector('[data-table-container]');
+    if (tableContainer) {
+      tableContainer.addEventListener('scroll', updatePosition, true);
+    }
+
+    return () => {
+      clearTimeout(initialTimeout);
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+      if (tableContainer) {
+        tableContainer.removeEventListener('scroll', updatePosition, true);
       }
-    });
-  }, [editingCell, showToolbar]);
+    };
+  }, [editingCell, showToolbar, calculateToolbarPosition]);
+
+  // Recalculate position once toolbar is actually rendered (when ref becomes available)
+  useEffect(() => {
+    if (!editingCell || !showToolbar || !toolbarMounted || !toolbarRef.current) {
+      return;
+    }
+
+    // Once toolbar is rendered, recalculate with actual dimensions
+    const recalculateWithActualDimensions = () => {
+      requestAnimationFrame(() => {
+        if (!editingCell || !showToolbar || !toolbarRef.current) {
+          return;
+        }
+
+        const position = calculateToolbarPosition();
+        if (position) {
+          setToolbarPosition({ top: position.top, left: position.left });
+        }
+      });
+    };
+
+    // Small delay to ensure toolbar is fully rendered
+    const timeout = setTimeout(recalculateWithActualDimensions, 50);
+    return () => clearTimeout(timeout);
+  }, [toolbarMounted, editingCell, showToolbar, calculateToolbarPosition]);
 
   // Note: Focus is handled in RichTextCellEditor component
 
@@ -1652,6 +2009,218 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
   return (
     <div className="h-full overflow-auto">
+      {/* Cardinality View */}
+      {showCardinalityView && settings.mode === 'load' && (cardinalityLoading ? (
+        <div className="p-4 text-blue-600">Loading cardinality data...</div>
+      ) : cardinalityError ? (
+        <div className="p-4 text-red-600">{cardinalityError}</div>
+      ) : cardinalityData && cardinalityData.length > 0 ? (
+        <div className="p-2">
+          <TableTemplate
+            key={`cardinality-view-${showCardinalityView}`}
+            headers={[
+              <ContextMenu key="Column">
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    Column
+                    {sortColumn === 'column' && (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleCardinalitySort('column', 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleCardinalitySort('column', 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <Filter className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <FilterMenu column="column" />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {columnFilters['column']?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearCardinalityColumnFilter('column')}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>,
+              <ContextMenu key="Data type">
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    Data type
+                    {sortColumn === 'data_type' && (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleCardinalitySort('data_type', 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleCardinalitySort('data_type', 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <Filter className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <FilterMenu column="data_type" />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {columnFilters['data_type']?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearCardinalityColumnFilter('data_type')}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>,
+              <ContextMenu key="Unique count">
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    Unique count
+                    {sortColumn === 'unique_count' && (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleCardinalitySort('unique_count', 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleCardinalitySort('unique_count', 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <Filter className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <FilterMenu column="unique_count" />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {columnFilters['unique_count']?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearCardinalityColumnFilter('unique_count')}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>,
+              "Sample values"
+            ]}
+            colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
+            bodyClassName="max-h-[350px] overflow-y-auto"
+            defaultMinimized={!showCardinalityView}
+            borderColor="border-teal-500"
+            customHeader={{
+              title: (
+                <span className="flex items-center gap-1">
+                  <span>Data Summary</span>
+                  <span className="text-slate-400">|</span>
+                  <span
+                    className="text-blue-500 cursor-pointer hover:text-blue-700 hover:underline"
+                    onClick={handleViewDataClick}
+                  >
+                    Data in detail
+                  </span>
+                </span>
+              ),
+              subtitle: undefined,
+              subtitleClickable: false,
+              onSubtitleClick: handleViewDataClick,
+              compactHeader: true
+            }}
+          >
+            {displayedCardinality.map((col, index) => (
+              <tr key={index} className="table-row">
+                <td className="table-cell">{col.column || col.Column || ''}</td>
+                <td className="table-cell">{col.data_type || col['Data type'] || ''}</td>
+                <td className="table-cell">{col.unique_count || col['Unique count'] || 0}</td>
+                <td className="table-cell">
+                  {col.unique_values ? (
+                    <div className="flex flex-wrap items-center gap-1">
+                      {Array.isArray(col.unique_values) ? (
+                        <>
+                          {col.unique_values.slice(0, 2).map((val: any, i: number) => (
+                            <Badge
+                              key={i}
+                              className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
+                            >
+                              {String(val)}
+                            </Badge>
+                          ))}
+                          {col.unique_values.length > 2 && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                                  <Plus className="w-3 h-3" />
+                                  {col.unique_values.length - 2}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                {col.unique_values
+                                  .slice(2)
+                                  .map(val => String(val))
+                                  .join(', ')}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </>
+                      ) : (
+                        <Badge className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50">
+                          {String(col.unique_values)}
+                        </Badge>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-gray-500 italic">No samples</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </TableTemplate>
+        </div>
+      ) : null)}
+      
       <div className="table-wrapper">
         <div className="table-overflow">
           <Table className="table-base">
@@ -1899,6 +2468,12 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                             <CellRenderer
                               value={isEditing ? editingCellValue : String(cellValue ?? '')}
                               html={(() => {
+                                // CRITICAL FIX: Don't pass HTML when editing - use plain text and CSS formatting
+                                // This prevents conflicts between HTML formatting tags and CSS styles
+                                if (isEditing) {
+                                  return undefined; // No HTML when editing - CSS handles formatting
+                                }
+                                
                                 const rowKey = String(actualRowIdx);
                                 const cellFormat = settings.cellFormatting?.[rowKey]?.[column];
                                 const storedHtml = cellFormat?.html;
@@ -1915,6 +2490,14 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                                 return storedHtml;
                               })()}
                               formatting={(() => {
+                                // CRITICAL FIX: Use cellFormatting state when editing for real-time updates
+                                // When not editing, use stored formatting from settings
+                                if (isEditing) {
+                                  // Use current cellFormatting state for real-time toolbar updates
+                                  return cellFormatting;
+                                }
+                                
+                                // When not editing, use stored formatting from settings
                                 const rowKey = String(actualRowIdx);
                                 const cellFormat = settings.cellFormatting?.[rowKey]?.[column];
                                 if (cellFormat) {
@@ -2041,11 +2624,6 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         </div>
       </div>
 
-      {/* Info footer */}
-      <div className="sticky bottom-0 px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
-        Showing {visibleRows.length} of {dataRowsToDisplay.length} rows • {visibleColumns.length} columns
-      </div>
-
       {/* Context Menu - Only show when layout.headerRow is true */}
       {/* When headerRow is false: No header row, first data row is just a regular editable row (no right-click menu) */}
       {/* When headerRow is true: Header row shown with right-click context menu, first data row remains a regular editable row */}
@@ -2158,7 +2736,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                     <div className="p-4 text-xs text-gray-500">Loading filter options...</div>
                   ) : (
                     <>
-                      {data.column_types[contextMenu.col] === 'number' ? (
+                      {['number', 'integer', 'float'].includes(data.column_types[contextMenu.col]) ? (
                         <NumberFilterComponent
                           column={contextMenu.col}
                           data={filterData && filterColumn === contextMenu.col ? filterData : data}
@@ -2397,15 +2975,177 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           portalTarget
         )}
 
-      {/* Rich Text Formatting Toolbar - Commented out */}
-      {false && showToolbar && editingCell && toolbarCellRect && portalTarget &&
+      {/* Rich Text Formatting Toolbar */}
+      {showToolbar && editingCell && portalTarget &&
         createPortal(
-          <TableRichTextToolbar
-            formatting={cellFormatting}
-            onFormattingChange={(fmt) => setCellFormatting(prev => ({ ...prev, ...fmt }))}
-            cellPosition={toolbarCellRect}
-            isVisible={true}
-          />,
+          <div
+            ref={(el) => {
+              toolbarRef.current = el;
+              if (el && !toolbarMounted) {
+                setToolbarMounted(true);
+              } else if (!el && toolbarMounted) {
+                setToolbarMounted(false);
+              }
+            }}
+            className="fixed z-[5000]"
+            style={{
+              top: toolbarPosition ? `${toolbarPosition.top}px` : '-9999px',
+              left: toolbarPosition ? `${toolbarPosition.left}px` : '-9999px',
+              transform: 'translateX(-50%)',
+              visibility: toolbarPosition ? 'visible' : 'hidden',
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <TextBoxToolbar
+              fontFamily={cellFormatting.fontFamily}
+              onFontFamilyChange={(font) => {
+                setCellFormatting(prev => ({ ...prev, fontFamily: font }));
+                // Ensure editor is focused for real-time update
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                }
+              }}
+              fontSize={cellFormatting.fontSize}
+              onIncreaseFontSize={() => {
+                const newSize = Math.min(cellFormatting.fontSize + 1, 72);
+                setCellFormatting(prev => ({ ...prev, fontSize: newSize }));
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                }
+              }}
+              onDecreaseFontSize={() => {
+                const newSize = Math.max(cellFormatting.fontSize - 1, 8);
+                setCellFormatting(prev => ({ ...prev, fontSize: newSize }));
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                }
+              }}
+              onApplyTextStyle={(preset: TextStylePreset) => {
+                setCellFormatting(prev => ({
+                  ...prev,
+                  fontSize: preset.fontSize,
+                  bold: preset.bold ?? false,
+                  italic: preset.italic ?? false,
+                  underline: preset.underline ?? false,
+                  strikethrough: preset.strikethrough ?? false,
+                }));
+                // Apply via execCommand for immediate visual feedback
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                  // Restore selection if lost
+                  const selection = window.getSelection();
+                  if (selection && selection.rangeCount === 0 && editorElement.textContent) {
+                    const range = document.createRange();
+                    range.selectNodeContents(editorElement);
+                    range.collapse(false);
+                    selection.addRange(range);
+                  }
+                  if (preset.bold) document.execCommand('bold', false);
+                  if (preset.italic) document.execCommand('italic', false);
+                  if (preset.underline) document.execCommand('underline', false);
+                  if (preset.strikethrough) document.execCommand('strikeThrough', false);
+                }
+              }}
+              bold={cellFormatting.bold}
+              italic={cellFormatting.italic}
+              underline={cellFormatting.underline}
+              strikethrough={cellFormatting.strikethrough}
+              onToggleBold={() => {
+                const newBold = !cellFormatting.bold;
+                setCellFormatting(prev => ({ ...prev, bold: newBold }));
+                // Apply via execCommand for immediate visual feedback
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                  // Restore selection if lost
+                  const selection = window.getSelection();
+                  if (selection && selection.rangeCount === 0 && editorElement.textContent) {
+                    const range = document.createRange();
+                    range.selectNodeContents(editorElement);
+                    range.collapse(false);
+                    selection.addRange(range);
+                  }
+                  document.execCommand('bold', false);
+                }
+              }}
+              onToggleItalic={() => {
+                const newItalic = !cellFormatting.italic;
+                setCellFormatting(prev => ({ ...prev, italic: newItalic }));
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                  const selection = window.getSelection();
+                  if (selection && selection.rangeCount === 0 && editorElement.textContent) {
+                    const range = document.createRange();
+                    range.selectNodeContents(editorElement);
+                    range.collapse(false);
+                    selection.addRange(range);
+                  }
+                  document.execCommand('italic', false);
+                }
+              }}
+              onToggleUnderline={() => {
+                const newUnderline = !cellFormatting.underline;
+                setCellFormatting(prev => ({ ...prev, underline: newUnderline }));
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                  const selection = window.getSelection();
+                  if (selection && selection.rangeCount === 0 && editorElement.textContent) {
+                    const range = document.createRange();
+                    range.selectNodeContents(editorElement);
+                    range.collapse(false);
+                    selection.addRange(range);
+                  }
+                  document.execCommand('underline', false);
+                }
+              }}
+              onToggleStrikethrough={() => {
+                const newStrikethrough = !cellFormatting.strikethrough;
+                setCellFormatting(prev => ({ ...prev, strikethrough: newStrikethrough }));
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                  const selection = window.getSelection();
+                  if (selection && selection.rangeCount === 0 && editorElement.textContent) {
+                    const range = document.createRange();
+                    range.selectNodeContents(editorElement);
+                    range.collapse(false);
+                    selection.addRange(range);
+                  }
+                  document.execCommand('strikeThrough', false);
+                }
+              }}
+              align={cellFormatting.textAlign as TextAlignOption}
+              onAlign={(align) => {
+                setCellFormatting(prev => ({ ...prev, textAlign: align }));
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                }
+              }}
+              color={cellFormatting.textColor}
+              onColorChange={(color) => {
+                setCellFormatting(prev => ({ ...prev, textColor: color }));
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                }
+              }}
+              backgroundColor={cellFormatting.backgroundColor}
+              onBackgroundColorChange={(color) => {
+                setCellFormatting(prev => ({ ...prev, backgroundColor: color }));
+                const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+                if (editorElement) {
+                  editorElement.focus();
+                }
+              }}
+            />
+          </div>,
           portalTarget
         )}
 

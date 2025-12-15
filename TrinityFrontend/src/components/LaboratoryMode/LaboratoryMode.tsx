@@ -623,8 +623,22 @@ const LaboratoryMode = () => {
 
   const handleAtomSelect = (atomId: string) => {
     if (!canEdit) return;
-    setSelectedAtomId(atomId);
-    setSelectedCardId(undefined);
+    // Treat empty string as undefined (for clearing selection)
+    const normalizedAtomId = atomId === '' ? undefined : atomId;
+    setSelectedAtomId(normalizedAtomId);
+    // If clearing atom selection, also clear card selection and context
+    if (!normalizedAtomId) {
+      setSelectedCardId(undefined);
+      // Clear context when user explicitly clears selection (clicked empty space)
+      const store = useLaboratoryStore.getState();
+      if (store.metricsInputs.contextCardId || store.metricsInputs.contextAtomId) {
+        console.log('📋 [LaboratoryMode] Clearing context (user cleared selection via empty space click)');
+        store.updateMetricsInputs({
+          contextCardId: undefined,
+          contextAtomId: undefined,
+        });
+      }
+    }
   };
 
   const handleCardSelect = (cardId: string, exhibited: boolean) => {
