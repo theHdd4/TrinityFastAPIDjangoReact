@@ -136,23 +136,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   // 🔧 SIMPLIFIED: Use settings.selectedFile directly, no local state needed
   const selectedFile = settings.selectedFile || '';
   
-  // 🔧 COMPREHENSIVE DEBUG: Log everything
-  React.useEffect(() => {
-    console.log(`
-╔════════════════════════════════════════════════════════════════
-║ [DataFrameOps Properties] STATE CHECK
-╠════════════════════════════════════════════════════════════════
-║ selectedFile (from settings): "${selectedFile}"
-║ settings.selectedFile: "${settings.selectedFile}"
-║ settings.fileId: "${settings.fileId}"
-║ settings.tableData exists: ${!!settings.tableData}
-║ settings.tableData rows: ${settings.tableData?.rows?.length || 0}
-╚════════════════════════════════════════════════════════════════
-    `);
-  }, [selectedFile, settings.selectedFile, settings.fileId, settings.tableData]);
-
   const applyFileSelect = async (fileId: string) => {
-    console.log(`🔄 [DataFrameOps Properties] Loading file: ${fileId}`);
     setLoading(true);
     setError(null);
     try {

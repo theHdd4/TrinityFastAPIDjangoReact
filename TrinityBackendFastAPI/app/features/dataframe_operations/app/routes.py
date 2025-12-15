@@ -29,7 +29,6 @@ from app.features.dataframe_operations.service import (
     sort_dataframe,
 )
 from app.features.shared.mongo_session import (
-    save_session_metadata,
     get_session_metadata,
     update_session_access_time,
     queue_draft_save,
@@ -520,39 +519,10 @@ async def load_cached_dataframe(
         logger.error(f"❌ [LOAD] {error_msg}")
         raise HTTPException(status_code=400, detail=error_msg) from e
     
-    logger.info(f"📊 [LOAD] DataFrame loaded successfully:")
-    logger.info(f"   - Shape: {df.shape}")
-    logger.info(f"   - Columns: {df.columns}")
-    logger.info(f"   - Dtypes: {dict(zip(df.columns, df.dtypes))}")
-    logger.info(f"   - Schema: {df.schema}")
-    
-    # Log sample data
-    try:
-        logger.info(f"📊 [LOAD] Sample row (first): {df.head(1).to_dicts()}")
-    except Exception as sample_err:
-        logger.warning(f"⚠️ [LOAD] Could not log sample data: {sample_err}")
+    logger.debug(f"📊 [LOAD] DataFrame loaded successfully with shape={df.shape} and columns={len(df.columns)}")
     
     df_id = str(uuid.uuid4())
     SESSIONS[df_id] = df
-    
-    # Get project context for MongoDB storage
-    project_id_env = project_id or os.getenv("PROJECT_ID", os.getenv("PROJECT_NAME", "default_project"))
-    atom_id_env = atom_id or "unknown"
-    
-    # Save session metadata to MongoDB
-    metadata = {
-        "row_count": df.height,
-        "column_count": df.width,
-    }
-    await save_session_metadata(
-        session_id=df_id,
-        atom_id=atom_id_env,
-        project_id=project_id_env,
-        object_name=object_name,
-        session_type="dataframe",
-        has_unsaved_changes=False,
-        metadata=metadata
-    )
     
     logger.info(f"✅ [LOAD] DataFrame cached in session: {df_id}")
     
@@ -581,22 +551,21 @@ async def load_file_details(request: LoadFileDetailsRequest):
     logger = logging.getLogger("dataframe_operations.load_file_details")
     
     try:
-        logger.info(f"🔍 ===== LOAD FILE DETAILS REQUEST =====")
-        logger.info(f"📥 Object name: {request.object_name}")
-        
+        logger.debug(f"🔍 ===== LOAD FILE DETAILS REQUEST =====")
+        logger.debug(f"📥 Object name: {request.object_name}")
+
         # Load the dataframe from Arrow Flight
-        logger.info("🚀 Loading dataframe from Arrow Flight...")
+        logger.debug("🚀 Loading dataframe from Arrow Flight...")
         df = _fetch_df_from_object(request.object_name)
-        logger.info(f"✅ Dataframe loaded: {len(df)} rows, {len(df.columns)} columns")
-        logger.info(f"📋 Available columns: {list(df.columns)}")
-        
+        logger.debug(f"✅ Dataframe loaded: {len(df)} rows, {len(df.columns)} columns")
+
         # Create a session for the dataframe
         df_id = str(uuid.uuid4())
         SESSIONS[df_id] = df
-        
+
         # Get all columns
         all_columns = list(df.columns)
-        logger.info(f"📋 Total columns: {len(all_columns)}")
+        logger.debug(f"📋 Total columns: {len(all_columns)}")
         
         # Classify columns into numeric and categorical
         numeric_columns = []
@@ -615,8 +584,8 @@ async def load_file_details(request: LoadFileDetailsRequest):
             else:
                 categorical_columns.append(col)
         
-        logger.info(f"🔢 Numeric columns: {len(numeric_columns)}")
-        logger.info(f"📝 Categorical columns: {len(categorical_columns)}")
+        logger.debug(f"🔢 Numeric columns: {len(numeric_columns)}")
+        logger.debug(f"📝 Categorical columns: {len(categorical_columns)}")
         
         # Get unique values for categorical columns (limit to reduce payload size)
         unique_values = {}
