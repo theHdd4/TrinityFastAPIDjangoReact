@@ -133,26 +133,7 @@ class LabMemoryStore:
         next atom can deterministically locate the correct input file.
         """
 
-        if not request_id or not latest_dataset_alias or not output_path:
-            return
-
         self.apply_context(project_context)
-
-        dataset_entry = {
-            "path": output_path,
-            "schema": output_schema,
-            "created_by": created_by,
-            "updated_at": datetime.utcnow(),
-        }
-
-        history_entry = {
-            "step_number": step_number,
-            "atom_id": created_by,
-            "output_alias": latest_dataset_alias,
-            "output_path": output_path,
-            "timestamp": datetime.utcnow(),
-            "inputs": execution_inputs or {},
-        }
 
         existing_doc = self._load_existing_context(session_id=session_id) or {}
         stable_request_id = request_id or existing_doc.get("request_id") or f"req-{session_id}"
@@ -166,20 +147,19 @@ class LabMemoryStore:
                 "project_name": self.project_name,
                 "session_id": session_id,
                 "request_id": stable_request_id,
-                "record_type": "react_context",
-                "latest_dataset_alias": latest_dataset_alias,
-                "react_state.last_output_alias": latest_dataset_alias,
-                f"datasets.{latest_dataset_alias}": dataset_entry,
+                "record_type": existing_doc.get("record_type") or "react_context",
                 "updated_at": datetime.utcnow(),
+                "timestamp": datetime.utcnow(),
                 "atom_history": existing_doc.get("atom_history") or [],
                 "react_state": existing_doc.get("react_state") or {},
                 "freshness_state": existing_doc.get("freshness_state") or {},
                 "input_hash": existing_doc.get("input_hash"),
                 "analysis_insights": existing_doc.get("analysis_insights") or {},
                 "envelope": existing_doc.get("envelope"),
-            },
-            "$push": {
-                "atom_history": history_entry,
+                "atom_execution_metadata": existing_doc.get("atom_execution_metadata") or [],
+                "available_files": existing_doc.get("available_files") or [],
+                "scope": existing_doc.get("scope"),
+                "latest_dataset_alias": existing_doc.get("latest_dataset_alias"),
             },
             "$setOnInsert": {
                 "created_at": datetime.utcnow(),
@@ -193,12 +173,38 @@ class LabMemoryStore:
         if validated_scope is not None:
             update_doc["$set"]["scope"] = validated_scope
 
+        if latest_dataset_alias and output_path:
+            dataset_entry = {
+                "path": output_path,
+                "schema": output_schema,
+                "created_by": created_by,
+                "updated_at": datetime.utcnow(),
+            }
+
+            history_entry = {
+                "step_number": step_number,
+                "atom_id": created_by,
+                "output_alias": latest_dataset_alias,
+                "output_path": output_path,
+                "timestamp": datetime.utcnow(),
+                "inputs": execution_inputs or {},
+            }
+
+            update_doc.setdefault("$set", {}).update(
+                {
+                    "latest_dataset_alias": latest_dataset_alias,
+                    "react_state.last_output_alias": latest_dataset_alias,
+                    f"datasets.{latest_dataset_alias}": dataset_entry,
+                }
+            )
+            update_doc.setdefault("$push", {}).update({"atom_history": history_entry})
+
         try:
             self.mongo_collection.update_one(base_filter, update_doc, upsert=True)
             logger.info(
                 "💾 Updated Trinity_AI_Context for session=%s request=%s with alias %s → %s",
                 session_id,
-                request_id,
+                stable_request_id,
                 latest_dataset_alias,
                 output_path,
             )
