@@ -22,8 +22,9 @@ import {
 import { toast } from '@/components/ui/use-toast';
 import { ArrowUp, ArrowDown, Info, X, Filter, Plus } from 'lucide-react';
 import CellRenderer from './CellRenderer';
-import { GROUPBY_API } from '@/lib/api';
+import { GROUPBY_API, CREATECOLUMN_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
+import { getProjectContext } from '@/utils/projectContext';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,7 @@ import { htmlMatchesValue, getPlainTextFromHtml } from './rich-text/utils/format
 import type { TableCellFormatting } from './rich-text/types';
 import NumberFilterComponent from './filters/NumberFilterComponent';
 import TextFilterComponent from './filters/TextFilterComponent';
+import { ColumnInfoIcon } from './ColumnInfoIcon';
 
 interface TableCanvasProps {
   data: TableData;
@@ -1258,27 +1260,37 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     setCardinalityError(null);
     
     try {
+      // Get project context for metadata retrieval
+      const projectContext = getProjectContext();
+      
       // Construct full path if needed
       let fullDataSource = settings.sourceFile;
       
-      // Get environment context to construct full path
-      const envStr = localStorage.getItem('env');
-      if (envStr && settings.sourceFile && !settings.sourceFile.includes('/')) {
-        try {
-          const env = JSON.parse(envStr);
-          const clientName = env.CLIENT_NAME || '';
-          const appName = env.APP_NAME || '';
-          const projectName = env.PROJECT_NAME || '';
-          
-          if (clientName && appName && projectName) {
-            fullDataSource = `${clientName}/${appName}/${projectName}/${settings.sourceFile}`;
-          }
-        } catch (e) {
-          console.warn('Failed to construct full path for cardinality:', e);
+      // If we have project context and sourceFile is just a filename, construct full path
+      if (projectContext && settings.sourceFile && !settings.sourceFile.includes('/')) {
+        const { client_name, app_name, project_name } = projectContext;
+        if (client_name && app_name && project_name) {
+          fullDataSource = `${client_name}/${app_name}/${project_name}/${settings.sourceFile}`;
         }
       }
       
-      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(fullDataSource)}`;
+      // Build URL parameters
+      const params = new URLSearchParams({
+        object_name: fullDataSource
+      });
+      
+      // Add project context parameters for metadata retrieval
+      if (projectContext) {
+        const { client_name, app_name, project_name } = projectContext;
+        if (client_name) params.append('client_name', client_name);
+        if (app_name) params.append('app_name', app_name);
+        if (project_name) params.append('project_name', project_name);
+      }
+      
+      // Use CREATECOLUMN_API instead of GROUPBY_API for metadata support
+      const url = `${CREATECOLUMN_API}/cardinality?${params.toString()}`;
+      console.log('🔍 [CARDINALITY] Fetching from:', url);
+      
       const res = await fetch(url);
       let payload: any = {};
       try {
@@ -1293,11 +1305,13 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       const data = (await resolveTaskResponse(payload)) || {};
       
       if (data.status === 'SUCCESS' && data.cardinality) {
+        console.log('✅ [CARDINALITY] Received data with metadata:', data.cardinality.length, 'columns');
         setCardinalityData(data.cardinality);
       } else {
         setCardinalityError(data.error || 'Failed to fetch cardinality data');
       }
     } catch (e: any) {
+      console.error('❌ [CARDINALITY] Error:', e);
       setCardinalityError(e.message || 'Error fetching cardinality data');
     } finally {
       setCardinalityLoading(false);
@@ -2172,7 +2186,14 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           >
             {displayedCardinality.map((col, index) => (
               <tr key={index} className="table-row">
-                <td className="table-cell">{col.column || col.Column || ''}</td>
+                <td className="table-cell">
+                  <div className="flex items-center gap-2">
+                    <span>{col.column || col.Column || ''}</span>
+                    {col.metadata?.is_created && (
+                      <ColumnInfoIcon metadata={col.metadata} />
+                    )}
+                  </div>
+                </td>
                 <td className="table-cell">{col.data_type || col['Data type'] || ''}</td>
                 <td className="table-cell">{col.unique_count || col['Unique count'] || 0}</td>
                 <td className="table-cell">
