@@ -21,6 +21,13 @@ interface KPIDashboardChartConfigProps {
   data: KPIDashboardData | null;
   settings: KPIDashboardSettings;
   onSettingsChange: (settings: Partial<KPIDashboardSettings>) => void;
+  onDataUpload: (data: KPIDashboardData) => void;
+}
+
+interface Frame {
+  object_name: string;
+  arrow_name?: string;
+  csv_name?: string;
 }
 
 // Filter Value Selector Component
@@ -94,12 +101,19 @@ const FilterValueSelector: React.FC<FilterValueSelectorProps> = ({
 const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
   data,
   settings,
-  onSettingsChange
+  onSettingsChange,
+  onDataUpload
 }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [fileId, setFileId] = useState<string>('');
   const [chartData, setChartData] = useState<any>(null);
+  
+  // Data Source state
+  const [frames, setFrames] = useState<Frame[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string>((settings as any).selectedFile || '');
+  const [loadingDataSource, setLoadingDataSource] = useState(false);
+  const [dataSourceError, setDataSourceError] = useState<string | null>(null);
   
   // Find the selected chart box (memoized to prevent unnecessary recalculations)
   const selectedChartBox = useMemo(() => {
@@ -125,6 +139,67 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
       isAdvancedMode: false,
     };
   });
+
+  // Fetch available dataframes from database
+  useEffect(() => {
+    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+      .then(r => r.json())
+      .then(d => {
+        // Filter to only show Arrow files
+        const allFiles = Array.isArray(d.files) ? d.files : [];
+        const arrowFiles = allFiles.filter(f => 
+          f.object_name && f.object_name.endsWith('.arrow')
+        );
+        setFrames(arrowFiles);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch dataframes:', err);
+        setFrames([]);
+      });
+  }, []);
+
+  // Load dataframe data when file is selected
+  const handleFileSelect = async (fileId: string) => {
+    setSelectedFile(fileId);
+    setLoadingDataSource(true);
+    setDataSourceError(null);
+
+    try {
+      const response = await fetch(`${VALIDATE_API}/load_dataframe_by_key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: fileId })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load dataframe');
+      }
+
+      const responseData = await response.json();
+      const frame = frames.find(f => f.object_name === fileId);
+      const fileName = frame?.arrow_name?.split('/').pop() || fileId;
+      
+      // Save selected file to settings so it's available for chart rendering
+      onSettingsChange({ 
+        ...settings,
+        selectedFile: fileId,
+        dataSource: fileName
+      } as any);
+      
+      onDataUpload({
+        headers: responseData.headers || [],
+        rows: responseData.rows || [],
+        fileName: fileName,
+        metrics: []
+      });
+
+      setLoadingDataSource(false);
+    } catch (err) {
+      console.error('Error loading dataframe:', err);
+      setDataSourceError('Failed to load dataframe');
+      setLoadingDataSource(false);
+    }
+  };
 
   // Track previous data source to prevent unnecessary reloads
   const previousDataSourceRef = useRef<string | null>(null);
@@ -490,6 +565,42 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
 
   return (
     <div className="space-y-4 h-full flex flex-col">
+      {/* Data Source Selection */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Data Source</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Select value={selectedFile} onValueChange={handleFileSelect}>
+            <SelectTrigger className="w-full bg-white border-gray-300">
+              <SelectValue placeholder="Select a saved dataframe..." />
+            </SelectTrigger>
+            <SelectContent>
+              {frames.length === 0 ? (
+                <SelectItem value="no-data" disabled>
+                  No dataframes available
+                </SelectItem>
+              ) : (
+                frames.map(f => (
+                  <SelectItem key={f.object_name} value={f.object_name}>
+                    {f.arrow_name?.split('/').pop() || f.csv_name || f.object_name}
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
+          {loadingDataSource && (
+            <p className="text-xs text-blue-600">Loading dataframe...</p>
+          )}
+          {dataSourceError && (
+            <p className="text-xs text-red-600">{dataSourceError}</p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Select a dataframe from the database to use as data source
+          </p>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Chart Configuration</CardTitle>

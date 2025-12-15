@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BarChart3 } from 'lucide-react';
@@ -7,12 +7,14 @@ interface ChartElementProps {
   chartConfig?: ChartMakerConfig;
   width?: number;
   height?: number;
+  onNoteChange?: (note: string) => void;
 }
 
 const ChartElement: React.FC<ChartElementProps> = ({ 
   chartConfig, 
   width, 
-  height = 300 
+  height = 300,
+  onNoteChange
 }) => {
   // If no chart config or chart not rendered, show placeholder
   if (!chartConfig || !chartConfig.chartRendered || !chartConfig.chartConfig) {
@@ -139,14 +141,67 @@ const ChartElement: React.FC<ChartElementProps> = ({
 
   const showNote = chartConfig.showNote || false;
   
+  // Local state for note input with debounced saving
+  const [noteValue, setNoteValue] = useState(chartConfig.note || '');
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Sync local state with chartConfig.note when it changes externally
+  useEffect(() => {
+    setNoteValue(chartConfig.note || '');
+  }, [chartConfig.note]);
+  
+  // Handle note change with debounced save
+  const handleNoteChange = (value: string) => {
+    setNoteValue(value);
+    
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    // Save after 500ms of no typing
+    saveTimeoutRef.current = setTimeout(() => {
+      if (onNoteChange) {
+        onNoteChange(value);
+      }
+    }, 500);
+  };
+  
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+  
   return (
-    <div className={`w-full h-full ${showNote ? 'flex flex-col' : 'flex items-center justify-center'}`} style={{ maxHeight: '100%', maxWidth: '100%', padding: '8px', minWidth: 0, minHeight: 0 }}>
+    <div className={`w-full h-full flex flex-col`} style={{ maxHeight: '100%', maxWidth: '100%', padding: '8px', minWidth: 0, minHeight: 0 }}>
+      {/* Chart Title */}
+      {chartConfig.title && (
+        <div className="flex items-center mb-2 flex-shrink-0">
+          <BarChart3 className="w-5 h-5 mr-2 text-gray-900" />
+          <h3 className="font-bold text-lg text-gray-900">{chartConfig.title}</h3>
+        </div>
+      )}
       <div className={`w-full ${showNote ? 'flex-1 min-h-0' : 'h-full'}`} style={{ maxWidth: '100%', maxHeight: showNote ? '100%' : '100%', overflow: 'hidden', minWidth: 0, minHeight: 0, width: '100%' }}>
         <RechartsChartRenderer {...rendererProps} />
       </div>
       {showNote && (
         <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-lg flex-shrink-0">
           <textarea
+            value={noteValue}
+            onChange={(e) => handleNoteChange(e.target.value)}
+            onBlur={() => {
+              // Save immediately on blur
+              if (saveTimeoutRef.current) {
+                clearTimeout(saveTimeoutRef.current);
+              }
+              if (onNoteChange) {
+                onNoteChange(noteValue);
+              }
+            }}
             placeholder="Add your notes here..."
             className="w-full min-h-[60px] p-2 text-xs border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
             style={{ fontFamily: 'inherit' }}

@@ -58,6 +58,7 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({
                 data={data} 
                 settings={settings}
                 onSettingsChange={onSettingsChange}
+                onDataUpload={onDataUpload}
               />
             </TabsContent>
             <TabsContent value="tables" className="h-full m-0 p-2" forceMount>

@@ -6,12 +6,14 @@ interface KPIDashboardVisualisationProps {
   data: KPIDashboardData | null;
   settings: KPIDashboardSettings;
   onSettingsChange: (settings: Partial<KPIDashboardSettings>) => void;
+  onDataUpload: (data: KPIDashboardData) => void;
 }
 
 const KPIDashboardVisualisation: React.FC<KPIDashboardVisualisationProps> = ({ 
   data, 
   settings, 
-  onSettingsChange 
+  onSettingsChange,
+  onDataUpload
 }) => {
   return (
     <div className="h-full overflow-y-auto">
@@ -19,6 +21,7 @@ const KPIDashboardVisualisation: React.FC<KPIDashboardVisualisationProps> = ({
         data={data}
         settings={settings}
         onSettingsChange={onSettingsChange}
+        onDataUpload={onDataUpload}
       />
     </div>
   );

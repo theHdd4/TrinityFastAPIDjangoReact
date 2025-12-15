@@ -3752,8 +3752,10 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       };
       
       // Format value with unit and format
-      const formattedValue = formatNumber(metricValue, valueFormat);
-      const displayValue = metricUnit ? `${formattedValue}${metricUnit}` : formattedValue;
+      // If metricValue is "-", display it directly without formatting
+      const displayValue = metricValue === '-' 
+        ? '-' 
+        : (metricUnit ? `${formatNumber(metricValue, valueFormat)}${metricUnit}` : formatNumber(metricValue, valueFormat));
       
       // Format change percentage
       const changePercentage = changeValue > 0 ? `+${changeValue}%` : `${changeValue}%`;
@@ -4197,6 +4199,19 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Calculate box height: layout height minus padding (about 20px total)
       const boxHeight = Math.max(150, layoutHeight - 20);
 
+      // Handle note changes for the chart
+      const handleNoteChange = (note: string) => {
+        const updatedLayouts = settings.layouts?.map(layout => ({
+          ...layout,
+          boxes: layout.boxes.map(box =>
+            box.id === boxId
+              ? { ...box, chartConfig: { ...chartConfig, note } }
+              : box
+          )
+        }));
+        onSettingsChange({ layouts: updatedLayouts });
+      };
+
       return (
         <div 
           className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
@@ -4217,6 +4232,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               chartConfig={chartConfig}
               width={undefined}
               height={boxHeight}
+              onNoteChange={handleNoteChange}
             />
           </div>
         </div>

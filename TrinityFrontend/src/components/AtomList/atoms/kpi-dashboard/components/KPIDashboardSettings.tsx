@@ -497,40 +497,6 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
 
   return (
     <div className="space-y-6 p-2">
-      {/* Select Dataframe from Database */}
-      <div className="space-y-2">
-        <Label className="text-sm font-medium">Data Source</Label>
-        <Card className="p-4 space-y-3">
-          <Select value={selectedFile} onValueChange={handleFileSelect}>
-            <SelectTrigger className="w-full bg-white border-gray-300">
-              <SelectValue placeholder="Select a saved dataframe..." />
-            </SelectTrigger>
-            <SelectContent>
-              {frames.length === 0 ? (
-                <SelectItem value="no-data" disabled>
-                  No dataframes available
-                </SelectItem>
-              ) : (
-                frames.map(f => (
-                  <SelectItem key={f.object_name} value={f.object_name}>
-                    {f.arrow_name?.split('/').pop() || f.csv_name || f.object_name}
-                  </SelectItem>
-                ))
-              )}
-            </SelectContent>
-          </Select>
-          {loading && (
-            <p className="text-xs text-blue-600">Loading dataframe...</p>
-          )}
-          {error && (
-            <p className="text-xs text-red-600">{error}</p>
-          )}
-        </Card>
-        <p className="text-xs text-muted-foreground">
-          Select a dataframe from the database to use as data source
-        </p>
-      </div>
-
       {/* Dashboard Title */}
       <div className="space-y-2">
         <Label htmlFor="title" className="text-sm font-medium">
@@ -544,36 +510,6 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
           className="w-full"
         />
       </div>
-
-      {/* Select Metric Columns */}
-      {availableColumns.length > 0 && (
-        <div className="space-y-3">
-          <Label className="text-sm font-medium">Select Metrics to Display</Label>
-          <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
-            {availableColumns.map((column) => (
-              <div
-                key={column}
-                className="flex items-center space-x-2 p-2 rounded-md hover:bg-muted/50 transition-colors"
-              >
-                <Checkbox
-                  id={`metric-${column}`}
-                  checked={settings.metricColumns.includes(column)}
-                  onCheckedChange={() => toggleMetricColumn(column)}
-                />
-                <label
-                  htmlFor={`metric-${column}`}
-                  className="text-sm cursor-pointer flex-1"
-                >
-                  {column}
-                </label>
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Selected: {settings.metricColumns.length} metrics
-          </p>
-        </div>
-      )}
 
       {/* Global Filters */}
       {(() => {
@@ -1002,13 +938,104 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                   });
                                   
                                   if (matchingVar) {
-                                    return {
+                                    let updatedBox = {
                                       ...box,
                                       variableId: matchingVar.id,
                                       variableName: matchingVar.variableName,
                                       variableNameKey: matchingVar.variableNameKey || matchingVar.variableName,
                                       metricValue: matchingVar.value || '0',
                                       value: matchingVar.value,
+                                    };
+                                    
+                                    // Recalculate comparison if enabled
+                                    if (box.showGrowthRate && box.comparisonIdentifier && box.comparisonIdentifierValue) {
+                                      const comparisonVar = variablesToUse.find((v: any) => {
+                                        const vKey = v.variableNameKey || v.variableName;
+                                        if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                        
+                                        const vParts = vKey.split('_');
+                                        const vIdentifiers: Record<string, string> = {};
+                                        
+                                        let j = 2;
+                                        while (j < vParts.length) {
+                                          const key = vParts[j]?.toLowerCase();
+                                          if (identifierTypes.includes(key) && j + 1 < vParts.length) {
+                                            let val = vParts[j + 1];
+                                            let nextIndex = j + 2;
+                                            
+                                            while (nextIndex < vParts.length) {
+                                              const nextPart = vParts[nextIndex]?.toLowerCase();
+                                              if (!identifierTypes.includes(nextPart)) {
+                                                val += '_' + vParts[nextIndex];
+                                                nextIndex++;
+                                              } else {
+                                                break;
+                                              }
+                                            }
+                                            
+                                            vIdentifiers[key] = val;
+                                            j = nextIndex;
+                                          } else {
+                                            j++;
+                                          }
+                                        }
+                                        
+                                        // Check if comparison identifier matches and all other identifiers match
+                                        const vIdentifierValue = vIdentifiers[box.comparisonIdentifier];
+                                        if (vIdentifierValue !== box.comparisonIdentifierValue) return false;
+                                        
+                                        // Check all other identifiers match
+                                        for (const [key, val] of Object.entries(currentIdentifiers)) {
+                                          if (key !== box.comparisonIdentifier && vIdentifiers[key] !== val) {
+                                            return false;
+                                          }
+                                        }
+                                        
+                                        return true;
+                                      });
+                                      
+                                      if (comparisonVar) {
+                                        const currentValue = parseFloat(matchingVar.value || '0');
+                                        const comparisonValueNum = parseFloat(comparisonVar.value || '0');
+                                        
+                                        if (!isNaN(currentValue) && !isNaN(comparisonValueNum)) {
+                                          const growthRate = comparisonValueNum !== 0 ? ((currentValue - comparisonValueNum) / comparisonValueNum) * 100 : 0;
+                                          const absoluteDifference = currentValue - comparisonValueNum;
+                                          updatedBox = {
+                                            ...updatedBox,
+                                            growthRateValue: growthRate,
+                                            absoluteDifferenceValue: absoluteDifference,
+                                            comparisonValue: comparisonVar.value
+                                          };
+                                        } else {
+                                          updatedBox = {
+                                            ...updatedBox,
+                                            growthRateValue: undefined,
+                                            absoluteDifferenceValue: undefined,
+                                            comparisonValue: undefined
+                                          };
+                                        }
+                                      } else {
+                                        // Comparison variable not found
+                                        updatedBox = {
+                                          ...updatedBox,
+                                          growthRateValue: undefined,
+                                          absoluteDifferenceValue: undefined,
+                                          comparisonValue: undefined
+                                        };
+                                      }
+                                    }
+                                    
+                                    return updatedBox;
+                                  } else {
+                                    // No matching variable found - variable doesn't exist for current filter context
+                                    return {
+                                      ...box,
+                                      metricValue: '-',
+                                      value: null,
+                                      growthRateValue: undefined,
+                                      absoluteDifferenceValue: undefined,
+                                      comparisonValue: undefined,
                                     };
                                   }
                                 }
@@ -1101,13 +1128,104 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                     });
                                     
                                     if (matchingVar) {
-                                      return {
+                                      let updatedBox = {
                                         ...box,
                                         variableId: matchingVar.id,
                                         variableName: matchingVar.variableName,
                                         variableNameKey: matchingVar.variableNameKey || matchingVar.variableName,
                                         metricValue: matchingVar.value || '0',
                                         value: matchingVar.value,
+                                      };
+                                      
+                                      // Recalculate comparison if enabled
+                                      if (box.showGrowthRate && box.comparisonIdentifier && box.comparisonIdentifierValue) {
+                                        const comparisonVar = variablesToUse.find((v: any) => {
+                                          const vKey = v.variableNameKey || v.variableName;
+                                          if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                          
+                                          const vParts = vKey.split('_');
+                                          const vIdentifiers: Record<string, string> = {};
+                                          
+                                          let j = 2;
+                                          while (j < vParts.length) {
+                                            const key = vParts[j]?.toLowerCase();
+                                            if (identifierTypes.includes(key) && j + 1 < vParts.length) {
+                                              let val = vParts[j + 1];
+                                              let nextIndex = j + 2;
+                                              
+                                              while (nextIndex < vParts.length) {
+                                                const nextPart = vParts[nextIndex]?.toLowerCase();
+                                                if (!identifierTypes.includes(nextPart)) {
+                                                  val += '_' + vParts[nextIndex];
+                                                  nextIndex++;
+                                                } else {
+                                                  break;
+                                                }
+                                              }
+                                              
+                                              vIdentifiers[key] = val;
+                                              j = nextIndex;
+                                            } else {
+                                              j++;
+                                            }
+                                          }
+                                          
+                                          // Check if comparison identifier matches and all other identifiers match
+                                          const vIdentifierValue = vIdentifiers[box.comparisonIdentifier];
+                                          if (vIdentifierValue !== box.comparisonIdentifierValue) return false;
+                                          
+                                          // Check all other identifiers match
+                                          for (const [key, val] of Object.entries(currentIdentifiers)) {
+                                            if (key !== box.comparisonIdentifier && vIdentifiers[key] !== val) {
+                                              return false;
+                                            }
+                                          }
+                                          
+                                          return true;
+                                        });
+                                        
+                                        if (comparisonVar) {
+                                          const currentValue = parseFloat(matchingVar.value || '0');
+                                          const comparisonValueNum = parseFloat(comparisonVar.value || '0');
+                                          
+                                          if (!isNaN(currentValue) && !isNaN(comparisonValueNum)) {
+                                            const growthRate = comparisonValueNum !== 0 ? ((currentValue - comparisonValueNum) / comparisonValueNum) * 100 : 0;
+                                            const absoluteDifference = currentValue - comparisonValueNum;
+                                            updatedBox = {
+                                              ...updatedBox,
+                                              growthRateValue: growthRate,
+                                              absoluteDifferenceValue: absoluteDifference,
+                                              comparisonValue: comparisonVar.value
+                                            };
+                                          } else {
+                                            updatedBox = {
+                                              ...updatedBox,
+                                              growthRateValue: undefined,
+                                              absoluteDifferenceValue: undefined,
+                                              comparisonValue: undefined
+                                            };
+                                          }
+                                        } else {
+                                          // Comparison variable not found
+                                          updatedBox = {
+                                            ...updatedBox,
+                                            growthRateValue: undefined,
+                                            absoluteDifferenceValue: undefined,
+                                            comparisonValue: undefined
+                                          };
+                                        }
+                                      }
+                                      
+                                      return updatedBox;
+                                    } else {
+                                      // No matching variable found - variable doesn't exist for current filter context
+                                      return {
+                                        ...box,
+                                        metricValue: '-',
+                                        value: null,
+                                        growthRateValue: undefined,
+                                        absoluteDifferenceValue: undefined,
+                                        comparisonValue: undefined,
                                       };
                                     }
                                   }
