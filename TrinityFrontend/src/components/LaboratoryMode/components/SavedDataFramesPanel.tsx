@@ -29,6 +29,7 @@ import {
 import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
   isOpen: boolean;
@@ -218,6 +219,28 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [processingSaving, setProcessingSaving] = useState(false);
   const [processingError, setProcessingError] = useState('');
   const [viewTarget, setViewTarget] = useState<Frame | null>(null);
+
+  // Laboratory store hooks for guided flow
+  const setActiveGuidedFlow = useLaboratoryStore((state) => state.setActiveGuidedFlow);
+  const cards = useLaboratoryStore((state) => state.cards);
+  const addAtom = useLaboratoryStore((state) => state.addAtom);
+
+  // Helper function to find or create a data-upload atom
+  const findOrCreateDataUploadAtom = () => {
+    // Look for existing data-upload atom
+    for (const card of cards) {
+      for (const atom of card.atoms) {
+        if (atom.atomId === 'data-upload') {
+          return atom.id;
+        }
+      }
+    }
+
+    // If no data-upload atom exists, create one
+    const newAtomId = `atom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    addAtom('data-upload', 'Data Upload', newAtomId);
+    return newAtomId;
+  };
   const [viewColumns, setViewColumns] = useState<ProcessingColumnConfig[]>([]);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError, setViewError] = useState('');
@@ -2351,10 +2374,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       if (contextMenu.frame) {
         void onToggleExpand(contextMenu.target);
       }
-    } else if (action === 'process') {
-      if (contextMenu.frame) {
-        openProcessingModal(contextMenu.frame);
-      }
+
     } else if (action === 'view') {
       if (contextMenu.frame) {
         openViewModal(contextMenu.frame);
@@ -2602,9 +2622,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                       <Wrench
                         className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-[#458EE2]"
                         onClick={async () => {
+                          // Find or create a data-upload atom
+                          const atomId = findOrCreateDataUploadAtom();
+                          
                           // Check priming status to determine initial stage
                           const projectContext = getActiveProjectContext();
-                          let startStage: 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' = 'U1';
+                          // Default to U1 (Scan step) for files uploaded directly from Saved DataFrames
+                          let startStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7' = 'U1';
                           
                           if (projectContext) {
                             try {
@@ -2623,22 +2647,41 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                               if (primingCheckRes.ok) {
                                 const primingData = await primingCheckRes.json();
                                 const currentStage = primingData?.current_stage;
-                                if (currentStage && ['U1', 'U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
-                                  startStage = currentStage as 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+                                const isInProgress = primingData?.is_in_progress;
+                                const isPrimed = primingData?.is_primed;
+                                
+                                // If file is fully primed, start at U1 to allow re-processing
+                                if (isPrimed) {
+                                  startStage = 'U1';
+                                }
+                                // If file is in progress (partially primed), continue from current stage
+                                else if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+                                  startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+                                }
+                                // If file has started but not in progress (U0 or U1), start at U1
+                                else if (currentStage === 'U0' || currentStage === 'U1') {
+                                  startStage = 'U1';
+                                }
+                                // Default: file uploaded directly, start at U1 (Scan step)
+                                else {
+                                  startStage = 'U1';
                                 }
                               }
                             } catch (err) {
                               console.warn('Failed to check priming status', err);
+                              // On error, default to U1 (Scan step)
+                              startStage = 'U1';
                             }
                           }
 
-                          setGuidedFlowInitialFile({
-                            name: sheet.arrow_name || sheet.csv_name || sheet.sheet_name,
-                            path: sheet.object_name,
-                            size: sheet.size || 0,
+                          // Start guided flow inline in canvas area
+                          setActiveGuidedFlow(atomId, startStage, {
+                            initialFile: {
+                              name: sheet.arrow_name || sheet.csv_name || sheet.sheet_name,
+                              path: sheet.object_name,
+                              size: sheet.size || 0,
+                            }
                           });
-                          setGuidedFlowInitialStage(startStage);
-                          setIsGuidedUploadFlowOpen(true);
                         }}
                         title="Open guided flow"
                       />
@@ -2784,9 +2827,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             <Wrench
               className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-[#458EE2]"
               onClick={async () => {
+                // Find or create a data-upload atom
+                const atomId = findOrCreateDataUploadAtom();
+                
                 // Check priming status to determine initial stage
                 const projectContext = getActiveProjectContext();
-                let startStage: 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' = 'U1';
+                // Default to U1 (Scan step) for files uploaded directly from Saved DataFrames
+                let startStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7' = 'U1';
                 
                 if (projectContext) {
                   try {
@@ -2805,22 +2852,41 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                     if (primingCheckRes.ok) {
                       const primingData = await primingCheckRes.json();
                       const currentStage = primingData?.current_stage;
-                      if (currentStage && ['U1', 'U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
-                        startStage = currentStage as 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+                      const isInProgress = primingData?.is_in_progress;
+                      const isPrimed = primingData?.is_primed;
+                      
+                      // If file is fully primed, start at U1 to allow re-processing
+                      if (isPrimed) {
+                        startStage = 'U1';
+                      }
+                      // If file is in progress (partially primed), continue from current stage
+                      else if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+                        startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+                      }
+                      // If file has started but not in progress (U0 or U1), start at U1
+                      else if (currentStage === 'U0' || currentStage === 'U1') {
+                        startStage = 'U1';
+                      }
+                      // Default: file uploaded directly, start at U1 (Scan step)
+                      else {
+                        startStage = 'U1';
                       }
                     }
                   } catch (err) {
                     console.warn('Failed to check priming status for wrench icon', err);
+                    // On error, default to U1 (Scan step)
+                    startStage = 'U1';
                   }
                 }
                 
-                setGuidedFlowInitialFile({
-                  name: f.arrow_name || f.csv_name || f.object_name,
-                  path: f.object_name,
-                  size: f.size,
+                // Start guided flow inline in canvas area
+                setActiveGuidedFlow(atomId, startStage, {
+                  initialFile: {
+                    name: f.arrow_name || f.csv_name || f.object_name,
+                    path: f.object_name,
+                    size: f.size || 0,
+                  }
                 });
-                setGuidedFlowInitialStage(startStage);
-                setIsGuidedUploadFlowOpen(true);
               }}
               title="Guided upload flow with rule-based checking"
             />
@@ -3378,7 +3444,71 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 <span>View properties</span>
               </button>
               <button
-                onClick={() => handleContextMenuAction('process')}
+                onClick={async () => {
+                  if (!contextMenu?.frame) return;
+                  
+                  // Find or create a data-upload atom
+                  const atomId = findOrCreateDataUploadAtom();
+                  
+                  // Check priming status to determine initial stage
+                  const projectContext = getActiveProjectContext();
+                  // Default to U1 (Scan step) for files uploaded directly from Saved DataFrames
+                  let startStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7' = 'U1';
+                  
+                  if (projectContext) {
+                    try {
+                      const queryParams = new URLSearchParams({
+                        client_name: projectContext.client_name || '',
+                        app_name: projectContext.app_name || '',
+                        project_name: projectContext.project_name || '',
+                        file_name: contextMenu.frame.object_name,
+                      }).toString();
+
+                      const primingCheckRes = await fetch(
+                        `${VALIDATE_API}/check-priming-status?${queryParams}`,
+                        { credentials: 'include' }
+                      );
+
+                      if (primingCheckRes.ok) {
+                        const primingData = await primingCheckRes.json();
+                        const currentStage = primingData?.current_stage;
+                        const isInProgress = primingData?.is_in_progress;
+                        const isPrimed = primingData?.is_primed;
+                        
+                        // If file is fully primed, start at U1 to allow re-processing
+                        if (isPrimed) {
+                          startStage = 'U1';
+                        }
+                        // If file is in progress (partially primed), continue from current stage
+                        else if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+                          startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+                        }
+                        // If file has started but not in progress (U0 or U1), start at U1
+                        else if (currentStage === 'U0' || currentStage === 'U1') {
+                          startStage = 'U1';
+                        }
+                        // Default: file uploaded directly, start at U1 (Scan step)
+                        else {
+                          startStage = 'U1';
+                        }
+                      }
+                    } catch (err) {
+                      console.warn('Failed to check priming status for dropdown wrench icon', err);
+                      // On error, default to U1 (Scan step)
+                      startStage = 'U1';
+                    }
+                  }
+                  
+                  // Start guided flow inline in canvas area
+                  setActiveGuidedFlow(atomId, startStage, {
+                    initialFile: {
+                      name: contextMenu.frame.arrow_name || contextMenu.frame.csv_name || contextMenu.frame.object_name,
+                      path: contextMenu.frame.object_name,
+                      size: contextMenu.frame.size || 0,
+                    }
+                  });
+                  setContextMenu(null);
+                }}
                 className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
               >
                 <Wrench className="w-4 h-4" />

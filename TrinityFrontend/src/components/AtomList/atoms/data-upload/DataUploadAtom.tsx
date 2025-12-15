@@ -269,25 +269,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
               </div>
             </div>
 
-          {/* Guided Mode Status Indicator */}
-          <div className="flex items-center justify-center p-2 bg-gray-50 rounded-lg border border-gray-200">
-            <div className="flex items-center gap-2">
-              <Sparkles className={`w-3.5 h-3.5 ${isGuidedModeActive ? 'text-purple-600' : 'text-gray-400'}`} />
-              <span className="text-xs text-gray-600 font-medium">
-                {isGuidedModeActive ? 'Guided Mode Active' : 'Guided Mode Off'}
-              </span>
-            </div>
-          </div>
 
-          {/* Start Guided Flow Button - Compact */}
-          <Button
-            className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md hover:shadow-lg transition-all duration-300 flex items-center justify-center gap-2 py-2.5 text-sm"
-            onClick={handleStartGuidedFlow}
-            disabled={!isGuidedModeActive}
-          >
-            <Sparkles className="w-4 h-4" />
-            {primedFiles.length === 0 ? 'Start Guided Upload' : 'Upload More Files'}
-          </Button>
         </div>
       </Card>
       </div>

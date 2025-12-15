@@ -4,7 +4,7 @@ import { Upload, Play, Sparkles, X, CheckCircle2, Circle, Settings, Eye, Databas
 import type { LaboratoryScenario, ScenarioData } from '../hooks/useLaboratoryScenario';
 
 import { cn } from '@/lib/utils';
-import './GuidedWorkflowPanel.css';
+
 
 interface ScenarioOverlayProps {
   scenario: LaboratoryScenario;
@@ -17,6 +17,7 @@ interface ScenarioOverlayProps {
   onIgnoreAndContinue: () => void;
   onActionSelected: (action: string) => void;
   onCreateDataUploadAtom?: () => Promise<void>;
+  currentGuidedStep?: string;
 }
 
 // Guided workflow steps configuration
@@ -83,9 +84,16 @@ export const ScenarioOverlay: React.FC<ScenarioOverlayProps> = ({
   onDismiss,
   onActionSelected,
   onCreateDataUploadAtom,
+  currentGuidedStep = 'U0',
 }) => {
 
-  const [currentStep, setCurrentStep] = React.useState('U0');
+  const [currentStep, setCurrentStep] = React.useState(currentGuidedStep);
+  const [isMinimized, setIsMinimized] = React.useState(false);
+
+  // Update current step when prop changes
+  React.useEffect(() => {
+    setCurrentStep(currentGuidedStep);
+  }, [currentGuidedStep]);
 
 
   if (scenario === 'loading') {
@@ -104,7 +112,37 @@ export const ScenarioOverlay: React.FC<ScenarioOverlayProps> = ({
 
   const handleStepClick = (stepId: string) => {
     setCurrentStep(stepId);
-    // Add logic to navigate to specific step
+    console.log(`Navigating to step: ${stepId}`);
+    
+    // Handle step navigation logic
+    switch (stepId) {
+      case 'U0':
+        // Navigate to upload step
+        onActionSelected('navigate-to-upload');
+        break;
+      case 'U1':
+        // Navigate to structural scan
+        onActionSelected('navigate-to-scan');
+        break;
+      case 'U2':
+        // Navigate to headers confirmation
+        onActionSelected('navigate-to-headers');
+        break;
+      case 'U3':
+        // Navigate to column names
+        onActionSelected('navigate-to-columns');
+        break;
+      case 'U4':
+        // Navigate to data types
+        onActionSelected('navigate-to-types');
+        break;
+      case 'U5':
+        // Navigate to validation
+        onActionSelected('navigate-to-validation');
+        break;
+      default:
+        console.log(`Unknown step: ${stepId}`);
+    }
   };
 
   return (
@@ -113,7 +151,10 @@ export const ScenarioOverlay: React.FC<ScenarioOverlayProps> = ({
       <div className="guided-panel-overlay absolute inset-0 z-40" />
       
       {/* Fixed right-side guided workflow panel */}
-      <div className="fixed top-0 right-0 h-full w-80 z-50">
+      <div className={cn(
+        "fixed top-0 right-0 h-full z-50 transition-all duration-300 ease-in-out",
+        isMinimized ? "w-12" : "w-80"
+      )}>
         {/* Glassomorphic panel */}
         <div className="guided-panel-glass h-full flex flex-col">
           {/* Header */}
@@ -122,51 +163,106 @@ export const ScenarioOverlay: React.FC<ScenarioOverlayProps> = ({
               <div className="w-8 h-8 bg-[#458EE2]/20 rounded-full flex items-center justify-center">
                 <Sparkles className="w-4 h-4 text-[#458EE2]" />
               </div>
-              <h3 className="text-sm font-semibold text-gray-900">Guided Workflow</h3>
+              {!isMinimized && <h3 className="text-sm font-semibold text-gray-900">Guided Workflow</h3>}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onDismiss}
-              className="h-8 w-8 hover:bg-white/50"
-            >
-              <X className="w-4 h-4" />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsMinimized(!isMinimized)}
+                className="h-8 w-8 hover:bg-white/50"
+                title={isMinimized ? "Expand panel" : "Minimize panel"}
+              >
+                <div className={cn(
+                  "w-4 h-4 transition-transform duration-200",
+                  isMinimized ? "rotate-180" : ""
+                )}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 18l6-6-6-6"/>
+                  </svg>
+                </div>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onDismiss}
+                className="h-8 w-8 hover:bg-white/50"
+                title="Close guided mode"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
 
           {/* Current Atom Info */}
-          <div className="p-4 border-b border-white/20 bg-white/50">
-            <div className="text-xs text-gray-500 mb-1">Current Atom</div>
-            <div className="text-sm font-medium text-gray-900">Data Upload</div>
-          </div>
+          {!isMinimized && (
+            <div className="p-4 border-b border-white/20 bg-white/50">
+              <div className="text-xs text-gray-500 mb-1">Current Atom</div>
+              <div className="text-sm font-medium text-gray-900">Data Upload</div>
+            </div>
+          )}
 
           {/* Steps List */}
-          <div className="guided-panel-scroll flex-1 overflow-y-auto p-4 space-y-3">
+          <div className={cn(
+            "guided-panel-scroll flex-1 overflow-y-auto space-y-3",
+            isMinimized ? "p-2" : "p-4"
+          )}>
             {GUIDED_STEPS.map((step, index) => {
               const isCompleted = index < GUIDED_STEPS.findIndex(s => s.id === currentStep);
               const isCurrent = step.id === currentStep;
               const isUpcoming = index > GUIDED_STEPS.findIndex(s => s.id === currentStep);
               const IconComponent = step.icon;
 
+              if (isMinimized) {
+                // Minimized view - show only icons
+                return (
+                  <div
+                    key={step.id}
+                    onClick={() => handleStepClick(step.id)}
+                    className={cn(
+                      "w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-110 mx-auto",
+                      isCompleted && "bg-green-500 text-white hover:bg-green-600",
+                      isCurrent && "bg-[#458EE2] text-white hover:bg-[#3a7bc7] animate-pulse",
+                      isUpcoming && "bg-gray-200 text-gray-400 hover:bg-gray-300"
+                    )}
+                    title={`${step.label} - Click to navigate`}
+                  >
+                    {isCompleted ? (
+                      <CheckCircle2 className="w-4 h-4" />
+                    ) : (
+                      <IconComponent className="w-4 h-4" />
+                    )}
+                  </div>
+                );
+              }
+
               return (
                 <div
                   key={step.id}
                   onClick={() => handleStepClick(step.id)}
                   className={cn(
-                    "guided-step-card relative p-3 rounded-lg cursor-pointer",
-                    isCompleted && "completed",
-                    isCurrent && "current",
-                    isUpcoming && ""
+                    "guided-step-card relative p-3 rounded-lg cursor-pointer transform transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+                    isCompleted && "completed hover:shadow-green-200/50",
+                    isCurrent && "current hover:shadow-blue-200/50 ring-2 ring-blue-200/30",
+                    isUpcoming && "hover:shadow-gray-200/50"
                   )}
+                  title={`Click to navigate to ${step.label}`}
                 >
                   <div className="flex items-start gap-3">
                     {/* Step Icon */}
-                    <div className={cn(
-                      "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all",
-                      isCompleted && "bg-green-500 text-white",
-                      isCurrent && "bg-[#458EE2] text-white",
-                      isUpcoming && "bg-gray-200 text-gray-400"
-                    )}>
+                    <div 
+                      className={cn(
+                        "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-200 hover:scale-110 cursor-pointer",
+                        isCompleted && "bg-green-500 text-white hover:bg-green-600 shadow-lg shadow-green-200/50",
+                        isCurrent && "bg-[#458EE2] text-white hover:bg-[#3a7bc7] shadow-lg shadow-blue-200/50 animate-pulse",
+                        isUpcoming && "bg-gray-200 text-gray-400 hover:bg-gray-300 hover:text-gray-500"
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleStepClick(step.id);
+                      }}
+                      title={`${step.label} - Click to navigate`}
+                    >
                       {isCompleted ? (
                         <CheckCircle2 className="w-4 h-4" />
                       ) : (
@@ -209,7 +305,8 @@ export const ScenarioOverlay: React.FC<ScenarioOverlayProps> = ({
           </div>
 
           {/* Action Buttons */}
-          <div className="p-4 border-t border-white/20 bg-white/50 space-y-2">
+          {!isMinimized && (
+            <div className="p-4 border-t border-white/20 bg-white/50 space-y-2">
             {!hasDatasets ? (
               <Button
                 onClick={async () => {
@@ -253,14 +350,17 @@ export const ScenarioOverlay: React.FC<ScenarioOverlayProps> = ({
                 </Button>
               </div>
             )}
-          </div>
+            </div>
+          )}
 
           {/* Footer */}
-          <div className="p-3 border-t border-white/20 bg-gray-50/50">
-            <p className="text-xs text-gray-500 italic text-center">
-              Click steps to navigate • All decisions remain under your control
-            </p>
-          </div>
+          {!isMinimized && (
+            <div className="p-3 border-t border-white/20 bg-gray-50/50">
+              <p className="text-xs text-gray-500 italic text-center">
+                Click steps to navigate • All decisions remain under your control
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

@@ -1263,6 +1263,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       return null;
     }
     
+    // Get the initial file from the saved state (set by wrench icon in SavedDataFramesPanel)
+    const flowState = activeGuidedFlows[atom.id];
+    const existingDataframe = flowState?.state?.initialFile as { name: string; path: string; size?: number } | undefined;
+    
     return (
       <div className="mt-4">
         <GuidedUploadFlowInline
@@ -1285,6 +1289,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           }}
           savedState={activeGuidedFlows[atom.id]?.state}
           initialStage={activeGuidedFlows[atom.id]?.currentStage}
+          existingDataframe={existingDataframe}
         />
       </div>
     );

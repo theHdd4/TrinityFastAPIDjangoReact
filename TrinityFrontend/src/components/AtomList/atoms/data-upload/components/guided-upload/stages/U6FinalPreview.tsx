@@ -212,9 +212,17 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           throw new Error('File path is not available');
         }
 
-        // CRITICAL: Apply transformations (dtype changes + missing value strategies) BEFORE fetching preview
+        // CRITICAL: Apply transformations (column renames + dtype changes + missing value strategies) BEFORE fetching preview
         // This ensures we see the cleaned/transformed data, not raw data
         let transformedFilePath = filePath;
+        
+        // Build column_renames from columnNameEdits (U3)
+        const columnRenames: Record<string, string> = {};
+        currentColumnEdits.forEach(edit => {
+          if (edit.keep !== false && edit.editedName && edit.editedName !== edit.originalName) {
+            columnRenames[edit.originalName] = edit.editedName;
+          }
+        });
         
         // Build dtype_changes from dataTypeSelections
         const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
@@ -253,15 +261,16 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
         });
         
         // Only apply transformations if there are any changes
-        if (Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategies).length > 0) {
+        if (Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategies).length > 0) {
           try {
-            console.log('Applying transformations before preview:', { dtypeChanges, missingValueStrategies });
+            console.log('Applying transformations before preview:', { columnRenames, dtypeChanges, missingValueStrategies });
             const transformRes = await fetch(`${UPLOAD_API}/apply-data-transformations`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
               body: JSON.stringify({
                 file_path: filePath,
+                column_renames: columnRenames,
                 dtype_changes: dtypeChanges,
                 missing_value_strategies: missingValueStrategies,
               }),

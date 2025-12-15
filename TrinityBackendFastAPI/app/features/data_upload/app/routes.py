@@ -5171,9 +5171,10 @@ async def detect_datetime_format(request: Request):
 @router.post("/apply-data-transformations")
 async def apply_data_transformations(request: Request):
     """
-    Apply dtype changes and missing value strategies to a file.
+    Apply column renames, dtype changes and missing value strategies to a file.
     Expects JSON body with:
     - file_path: str
+    - column_renames: dict[str, str] (old_name -> new_name) - OPTIONAL
     - dtype_changes: dict[str, str | dict] (column_name -> new_dtype or {dtype: str, format: str})
     - missing_value_strategies: dict[str, dict] (column_name -> {strategy: str, value?: str})
     """
@@ -5185,14 +5186,18 @@ async def apply_data_transformations(request: Request):
         logger.info("=" * 80)
         
         file_path = body.get("file_path")
+        column_renames = body.get("column_renames", {})
         dtype_changes = body.get("dtype_changes", {})
         missing_value_strategies = body.get("missing_value_strategies", {})
         
         logger.info(f"Extracted file_path: {file_path}")
+        logger.info(f"Extracted column_renames: {column_renames}")
         logger.info(f"Extracted dtype_changes: {dtype_changes}")
         logger.info(f"Extracted missing_value_strategies: {missing_value_strategies}")
         
-        # Check if this is a missing value only request
+        # Log what transformations are being applied
+        if len(column_renames) > 0:
+            logger.info(f"✅ COLUMN RENAMES: {len(column_renames)} columns to rename")
         if len(dtype_changes) == 0 and len(missing_value_strategies) > 0:
             logger.warning("⚠️  MISSING VALUE ONLY REQUEST - No dtype changes found!")
         elif len(dtype_changes) > 0 and len(missing_value_strategies) == 0:
@@ -5227,7 +5232,18 @@ async def apply_data_transformations(request: Request):
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
         
-        # Apply missing value strategies first
+        # Apply column renames first (before other transformations)
+        if column_renames:
+            logger.info(f"Applying column renames: {column_renames}")
+            # Filter out renames where old_name == new_name
+            valid_renames = {old: new for old, new in column_renames.items() if old != new and old in df.columns}
+            if valid_renames:
+                df = df.rename(columns=valid_renames)
+                logger.info(f"✅ Renamed columns: {valid_renames}")
+            else:
+                logger.info("No valid column renames to apply")
+        
+        # Apply missing value strategies
         for col_name, strategy_config in missing_value_strategies.items():
             if col_name not in df.columns:
                 continue
