@@ -54,7 +54,6 @@ const API_BASE = ACCOUNTS_API;
 interface App {
   id: number;
   name: string;
-  usecase_id?: number;
 }
 
 const Users = () => {
@@ -123,13 +122,12 @@ const Users = () => {
 
   const loadTenantApps = async () => {
     try {
-      // Use /tenants/current/ to get the current user's tenant instead of the first tenant
-      const res = await fetch(`${TENANTS_API}/tenants/current/`, { credentials: 'include' });
+      const res = await fetch(`${TENANTS_API}/tenants/`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
-        // tenant.allowed_apps contains UseCase IDs from public schema
-        // We'll filter apps by matching their usecase_id with these UseCase IDs
-        setTenantAppIds(data.allowed_apps || []);
+        if (data.length > 0) {
+          setTenantAppIds(data[0].allowed_apps || []);
+        }
       }
     } catch {
       /* ignore */
@@ -577,7 +575,7 @@ const Users = () => {
                   </label>
                   <div className="w-full max-h-[200px] overflow-y-auto border border-gray-200 rounded-md p-3 space-y-2 bg-white">
                     {apps
-                      .filter((a) => !a.usecase_id || tenantAppIds.includes(a.usecase_id))
+                      .filter((a) => tenantAppIds.includes(a.id))
                       .map((a) => (
                         <label
                           key={a.id}
