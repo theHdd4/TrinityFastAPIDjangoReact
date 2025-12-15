@@ -1,7 +1,35 @@
 import type { SlideObject } from '../../../store/exhibitionStore';
-import type { TextBoxFormatting, TextStylePreset } from './types';
+import type { TextBoxFormatting, TextStylePreset, TextStyleOption } from './types';
 
 export const DEFAULT_TEXT_BOX_TEXT = 'Double click to edit';
+
+export const TEXT_STYLE_OPTIONS: readonly { value: TextStyleOption; label: string; fontSize: number; color: string; bold: boolean }[] = [
+  { value: 'header', label: 'Header', fontSize: 36, color: '#111827', bold: true },
+  { value: 'sub-header', label: 'Sub Header', fontSize: 22, color: '#111827', bold: true },
+  { value: 'paragraph', label: 'Paragraph', fontSize: 18, color: '#6B7280', bold: false },
+] as const;
+
+/**
+ * Helper function to get style properties for a given text style
+ * Use this in parent components to apply all style properties when textStyle changes
+ */
+export const getTextStyleProperties = (textStyle: TextStyleOption): Partial<TextBoxFormatting> => {
+  const styleOption = TEXT_STYLE_OPTIONS.find(s => s.value === textStyle);
+  if (!styleOption) {
+    return {
+      fontSize: 16,
+      color: '#6B7280',
+      bold: false,
+      fontFamily: 'DM Sans',
+    };
+  }
+  return {
+    fontSize: styleOption.fontSize,
+    color: styleOption.color,
+    bold: styleOption.bold,
+    fontFamily: 'DM Sans', // Default font for KPI Dashboard
+  };
+};
 
 export const FONT_FILTER_CHIPS = [
   { id: 'handwriting', label: 'Handwriting' },
@@ -112,18 +140,24 @@ export const TEXT_STYLE_PRESETS: readonly TextStylePreset[] = [
 
 const createDefaultFormatting = (
   overrides: Partial<TextBoxFormatting> = {},
-): TextBoxFormatting => ({
-  text: DEFAULT_TEXT_BOX_TEXT,
-  fontSize: 16,
-  fontFamily: 'Comic Sans',
-  bold: false,
-  italic: false,
-  underline: false,
-  strikethrough: false,
-  align: 'left',
-  color: '#111827',
-  ...overrides,
-});
+): TextBoxFormatting => {
+  const textStyle = overrides.textStyle || 'paragraph';
+  const defaultStyle = TEXT_STYLE_OPTIONS.find(s => s.value === textStyle) || TEXT_STYLE_OPTIONS[2]; // Default to paragraph
+  
+  return {
+    text: DEFAULT_TEXT_BOX_TEXT,
+    fontSize: defaultStyle.fontSize,
+    fontFamily: 'DM Sans',
+    bold: defaultStyle.bold,
+    italic: false,
+    underline: false,
+    strikethrough: false,
+    align: 'left',
+    color: defaultStyle.color,
+    textStyle: textStyle,
+    ...overrides,
+  };
+};
 
 const resolveNextZIndex = (objects: SlideObject[] | undefined): number => {
   if (!Array.isArray(objects) || objects.length === 0) {
@@ -201,6 +235,10 @@ export const extractTextBoxFormatting = (
     typeof props.color === 'string' && props.color.trim().length > 0
       ? props.color
       : formatting.color;
+  const textStyle = 
+    (props.textStyle === 'header' || props.textStyle === 'sub-header' || props.textStyle === 'paragraph')
+      ? props.textStyle
+      : formatting.textStyle;
 
   return {
     text,
@@ -212,5 +250,6 @@ export const extractTextBoxFormatting = (
     strikethrough,
     align,
     color,
+    textStyle,
   };
 };

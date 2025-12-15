@@ -1,6 +1,5 @@
 import React from 'react';
-import SimpleCellEditor from './SimpleCellEditor';
-// import { TableRichTextEditor } from './rich-text';
+import TextBoxCellEditor from './TextBoxCellEditor';
 
 interface RichTextFormatting {
   fontFamily?: string;
@@ -47,37 +46,19 @@ const CellRenderer: React.FC<CellRendererProps> = ({
   className,
   style,
 }) => {
-  // Rich text path temporarily disabled; use simple editor always
-  // if (formatting || html) {
-  //   return (
-  //     <TableRichTextEditor
-  //       value={value}
-  //       html={html}
-  //       formatting={formatting as any}
-  //       isEditing={isEditing}
-  //       onValueChange={(plainText, htmlText) => onValueChange(plainText, htmlText)}
-  //       onCommit={(plainText, htmlText) => onCommit(plainText, htmlText)}
-  //       onCancel={onCancel}
-  //       onFocus={onFocus}
-  //       onBlur={onBlur}
-  //       onFormattingChange={onFormattingChange as any}
-  //       onClick={onClick}
-  //       className={className}
-  //       style={style}
-  //     />
-  //   );
-  // }
-  
-  // Default: Use SimpleCellEditor for plain text cells
+  // Use TextBoxCellEditor based on text-box implementation for consistent rich text experience
   return (
-    <SimpleCellEditor
+    <TextBoxCellEditor
       value={value}
+      html={html}
+      formatting={formatting}
       isEditing={isEditing}
-      onValueChange={(plainText) => onValueChange(plainText)}
-      onCommit={(plainText) => onCommit(plainText)}
+      onValueChange={(plainText, htmlText) => onValueChange(plainText, htmlText)}
+      onCommit={(plainText, htmlText) => onCommit(plainText, htmlText)}
       onCancel={onCancel}
       onFocus={onFocus}
       onBlur={onBlur}
+      onFormattingChange={onFormattingChange}
       onClick={onClick}
       textAlign={textAlign}
       className={className}

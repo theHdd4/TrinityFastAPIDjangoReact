@@ -18,12 +18,21 @@ import Table from '@/templates/tables/table';
 import { DataFrameData } from '../DataFrameOperationsAtom';
 import dataframeOperations from '../index';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { ColumnInfoIcon } from '../../table/components/ColumnInfoIcon';
 
 interface ColumnInfo {
   column: string;
   data_type: string;
   unique_count: number;
   unique_values: string[];
+  metadata?: {
+    is_created: boolean;
+    operation_type?: string;
+    input_columns?: string[];
+    parameters?: Record<string, any>;
+    formula?: string;
+    created_column_name?: string;
+  };
 }
 
 interface DataFrameCardinalityViewProps {
@@ -371,7 +380,14 @@ const DataFrameCardinalityView: React.FC<DataFrameCardinalityViewProps> = ({
         >
           {displayed.map(col => (
             <tr key={col.column} className="table-row">
-              <td className="table-cell-primary">{col.column}</td>
+              <td className="table-cell-primary">
+                <div className="flex items-center gap-2">
+                  <span>{col.column}</span>
+                  {col.metadata?.is_created && (
+                    <ColumnInfoIcon metadata={col.metadata} />
+                  )}
+                </div>
+              </td>
               <td className="table-cell">{col.data_type}</td>
               <td className="table-cell">{col.unique_count.toLocaleString()}</td>
               <td className="table-cell">

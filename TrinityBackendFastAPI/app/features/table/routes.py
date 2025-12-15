@@ -142,6 +142,12 @@ async def load_table(request: TableLoadRequest):
             logger.info(f"🎨 [TABLE-LOAD] Loaded conditional formatting styles for {len(conditional_format_styles)} rows")
         if table_metadata:
             logger.info(f"📋 [TABLE-LOAD] Loaded table metadata (formatting, design, layout)")
+            # CRITICAL: Log cell_formatting to verify it's being loaded
+            if table_metadata.get('cell_formatting'):
+                cell_fmt_count = sum(len(cols) for cols in table_metadata['cell_formatting'].values())
+                logger.info(f"📋 [TABLE-LOAD] Cell formatting: {len(table_metadata['cell_formatting'])} rows, {cell_fmt_count} cells")
+            else:
+                logger.warning(f"⚠️ [TABLE-LOAD] No cell_formatting in loaded metadata")
         
         # Convert to response format
         response = dataframe_to_response(
@@ -537,6 +543,12 @@ async def save_table(request: TableSaveRequest):
             # Convert Pydantic model to dict
             table_metadata_dict = request.metadata.dict(exclude_none=True)
             logger.info(f"📋 [TABLE-SAVE] Saving table metadata (formatting, design, layout)")
+            # CRITICAL: Log cell_formatting to verify it's being saved
+            if table_metadata_dict.get('cell_formatting'):
+                cell_fmt_count = sum(len(cols) for cols in table_metadata_dict['cell_formatting'].values())
+                logger.info(f"📋 [TABLE-SAVE] Cell formatting: {len(table_metadata_dict['cell_formatting'])} rows, {cell_fmt_count} cells")
+            else:
+                logger.warning(f"⚠️ [TABLE-SAVE] No cell_formatting in metadata dict")
         
         # Save table to MinIO with metadata using service function
         logger.info(f"🔄 [TABLE-SAVE] Writing DataFrame to Arrow format...")

@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { ColumnInfoIcon } from '../../table/components/ColumnInfoIcon';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import {
   Pagination,
@@ -931,9 +932,34 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     setCardinalityError(null);
     
     try {
-      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(resolvedObjectName)}`;
+      // Build URL with metadata parameters
+      const params = new URLSearchParams({
+        object_name: resolvedObjectName,
+      });
+      
+      // Add metadata parameters if available
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          if (env.CLIENT_NAME) params.append('client_name', env.CLIENT_NAME);
+          if (env.APP_NAME) params.append('app_name', env.APP_NAME);
+          if (env.PROJECT_NAME) params.append('project_name', env.PROJECT_NAME);
+        } catch (e) {
+          console.warn('Failed to parse env for cardinality metadata:', e);
+        }
+      }
+      
+      const url = `${CREATECOLUMN_API}/cardinality?${params.toString()}`;
       const res = await fetch(url);
-      const data = await res.json();
+      const payload = await res.json();
+      
+      if (!res.ok) {
+        const detail = typeof payload?.detail === 'string' ? payload.detail : res.statusText;
+        throw new Error(detail || 'Failed to fetch cardinality data');
+      }
+      
+      const data = (await resolveTaskResponse(payload)) || {};
       
       if (data.status === 'SUCCESS' && data.cardinality) {
         setCardinalityData(data.cardinality);
@@ -1457,7 +1483,14 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
             >
               {displayedCardinality.map((col, index) => (
                 <tr key={index} className="table-row">
-                  <td className="table-cell">{col.column || col.Column || ''}</td>
+                  <td className="table-cell">
+                    <div className="flex items-center gap-2">
+                      <span>{col.column || col.Column || ''}</span>
+                      {col.metadata?.is_created && (
+                        <ColumnInfoIcon metadata={col.metadata} />
+                      )}
+                    </div>
+                  </td>
                   <td className="table-cell">{col.data_type || col.Data_Type || ''}</td>
                   <td className="table-cell">{col.unique_count || col.Unique_Count || 0}</td>
                   <td className="table-cell">

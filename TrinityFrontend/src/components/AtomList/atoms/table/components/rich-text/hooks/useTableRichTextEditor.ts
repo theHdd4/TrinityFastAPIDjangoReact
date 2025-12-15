@@ -17,13 +17,13 @@ export const useTableRichTextEditor = ({
   onValueChange,
   onCommit,
   onCancel,
-  onFormattingChange: onFormattingChangeProp = () => {},
+  onFormattingChange: onFormattingChangeProp = () => { },
 }: TableRichTextEditorProps) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const lastHtmlRef = useRef<string>('');
   const isCommittingRef = useRef(false);
   const selectionRef = useRef<Range | null>(null);
-  const onFormattingChange = onFormattingChangeProp ?? (() => {});
+  const onFormattingChange = onFormattingChangeProp ?? (() => { });
 
   // Initialize content when editing starts
   useEffect(() => {
@@ -33,7 +33,7 @@ export const useTableRichTextEditor = ({
     if (editorRef.current.innerHTML !== currentHtml) {
       editorRef.current.innerHTML = currentHtml;
       lastHtmlRef.current = currentHtml;
-      
+
       // Reset child element styles
       const resetChildStyles = () => {
         if (!editorRef.current) return;
@@ -53,7 +53,7 @@ export const useTableRichTextEditor = ({
     if (!editorRef.current || !isEditing) return;
 
     const editor = editorRef.current;
-    
+
     // Apply formatting immediately for visual feedback
     applyFormattingToEditor(editor, formatting);
   }, [isEditing, formatting]);
@@ -61,18 +61,29 @@ export const useTableRichTextEditor = ({
   // Focus when editing starts
   useEffect(() => {
     if (isEditing && editorRef.current) {
-      requestAnimationFrame(() => {
-        editorRef.current?.focus();
+      // Use setTimeout instead of requestAnimationFrame for more reliable focus after layout updates
+      // This fixes the "double click to edit" issue by ensuring the element is fully ready
+      const timerId = setTimeout(() => {
+        if (!editorRef.current) return;
+
+        editorRef.current.focus();
+
         // Place cursor at end
-        const range = document.createRange();
-        const selection = window.getSelection();
-        if (selection && editorRef.current) {
-          range.selectNodeContents(editorRef.current);
-          range.collapse(false);
-          selection.removeAllRanges();
-          selection.addRange(range);
+        try {
+          const range = document.createRange();
+          const selection = window.getSelection();
+          if (selection && editorRef.current) {
+            range.selectNodeContents(editorRef.current);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        } catch (e) {
+          // Ignore selection errors during initialization
         }
-      });
+      }, 0);
+
+      return () => clearTimeout(timerId);
     }
   }, [isEditing]);
 
@@ -93,7 +104,7 @@ export const useTableRichTextEditor = ({
           selection.removeAllRanges();
           selection.addRange(selectionRef.current);
         } catch (e) {
-          // Selection might be invalid, ignore
+          // Selection might be invalid or disconnected, fallback to failing gracefully
         }
       }
     }
@@ -114,7 +125,7 @@ export const useTableRichTextEditor = ({
   // Handle blur - commit cell if focus moved away (but not to toolbar)
   const handleBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
     const relatedTarget = e.relatedTarget as HTMLElement;
-    
+
     // Don't commit if focus is moving to toolbar or popover
     if (relatedTarget && isToolbarElement(relatedTarget)) {
       return; // Don't commit
@@ -126,14 +137,14 @@ export const useTableRichTextEditor = ({
       if (isFocusInToolbar() || editorRef.current === document.activeElement) {
         return; // Still in toolbar/editor, don't commit
       }
-      
+
       // Double-check we're still supposed to commit
       if (!editorRef.current || isCommittingRef.current || !isEditing) return;
-      
+
       try {
         const currentHtml = editorRef.current.innerHTML;
         const plainText = getPlainTextFromHtml(currentHtml);
-        
+
         isCommittingRef.current = true;
         onCommit(plainText, currentHtml);
         isCommittingRef.current = false;
@@ -148,12 +159,12 @@ export const useTableRichTextEditor = ({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       e.stopPropagation();
-      
+
       if (editorRef.current && !isCommittingRef.current) {
         try {
           const currentHtml = editorRef.current.innerHTML;
           const plainText = getPlainTextFromHtml(currentHtml);
-          
+
           isCommittingRef.current = true;
           onCommit(plainText, currentHtml);
         } catch (error) {
@@ -162,7 +173,7 @@ export const useTableRichTextEditor = ({
       }
       return;
     }
-    
+
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -180,7 +191,7 @@ export const useTableRichTextEditor = ({
         try {
           const currentHtml = editorRef.current.innerHTML;
           const plainText = getPlainTextFromHtml(currentHtml);
-          
+
           isCommittingRef.current = true;
           onCommit(plainText, currentHtml);
         } catch (error) {
@@ -196,7 +207,7 @@ export const useTableRichTextEditor = ({
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
     e.preventDefault();
     const plainText = e.clipboardData.getData('text/plain');
-    
+
     if (plainText && document.execCommand) {
       document.execCommand('insertText', false, plainText);
     } else if (editorRef.current) {
@@ -216,17 +227,17 @@ export const useTableRichTextEditor = ({
   // Apply formatting change
   const applyFormatting = useCallback((newFormatting: Partial<TableCellFormatting>) => {
     if (!editorRef.current) return;
-    
+
     preserveSelection();
-    
+
     // Apply formatting immediately for visual feedback
     applyFormattingToEditor(editorRef.current, newFormatting);
-    
+
     // Also apply via execCommand for HTML structure
     applyFormattingViaCommand(newFormatting);
-    
+
     restoreSelection();
-    
+
     // Notify parent of formatting change
     if (onFormattingChange) {
       onFormattingChange(newFormatting);

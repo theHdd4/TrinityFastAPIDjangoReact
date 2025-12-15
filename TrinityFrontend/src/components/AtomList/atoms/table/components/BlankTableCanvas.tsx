@@ -4,8 +4,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import '@/templates/tables/table.css';
 import { editTableCell } from '../services/tableApi';
 import { cn } from '@/lib/utils';
-// Rich text disabled for testing. Uncomment to restore.
-// import { TableRichTextEditor, TableRichTextToolbar } from './rich-text';
+import { TextBoxToolbar } from '@/components/LaboratoryMode/components/CanvasArea/text-box/TextBoxToolbar';
+import type { TextAlignOption, TextStylePreset } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
 import { getTheme } from './design/tableThemes';
 import { calculateAggregation, formatAggregation, getBorderClasses } from '../utils/tableUtils';
 
@@ -43,6 +43,7 @@ const BlankTableCanvas: React.FC<BlankTableCanvasProps> = ({
   const [toolbarCellRect, setToolbarCellRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
+  const [toolbarMounted, setToolbarMounted] = useState(false);
   
   // Resize state
   const [resizingCol, setResizingCol] = useState<{colIdx: number, startX: number, startWidth: number} | null>(null);
@@ -493,29 +494,198 @@ const BlankTableCanvas: React.FC<BlankTableCanvasProps> = ({
     }
   }, []); // Run once on mount
 
-  // Position toolbar near editing cell
-  useEffect(() => {
+  // Toolbar positioning with boundary detection and sticky behavior
+  const [toolbarPosition, setToolbarPosition] = useState<{ top: number; left: number } | null>(null);
+  
+  // Function to calculate toolbar position with boundary detection
+  const calculateToolbarPosition = useCallback(() => {
     if (!editingCell || !showToolbar) {
-      setToolbarCellRect(null);
-      return;
+      return null;
     }
-    
+
+    // Find the editor element
     const editorElements = document.querySelectorAll('[contenteditable="true"]');
     const activeEditor = Array.from(editorElements).find(el => 
       el === document.activeElement || el.contains(document.activeElement)
-    );
+    ) as HTMLElement;
     
-    if (activeEditor) {
+    if (!activeEditor) {
+      return null;
+    }
+
+    try {
       const rect = activeEditor.getBoundingClientRect();
-      setToolbarCellRect({
-        top: rect.top + window.scrollY,
-        left: rect.left + window.scrollX,
-        width: rect.width,
-      });
-    } else {
-      setToolbarCellRect(null);
+      
+      // Get toolbar dimensions for boundary calculations
+      // Use actual dimensions if toolbar is rendered, otherwise use fallback
+      let toolbarWidth = 400; // Fallback width
+      let toolbarHeight = 50; // Fallback height
+      if (toolbarRef.current) {
+        try {
+          const toolbarRect = toolbarRef.current.getBoundingClientRect();
+          toolbarWidth = toolbarRect.width || 400;
+          toolbarHeight = toolbarRect.height || 50;
+        } catch (e) {
+          // Toolbar not fully rendered yet, use fallback
+        }
+      }
+      
+      // Viewport dimensions
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const padding = 10; // Minimum padding from screen edges
+      
+      // Calculate preferred position (above cell, centered)
+      let top = rect.top - toolbarHeight - 10; // 10px gap above cell
+      let left = rect.left + rect.width / 2; // Center horizontally
+      
+      // Boundary detection and adjustment
+      // Check if toolbar would go off top of screen
+      if (top < padding) {
+        // Position below cell instead
+        top = rect.bottom + 10;
+      }
+      
+      // Check if toolbar would go off bottom of screen
+      if (top + toolbarHeight > viewportHeight - padding) {
+        // Try to position above cell, but ensure it doesn't go off top
+        top = Math.max(padding, rect.top - toolbarHeight - 10);
+        // If still doesn't fit, position it at the top of viewport
+        if (top + toolbarHeight > viewportHeight - padding) {
+          top = padding;
+        }
+      }
+      
+      // Check if toolbar would go off left of screen
+      if (left - toolbarWidth / 2 < padding) {
+        left = padding + toolbarWidth / 2;
+      }
+      
+      // Check if toolbar would go off right of screen
+      if (left + toolbarWidth / 2 > viewportWidth - padding) {
+        left = viewportWidth - padding - toolbarWidth / 2;
+      }
+      
+      // Ensure left is never less than toolbarWidth/2
+      left = Math.max(toolbarWidth / 2, left);
+      
+      return {
+        top,
+        left,
+        cellRect: {
+          top: rect.top + window.scrollY,
+          left: rect.left + window.scrollX,
+          width: rect.width,
+        }
+      };
+    } catch (error) {
+      console.error('Error calculating toolbar position:', error);
+      return null;
     }
   }, [editingCell, showToolbar]);
+  
+  // Update toolbar position on mount, scroll, resize, and when editing cell changes
+  useEffect(() => {
+    if (!editingCell || !showToolbar) {
+      setToolbarPosition(null);
+      setToolbarCellRect(null);
+      return;
+    }
+
+    // Initial position calculation
+    const updatePosition = () => {
+      requestAnimationFrame(() => {
+        if (!editingCell || !showToolbar) {
+          setToolbarPosition(null);
+          setToolbarCellRect(null);
+          return;
+        }
+
+        const position = calculateToolbarPosition();
+        if (position) {
+          setToolbarPosition({ top: position.top, left: position.left });
+          setToolbarCellRect(position.cellRect);
+        } else {
+          // Retry if element not found
+          let retryCount = 0;
+          const maxRetries = 5;
+          
+          const retryFind = () => {
+            if (retryCount >= maxRetries || !editingCell || !showToolbar) {
+              return;
+            }
+            
+            retryCount++;
+            const position = calculateToolbarPosition();
+            if (position) {
+              setToolbarPosition({ top: position.top, left: position.left });
+              setToolbarCellRect(position.cellRect);
+            } else if (retryCount < maxRetries) {
+              setTimeout(retryFind, 100);
+            }
+          };
+          
+          setTimeout(retryFind, 100);
+        }
+      });
+    };
+
+    // Initial update with delay to ensure DOM is ready
+    const initialTimeout = setTimeout(() => {
+      updatePosition();
+    }, 0);
+
+    // Update position on scroll and resize for sticky behavior
+    window.addEventListener('scroll', updatePosition, true); // Use capture phase for all scroll events
+    window.addEventListener('resize', updatePosition);
+    
+    // Also listen to scroll events on the table container if it exists
+    const tableContainer = containerRef.current;
+    if (tableContainer) {
+      tableContainer.addEventListener('scroll', updatePosition, true);
+    }
+
+    return () => {
+      clearTimeout(initialTimeout);
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+      if (tableContainer) {
+        tableContainer.removeEventListener('scroll', updatePosition, true);
+      }
+    };
+  }, [editingCell, showToolbar, calculateToolbarPosition, containerRef]);
+
+  // Recalculate position once toolbar is actually rendered (when ref becomes available)
+  useEffect(() => {
+    if (!editingCell || !showToolbar || !toolbarMounted || !toolbarRef.current) {
+      return;
+    }
+
+    // Once toolbar is rendered, recalculate with actual dimensions
+    const recalculateWithActualDimensions = () => {
+      requestAnimationFrame(() => {
+        if (!editingCell || !showToolbar || !toolbarRef.current) {
+          return;
+        }
+
+        const position = calculateToolbarPosition();
+        if (position) {
+          setToolbarPosition({ top: position.top, left: position.left });
+        }
+      });
+    };
+
+    // Small delay to ensure toolbar is fully rendered
+    const timeout = setTimeout(recalculateWithActualDimensions, 50);
+    return () => clearTimeout(timeout);
+  }, [toolbarMounted, editingCell, showToolbar, calculateToolbarPosition]);
+
+  // Reset toolbar mounted state when editing stops
+  useEffect(() => {
+    if (!editingCell) {
+      setToolbarMounted(false);
+    }
+  }, [editingCell]);
 
   return (
     <div className="flex-1 overflow-auto min-h-0 w-full" ref={containerRef}>
@@ -748,7 +918,8 @@ const BlankTableCanvas: React.FC<BlankTableCanvasProps> = ({
                            ...(isFirstCol && layout.firstColumn && { position: 'sticky', left: 0, zIndex: 10 }),
                           }}
                           onClick={() => !isEditing && handleCellClick(actualRowIdx, colIdx)}
-                        >
+                        onDoubleClick={() => !isEditing && handleCellClick(actualRowIdx, colIdx)}
+                      >
                           {isEditing ? (
                             <input
                               className="w-full h-full px-2 py-1 text-xs"
@@ -912,22 +1083,90 @@ const BlankTableCanvas: React.FC<BlankTableCanvasProps> = ({
         </div>
       </div>
 
-      {/* Info footer */}
-      <div className="sticky bottom-0 px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
-        Blank Table: {rows} rows × {columns} columns {useHeaderRow ? '(with header row)' : ''} • Click any cell to edit
-      </div>
-
-      {/* Rich Text Formatting Toolbar disabled for testing. Uncomment to restore.
-      {showToolbar && editingCell && toolbarCellRect && portalTarget && createPortal(
-        <TableRichTextToolbar
-          formatting={cellFormatting as any}
-          onFormattingChange={(fmt) => setCellFormatting(prev => ({ ...prev, ...fmt }))}
-          cellPosition={toolbarCellRect}
-          isVisible={true}
-        />,
+      {/* Rich Text Formatting Toolbar */}
+      {showToolbar && editingCell && portalTarget && createPortal(
+        <div
+          ref={(el) => {
+            toolbarRef.current = el;
+            if (el && !toolbarMounted) {
+              setToolbarMounted(true);
+            } else if (!el && toolbarMounted) {
+              setToolbarMounted(false);
+            }
+          }}
+          className="fixed z-[5000]"
+          style={{
+            top: toolbarPosition ? `${toolbarPosition.top}px` : '-9999px',
+            left: toolbarPosition ? `${toolbarPosition.left}px` : '-9999px',
+            transform: 'translateX(-50%)',
+            visibility: toolbarPosition ? 'visible' : 'hidden',
+          }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <TextBoxToolbar
+            fontFamily={cellFormatting.fontFamily}
+            onFontFamilyChange={(font) => setCellFormatting(prev => ({ ...prev, fontFamily: font }))}
+            fontSize={cellFormatting.fontSize}
+            onIncreaseFontSize={() => {
+              const newSize = Math.min(cellFormatting.fontSize + 1, 72);
+              setCellFormatting(prev => ({ ...prev, fontSize: newSize }));
+            }}
+            onDecreaseFontSize={() => {
+              const newSize = Math.max(cellFormatting.fontSize - 1, 8);
+              setCellFormatting(prev => ({ ...prev, fontSize: newSize }));
+            }}
+            onApplyTextStyle={(preset: TextStylePreset) => {
+              setCellFormatting(prev => ({
+                ...prev,
+                fontSize: preset.fontSize,
+                bold: preset.bold ?? false,
+                italic: preset.italic ?? false,
+                underline: preset.underline ?? false,
+                strikethrough: preset.strikethrough ?? false,
+              }));
+              // Apply via execCommand for immediate visual feedback
+              const editorElement = document.querySelector('[data-table-cell-editor="true"]') as HTMLElement;
+              if (editorElement) {
+                if (preset.bold) document.execCommand('bold', false);
+                if (preset.italic) document.execCommand('italic', false);
+                if (preset.underline) document.execCommand('underline', false);
+                if (preset.strikethrough) document.execCommand('strikeThrough', false);
+              }
+            }}
+            bold={cellFormatting.bold}
+            italic={cellFormatting.italic}
+            underline={cellFormatting.underline}
+            strikethrough={cellFormatting.strikethrough}
+            onToggleBold={() => {
+              const newBold = !cellFormatting.bold;
+              setCellFormatting(prev => ({ ...prev, bold: newBold }));
+              document.execCommand('bold', false);
+            }}
+            onToggleItalic={() => {
+              const newItalic = !cellFormatting.italic;
+              setCellFormatting(prev => ({ ...prev, italic: newItalic }));
+              document.execCommand('italic', false);
+            }}
+            onToggleUnderline={() => {
+              const newUnderline = !cellFormatting.underline;
+              setCellFormatting(prev => ({ ...prev, underline: newUnderline }));
+              document.execCommand('underline', false);
+            }}
+            onToggleStrikethrough={() => {
+              const newStrikethrough = !cellFormatting.strikethrough;
+              setCellFormatting(prev => ({ ...prev, strikethrough: newStrikethrough }));
+              document.execCommand('strikeThrough', false);
+            }}
+            align={cellFormatting.textAlign as TextAlignOption}
+            onAlign={(align) => setCellFormatting(prev => ({ ...prev, textAlign: align }))}
+            color={cellFormatting.textColor}
+            onColorChange={(color) => setCellFormatting(prev => ({ ...prev, textColor: color }))}
+            backgroundColor={cellFormatting.backgroundColor}
+            onBackgroundColorChange={(color) => setCellFormatting(prev => ({ ...prev, backgroundColor: color }))}
+          />
+        </div>,
         portalTarget
       )}
-      */}
     </div>
   );
 };
