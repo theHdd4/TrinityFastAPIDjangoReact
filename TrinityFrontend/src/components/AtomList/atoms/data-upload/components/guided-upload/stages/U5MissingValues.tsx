@@ -319,8 +319,8 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
               historicalTreatment: existingStrategy?.strategy as MissingValueStrategy['strategy'] | undefined,
             };
           })
-          .filter((col: ColumnMissingInfo) => col.missingPercent > 0) // Only show columns with missing values
-          .sort((a: ColumnMissingInfo, b: ColumnMissingInfo) => b.missingPercent - a.missingPercent);
+          .filter((col: ColumnMissingInfo | null): col is ColumnMissingInfo => col !== null && col.missingPercent > 0) // Only show columns with missing values
+          .sort((a: ColumnMissingInfo, b: ColumnMissingInfo) => (b?.missingPercent || 0) - (a?.missingPercent || 0));
 
         setColumns(columnInfos);
         columnsRef.current = columnInfos;
