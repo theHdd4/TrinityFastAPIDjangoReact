@@ -68,11 +68,11 @@ class CSVReader:
         try:
             # First, read without header to allow header detection
             # Use error_bad_lines for older pandas, on_bad_lines for newer
+            # Note: 'python' engine doesn't support 'low_memory' parameter
             read_kwargs = {
                 "encoding": encoding,
                 "sep": delimiter,
                 "header": None,
-                "low_memory": False,
                 "engine": "python",  # More flexible parsing
             }
             # Handle pandas version differences
@@ -95,11 +95,11 @@ class CSVReader:
             # Try fallback encodings
             for fallback_enc in ['latin-1', 'cp1252', 'iso-8859-1']:
                 try:
+                    # Note: 'python' engine doesn't support 'low_memory' parameter
                     read_kwargs = {
                         "encoding": fallback_enc,
                         "sep": delimiter,
                         "header": None,
-                        "low_memory": False,
                         "engine": "python",
                     }
                     if SUPPORTS_ON_BAD_LINES:
@@ -130,11 +130,11 @@ class CSVReader:
                     # If that fails, use original content
                     content_for_pandas = content
                 
+                # Note: 'python' engine doesn't support 'low_memory' parameter
                 read_kwargs = {
                     "encoding": "utf-8",
                     "sep": delimiter,
                     "header": None,
-                    "low_memory": False,
                     "engine": "python",
                 }
                 if SUPPORTS_ON_BAD_LINES:

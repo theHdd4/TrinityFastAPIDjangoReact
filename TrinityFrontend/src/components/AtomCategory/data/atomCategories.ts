@@ -64,6 +64,7 @@ import dataframeOperations from '@/components/AtomList/atoms/dataframe-operation
 import clustering from '@/components/AtomList/atoms/clustering';
 import pivotTable from '@/components/AtomList/atoms/pivot-table';
 import unpivot from '@/components/AtomList/atoms/unpivot';
+import kpiDashboard from '@/components/AtomList/atoms/kpi-dashboard';
 import table from '@/components/AtomList/atoms/table';
 
 export interface Atom {
@@ -178,6 +179,7 @@ export const atomCategories: AtomCategory[] = [
       promoEstimator,
       pivotTable,
       unpivot,
+      kpiDashboard,
       table
     ]
   }

@@ -137,7 +137,7 @@ from app.DataStorageRetrieval.db import (
     delete_arrow_dataset,
     arrow_dataset_exists,
 )
-from app.DataStorageRetrieval.arrow_client import upload_dataframe
+from app.DataStorageRetrieval.arrow_client import upload_dataframe, download_table_bytes
 from app.DataStorageRetrieval.flight_registry import (
     set_ticket,
     get_ticket_by_key,
@@ -3597,7 +3597,15 @@ async def get_workbook_metadata_endpoint(object_name: str = Query(...)):
     try:
         metadata = _load_workbook_metadata(decoded)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Workbook metadata not found")
+        # Return default metadata for files without workbook metadata (e.g., single-sheet files)
+        # This prevents 404 errors in logs for normal operation
+        return {
+            "has_multiple_sheets": False,
+            "sheet_names": [],
+            "selected_sheet": None,
+            "workbook_path": None,
+            "flight_path": None
+        }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return metadata

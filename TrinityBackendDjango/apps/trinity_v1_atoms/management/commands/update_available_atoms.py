@@ -33,6 +33,7 @@ class Command(BaseCommand):
             'clustering',  # Added missing clustering atom
             'pivot-table',
             'unpivot',
+            'kpi-dashboard',  # KPI Dashboard atom
             'table'  # Table atom - display and manipulate data in table format
         ]
         

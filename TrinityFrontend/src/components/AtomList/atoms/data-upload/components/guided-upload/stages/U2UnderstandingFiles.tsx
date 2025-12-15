@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronRight, RotateCcw, X, ArrowLeft } from 'lucide-react';
 import { UPLOAD_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
@@ -85,11 +85,37 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
     (!currentFile.processed && (currentFile.path?.includes('tmp/') || currentFile.path?.includes('temp_uploads/'))) :
     false;
 
+  // Create stable file key to prevent unnecessary re-fetches
+  const fileKey = useMemo(() => {
+    if (!currentFile) return null;
+    return `${currentFile.path}:${currentFile.selectedSheet || ''}`;
+  }, [currentFile?.path, currentFile?.selectedSheet]);
+
+  // Track last fetched file to prevent duplicate calls
+  const lastFetchedFileKeyRef = useRef<string | null>(null);
+
   // Fetch preview data from backend
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'U2UnderstandingFiles.tsx:98',message:'U2 fetchPreview effect triggered',data:{hasCurrentFile:!!currentFile,fileKey,lastFetchedKey:lastFetchedFileKeyRef.current,selectedFileIndex},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+    // #endregion
+    
     const fetchPreview = async () => {
-      if (!currentFile) return;
+      if (!currentFile || !fileKey) return;
       
+      // Prevent duplicate calls for the same file
+      if (lastFetchedFileKeyRef.current === fileKey) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'U2UnderstandingFiles.tsx:103',message:'Skipping duplicate fetch',data:{fileKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        return;
+      }
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'U2UnderstandingFiles.tsx:107',message:'Starting file preview fetch',data:{fileKey,filePath:currentFile.path},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      
+      lastFetchedFileKeyRef.current = fileKey;
       setLoading(true);
       setError('');
 
@@ -174,20 +200,32 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
         }
       } catch (err: any) {
         setError(err.message || 'Failed to load preview');
+        lastFetchedFileKeyRef.current = null; // Reset on error to allow retry
       } finally {
         setLoading(false);
       }
     };
 
-    if (currentFile) {
+    if (currentFile && fileKey) {
       void fetchPreview();
     }
-  }, [currentFile, currentHeaderSelection, currentFile?.selectedSheet]);
+  }, [fileKey, currentFile, currentHeaderSelection]);
+
+  // Track last fetched row issues to prevent duplicate calls
+  const lastFetchedRowIssuesKeyRef = useRef<string | null>(null);
 
   // Fetch full-dataset row issues (paginated, server-side scan)
   const fetchRowIssues = useCallback(
     async (nextOffset: number = 0, nextLimit: number = rowIssues.limit) => {
-      if (!currentFile) return;
+      if (!currentFile || !fileKey) return;
+      
+      // Prevent duplicate calls for the same file
+      const issuesKey = `${fileKey}:${nextOffset}:${nextLimit}`;
+      if (lastFetchedRowIssuesKeyRef.current === issuesKey) {
+        return;
+      }
+      
+      lastFetchedRowIssuesKeyRef.current = issuesKey;
       setRowIssuesLoading(true);
       setRowIssuesError(null);
       try {
@@ -227,18 +265,19 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
         });
       } catch (err: any) {
         setRowIssuesError(err.message || 'Failed to load row issues');
+        lastFetchedRowIssuesKeyRef.current = null; // Reset on error to allow retry
       } finally {
         setRowIssuesLoading(false);
       }
     },
-    [currentFile, rowIssues.limit],
+    [currentFile, fileKey, rowIssues.limit],
   );
 
   useEffect(() => {
-    if (currentFile) {
+    if (currentFile && fileKey) {
       void fetchRowIssues(0, rowIssues.limit);
     }
-  }, [currentFile, currentFile?.selectedSheet, fetchRowIssues, rowIssues.limit]);
+  }, [fileKey, fetchRowIssues]);
 
   // Handle header selection change
   const handleHeaderSelectionChange = (rowIndex: number | 'none') => {

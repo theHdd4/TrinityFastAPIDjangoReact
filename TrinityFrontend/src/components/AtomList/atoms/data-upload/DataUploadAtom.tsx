@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Upload, FileUp, FolderOpen, Sparkles, Database, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { GuidedUploadFlow } from './components/guided-upload';
+import { Switch } from '@/components/ui/switch';
 import { useLaboratoryStore, DataUploadSettings, createDefaultDataUploadSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { UPLOAD_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
@@ -21,13 +21,15 @@ interface SavedDataframe {
 
 const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
+  const setActiveGuidedFlow = useLaboratoryStore((state) => state.setActiveGuidedFlow);
+  const isGuidedModeActive = useLaboratoryStore((state) => state.isGuidedModeActiveForAtom(atomId));
+  const toggleAtomGuidedMode = useLaboratoryStore((state) => state.toggleAtomGuidedMode);
+  const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
   
   const settings = useLaboratoryStore((state) => {
     const currentAtom = state.getAtom(atomId);
     return currentAtom?.settings as DataUploadSettings || createDefaultDataUploadSettings();
   });
-
-  const [isGuidedFlowOpen, setIsGuidedFlowOpen] = useState(false);
   const [savedDataframes, setSavedDataframes] = useState<SavedDataframe[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [primedFiles, setPrimedFiles] = useState<string[]>(() => {
@@ -127,72 +129,99 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     });
     
     setPrimedFiles(fileNames);
-    setIsGuidedFlowOpen(false);
     
     // Refresh saved dataframes list
     fetchSavedDataframes();
   };
 
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    // Start guided flow when files are dropped
+    handleStartGuidedFlow();
+  };
+
+  const handleStartGuidedFlow = () => {
+    // Set active guided flow in store - CanvasArea will render the inline component
+    setActiveGuidedFlow(atomId, 'U0', {});
+  };
+
   return (
-    <Card className="h-full flex flex-col bg-gradient-to-br from-blue-50 to-white border-2 border-blue-200">
-      <div className="p-6 flex-1 flex flex-col">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
-            <Upload className="w-6 h-6 text-white" />
+    <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
+      <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white flex-1">
+        <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
+          {/* Header - Compact */}
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 shadow-md">
+              <Upload className="w-4 h-4 text-white" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Data Upload</h2>
-            <p className="text-sm text-gray-500">Upload and prime your data files</p>
+              <h2 className="text-sm font-bold text-gray-900">Data Upload</h2>
+              <p className="text-xs text-gray-500">Upload and prime your data files</p>
           </div>
         </div>
 
-        {/* Primed Files Summary */}
-        {primedFiles.length > 0 && (
-          <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle2 className="w-5 h-5 text-green-600" />
-              <span className="font-medium text-green-800">Primed Files ({primedFiles.length})</span>
+          {/* Saved Dataframes Count - Compact */}
+          {savedDataframes.length > 0 && (
+            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-center gap-2">
+                <FolderOpen className="w-4 h-4 text-blue-600" />
+                <span className="text-xs text-blue-800">
+                  <strong>{savedDataframes.length}</strong> dataframe{savedDataframes.length !== 1 ? 's' : ''} saved in project
+                </span>
+              </div>
             </div>
-            <div className="space-y-1">
-              {primedFiles.slice(0, 3).map((file, idx) => (
-                <div key={idx} className="text-sm text-green-700 flex items-center gap-2">
-                  <Database className="w-4 h-4" />
-                  {file}
+          )}
+
+          {/* Primed Files Summary - Compact */}
+        {primedFiles.length > 0 && (
+            <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+              <div className="flex items-center gap-2 mb-1">
+                <CheckCircle2 className="w-4 h-4 text-green-600" />
+                <span className="text-xs font-medium text-green-800">Primed Files ({primedFiles.length})</span>
+            </div>
+              <div className="space-y-0.5">
+                {primedFiles.slice(0, 2).map((file, idx) => (
+                  <div key={idx} className="text-xs text-green-700 flex items-center gap-1.5">
+                    <Database className="w-3 h-3" />
+                    <span className="truncate">{file}</span>
                 </div>
               ))}
-              {primedFiles.length > 3 && (
-                <div className="text-sm text-green-600 italic">
-                  +{primedFiles.length - 3} more files
+                {primedFiles.length > 2 && (
+                  <div className="text-xs text-green-600 italic">
+                    +{primedFiles.length - 2} more files
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* Saved Dataframes Count */}
-        {savedDataframes.length > 0 && (
-          <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-            <div className="flex items-center gap-2">
-              <FolderOpen className="w-5 h-5 text-blue-600" />
-              <span className="text-sm text-blue-800">
-                <strong>{savedDataframes.length}</strong> dataframe{savedDataframes.length !== 1 ? 's' : ''} saved in project
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Error notice (non-blocking) */}
+          {/* Error notice (non-blocking) - Compact */}
         {fetchError && savedDataframes.length === 0 && (
-          <div className="mb-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+            <div className="p-2 bg-amber-50 rounded-lg border border-amber-200">
             <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-              <span className="text-sm text-amber-700">
+                <AlertCircle className="w-3 h-3 text-amber-600 flex-shrink-0" />
+                <span className="text-xs text-amber-700 flex-1">
                 Could not load saved dataframes. You can still upload files.
               </span>
               <button
                 onClick={fetchSavedDataframes}
-                className="ml-auto text-amber-700 hover:text-amber-800 text-sm underline"
+                  className="text-amber-700 hover:text-amber-800 text-xs underline"
               >
                 Retry
               </button>
@@ -200,49 +229,60 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           </div>
         )}
 
-        {/* Main Action Area */}
-        <div className="flex-1 flex flex-col items-center justify-center">
-          {primedFiles.length === 0 ? (
-            <>
-              <div className="text-center mb-8">
-                <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
-                  <FileUp className="w-10 h-10 text-blue-600" />
+          {/* Drag and Drop Area - Compact */}
+          <div
+            className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 p-4 ${
+              isDragOver 
+                ? 'border-blue-400 bg-blue-50' 
+                : 'border-blue-300 hover:border-blue-400 bg-blue-50/50'
+            }`}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+          >
+            <div className="mb-3">
+              <div className={`mx-auto rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md transform transition-transform duration-300 ${
+                isDragOver ? 'scale-110' : 'hover:scale-105'
+              } w-12 h-12 mb-2`}>
+                <Upload className="text-white drop-shadow-lg w-6 h-6" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                  Ready to Upload Your Data
-                </h3>
-                <p className="text-gray-600 max-w-sm">
-                  Use our guided workflow to upload, clean, and prime your data files for analysis
+              <p className="text-xs font-medium text-gray-700 mb-1">
+                {isDragOver ? 'Drop files here' : 'Drag and drop files or click to upload'}
+              </p>
+              <p className="text-xs text-gray-500">
+                Use our guided workflow to upload, clean, and prime your data files
                 </p>
               </div>
-            </>
-          ) : (
-            <div className="text-center mb-6">
-              <p className="text-gray-600">
-                Upload additional files or re-run the guided workflow
-              </p>
             </div>
-          )}
 
-          {/* Start Guided Flow Button */}
+          {/* Per-Atom Guided Mode Toggle */}
+          <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg border border-gray-200">
+            <div className="flex items-center gap-2">
+              <Sparkles className={`w-3.5 h-3.5 ${isGuidedModeActive ? 'text-purple-600' : 'text-gray-400'}`} />
+              <span className="text-xs text-gray-600 font-medium">Guided Mode</span>
+              {globalGuidedModeEnabled && (
+                <span className="text-xs text-gray-400">(Global ON)</span>
+              )}
+            </div>
+            <Switch
+              checked={isGuidedModeActive}
+              onCheckedChange={() => toggleAtomGuidedMode(atomId)}
+              className="scale-[0.7]"
+            />
+          </div>
+
+          {/* Start Guided Flow Button - Compact */}
           <Button
-            size="lg"
-            className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-300 flex items-center gap-2 px-8 py-6 text-lg"
-            onClick={() => setIsGuidedFlowOpen(true)}
+            className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md hover:shadow-lg transition-all duration-300 flex items-center justify-center gap-2 py-2.5 text-sm"
+            onClick={handleStartGuidedFlow}
+            disabled={!isGuidedModeActive}
           >
-            <Sparkles className="w-5 h-5" />
+            <Sparkles className="w-4 h-4" />
             {primedFiles.length === 0 ? 'Start Guided Upload' : 'Upload More Files'}
           </Button>
         </div>
+      </Card>
       </div>
-
-      {/* Guided Upload Flow Modal */}
-      <GuidedUploadFlow
-        open={isGuidedFlowOpen}
-        onOpenChange={setIsGuidedFlowOpen}
-        onComplete={handleGuidedFlowComplete}
-      />
-    </Card>
   );
 };
 
@@ -257,28 +297,28 @@ const DataUploadAtom: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   } catch (err) {
     console.error('DataUploadAtom: Component error:', err);
     return (
-      <Card className="h-full flex flex-col bg-gradient-to-br from-blue-50 to-white border-2 border-blue-200">
-        <div className="p-6 flex-1 flex flex-col items-center justify-center">
+      <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex items-center justify-center">
+        <Card className="shadow-sm border-2 border-blue-200 bg-white p-4">
           <div className="text-center">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center">
-              <AlertCircle className="w-8 h-8 text-amber-600" />
+            <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-amber-100 flex items-center justify-center">
+              <AlertCircle className="w-6 h-6 text-amber-600" />
             </div>
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">
+            <h3 className="text-sm font-semibold text-gray-800 mb-2">
               Unable to Load Data Upload
             </h3>
-            <p className="text-gray-600 mb-4 text-sm">
+            <p className="text-gray-600 mb-3 text-xs">
               The component encountered an error. This might be due to network issues.
             </p>
             <Button
               onClick={() => window.location.reload()}
-              className="bg-blue-500 hover:bg-blue-600 text-white"
+              className="bg-blue-500 hover:bg-blue-600 text-white text-xs py-1.5 px-4"
             >
-              <RefreshCw className="w-4 h-4 mr-2" />
+              <RefreshCw className="w-3 h-3 mr-2" />
               Reload Page
             </Button>
           </div>
+        </Card>
         </div>
-      </Card>
     );
   }
 };

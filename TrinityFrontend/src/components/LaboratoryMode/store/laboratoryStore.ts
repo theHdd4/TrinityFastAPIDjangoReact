@@ -3,6 +3,7 @@ import { safeStringify } from "@/utils/safeStringify";
 import { atoms as allAtoms } from "@/components/AtomList/data";
 import { ClarificationRequestMessage as ClarificationRequest } from "@/types/streaming";
 import { LABORATORY_API } from "@/lib/api";
+import type { UploadStage, GuidedUploadFlowState } from "@/components/AtomList/atoms/data-upload/components/guided-upload/useGuidedUploadFlow";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -2002,6 +2003,9 @@ interface LaboratoryStore {
   subMode: LaboratorySubMode;
   isLaboratorySession: boolean;
   pendingClarification?: ClarificationRequest | null;
+  activeGuidedFlows: Record<string, { atomId: string; currentStage: UploadStage; state: Partial<GuidedUploadFlowState> }>;
+  globalGuidedModeEnabled: boolean;
+  atomGuidedModeOverrides: Record<string, boolean>;
 
   // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
@@ -2049,6 +2053,16 @@ interface LaboratoryStore {
   ) => Promise<void>;
   findCardByAtomId: (atomId: string) => LayoutCard | undefined;
   findCardIndex: (cardId: string) => number;
+
+  // --- Guided Flow Actions ---
+  setActiveGuidedFlow: (atomId: string, currentStage: UploadStage, state?: Partial<GuidedUploadFlowState>) => void;
+  updateGuidedFlowStage: (atomId: string, stage: UploadStage) => void;
+  removeActiveGuidedFlow: (atomId: string) => void;
+  
+  // --- Guided Mode Toggle Actions ---
+  setGlobalGuidedMode: (enabled: boolean) => void;
+  toggleAtomGuidedMode: (atomId: string) => void;
+  isGuidedModeActiveForAtom: (atomId: string) => boolean;
 }
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
@@ -2072,6 +2086,9 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     : null,
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   subMode: 'analytics',  // Default to analytics mode
+  activeGuidedFlows: {},
+  globalGuidedModeEnabled: false,
+  atomGuidedModeOverrides: {},
   setCards: (cards: LayoutCard[]) => {
     const currentSubMode = get().subMode;
     
@@ -2666,11 +2683,79 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     return { success: true, tableAtomId: newTableAtomId };
   },
 
+  // --- Guided Flow Actions ---
+  setActiveGuidedFlow: (atomId: string, currentStage: UploadStage, state?: Partial<GuidedUploadFlowState>) => {
+    set((prev) => ({
+      activeGuidedFlows: {
+        ...prev.activeGuidedFlows,
+        [atomId]: {
+          atomId,
+          currentStage,
+          state: state || {},
+        },
+      },
+    }));
+  },
+
+  updateGuidedFlowStage: (atomId: string, stage: UploadStage) => {
+    set((prev) => {
+      const flow = prev.activeGuidedFlows[atomId];
+      if (!flow) return prev;
+      return {
+        activeGuidedFlows: {
+          ...prev.activeGuidedFlows,
+          [atomId]: {
+            ...flow,
+            currentStage: stage,
+          },
+        },
+      };
+    });
+  },
+
+  removeActiveGuidedFlow: (atomId: string) => {
+    set((prev) => {
+      const { [atomId]: removed, ...rest } = prev.activeGuidedFlows;
+      return { activeGuidedFlows: rest };
+    });
+  },
+
+  // --- Guided Mode Toggle Actions ---
+  setGlobalGuidedMode: (enabled: boolean) => {
+    set({ globalGuidedModeEnabled: enabled });
+  },
+
+  toggleAtomGuidedMode: (atomId: string) => {
+    set((prev) => {
+      const currentOverride = prev.atomGuidedModeOverrides[atomId];
+      // Toggle: if undefined or false, set to true; if true, set to false
+      const newOverrides = {
+        ...prev.atomGuidedModeOverrides,
+        [atomId]: currentOverride === undefined ? true : !currentOverride,
+      };
+      return { atomGuidedModeOverrides: newOverrides };
+    });
+  },
+
+  isGuidedModeActiveForAtom: (atomId: string) => {
+    const state = get();
+    if (state.globalGuidedModeEnabled) {
+      // Global is ON, check if atom has explicit override to disable
+      return !state.atomGuidedModeOverrides[atomId];
+    } else {
+      // Global is OFF, check if atom has explicit enable
+      return !!state.atomGuidedModeOverrides[atomId];
+    }
+  },
+
   reset: () => {
     set({
       cards: [],
       metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
       pendingClarification: null,
+      activeGuidedFlows: {},
+      globalGuidedModeEnabled: false,
+      atomGuidedModeOverrides: {},
     });
     if (typeof window !== 'undefined') {
       localStorage.removeItem('trinity_lab_pending_clarification');

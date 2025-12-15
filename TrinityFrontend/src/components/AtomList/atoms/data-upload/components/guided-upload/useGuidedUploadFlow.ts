@@ -90,12 +90,23 @@ export function useGuidedUploadFlow(initialState?: Partial<GuidedUploadFlowState
   stateRef.current = state;
 
   const goToStage = useCallback((stage: UploadStage) => {
-    setState(prev => ({ ...prev, currentStage: stage }));
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useGuidedUploadFlow.ts:92',message:'goToStage called',data:{to:stage,currentState:stateRef.current.currentStage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    setState(prev => {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useGuidedUploadFlow.ts:94',message:'goToStage setState',data:{from:prev.currentStage,to:stage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      return { ...prev, currentStage: stage };
+    });
   }, []);
 
   const goToNextStage = useCallback(() => {
     const stages: UploadStage[] = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
     const currentIndex = stages.indexOf(state.currentStage);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useGuidedUploadFlow.ts:96',message:'goToNextStage called',data:{currentStage:state.currentStage,currentIndex,nextStage:currentIndex < stages.length - 1 ? stages[currentIndex + 1] : 'none'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
     if (currentIndex < stages.length - 1) {
       goToStage(stages[currentIndex + 1]);
     }

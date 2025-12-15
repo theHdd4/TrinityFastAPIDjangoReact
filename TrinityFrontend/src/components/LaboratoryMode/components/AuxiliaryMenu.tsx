@@ -4,7 +4,7 @@ import SavedDataFramesPanel from './SavedDataFramesPanel';
 import HelpPanel from './HelpPanel/';
 import ExhibitionPanel from './ExhibitionPanel';
 import { TrinityAIIcon, TrinityAIPanel } from '@/components/TrinityAI';
-import { Settings, Database, HelpCircle, GalleryHorizontal, Undo2, Save, Share2, List, Play, Sparkles } from 'lucide-react';
+import { Settings, Database, HelpCircle, GalleryHorizontal, Undo2, Save, Share2, List, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 
@@ -42,7 +42,6 @@ interface Props {
   onShare?: () => void;
   showFloatingNavigationList?: boolean;
   setShowFloatingNavigationList?: (show: boolean) => void;
-  onOpenPriming?: () => void;
 }
 
 const AuxiliaryMenu: React.FC<Props> = ({
@@ -63,7 +62,6 @@ const AuxiliaryMenu: React.FC<Props> = ({
   onShare,
   showFloatingNavigationList = true,
   setShowFloatingNavigationList,
-  onOpenPriming
 }) => {
   const [internalActive, setInternalActive] = useState<
     'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null
@@ -229,22 +227,6 @@ const AuxiliaryMenu: React.FC<Props> = ({
             <Database className="w-3.5 h-3.5" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Saved DataFrames
-            </span>
-          </button>
-        </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button
-            onClick={() => {
-              onOpenPriming?.();
-            }}
-            className="w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center"
-            title="Priming the data"
-            data-priming="true"
-            type="button"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Priming the data
             </span>
           </button>
         </div>

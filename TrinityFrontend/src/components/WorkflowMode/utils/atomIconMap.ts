@@ -39,6 +39,7 @@ import {
     Calculator,
     Search,
     Crosshair,
+    LayoutDashboard,
   } from 'lucide-react';
   
   export const atomIconMap: Record<string, any> = {
@@ -98,5 +99,8 @@ import {
     // Business Intelligence
     'base-price-estimator': DollarSign,
     'promo-estimator': TagIcon,
+    'pivot-table': Table,
+    'unpivot': Copy,
+    'kpi-dashboard': LayoutDashboard,
   };
   
