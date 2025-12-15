@@ -6,7 +6,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Plus, Minus, X, Divide, Circle, BarChart3, Calculator, TrendingDown, Activity, Calendar, ChevronDown, ChevronRight, Trash2, AlertCircle, Hash, Type, Filter, Users, TrendingUp, Clock, FileText, FunctionSquare, HelpCircle, Search } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useLaboratoryStore } from '../../../../../store/laboratoryStore'
 import { FEATURE_OVERVIEW_API, CREATECOLUMN_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
@@ -480,15 +479,23 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
   const [identifiersListOpen, setIdentifiersListOpen] = React.useState(false);
   const openedBySearchRef = React.useRef(false);
   const { toast } = useToast();
-  const metricsInputs = useLaboratoryStore(state => state.metricsInputs);
-  const updateMetricsInputs = useLaboratoryStore(state => state.updateMetricsInputs);
-  const selectedOperations = metricsInputs.operations;
+
+  // Local operations state for guideflow – independent of global laboratory store
+  const [selectedOperations, setSelectedOperations] = React.useState<Array<{
+    id: string;
+    type: string;
+    name: string;
+    columns: string[];
+    rename?: string | Record<string, any>;
+    param?: string | number | Record<string, any>;
+    fiscalStartMonth?: string;
+  }>>([]);
   
   // Convert selectedIdentifiersForBackend array to Set for easier manipulation
-  const selectedIdentifiersForBackendSet = React.useMemo(() => new Set(selectedIdentifiersForBackend), [selectedIdentifiersForBackend]);
-  const addMetricsOperation = useLaboratoryStore(state => state.addMetricsOperation);
-  const updateMetricsOperation = useLaboratoryStore(state => state.updateMetricsOperation);
-  const removeMetricsOperation = useLaboratoryStore(state => state.removeMetricsOperation);
+  const selectedIdentifiersForBackendSet = React.useMemo(
+    () => new Set(selectedIdentifiersForBackend),
+    [selectedIdentifiersForBackend]
+  );
 
   // Use provided API or default to FEATURE_OVERVIEW_API (memoized to prevent infinite loops)
   const apiBase = React.useMemo(() => 
@@ -812,11 +819,15 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
       rename: opType.type === 'rename' ? {} : '',
       param: opType.type === 'replace' ? { oldValue: '', newValue: '' } : (opType.type === 'fill_na' ? { strategy: '', customValue: '' } : (opType.type === 'date_builder' ? 'from_year_month_day' : (opType.type === 'power' || opType.type === 'lag' || opType.type === 'lead' || opType.type === 'diff' || opType.type === 'rolling_mean' || opType.type === 'rolling_sum' || opType.type === 'rolling_min' || opType.type === 'rolling_max' ? '' : (opType.type === 'growth_rate' ? { period: '1', frequency: 'none', comparison_type: 'period' } : (opType.type === 'filter_rows_condition' ? {} : (opType.type === 'filter_top_n_per_group' ? { n: '1', metric_col: '', ascending: false } : (opType.type === 'filter_percentile' ? { percentile: '10', metric_col: '', direction: 'top' } : (opType.type === 'compute_metrics_within_group' ? { metric_cols: [{ metric_col: '', method: 'sum', rename: '' }] } : (opType.type === 'group_share_of_total' ? { metric_cols: [{ metric_col: '', rename: '' }] } : (opType.type === 'group_contribution' ? { metric_cols: [{ metric_col: '', rename: '' }] } : undefined)))))))))),
     };
-    addMetricsOperation(newOperation);
+    setSelectedOperations(prev => [...prev, newOperation]);
   };
 
   const updateOperationColumns = (opId: string, newColumns: string[]) => {
-    updateMetricsOperation(opId, { columns: [...newColumns] });
+    setSelectedOperations(prev =>
+      prev.map(op =>
+        op.id === opId ? { ...op, columns: [...newColumns] } : op
+      )
+    );
   };
 
   const addColumnSelector = (opId: string) => {
@@ -826,9 +837,15 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
     updateOperationColumns(opId, [...current, '']);
     // For rename operation, initialize the rename value for the new column
     if (op.type === 'rename') {
-      const currentRename = (op.rename && typeof op.rename === 'object' ? op.rename as Record<string, any> : {}) || {};
+      const currentRename = (op.rename && typeof op.rename === 'object'
+        ? (op.rename as Record<string, any>)
+        : {}) || {};
       const newRename = { ...currentRename, [current.length]: '' };
-      updateMetricsOperation(opId, { rename: newRename });
+      setSelectedOperations(prev =>
+        prev.map(o =>
+          o.id === opId ? { ...o, rename: newRename } : o
+        )
+      );
     }
   };
 
@@ -857,7 +874,13 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
       });
       // Also clear the selected oldValue when column changes
       const currentParam = (op.param as Record<string, any>) || { oldValue: '', newValue: '' };
-      updateMetricsOperation(opId, { param: { ...currentParam, oldValue: '' } });
+      setSelectedOperations(prev =>
+        prev.map(o =>
+          o.id === opId
+            ? { ...o, param: { ...currentParam, oldValue: '' } }
+            : o
+        )
+      );
     }
   };
 
@@ -897,7 +920,7 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
   };
 
   const removeOperation = (opId: string) => {
-    removeMetricsOperation(opId);
+    setSelectedOperations(prev => prev.filter(op => op.id !== opId));
   };
 
   const getAvailableColumns = (opType: string) => {
@@ -1813,7 +1836,7 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      selectedOperations.forEach(op => removeMetricsOperation(op.id));
+                      setSelectedOperations([]);
                     }}
                     className="text-xs"
                   >
@@ -2028,7 +2051,13 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                   value={(selectedOperation.param as Record<string, any>)?.oldValue || ''}
                                   onChange={e => {
                                     const currentParam = (selectedOperation.param as Record<string, any>) || { oldValue: '', newValue: '' };
-                                    updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, oldValue: e.target.value } });
+                                    setSelectedOperations(prev =>
+                                      prev.map(op =>
+                                        op.id === selectedOperation.id
+                                          ? { ...op, param: { ...currentParam, oldValue: e.target.value } }
+                                          : op
+                                      )
+                                    );
                                   }}
                                   onFocus={() => {
                                     // Fetch unique values when dropdown is focused
@@ -2063,7 +2092,13 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                   value={(selectedOperation.param as Record<string, any>)?.newValue || ''}
                                   onChange={e => {
                                     const currentParam = (selectedOperation.param as Record<string, any>) || { oldValue: '', newValue: '' };
-                                    updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, newValue: e.target.value } });
+                                    setSelectedOperations(prev =>
+                                      prev.map(op =>
+                                        op.id === selectedOperation.id
+                                          ? { ...op, param: { ...currentParam, newValue: e.target.value } }
+                                          : op
+                                      )
+                                    );
                                   }}
                                   placeholder="Enter replacement value"
                                   className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2097,7 +2132,13 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                   value={(selectedOperation.param as Record<string, any>)?.strategy || ''}
                                   onChange={e => {
                                     const currentParam = (selectedOperation.param as Record<string, any>) || { strategy: '', customValue: '' };
-                                    updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, strategy: e.target.value } });
+                                    setSelectedOperations(prev =>
+                                      prev.map(op =>
+                                        op.id === selectedOperation.id
+                                          ? { ...op, param: { ...currentParam, strategy: e.target.value } }
+                                          : op
+                                      )
+                                    );
                                   }}
                                   className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 >
@@ -2119,7 +2160,13 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                     value={(selectedOperation.param as Record<string, any>)?.customValue || ''}
                                     onChange={e => {
                                       const currentParam = (selectedOperation.param as Record<string, any>) || { strategy: '', customValue: '' };
-                                      updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, customValue: e.target.value } });
+                                      setSelectedOperations(prev =>
+                                        prev.map(op =>
+                                          op.id === selectedOperation.id
+                                            ? { ...op, param: { ...currentParam, customValue: e.target.value } }
+                                            : op
+                                        )
+                                      );
                                     }}
                                     placeholder="Enter custom value"
                                     className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2171,7 +2218,13 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                         onChange={e => {
                                           const currentRename = (selectedOperation.rename && typeof selectedOperation.rename === 'object' ? selectedOperation.rename as Record<string, any> : {}) || {};
                                           const newRename = { ...currentRename, [idx]: e.target.value };
-                                          updateMetricsOperation(selectedOperation.id, { rename: newRename });
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, rename: newRename }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         placeholder="New name"
                                         className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2189,7 +2242,7 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                           delete newRename[idx];
                                           // Reindex remaining rename values
                                           const reindexed: Record<string, any> = {};
-                                          Object.keys(newRename).forEach((key, newIdx) => {
+                                          Object.keys(newRename).forEach((key) => {
                                             const oldIdx = parseInt(key);
                                             if (oldIdx > idx) {
                                               reindexed[oldIdx - 1] = newRename[key];
@@ -2197,7 +2250,13 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                               reindexed[oldIdx] = newRename[key];
                                             }
                                           });
-                                          updateMetricsOperation(selectedOperation.id, { rename: reindexed });
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, rename: reindexed }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         className="h-4 w-4 text-red-400 hover:text-red-600 flex-shrink-0"
                                       >
@@ -2236,7 +2295,13 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                       delete newParam[key];
                                     }
                                   });
-                                  updateMetricsOperation(selectedOperation.id, { param: newParam });
+                                  setSelectedOperations(prev =>
+                                    prev.map(op =>
+                                      op.id === selectedOperation.id
+                                        ? { ...op, param: newParam }
+                                        : op
+                                    )
+                                  );
                                 }}
                                 className="w-full h-24 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               >
@@ -2260,8 +2325,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                       <select
                                         value={operator}
                                         onChange={e => {
-                                          const newParam = { ...currentParam, [`condition_${idx}_operator`]: e.target.value };
-                                          updateMetricsOperation(selectedOperation.id, { param: newParam });
+                                  const newParam = { ...currentParam, [`condition_${idx}_operator`]: e.target.value };
+                                  setSelectedOperations(prev =>
+                                    prev.map(op =>
+                                      op.id === selectedOperation.id
+                                        ? { ...op, param: newParam }
+                                        : op
+                                    )
+                                  );
                                         }}
                                         className="h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                       >
@@ -2279,7 +2350,13 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                         value={value}
                                         onChange={e => {
                                           const newParam = { ...currentParam, [`condition_${idx}_value`]: e.target.value };
-                                          updateMetricsOperation(selectedOperation.id, { param: newParam });
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, param: newParam }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         placeholder="Value"
                                         className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2321,7 +2398,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                   value={(selectedOperation.param as Record<string, any>)?.n || '1'}
                                   onChange={e => {
                                     const currentParam = (selectedOperation.param as Record<string, any>) || { n: '1', metric_col: '', ascending: false };
-                                    updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, n: e.target.value } });
+                                    const newParam = { ...currentParam, n: e.target.value };
+                                    setSelectedOperations(prev =>
+                                      prev.map(op =>
+                                        op.id === selectedOperation.id
+                                          ? { ...op, param: newParam }
+                                          : op
+                                      )
+                                    );
                                   }}
                                   placeholder="1"
                                   className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2333,7 +2417,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                   value={(selectedOperation.param as Record<string, any>)?.metric_col || ''}
                                   onChange={e => {
                                     const currentParam = (selectedOperation.param as Record<string, any>) || { n: '1', metric_col: '', ascending: false };
-                                    updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_col: e.target.value } });
+                                    const newParam = { ...currentParam, metric_col: e.target.value };
+                                    setSelectedOperations(prev =>
+                                      prev.map(op =>
+                                        op.id === selectedOperation.id
+                                          ? { ...op, param: newParam }
+                                          : op
+                                      )
+                                    );
                                   }}
                                   className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 >
@@ -2349,7 +2440,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                   value={(selectedOperation.param as Record<string, any>)?.ascending ? 'ascending' : 'descending'}
                                   onChange={e => {
                                     const currentParam = (selectedOperation.param as Record<string, any>) || { n: '1', metric_col: '', ascending: false };
-                                    updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, ascending: e.target.value === 'ascending' } });
+                                    const newParam = { ...currentParam, ascending: e.target.value === 'ascending' };
+                                    setSelectedOperations(prev =>
+                                      prev.map(op =>
+                                        op.id === selectedOperation.id
+                                          ? { ...op, param: newParam }
+                                          : op
+                                      )
+                                    );
                                   }}
                                   className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 >
@@ -2372,7 +2470,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                               value={(selectedOperation.param as Record<string, any>)?.percentile || '10'}
                               onChange={e => {
                                 const currentParam = (selectedOperation.param as Record<string, any>) || { percentile: '10', metric_col: '', direction: 'top' };
-                                updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, percentile: e.target.value } });
+                                const newParam = { ...currentParam, percentile: e.target.value };
+                                setSelectedOperations(prev =>
+                                  prev.map(op =>
+                                    op.id === selectedOperation.id
+                                      ? { ...op, param: newParam }
+                                      : op
+                                  )
+                                );
                               }}
                               placeholder="10"
                               className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2384,7 +2489,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                               value={(selectedOperation.param as Record<string, any>)?.metric_col || opColumns.filter(Boolean)[0] || ''}
                               onChange={e => {
                                 const currentParam = (selectedOperation.param as Record<string, any>) || { percentile: '10', metric_col: '', direction: 'top' };
-                                updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_col: e.target.value } });
+                                const newParam = { ...currentParam, metric_col: e.target.value };
+                                setSelectedOperations(prev =>
+                                  prev.map(op =>
+                                    op.id === selectedOperation.id
+                                      ? { ...op, param: newParam }
+                                      : op
+                                  )
+                                );
                                 // Update columns array with the metric column for backend compatibility
                                 updateOperationColumns(selectedOperation.id, [e.target.value]);
                               }}
@@ -2402,7 +2514,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                               value={(selectedOperation.param as Record<string, any>)?.direction || 'top'}
                               onChange={e => {
                                 const currentParam = (selectedOperation.param as Record<string, any>) || { percentile: '10', metric_col: '', direction: 'top' };
-                                updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, direction: e.target.value } });
+                                const newParam = { ...currentParam, direction: e.target.value };
+                                setSelectedOperations(prev =>
+                                  prev.map(op =>
+                                    op.id === selectedOperation.id
+                                      ? { ...op, param: newParam }
+                                      : op
+                                  )
+                                );
                               }}
                               className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             >
@@ -2440,7 +2559,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                 onClick={() => {
                                   const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', method: 'sum', rename: '' }] };
                                   const metricCols = currentParam.metric_cols || [{ metric_col: '', method: 'sum', rename: '' }];
-                                  updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: [...metricCols, { metric_col: '', method: 'sum', rename: '' }] } });
+                                  const newParam = { ...currentParam, metric_cols: [...metricCols, { metric_col: '', method: 'sum', rename: '' }] };
+                                  setSelectedOperations(prev =>
+                                    prev.map(op =>
+                                      op.id === selectedOperation.id
+                                        ? { ...op, param: newParam }
+                                        : op
+                                    )
+                                  );
                                 }}
                                 className="h-5 w-5"
                               >
@@ -2465,7 +2591,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                           const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', method: 'sum', rename: '' }] };
                                           const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', method: 'sum', rename: '' }])];
                                           newMetricCols[idx] = { ...newMetricCols[idx], metric_col: e.target.value };
-                                          updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                          const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, param: newParam }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                       >
@@ -2482,7 +2615,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                           const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', method: 'sum', rename: '' }] };
                                           const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', method: 'sum', rename: '' }])];
                                           newMetricCols[idx] = { ...newMetricCols[idx], method: e.target.value };
-                                          updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                          const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, param: newParam }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                       >
@@ -2505,7 +2645,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                           const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', method: 'sum', rename: '' }] };
                                           const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', method: 'sum', rename: '' }])];
                                           newMetricCols.splice(idx, 1);
-                                          updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                          const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, param: newParam }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         className="h-4 w-4 text-red-400 hover:text-red-600 flex-shrink-0"
                                       >
@@ -2521,7 +2668,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                         const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', method: 'sum', rename: '' }] };
                                         const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', method: 'sum', rename: '' }])];
                                         newMetricCols[idx] = { ...newMetricCols[idx], rename: e.target.value };
-                                        updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                        const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                        setSelectedOperations(prev =>
+                                          prev.map(op =>
+                                            op.id === selectedOperation.id
+                                              ? { ...op, param: newParam }
+                                              : op
+                                          )
+                                        );
                                       }}
                                       className={`h-6 text-[10px] ${hasDuplicate ? 'border-red-500' : ''}`}
                                     />
@@ -2563,7 +2717,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                 onClick={() => {
                                   const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', rename: '' }] };
                                   const metricCols = currentParam.metric_cols || [{ metric_col: '', rename: '' }];
-                                  updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: [...metricCols, { metric_col: '', rename: '' }] } });
+                                  const newParam = { ...currentParam, metric_cols: [...metricCols, { metric_col: '', rename: '' }] };
+                                  setSelectedOperations(prev =>
+                                    prev.map(op =>
+                                      op.id === selectedOperation.id
+                                        ? { ...op, param: newParam }
+                                        : op
+                                    )
+                                  );
                                 }}
                                 className="h-5 w-5"
                               >
@@ -2588,7 +2749,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                           const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', rename: '' }] };
                                           const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', rename: '' }])];
                                           newMetricCols[idx] = { ...newMetricCols[idx], metric_col: e.target.value };
-                                          updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                          const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, param: newParam }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                       >
@@ -2606,7 +2774,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                           const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', rename: '' }] };
                                           const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', rename: '' }])];
                                           newMetricCols.splice(idx, 1);
-                                          updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                          const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, param: newParam }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         className="h-4 w-4 text-red-400 hover:text-red-600 flex-shrink-0"
                                       >
@@ -2622,7 +2797,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                         const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', rename: '' }] };
                                         const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', rename: '' }])];
                                         newMetricCols[idx] = { ...newMetricCols[idx], rename: e.target.value };
-                                        updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                        const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                        setSelectedOperations(prev =>
+                                          prev.map(op =>
+                                            op.id === selectedOperation.id
+                                              ? { ...op, param: newParam }
+                                              : op
+                                          )
+                                        );
                                       }}
                                       className={`h-6 text-[10px] ${hasDuplicate ? 'border-red-500' : ''}`}
                                     />
@@ -2664,7 +2846,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                 onClick={() => {
                                   const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', rename: '' }] };
                                   const metricCols = currentParam.metric_cols || [{ metric_col: '', rename: '' }];
-                                  updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: [...metricCols, { metric_col: '', rename: '' }] } });
+                                  const newParam = { ...currentParam, metric_cols: [...metricCols, { metric_col: '', rename: '' }] };
+                                  setSelectedOperations(prev =>
+                                    prev.map(op =>
+                                      op.id === selectedOperation.id
+                                        ? { ...op, param: newParam }
+                                        : op
+                                    )
+                                  );
                                 }}
                                 className="h-5 w-5"
                               >
@@ -2689,7 +2878,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                           const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', rename: '' }] };
                                           const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', rename: '' }])];
                                           newMetricCols[idx] = { ...newMetricCols[idx], metric_col: e.target.value };
-                                          updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                          const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, param: newParam }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                       >
@@ -2707,7 +2903,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                           const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', rename: '' }] };
                                           const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', rename: '' }])];
                                           newMetricCols.splice(idx, 1);
-                                          updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                          const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                          setSelectedOperations(prev =>
+                                            prev.map(op =>
+                                              op.id === selectedOperation.id
+                                                ? { ...op, param: newParam }
+                                                : op
+                                            )
+                                          );
                                         }}
                                         className="h-4 w-4 text-red-400 hover:text-red-600 flex-shrink-0"
                                       >
@@ -2723,7 +2926,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                         const currentParam = (selectedOperation.param as Record<string, any>) || { metric_cols: [{ metric_col: '', rename: '' }] };
                                         const newMetricCols = [...(currentParam.metric_cols || [{ metric_col: '', rename: '' }])];
                                         newMetricCols[idx] = { ...newMetricCols[idx], rename: e.target.value };
-                                        updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, metric_cols: newMetricCols } });
+                                        const newParam = { ...currentParam, metric_cols: newMetricCols };
+                                        setSelectedOperations(prev =>
+                                          prev.map(op =>
+                                            op.id === selectedOperation.id
+                                              ? { ...op, param: newParam }
+                                              : op
+                                          )
+                                        );
                                       }}
                                       className={`h-6 text-[10px] ${hasDuplicate ? 'border-red-500' : ''}`}
                                     />
@@ -2910,7 +3120,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                           step="any"
                           value={selectedOperation.param || ''}
                           onChange={e => {
-                            updateMetricsOperation(selectedOperation.id, { param: e.target.value });
+                            const newParam = e.target.value;
+                            setSelectedOperations(prev =>
+                              prev.map(op =>
+                                op.id === selectedOperation.id
+                                  ? { ...op, param: newParam }
+                                  : op
+                              )
+                            );
                           }}
                           placeholder="Enter exponent"
                           className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2927,7 +3144,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                           min="1"
                           value={selectedOperation.param || ''}
                           onChange={e => {
-                            updateMetricsOperation(selectedOperation.id, { param: e.target.value });
+                            const newParam = e.target.value;
+                            setSelectedOperations(prev =>
+                              prev.map(op =>
+                                op.id === selectedOperation.id
+                                  ? { ...op, param: newParam }
+                                  : op
+                              )
+                            );
                           }}
                           placeholder="Enter period"
                           className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2944,7 +3168,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                           min="1"
                           value={selectedOperation.param || ''}
                           onChange={e => {
-                            updateMetricsOperation(selectedOperation.id, { param: e.target.value });
+                            const newParam = e.target.value;
+                            setSelectedOperations(prev =>
+                              prev.map(op =>
+                                op.id === selectedOperation.id
+                                  ? { ...op, param: newParam }
+                                  : op
+                              )
+                            );
                           }}
                           placeholder="Enter period"
                           className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2961,7 +3192,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                           min="1"
                           value={selectedOperation.param || ''}
                           onChange={e => {
-                            updateMetricsOperation(selectedOperation.id, { param: e.target.value });
+                            const newParam = e.target.value;
+                            setSelectedOperations(prev =>
+                              prev.map(op =>
+                                op.id === selectedOperation.id
+                                  ? { ...op, param: newParam }
+                                  : op
+                              )
+                            );
                           }}
                           placeholder="Enter period"
                           className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2978,7 +3216,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                           min="1"
                           value={selectedOperation.param || ''}
                           onChange={e => {
-                            updateMetricsOperation(selectedOperation.id, { param: e.target.value });
+                            const newParam = e.target.value;
+                            setSelectedOperations(prev =>
+                              prev.map(op =>
+                                op.id === selectedOperation.id
+                                  ? { ...op, param: newParam }
+                                  : op
+                              )
+                            );
                           }}
                           placeholder="Enter window size"
                           className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -2997,7 +3242,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                             value={(selectedOperation.param as Record<string, any>)?.period || '1'}
                             onChange={e => {
                               const currentParam = (selectedOperation.param as Record<string, any>) || { period: '1', frequency: 'none', comparison_type: 'period' };
-                              updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, period: e.target.value } });
+                              const newParam = { ...currentParam, period: e.target.value };
+                              setSelectedOperations(prev =>
+                                prev.map(op =>
+                                  op.id === selectedOperation.id
+                                    ? { ...op, param: newParam }
+                                    : op
+                                )
+                              );
                             }}
                             placeholder="Enter period"
                             className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -3009,9 +3261,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                             value={(selectedOperation.param as Record<string, any>)?.frequency || 'none'}
                             onChange={e => {
                               const currentParam = (selectedOperation.param as Record<string, any>) || { period: '1', frequency: 'none', comparison_type: 'period' };
-                              // Store the actual value (not converting to empty string) for UI state
-                              // We'll convert to empty string only when sending to backend
-                              updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, frequency: e.target.value } });
+                              const newParam = { ...currentParam, frequency: e.target.value };
+                              setSelectedOperations(prev =>
+                                prev.map(op =>
+                                  op.id === selectedOperation.id
+                                    ? { ...op, param: newParam }
+                                    : op
+                                )
+                              );
                             }}
                             className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           >
@@ -3033,7 +3290,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                                 value={(selectedOperation.param as Record<string, any>)?.comparison_type || 'period'}
                                 onChange={e => {
                                   const currentParam = (selectedOperation.param as Record<string, any>) || { period: '1', frequency: 'none', comparison_type: 'period' };
-                                  updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, comparison_type: e.target.value } });
+                                  const newParam = { ...currentParam, comparison_type: e.target.value };
+                                  setSelectedOperations(prev =>
+                                    prev.map(op =>
+                                      op.id === selectedOperation.id
+                                        ? { ...op, param: newParam }
+                                        : op
+                                    )
+                                  );
                                 }}
                                 className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               >
@@ -3056,7 +3320,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                             value={(selectedOperation.param as Record<string, any>)?.gr || ''}
                             onChange={e => {
                               const currentParam = (selectedOperation.param as Record<string, any>) || {};
-                              updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, gr: e.target.value } });
+                              const newParam = { ...currentParam, gr: e.target.value };
+                              setSelectedOperations(prev =>
+                                prev.map(op =>
+                                  op.id === selectedOperation.id
+                                    ? { ...op, param: newParam }
+                                    : op
+                                )
+                              );
                             }}
                             placeholder="gr"
                             className="px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -3067,7 +3338,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                             value={(selectedOperation.param as Record<string, any>)?.co || ''}
                             onChange={e => {
                               const currentParam = (selectedOperation.param as Record<string, any>) || {};
-                              updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, co: e.target.value } });
+                              const newParam = { ...currentParam, co: e.target.value };
+                              setSelectedOperations(prev =>
+                                prev.map(op =>
+                                  op.id === selectedOperation.id
+                                    ? { ...op, param: newParam }
+                                    : op
+                                )
+                              );
                             }}
                             placeholder="co"
                             className="px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -3078,7 +3356,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                             value={(selectedOperation.param as Record<string, any>)?.mp || ''}
                             onChange={e => {
                               const currentParam = (selectedOperation.param as Record<string, any>) || {};
-                              updateMetricsOperation(selectedOperation.id, { param: { ...currentParam, mp: e.target.value } });
+                              const newParam = { ...currentParam, mp: e.target.value };
+                              setSelectedOperations(prev =>
+                                prev.map(op =>
+                                  op.id === selectedOperation.id
+                                    ? { ...op, param: newParam }
+                                    : op
+                                )
+                              );
                             }}
                             placeholder="mp"
                             className="px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
@@ -3093,7 +3378,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                         <select
                           value={(selectedOperation.param as string) || ''}
                           onChange={e => {
-                            updateMetricsOperation(selectedOperation.id, { param: e.target.value });
+                            const newParam = e.target.value;
+                            setSelectedOperations(prev =>
+                              prev.map(op =>
+                                op.id === selectedOperation.id
+                                  ? { ...op, param: newParam }
+                                  : op
+                              )
+                            );
                           }}
                           className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         >
@@ -3115,7 +3407,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                           <select
                             value={(selectedOperation.param as string) || ''}
                             onChange={e => {
-                              updateMetricsOperation(selectedOperation.id, { param: e.target.value });
+                              const newParam = e.target.value;
+                              setSelectedOperations(prev =>
+                                prev.map(op =>
+                                  op.id === selectedOperation.id
+                                    ? { ...op, param: newParam }
+                                    : op
+                                )
+                              );
                             }}
                             className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           >
@@ -3131,7 +3430,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                           <select
                             value={String((selectedOperation as any).fiscalStartMonth || '1')}
                             onChange={e => {
-                              updateMetricsOperation(selectedOperation.id, { fiscalStartMonth: e.target.value });
+                              const newFiscalStartMonth = e.target.value;
+                              setSelectedOperations(prev =>
+                                prev.map(op =>
+                                  op.id === selectedOperation.id
+                                    ? { ...op, fiscalStartMonth: newFiscalStartMonth }
+                                    : op
+                                )
+                              );
                             }}
                             className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           >
@@ -3159,7 +3465,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                           <select
                             value={(selectedOperation.param as string) || 'from_year_month_day'}
                             onChange={e => {
-                              updateMetricsOperation(selectedOperation.id, { param: e.target.value });
+                              const newParam = e.target.value;
+                              setSelectedOperations(prev =>
+                                prev.map(op =>
+                                  op.id === selectedOperation.id
+                                    ? { ...op, param: newParam }
+                                    : op
+                                )
+                              );
                             }}
                             className="w-full h-6 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           >
@@ -3253,7 +3566,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                           type="text"
                           value={selectedOperation.rename || ''}
                           onChange={e => {
-                            updateMetricsOperation(selectedOperation.id, { rename: e.target.value });
+                            const newRename = e.target.value;
+                            setSelectedOperations(prev =>
+                              prev.map(op =>
+                                op.id === selectedOperation.id
+                                  ? { ...op, rename: newRename }
+                                  : op
+                              )
+                            );
                           }}
                           placeholder="New column name"
                           className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
