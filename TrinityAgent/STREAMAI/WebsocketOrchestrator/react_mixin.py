@@ -64,6 +64,7 @@ class ReactWorkflowMixin:
                 guard_entry["status"] = status
                 guard_entry["updated_at"] = datetime.utcnow().isoformat()
 
+    @staticmethod
     def _description_similarity(text_a: Optional[str], text_b: Optional[str]) -> float:
             """Return similarity score between two descriptions (0-1)."""
 
