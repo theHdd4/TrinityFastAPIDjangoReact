@@ -1982,7 +1982,8 @@ export const DASHBOARD_ALLOWED_ATOMS = [
   'dataframe-operations',
   'chart-maker',
   'correlation',
-  'table'  // ✅ Enable table atom in dashboard mode
+  'table',
+  'kpi-dashboard'
 ] as const;
 
 // Helper function to get allowed atoms based on mode
