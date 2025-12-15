@@ -180,11 +180,14 @@ const NumberFilterComponent: React.FC<NumberFilterComponentProps> = ({
         .map(v => Number(v))
         .filter(v => !isNaN(v));
       
-      if (numericValues.length > 0) {
-        onApplyFilter(column, numericValues as any);
-      } else if (selectedValues.includes('(blank)')) {
-        // Handle blank values separately
-        onApplyFilter(column, ['(blank)'] as any);
+      // Build filter array with both numeric values and blank if selected
+      const filterValues: (number | string)[] = [...numericValues];
+      if (selectedValues.includes('(blank)')) {
+        filterValues.push('(blank)');
+      }
+      
+      if (filterValues.length > 0) {
+        onApplyFilter(column, filterValues as any);
       }
     }
     onClose();
