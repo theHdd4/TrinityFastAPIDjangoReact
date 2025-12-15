@@ -99,6 +99,17 @@ class LabMemoryStore:
             logger.warning("Failed to create MongoDB indices for lab context: %s", exc)
         return collection
 
+    def _context_filter(self, session_id: str) -> Dict[str, Any]:
+        """Return the canonical Mongo filter for a single lab session context."""
+
+        return {
+            "client_name": self.client_name,
+            "app_name": self.app_name,
+            "project_name": self.project_name,
+            "session_id": session_id,
+            "record_type": {"$ne": "atom_snapshot"},
+        }
+
     def update_react_context(
         self,
         *,
@@ -143,14 +154,10 @@ class LabMemoryStore:
             "inputs": execution_inputs or {},
         }
 
-        base_filter = {
-            "client_name": self.client_name,
-            "app_name": self.app_name,
-            "project_name": self.project_name,
-            "session_id": session_id,
-            "request_id": request_id,
-            "record_type": {"$ne": "atom_snapshot"},
-        }
+        existing_doc = self._load_existing_context(session_id=session_id) or {}
+        stable_request_id = request_id or existing_doc.get("request_id") or f"req-{session_id}"
+
+        base_filter = self._context_filter(session_id)
 
         update_doc: Dict[str, Any] = {
             "$set": {
@@ -158,15 +165,24 @@ class LabMemoryStore:
                 "app_name": self.app_name,
                 "project_name": self.project_name,
                 "session_id": session_id,
-                "request_id": request_id,
+                "request_id": stable_request_id,
                 "record_type": "react_context",
                 "latest_dataset_alias": latest_dataset_alias,
                 "react_state.last_output_alias": latest_dataset_alias,
                 f"datasets.{latest_dataset_alias}": dataset_entry,
                 "updated_at": datetime.utcnow(),
+                "atom_history": existing_doc.get("atom_history") or [],
+                "react_state": existing_doc.get("react_state") or {},
+                "freshness_state": existing_doc.get("freshness_state") or {},
+                "input_hash": existing_doc.get("input_hash"),
+                "analysis_insights": existing_doc.get("analysis_insights") or {},
+                "envelope": existing_doc.get("envelope"),
             },
             "$push": {
                 "atom_history": history_entry,
+            },
+            "$setOnInsert": {
+                "created_at": datetime.utcnow(),
             },
         }
 
@@ -202,13 +218,7 @@ class LabMemoryStore:
         primary request document.
         """
 
-        query: Dict[str, Any] = {
-            "client_name": self.client_name,
-            "app_name": self.app_name,
-            "project_name": self.project_name,
-            "session_id": session_id,
-            "record_type": {"$ne": "atom_snapshot"},
-        }
+        query: Dict[str, Any] = self._context_filter(session_id)
         if request_id:
             query["request_id"] = request_id
 
@@ -234,13 +244,8 @@ class LabMemoryStore:
 
         self.apply_context(project_context)
 
-        query: Dict[str, Any] = {
-            "client_name": self.client_name,
-            "app_name": self.app_name,
-            "project_name": self.project_name,
-            "session_id": session_id,
-            "record_type": "react_context",
-        }
+        query: Dict[str, Any] = self._context_filter(session_id)
+        query["record_type"] = "react_context"
         if request_id:
             query["request_id"] = request_id
 
@@ -492,16 +497,22 @@ class LabMemoryStore:
                     "feature_flags": document.envelope.feature_flags,
                 },
                 "atom_execution_metadata": merged_metadata,
+                "record_type": existing_doc.get("record_type") or "react_context",
+                "datasets": existing_doc.get("datasets") or {},
+                "atom_history": existing_doc.get("atom_history") or [],
+                "react_state": existing_doc.get("react_state") or {},
+                "latest_dataset_alias": existing_doc.get("latest_dataset_alias"),
+                "available_files": existing_doc.get("available_files") or [],
+                "scope": existing_doc.get("scope"),
             }
-            self.mongo_collection.replace_one(
+            self.mongo_collection.update_one(
+                self._context_filter(document.envelope.session_id),
                 {
-                    "client_name": self.client_name,
-                    "app_name": self.app_name,
-                    "project_name": self.project_name,
-                    "session_id": document.envelope.session_id,
-                    "request_id": document.envelope.request_id,
+                    "$set": mongo_payload,
+                    "$setOnInsert": {
+                        "created_at": datetime.utcnow(),
+                    },
                 },
-                mongo_payload,
                 upsert=True,
             )
             logger.info(
@@ -615,13 +626,7 @@ class LabMemoryStore:
             existing_doc.get("atom_execution_metadata") or [], [incoming_entry]
         )
 
-        base_filter = {
-            "client_name": self.client_name,
-            "app_name": self.app_name,
-            "project_name": self.project_name,
-            "session_id": envelope.session_id,
-            "request_id": envelope.request_id,
-        }
+        base_filter = self._context_filter(envelope.session_id)
 
         try:
             self.mongo_collection.update_one(
@@ -640,14 +645,15 @@ class LabMemoryStore:
                             "deterministic_params": envelope.deterministic_params,
                             "retrieved_at": datetime.utcnow(),
                         },
+                        "request_id": envelope.request_id,
                     },
                     "$setOnInsert": {
                         "app_name": self.app_name,
                         "client_name": self.client_name,
                         "project_name": self.project_name,
                         "session_id": envelope.session_id,
-                        "request_id": envelope.request_id,
                         "timestamp": envelope.timestamp,
+                        "record_type": "react_context",
                     },
                 },
                 upsert=True,
