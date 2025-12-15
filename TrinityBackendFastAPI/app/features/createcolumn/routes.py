@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Form, HTTPException, Query, Body
 from fastapi.responses import Response
+from typing import Optional
 
 import io
 import json
@@ -408,9 +409,16 @@ async def get_createcolumn_configuration(
 @router.get("/cardinality")
 async def get_cardinality_data(
     object_name: str = Query(..., description="Object name/path of the dataframe"),
+    client_name: Optional[str] = Query(None, description="Client name for metadata lookup"),
+    app_name: Optional[str] = Query(None, description="App name for metadata lookup"),
+    project_name: Optional[str] = Query(None, description="Project name for metadata lookup"),
 ):
     submission = submit_cardinality_task(
-        bucket_name=MINIO_BUCKET, object_name=object_name
+        bucket_name=MINIO_BUCKET,
+        object_name=object_name,
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
     )
 
     if submission.status == "failure":

@@ -135,13 +135,25 @@ def _build_dedupe_signature(payload: dict) -> str | None:
     return None
 
 
-async def _wait_for_clarification_response(websocket: WebSocket) -> dict | None:
-    """Block until a clarification response arrives or the socket closes."""
+async def _wait_for_clarification_response(
+    websocket: WebSocket, queue: asyncio.Queue | None = None
+) -> dict | None:
+    """Block until a clarification response arrives or the socket closes.
+
+    When a shared clarification queue is provided, responses already captured by
+    the background router will be drained from the queue instead of directly
+    reading the websocket. This prevents races where the router consumes the
+    clarification before the synchronous wait starts, leaving the workflow
+    paused indefinitely.
+    """
 
     while True:
         try:
-            incoming = await websocket.receive_text()
-            parsed = json.loads(incoming)
+            if queue is not None:
+                parsed = await queue.get()
+            else:
+                incoming = await websocket.receive_text()
+                parsed = json.loads(incoming)
         except WebSocketDisconnect:
             return None
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -616,6 +628,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
             return True
 
         clarification_stop = asyncio.Event()
+        clarification_queue: asyncio.Queue = asyncio.Queue()
 
         async def clarification_router():
             while not clarification_stop.is_set():
@@ -624,6 +637,8 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         websocket.receive_text(), timeout=5.0
                     )
                     parsed_router = json.loads(router_message)
+                    if parsed_router.get("type") == "clarification_response":
+                        await clarification_queue.put(parsed_router)
                     handled = await handle_clarification_response(parsed_router)
                     if not handled:
                         logger.debug("Received non-clarification message during stream: %s", parsed_router)
@@ -736,7 +751,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
                         "message": "Awaiting user confirmation before continuing.",
                     })
 
-                    clarification_response = await _wait_for_clarification_response(websocket)
+                    clarification_response = await _wait_for_clarification_response(
+                        websocket, queue=clarification_queue
+                    )
                     if not clarification_response:
                         close_code = 1001
                         close_reason = "clarification_aborted"
@@ -964,7 +981,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 },
             )
 
-            clarification_response = await _wait_for_clarification_response(websocket)
+            clarification_response = await _wait_for_clarification_response(
+                websocket, queue=clarification_queue
+            )
             if not clarification_response:
                 close_code = 1001
                 close_reason = "clarification_aborted"
@@ -1147,7 +1166,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 },
             )
 
-            clarification_response = await _wait_for_clarification_response(websocket)
+            clarification_response = await _wait_for_clarification_response(
+                websocket, queue=clarification_queue
+            )
             if not clarification_response:
                 close_code = 1001
                 close_reason = "clarification_aborted"
@@ -1494,7 +1515,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
             clarification_stop.set()
         if clarification_task:
             clarification_task.cancel()
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await asyncio.wait_for(clarification_task, timeout=0.5)
         await _safe_close_websocket(websocket, code=close_code, reason=close_reason)
 

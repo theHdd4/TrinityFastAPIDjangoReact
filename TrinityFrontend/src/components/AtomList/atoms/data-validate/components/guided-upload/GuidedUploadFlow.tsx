@@ -14,6 +14,8 @@ import { U7Success } from './stages/U7Success';
 import { ArrowLeft, RotateCcw, X, Minimize2, Maximize2 } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import { VALIDATE_API } from '@/lib/api';
+import { GuidedUploadFlowState } from '../../../data-upload/components/guided-upload';
 
 interface GuidedUploadFlowProps {
   open: boolean;
@@ -124,6 +126,82 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
 
   const handleNext = async () => {
     if (state.currentStage === 'U6') {
+      // CRITICAL: Apply all transformations before moving to U7
+      const chosenIndex = state.selectedFileIndex !== undefined && state.selectedFileIndex < state.uploadedFiles.length 
+        ? state.selectedFileIndex : 0;
+      const currentFile = state.uploadedFiles[chosenIndex];
+      
+      if (currentFile?.path) {
+        try {
+          const currentColumnEdits = state.columnNameEdits[currentFile.name] || [];
+          const currentDataTypes = state.dataTypeSelections[currentFile.name] || [];
+          const currentStrategies = state.missingValueStrategies[currentFile.name] || [];
+          
+          // Build column_renames from columnNameEdits (U3)
+          const columnRenames: Record<string, string> = {};
+          currentColumnEdits.forEach(edit => {
+            if (edit.keep !== false && edit.editedName && edit.editedName !== edit.originalName) {
+              columnRenames[edit.originalName] = edit.editedName;
+            }
+          });
+          
+          // Build dtype_changes from dataTypeSelections (U4)
+          const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
+          currentDataTypes.forEach(dt => {
+            if (dt.selectedType && dt.selectedType !== dt.detectedType) {
+              if (dt.selectedType === 'date' && dt.format) {
+                dtypeChanges[dt.columnName] = { dtype: 'datetime64', format: dt.format };
+              } else {
+                const backendType = dt.selectedType === 'number' ? 'float64' : 
+                                   dt.selectedType === 'category' ? 'object' :
+                                   dt.selectedType === 'date' ? 'datetime64' :
+                                   dt.selectedType;
+                dtypeChanges[dt.columnName] = backendType;
+              }
+            }
+          });
+          
+          // Build missing_value_strategies from missingValueStrategies (U5)
+          const missingValueStrategiesPayload: Record<string, { strategy: string; value?: string | number }> = {};
+          currentStrategies.forEach(s => {
+            if (s.strategy !== 'none') {
+              const strategyConfig: { strategy: string; value?: string | number } = {
+                strategy: s.strategy,
+              };
+              if (s.strategy === 'custom' && s.value !== undefined) {
+                strategyConfig.value = s.value;
+              }
+              missingValueStrategiesPayload[s.columnName] = strategyConfig;
+            }
+          });
+          
+          // Apply transformations if there are any changes
+          if (Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategiesPayload).length > 0) {
+            console.log('🔄 Applying final transformations before U7:', { columnRenames, dtypeChanges, missingValueStrategiesPayload });
+            
+            const transformRes = await fetch(`${VALIDATE_API}/apply-data-transformations`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                file_path: currentFile.path,
+                column_renames: columnRenames,
+                dtype_changes: dtypeChanges,
+                missing_value_strategies: missingValueStrategiesPayload,
+              }),
+            });
+            
+            if (transformRes.ok) {
+              console.log('✅ Transformations applied successfully before U7');
+            } else {
+              console.warn('⚠️ Failed to apply transformations before U7');
+            }
+          }
+        } catch (error) {
+          console.error('Error applying transformations before U7:', error);
+        }
+      }
+      
       // Move from U6 (Final Preview) to U7 (Success)
       goToNextStage();
     } else if (state.currentStage === 'U7') {

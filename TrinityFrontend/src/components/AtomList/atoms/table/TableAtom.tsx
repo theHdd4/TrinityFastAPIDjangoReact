@@ -119,6 +119,11 @@ export interface TableSettings {
       };
     };
   };
+  // Cardinality view filtering and sorting
+  showCardinalityView?: boolean;
+  cardinalitySortColumn?: string;
+  cardinalitySortDirection?: 'asc' | 'desc';
+  cardinalityColumnFilters?: Record<string, string[]>;
 }
 
 // Helper function to convert backend metadata (snake_case) to frontend format (camelCase)
@@ -143,12 +148,32 @@ const applyMetadataToSettings = (
   
   const updates: Partial<TableSettings> = {};
   
-  // Apply cell formatting (metadata takes priority)
+  // CRITICAL: Apply cell formatting (metadata takes priority)
+  // Deep merge to preserve all cell formatting from metadata
   if (metadata.cellFormatting) {
-    updates.cellFormatting = {
+    // Start with current settings (if any)
+    const mergedCellFormatting: Record<string, Record<string, any>> = {
       ...(currentSettings.cellFormatting || {}),
-      ...metadata.cellFormatting,
     };
+    
+    // Deep merge each row's formatting
+    Object.keys(metadata.cellFormatting).forEach(rowKey => {
+      if (!mergedCellFormatting[rowKey]) {
+        mergedCellFormatting[rowKey] = {};
+      }
+      // Merge column-level formatting for this row
+      mergedCellFormatting[rowKey] = {
+        ...mergedCellFormatting[rowKey],
+        ...metadata.cellFormatting![rowKey],
+      };
+    });
+    
+    updates.cellFormatting = mergedCellFormatting;
+    
+    console.log('📋 [TABLE-METADATA] Applied cell formatting:', {
+      rowCount: Object.keys(mergedCellFormatting).length,
+      totalCells: Object.values(mergedCellFormatting).reduce((sum, cols) => sum + Object.keys(cols).length, 0)
+    });
   }
   
   // Apply design (theme, borderStyle, etc.) - metadata takes priority
@@ -404,7 +429,9 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           console.log('💾 [TABLE-ATOM] Updating settings with loaded data:', {
             hasTableData: !!settingsUpdate.tableData,
             columnCount: settingsUpdate.visibleColumns?.length,
-            reloadTriggerCleared: settingsUpdate.reloadTrigger === undefined
+            reloadTriggerCleared: settingsUpdate.reloadTrigger === undefined,
+            hasCellFormatting: !!metadataUpdates.cellFormatting,
+            cellFormattingRows: metadataUpdates.cellFormatting ? Object.keys(metadataUpdates.cellFormatting).length : 0
           });
           
           updateSettings(atomId, settingsUpdate);

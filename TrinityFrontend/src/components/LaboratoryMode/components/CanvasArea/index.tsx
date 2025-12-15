@@ -1263,6 +1263,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       return null;
     }
     
+    // Get the initial file from the saved state (set by wrench icon in SavedDataFramesPanel)
+    const flowState = activeGuidedFlows[atom.id];
+    const existingDataframe = flowState?.state?.initialFile as { name: string; path: string; size?: number } | undefined;
+    
     return (
       <div className="mt-4">
         <GuidedUploadFlowInline
@@ -1285,6 +1289,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           }}
           savedState={activeGuidedFlows[atom.id]?.state}
           initialStage={activeGuidedFlows[atom.id]?.currentStage}
+          existingDataframe={existingDataframe}
         />
       </div>
     );
@@ -5298,6 +5303,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             <div data-lab-cards-container="true" className="p-2 space-y-6" onClick={(e) => {
               // Handle clicks on the empty space in the canvas
               if (e.target === e.currentTarget) {
+                // Clear selection when clicking empty space (for Condition 3 context clearing)
+                // This allows users to create a new Table by clearing context
+                if (onAtomSelect) {
+                  // Pass empty string to clear atom selection (handler will convert to undefined)
+                  onAtomSelect('');
+                }
+                
                 if (onOpenSettingsPanel) {
                   onOpenSettingsPanel();
                 }

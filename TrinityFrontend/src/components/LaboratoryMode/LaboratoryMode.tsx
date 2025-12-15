@@ -36,12 +36,12 @@ import {
 } from '@/utils/projectTransition';
 import { useCollaborativeSync } from '@/hooks/useCollaborativeSync';
 import { TrinityAIPanel } from '@/components/TrinityAI';
-import { ScenarioOverlay } from './components/ScenarioOverlay';
+
 import { useLaboratoryScenario } from './hooks/useLaboratoryScenario';
 import { useGuidedFlowPersistence } from './hooks/useGuidedFlowPersistence';
 import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
-import { GuidedFlowStepTrackerPanel } from './components/GuidedFlowStepTrackerPanel';
-import { GuidedFlowFloatingPanel } from './components/GuidedFlowFloatingPanel';
+
+
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 const useIsomorphicInsertionEffect =
@@ -623,8 +623,22 @@ const LaboratoryMode = () => {
 
   const handleAtomSelect = (atomId: string) => {
     if (!canEdit) return;
-    setSelectedAtomId(atomId);
-    setSelectedCardId(undefined);
+    // Treat empty string as undefined (for clearing selection)
+    const normalizedAtomId = atomId === '' ? undefined : atomId;
+    setSelectedAtomId(normalizedAtomId);
+    // If clearing atom selection, also clear card selection and context
+    if (!normalizedAtomId) {
+      setSelectedCardId(undefined);
+      // Clear context when user explicitly clears selection (clicked empty space)
+      const store = useLaboratoryStore.getState();
+      if (store.metricsInputs.contextCardId || store.metricsInputs.contextAtomId) {
+        console.log('📋 [LaboratoryMode] Clearing context (user cleared selection via empty space click)');
+        store.updateMetricsInputs({
+          contextCardId: undefined,
+          contextAtomId: undefined,
+        });
+      }
+    }
   };
 
   const handleCardSelect = (cardId: string, exhibited: boolean) => {
@@ -1138,6 +1152,8 @@ const LaboratoryMode = () => {
             </button>
           )}
 
+
+
           {/* Guided Mode Toggle */}
           <div className="flex items-center gap-1.5 px-2 py-1 bg-gray-50 rounded-lg border border-gray-200">
             <Sparkles className={`w-3.5 h-3.5 ${globalGuidedModeEnabled ? 'text-purple-600' : 'text-gray-400'}`} />
@@ -1243,57 +1259,6 @@ const LaboratoryMode = () => {
                 onCardFocus={notifyCardFocus}
                 onCardBlur={notifyCardBlur}
               />
-              
-              {/* Scenario Overlay - shows only when Guided mode toggle is ON */}
-              {globalGuidedModeEnabled && scenarioData.scenario !== 'loading' && (
-                <ScenarioOverlay
-                  scenario={scenarioData.scenario}
-                  scenarioData={scenarioData}
-                  onDismiss={() => setGlobalGuidedMode(false)}
-                  onStartUpload={() => {
-                    // Create a data upload atom and start guided workflow
-                    // This will be handled by the canvas area's addNewCardWithAtom function
-                  }}
-                  onStartPriming={(filePath) => {
-                    // Will be handled by ScenarioOverlay's internal GuidedUploadFlow
-                  }}
-                  onResumeFlow={async () => {
-                    const savedState = await loadState();
-                    if (savedState) {
-                      // State will be loaded by GuidedUploadFlow when it opens
-                    }
-                  }}
-                  onRestartFlow={() => {
-                    clearState();
-                  }}
-                  onIgnoreAndContinue={() => {
-                    setGlobalGuidedMode(false);
-                  }}
-                  onActionSelected={(action) => {
-                    console.log('Action selected:', action);
-                    
-                    // Handle guided mode actions
-                    if (action === 'start-analysis') {
-                      // Close guided mode and let user start analysis
-                      setGlobalGuidedMode(false);
-                    } else if (action === 'upload-complete') {
-                      // Data upload completed, close guided mode
-                      setGlobalGuidedMode(false);
-                    } else {
-                      // For other actions, close guided mode
-                      setGlobalGuidedMode(false);
-                    }
-                  }}
-                  onCreateDataUploadAtom={async () => {
-                    // Create a data upload atom on the canvas
-                    if (canvasAreaRef.current) {
-                      await canvasAreaRef.current.addNewCardWithAtom('data-upload');
-                      // The guided flow will start automatically since global guided mode is active
-                      // and the DataUploadAtom will detect this and start the guided workflow
-                    }
-                  }}
-                />
-              )}
           </div>
 
           {/* Auxiliary menu */}
@@ -1331,6 +1296,13 @@ const LaboratoryMode = () => {
               onShare={handleShareClick}
               showFloatingNavigationList={showFloatingNavigationList}
               setShowFloatingNavigationList={setShowFloatingNavigationList}
+              onCreateDataUploadAtom={async () => {
+                // Create a data upload atom on the canvas
+                if (canvasAreaRef.current) {
+                  await canvasAreaRef.current.addNewCardWithAtom('data-upload');
+                }
+              }}
+              isGuidedModeEnabled={globalGuidedModeEnabled}
             />
             <FloatingNavigationList
               isVisible={showFloatingNavigationList}
@@ -1339,8 +1311,7 @@ const LaboratoryMode = () => {
             />
           </div>
 
-          {/* Guided Flow Floating Panel */}
-          <GuidedFlowFloatingPanel />
+
 
           {/* Trinity AI Panel - Only for horizontal layout */}
           {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
@@ -1383,6 +1354,8 @@ const LaboratoryMode = () => {
 
       {/* Direct Guided Upload Flow - fallback when scenario detection is still loading */}
       {/* Removed - using inline flow instead */}
+
+
     </div>
   );
 };
