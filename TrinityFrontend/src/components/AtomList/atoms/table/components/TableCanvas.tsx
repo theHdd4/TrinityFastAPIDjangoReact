@@ -2736,7 +2736,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
                     <div className="p-4 text-xs text-gray-500">Loading filter options...</div>
                   ) : (
                     <>
-                      {data.column_types[contextMenu.col] === 'number' ? (
+                      {['number', 'integer', 'float'].includes(data.column_types[contextMenu.col]) ? (
                         <NumberFilterComponent
                           column={contextMenu.col}
                           data={filterData && filterColumn === contextMenu.col ? filterData : data}
