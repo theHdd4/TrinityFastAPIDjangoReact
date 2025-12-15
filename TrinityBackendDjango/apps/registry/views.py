@@ -92,6 +92,7 @@ class AppViewSet(viewsets.ModelViewSet):
             'name': app.name,
             'slug': app.slug,
             'description': app.description,
+            'usecase_id': app.usecase_id,  # Include usecase_id to allow filtering by tenant's allowed_apps
             'modules': [],
             'molecules': [],
             'molecule_atoms': {},
