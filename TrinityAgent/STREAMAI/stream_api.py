@@ -283,6 +283,7 @@ def _format_scorecard(
     vagueness_score: float | None = None,
     vagueness_threshold: float | None = None,
     card_threshold: float | None = None,
+    intent_threshold: float | None = None,
     scope_threshold: float | None = None,
 ) -> str:
     """Build a concise, user-facing summary of scoring signals."""
@@ -293,9 +294,11 @@ def _format_scorecard(
         pieces.append(f"vagueness {vagueness_score:.2f}/{vagueness_threshold:.2f}")
 
     if "intent_clarity_score" in prerequisite_scores:
-        pieces.append(
-            f"intent clarity {prerequisite_scores.get('intent_clarity_score', 0.0):.2f}"
-        )
+        intent_score = prerequisite_scores.get("intent_clarity_score", 0.0)
+        if intent_threshold is not None:
+            pieces.append(f"intent clarity {intent_score:.2f}/{intent_threshold:.2f}")
+        else:
+            pieces.append(f"intent clarity {intent_score:.2f}")
 
     scope_score = prerequisite_scores.get("scope_detectability_score")
     if scope_score is not None:
@@ -312,6 +315,34 @@ def _format_scorecard(
             pieces.append(f"card readiness {card_score:.2f}")
 
     return "Scores → " + ", ".join(pieces) if pieces else "Scores pending"
+
+
+def _build_vagueness_clarification(
+    atom_ai_context: dict,
+    available_files: list[str] | None,
+    contextual_prompt: str,
+) -> str:
+    """Create a conversational vagueness clarification without numeric scores."""
+
+    known_scope = _collect_known_scope_details(
+        atom_ai_context, available_files, contextual_prompt
+    )
+    datasets = known_scope.get("datasets") or []
+    has_known_data = bool(datasets or (available_files or []))
+
+    if has_known_data:
+        request_piece = (
+            "which columns, filters, or joins you want me to focus on and the outcome you’re after"
+        )
+    else:
+        request_piece = (
+            "which dataset or file to use, the columns to hone in on, and the result you want"
+        )
+
+    return (
+        "I’m missing a few details before I can move forward. Could you share a bit more "
+        f"context—like {request_piece}?"
+    )
 
 
 def _build_contextual_prompt(
@@ -458,7 +489,7 @@ def _build_conversational_clarification(
     datasets = known_scope.get("datasets") or []
 
     scope_detail_default = (
-        "which file or dataset to use, plus the columns and any filters or joins"
+        "the columns and any filters or joins you want me to use"
     )
     required_details = {
         "intent clarity": (
@@ -467,43 +498,42 @@ def _build_conversational_clarification(
         "scope detectability": scope_detail_default,
     }
 
-    if weakest_dimension == "scope detectability" and datasets:
-        dataset_hint = datasets[0] if len(datasets) == 1 else ", ".join(datasets[:2])
-        required_details["scope detectability"] = (
-            f"how to use {dataset_hint} — list the columns to focus on and any filters or joins"
-        )
+    if weakest_dimension == "scope detectability":
+        if datasets:
+            dataset_hint = datasets[0] if len(datasets) == 1 else ", ".join(datasets[:2])
+            required_details["scope detectability"] = (
+                f"how you’d like me to use {dataset_hint} — which columns to focus on and any filters or joins"
+            )
+        elif available_files:
+            required_details["scope detectability"] = (
+                "which columns from your shared file(s) to emphasize, plus any filters or joins"
+            )
 
     request_detail = required_details.get(
         weakest_dimension,
         "the specific goal and the data or filters you want me to focus on",
     )
 
-    scope_note = (
-        f" Scope detectability should be at least {scope_detectability_threshold:.2f} "
-        "so I can operate safely."
-        if weakest_dimension == "scope detectability"
-        else ""
-    )
+    guidance_parts: list[str] = []
+    if weakest_dimension == "scope detectability":
+        if datasets or available_files:
+            guidance_parts.append(
+                "Tell me the columns to use and any filters or joins that matter."
+            )
+        else:
+            guidance_parts.append(
+                "A quick note with the dataset or file, key columns, and any filters helps."
+            )
+    elif weakest_dimension == "intent clarity":
+        guidance_parts.append("What should the finished output look like?")
 
-    scorecard = _format_scorecard(
-        prerequisite_scores,
-        vagueness_score=vagueness_score,
-        vagueness_threshold=vagueness_threshold,
-        card_threshold=threshold,
-        scope_threshold=scope_detectability_threshold,
-    )
-
-    guidance = (
-        "Quick reply template → 1) File or dataset name, 2) Columns plus any filters/joins, "
-        "3) Desired output (chart/table/summary)."
-    )
+    guidance = " ".join(guidance_parts)
 
     return (
-        "I want to make sure I’m working with the right portion of your data. "
+        "I want to be sure I’m working on the right thing. "
         f"Here’s what I have so far: {known_summary}. "
         f"Could you share {request_detail}? Once I have that, I’ll take care of the rest. "
-        f"{scorecard}. (card_prerequisite_score={card_score:.2f}, threshold={threshold:.2f})."
-        f"{scope_note} {guidance}"
+        f"{guidance}"
     )
 
 # Initialize components (will be set by main_api.py)
@@ -942,30 +972,33 @@ async def execute_workflow_websocket(websocket: WebSocket):
             vagueness_score,
             current_vagueness_threshold,
         )
+        vagueness_scorecard = _format_scorecard(
+            {},
+            vagueness_score=vagueness_score,
+            vagueness_threshold=current_vagueness_threshold,
+        )
         await _safe_send_json(
             websocket,
             {
                 "type": "status",
                 "status": "vagueness_check",
-                "message": (
-                    "Calculating vagueness score for workflow routing: "
-                    f"score={vagueness_score:.2f}, threshold={current_vagueness_threshold:.2f}"
-                ),
+                "message": "Checking if I have enough detail to get started.",
                 "vagueness_score": vagueness_score,
                 "vagueness_threshold": current_vagueness_threshold,
+                "scorecard_log": vagueness_scorecard,
             },
         )
 
         while vagueness_score < current_vagueness_threshold:
+            clarification_message = _build_vagueness_clarification(
+                atom_ai_context, available_files, contextual_prompt
+            )
             clarification_payload = {
                 "type": "clarification_required",
-                "message": (
-                    "I need more details to proceed. Please provide additional context or specifics. "
-                    f"(vagueness_score={vagueness_score:.2f}, threshold={current_vagueness_threshold:.2f})"
-                    " Tip: mention the dataset/file, key columns, and the exact output you want."
-                ),
+                "message": clarification_message,
                 "vagueness_score": vagueness_score,
                 "vagueness_threshold": current_vagueness_threshold,
+                "scorecard_log": vagueness_scorecard,
             }
             await _safe_send_json(
                 websocket,
@@ -1023,6 +1056,11 @@ async def execute_workflow_websocket(websocket: WebSocket):
             )
 
             vagueness_score = _compute_vagueness_score(contextual_prompt)
+            vagueness_scorecard = _format_scorecard(
+                {},
+                vagueness_score=vagueness_score,
+                vagueness_threshold=current_vagueness_threshold,
+            )
             logger.info(
                 "🧭 Recomputed vagueness score after clarification -> %.2f (threshold=%.2f)",
                 vagueness_score,
@@ -1033,12 +1071,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 {
                     "type": "status",
                     "status": "vagueness_check",
-                    "message": (
-                        "Recomputed vagueness score after clarification: "
-                        f"score={vagueness_score:.2f}, threshold={current_vagueness_threshold:.2f}"
-                    ),
+                    "message": "Got your clarification—checking if that’s enough detail.",
                     "vagueness_score": vagueness_score,
                     "vagueness_threshold": current_vagueness_threshold,
+                    "scorecard_log": vagueness_scorecard,
                 },
             )
 
@@ -1064,6 +1100,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
 
         # Laboratory prerequisite scoring for atom execution
         card_prerequisite_threshold = float(message.get("card_prerequisite_threshold", 0.5))
+        intent_clarity_threshold = float(message.get("intent_clarity_threshold", 0.5))
         scope_detectability_threshold = float(message.get("scope_detectability_threshold", 0.5))
         contextual_prompt = _build_contextual_prompt(
             user_prompt, atom_ai_context, history_summary
@@ -1072,12 +1109,14 @@ async def execute_workflow_websocket(websocket: WebSocket):
         prerequisite_scores = _compute_prerequisite_scores(contextual_prompt)
         card_prerequisite_score = prerequisite_scores.get("card_prerequisite_score", 0.0)
         current_card_threshold = max(0.35, card_prerequisite_threshold)
+        current_intent_threshold = max(0.35, intent_clarity_threshold)
         current_scope_threshold = max(0.35, scope_detectability_threshold)
         scorecard_summary = _format_scorecard(
             prerequisite_scores,
             vagueness_score=vagueness_score,
             vagueness_threshold=vagueness_threshold,
             card_threshold=current_card_threshold,
+            intent_threshold=current_intent_threshold,
             scope_threshold=current_scope_threshold,
         )
 
@@ -1087,11 +1126,11 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "type": "status",
                 "status": "prerequisite_check",
                 "message": (
-                    "Evaluating laboratory readiness for atom execution. "
-                    f"{scorecard_summary}. If anything is low, I'll ask for a tiny follow-up."
+                    "Making sure I have the right details before I start. If anything’s missing, I’ll ask a quick follow-up."
                 ),
                 "prerequisite_scores": prerequisite_scores,
                 "card_prerequisite_threshold": current_card_threshold,
+                "intent_clarity_threshold": current_intent_threshold,
                 "scope_detectability_threshold": current_scope_threshold,
                 "scorecard_summary": scorecard_summary,
             },
@@ -1103,17 +1142,30 @@ async def execute_workflow_websocket(websocket: WebSocket):
         while (
             card_prerequisite_score < current_card_threshold
             or clarification_vagueness < vagueness_threshold
+            or prerequisite_scores.get("intent_clarity_score", 0.0)
+            < current_intent_threshold
             or prerequisite_scores.get("scope_detectability_score", 0.0)
             < current_scope_threshold
         ):
             iterations += 1
-            weakest_dimension = min(
-                (
-                    ("intent clarity", prerequisite_scores.get("intent_clarity_score", 0.0)),
-                    ("scope detectability", prerequisite_scores.get("scope_detectability_score", 0.0)),
-                ),
-                key=lambda item: item[1],
-            )[0]
+            dimension_scores = {
+                "intent clarity": prerequisite_scores.get("intent_clarity_score", 0.0),
+                "scope detectability": prerequisite_scores.get("scope_detectability_score", 0.0),
+            }
+            dimension_thresholds = {
+                "intent clarity": current_intent_threshold,
+                "scope detectability": current_scope_threshold,
+            }
+            unmet_dimensions = [
+                name
+                for name, score in dimension_scores.items()
+                if score < dimension_thresholds.get(name, 1.0)
+            ]
+            weakest_dimension = (
+                min(unmet_dimensions, key=lambda name: dimension_scores.get(name, 0.0))
+                if unmet_dimensions
+                else min(dimension_scores.items(), key=lambda item: item[1])[0]
+            )
 
             current_known_summary = _summarize_known_data(
                 atom_ai_context, available_files, user_prompt, contextual_prompt
@@ -1139,6 +1191,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 vagueness_score=clarification_vagueness,
                 vagueness_threshold=vagueness_threshold,
                 card_threshold=current_card_threshold,
+                intent_threshold=current_intent_threshold,
                 scope_threshold=current_scope_threshold,
             )
             clarification_payload = {
@@ -1147,6 +1200,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "focus": weakest_dimension,
                 "prerequisite_scores": prerequisite_scores,
                 "card_prerequisite_threshold": current_card_threshold,
+                "intent_clarity_threshold": current_intent_threshold,
                 "scope_detectability_threshold": current_scope_threshold,
                 "vagueness_threshold": vagueness_threshold,
                 "scorecard_summary": scorecard_summary,
@@ -1233,6 +1287,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 vagueness_score=clarification_vagueness,
                 vagueness_threshold=vagueness_threshold,
                 card_threshold=current_card_threshold,
+                intent_threshold=current_intent_threshold,
                 scope_threshold=current_scope_threshold,
             )
             await _safe_send_json(
@@ -1246,12 +1301,14 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     ),
                     "prerequisite_scores": prerequisite_scores,
                     "card_prerequisite_threshold": current_card_threshold,
+                    "intent_clarity_threshold": current_intent_threshold,
                     "scope_detectability_threshold": current_scope_threshold,
                     "scorecard_summary": scorecard_summary,
                 },
             )
 
             current_card_threshold = max(0.35, current_card_threshold - 0.05)
+            current_intent_threshold = max(0.35, current_intent_threshold - 0.05)
             current_scope_threshold = max(0.35, current_scope_threshold - 0.05)
             vagueness_threshold = max(0.35, vagueness_threshold - 0.03)
 
@@ -1290,6 +1347,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "message": "Card prerequisites satisfied. Proceeding to atom execution.",
                 "prerequisite_scores": prerequisite_scores,
                 "card_prerequisite_threshold": current_card_threshold,
+                "intent_clarity_threshold": current_intent_threshold,
                 "scope_detectability_threshold": current_scope_threshold,
             },
         )
