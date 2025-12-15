@@ -23,7 +23,6 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
   const setActiveGuidedFlow = useLaboratoryStore((state) => state.setActiveGuidedFlow);
   const isGuidedModeActive = useLaboratoryStore((state) => state.isGuidedModeActiveForAtom(atomId));
-  const toggleAtomGuidedMode = useLaboratoryStore((state) => state.toggleAtomGuidedMode);
   const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
   
   const settings = useLaboratoryStore((state) => {
@@ -41,6 +40,12 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   // Use ref to track if we've already synced from settings to prevent infinite loop
   const lastSyncedFilesRef = useRef<string>(JSON.stringify(settings.uploadedFiles || []));
   const hasFetchedRef = useRef(false);
+  const hasStartedGuidedFlowRef = useRef(false);
+
+  const handleStartGuidedFlow = () => {
+    // Set active guided flow in store - CanvasArea will render the inline component
+    setActiveGuidedFlow(atomId, 'U0', {});
+  };
 
   // Sync primed files from settings only when they actually change
   useEffect(() => {
@@ -50,6 +55,18 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
       setPrimedFiles(settings.uploadedFiles || []);
     }
   }, [settings.uploadedFiles]);
+
+  // Auto-start guided flow when atom is created and guided mode is active
+  useEffect(() => {
+    if (isGuidedModeActive && !hasStartedGuidedFlowRef.current && primedFiles.length === 0) {
+      // Only start guided flow if:
+      // 1. Guided mode is active
+      // 2. We haven't started it before
+      // 3. There are no primed files (new atom)
+      hasStartedGuidedFlowRef.current = true;
+      handleStartGuidedFlow();
+    }
+  }, [isGuidedModeActive, primedFiles.length]);
 
   // Memoized fetch function
   const fetchSavedDataframes = useCallback(async () => {
@@ -156,10 +173,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     handleStartGuidedFlow();
   };
 
-  const handleStartGuidedFlow = () => {
-    // Set active guided flow in store - CanvasArea will render the inline component
-    setActiveGuidedFlow(atomId, 'U0', {});
-  };
+
 
   return (
     <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
@@ -255,20 +269,14 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
               </div>
             </div>
 
-          {/* Per-Atom Guided Mode Toggle */}
-          <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg border border-gray-200">
+          {/* Guided Mode Status Indicator */}
+          <div className="flex items-center justify-center p-2 bg-gray-50 rounded-lg border border-gray-200">
             <div className="flex items-center gap-2">
               <Sparkles className={`w-3.5 h-3.5 ${isGuidedModeActive ? 'text-purple-600' : 'text-gray-400'}`} />
-              <span className="text-xs text-gray-600 font-medium">Guided Mode</span>
-              {globalGuidedModeEnabled && (
-                <span className="text-xs text-gray-400">(Global ON)</span>
-              )}
+              <span className="text-xs text-gray-600 font-medium">
+                {isGuidedModeActive ? 'Guided Mode Active' : 'Guided Mode Off'}
+              </span>
             </div>
-            <Switch
-              checked={isGuidedModeActive}
-              onCheckedChange={() => toggleAtomGuidedMode(atomId)}
-              className="scale-[0.7]"
-            />
           </div>
 
           {/* Start Guided Flow Button - Compact */}

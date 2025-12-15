@@ -2006,7 +2006,6 @@ interface LaboratoryStore {
   pendingClarification?: ClarificationRequest | null;
   activeGuidedFlows: Record<string, { atomId: string; currentStage: UploadStage; state: Partial<GuidedUploadFlowState> }>;
   globalGuidedModeEnabled: boolean;
-  atomGuidedModeOverrides: Record<string, boolean>;
 
   // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
@@ -2089,7 +2088,6 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   subMode: 'analytics',  // Default to analytics mode
   activeGuidedFlows: {},
   globalGuidedModeEnabled: false,
-  atomGuidedModeOverrides: {},
   setCards: (cards: LayoutCard[]) => {
     const currentSubMode = get().subMode;
     
@@ -2726,27 +2724,13 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     set({ globalGuidedModeEnabled: enabled });
   },
 
-  toggleAtomGuidedMode: (atomId: string) => {
-    set((prev) => {
-      const currentOverride = prev.atomGuidedModeOverrides[atomId];
-      // Toggle: if undefined or false, set to true; if true, set to false
-      const newOverrides = {
-        ...prev.atomGuidedModeOverrides,
-        [atomId]: currentOverride === undefined ? true : !currentOverride,
-      };
-      return { atomGuidedModeOverrides: newOverrides };
-    });
-  },
+
 
   isGuidedModeActiveForAtom: (atomId: string) => {
     const state = get();
-    if (state.globalGuidedModeEnabled) {
-      // Global is ON, check if atom has explicit override to disable
-      return !state.atomGuidedModeOverrides[atomId];
-    } else {
-      // Global is OFF, check if atom has explicit enable
-      return !!state.atomGuidedModeOverrides[atomId];
-    }
+    // When global guided mode is enabled, it applies to ALL atoms
+    // Individual atom overrides are ignored to maintain global consistency
+    return state.globalGuidedModeEnabled;
   },
 
   reset: () => {
@@ -2756,7 +2740,6 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       pendingClarification: null,
       activeGuidedFlows: {},
       globalGuidedModeEnabled: false,
-      atomGuidedModeOverrides: {},
     });
     if (typeof window !== 'undefined') {
       localStorage.removeItem('trinity_lab_pending_clarification');

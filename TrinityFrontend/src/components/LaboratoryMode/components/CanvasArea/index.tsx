@@ -200,6 +200,7 @@ interface CanvasAreaProps {
 
 interface CanvasAreaRef {
   syncWorkflowCollection: () => Promise<void>;
+  addNewCardWithAtom: (atomId: string, moleculeId?: string, position?: number) => Promise<void>;
 }
 
 
@@ -5219,8 +5220,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
   // Expose sync function to parent component via ref
   React.useImperativeHandle(ref, () => ({
-    syncWorkflowCollection: syncWorkflowCollectionOnLaboratorySave
-  }), [pendingChanges, layoutCards]);
+    syncWorkflowCollection: syncWorkflowCollectionOnLaboratorySave,
+    addNewCardWithAtom: addNewCardWithAtom
+  }), [pendingChanges, layoutCards, addNewCardWithAtom]);
 
   if (isCanvasLoading) {
     return (

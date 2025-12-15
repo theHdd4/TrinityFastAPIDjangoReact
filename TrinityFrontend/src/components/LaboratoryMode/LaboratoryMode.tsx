@@ -1251,7 +1251,8 @@ const LaboratoryMode = () => {
                   scenarioData={scenarioData}
                   onDismiss={() => setGlobalGuidedMode(false)}
                   onStartUpload={() => {
-                    // Will be handled by ScenarioOverlay's internal GuidedUploadFlow
+                    // Create a data upload atom and start guided workflow
+                    // This will be handled by the canvas area's addNewCardWithAtom function
                   }}
                   onStartPriming={(filePath) => {
                     // Will be handled by ScenarioOverlay's internal GuidedUploadFlow
@@ -1270,8 +1271,26 @@ const LaboratoryMode = () => {
                   }}
                   onActionSelected={(action) => {
                     console.log('Action selected:', action);
-                    // Handle various actions for Scenario D
-                    setGlobalGuidedMode(false);
+                    
+                    // Handle guided mode actions
+                    if (action === 'start-analysis') {
+                      // Close guided mode and let user start analysis
+                      setGlobalGuidedMode(false);
+                    } else if (action === 'upload-complete') {
+                      // Data upload completed, close guided mode
+                      setGlobalGuidedMode(false);
+                    } else {
+                      // For other actions, close guided mode
+                      setGlobalGuidedMode(false);
+                    }
+                  }}
+                  onCreateDataUploadAtom={async () => {
+                    // Create a data upload atom on the canvas
+                    if (canvasAreaRef.current) {
+                      await canvasAreaRef.current.addNewCardWithAtom('data-upload');
+                      // The guided flow will start automatically since global guided mode is active
+                      // and the DataUploadAtom will detect this and start the guided workflow
+                    }
                   }}
                 />
               )}

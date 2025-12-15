@@ -211,7 +211,7 @@ class CSVReader:
         
         # Clean headers (preserve numeric headers)
         df = DataCleaner.normalize_column_names(df)
-        df = DataCleaner.standardize_headers(df, preserve_numeric=True)
+        df = DataCleaner.standardize_headers(df)
         
         # Remove empty rows/columns if requested
         if skip_empty_rows:

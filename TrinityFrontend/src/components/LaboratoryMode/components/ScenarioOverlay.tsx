@@ -1,20 +1,10 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Upload, Database, Play, FileText, BarChart3, Table, Sparkles, Plus, GitMerge, Layers, ArrowRight, X } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { Upload, Play, Sparkles, X, CheckCircle2, Circle, Settings, Eye, Database, FileCheck } from 'lucide-react';
 import type { LaboratoryScenario, ScenarioData } from '../hooks/useLaboratoryScenario';
-import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
-import type { GuidedUploadFlowState } from '@/components/AtomList/atoms/data-validate/components/guided-upload/useGuidedUploadFlow';
-import { useGuidedFlowPersistence } from '../hooks/useGuidedFlowPersistence';
+
+import { cn } from '@/lib/utils';
+import './GuidedWorkflowPanel.css';
 
 interface ScenarioOverlayProps {
   scenario: LaboratoryScenario;
@@ -26,543 +16,257 @@ interface ScenarioOverlayProps {
   onRestartFlow: () => void;
   onIgnoreAndContinue: () => void;
   onActionSelected: (action: string) => void;
+  onCreateDataUploadAtom?: () => Promise<void>;
 }
+
+// Guided workflow steps configuration
+const GUIDED_STEPS = [
+  { 
+    id: 'U0', 
+    label: 'Upload Dataset', 
+    shortLabel: 'Upload',
+    icon: Upload,
+    status: 'SETUP',
+    description: 'Select and upload your data file'
+  },
+  { 
+    id: 'U1', 
+    label: 'Structural Scan', 
+    shortLabel: 'Scan',
+    icon: Eye,
+    status: 'CONFIGURATION',
+    description: 'Analyze file structure and format'
+  },
+  { 
+    id: 'U2', 
+    label: 'Confirm Headers', 
+    shortLabel: 'Headers',
+    icon: FileCheck,
+    status: 'CONFIGURATION',
+    description: 'Verify column headers'
+  },
+  { 
+    id: 'U3', 
+    label: 'Column Names', 
+    shortLabel: 'Columns',
+    icon: Database,
+    status: 'CONFIGURATION',
+    description: 'Configure column names'
+  },
+  { 
+    id: 'U4', 
+    label: 'Data Types', 
+    shortLabel: 'Types',
+    icon: Settings,
+    status: 'CONFIGURATION',
+    description: 'Set appropriate data types'
+  },
+  { 
+    id: 'U5', 
+    label: 'Validation', 
+    shortLabel: 'Validate',
+    icon: CheckCircle2,
+    status: 'VALIDATION',
+    description: 'Final validation and preview'
+  },
+];
+
+const STATUS_COLORS = {
+  SETUP: 'bg-blue-500/20 text-blue-700 border-blue-300',
+  CONFIGURATION: 'bg-green-500/20 text-green-700 border-green-300',
+  VALIDATION: 'bg-orange-500/20 text-orange-700 border-orange-300',
+};
 
 export const ScenarioOverlay: React.FC<ScenarioOverlayProps> = ({
   scenario,
   scenarioData,
   onDismiss,
-  onStartUpload,
-  onStartPriming,
-  onResumeFlow,
-  onRestartFlow,
-  onIgnoreAndContinue,
   onActionSelected,
+  onCreateDataUploadAtom,
 }) => {
-  const [showGuidedFlow, setShowGuidedFlow] = React.useState(false);
-  const [guidedFlowFile, setGuidedFlowFile] = React.useState<{ name: string; path: string } | null>(null);
-  const [guidedFlowStage, setGuidedFlowStage] = React.useState<'U0' | 'U1'>('U0');
-  const [savedFlowState, setSavedFlowState] = React.useState<Partial<GuidedUploadFlowState> | undefined>(undefined);
-  const [showWarningDialog, setShowWarningDialog] = React.useState(false);
-  const [showSampleDialog, setShowSampleDialog] = React.useState(false);
-  const { loadState } = useGuidedFlowPersistence();
+
+  const [currentStep, setCurrentStep] = React.useState('U0');
+
 
   if (scenario === 'loading') {
     return (
-      <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="absolute inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#458EE2] mx-auto mb-4"></div>
-          <p className="text-gray-600">Checking your project status...</p>
+          <p className="text-white">Checking your project status...</p>
         </div>
       </div>
     );
   }
 
-  // Scenario A: Brand New Project
-  if (scenario === 'A') {
-    return (
-      <>
-        <div className="absolute inset-0 bg-white/95 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="max-w-2xl w-full mx-4 bg-white rounded-lg shadow-xl border border-gray-200 p-8">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-[#458EE2] bg-opacity-10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Database className="w-8 h-8 text-[#458EE2]" />
-              </div>
-              <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-                Welcome to your new project
-              </h2>
-              <p className="text-gray-600">
-                To begin your analysis, let's upload your data. Once uploaded, it will need to be primed. 
-                Data Priming is an important step to ensure interpretability.
-              </p>
-            </div>
+  const hasDatasets = scenarioData.files.length > 0;
+  const hasPrimedDatasets = scenarioData.primedFiles.length > 0;
 
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Button
-                onClick={() => {
-                  setSavedFlowState(undefined); // Clear any saved state for new upload
-                  setGuidedFlowStage('U0');
-                  setGuidedFlowFile(null);
-                  setShowGuidedFlow(true);
-                }}
-                className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white"
-                size="lg"
-              >
-                <Upload className="w-5 h-5 mr-2" />
-                Upload Data (Excel/CSV)
-              </Button>
-              <Button
-                onClick={() => {
-                  setShowSampleDialog(true);
-                }}
-                variant="outline"
-                size="lg"
-              >
-                <Database className="w-5 h-5 mr-2" />
-                Use Sample Dataset
-              </Button>
+  const handleStepClick = (stepId: string) => {
+    setCurrentStep(stepId);
+    // Add logic to navigate to specific step
+  };
+
+  return (
+    <>
+      {/* Glassomorphic blur overlay for left side */}
+      <div className="guided-panel-overlay absolute inset-0 z-40" />
+      
+      {/* Fixed right-side guided workflow panel */}
+      <div className="fixed top-0 right-0 h-full w-80 z-50">
+        {/* Glassomorphic panel */}
+        <div className="guided-panel-glass h-full flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between p-4 border-b border-white/20 bg-gradient-to-r from-blue-50/80 to-indigo-50/80 backdrop-blur-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-[#458EE2]/20 rounded-full flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-[#458EE2]" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-900">Guided Workflow</h3>
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onDismiss}
+              className="h-8 w-8 hover:bg-white/50"
+            >
+              <X className="w-4 h-4" />
+            </Button>
           </div>
-        </div>
 
-        {showGuidedFlow && (
-          <GuidedUploadFlow
-            open={showGuidedFlow}
-            onOpenChange={(open) => {
-              setShowGuidedFlow(open);
-              if (!open) {
-                setSavedFlowState(undefined);
-                onDismiss();
-              }
-            }}
-            initialStage={guidedFlowStage}
-            savedState={savedFlowState}
-            onComplete={(result) => {
-              setShowGuidedFlow(false);
-              setSavedFlowState(undefined);
-              onDismiss();
-              onActionSelected('upload-complete');
-            }}
-          />
-        )}
+          {/* Current Atom Info */}
+          <div className="p-4 border-b border-white/20 bg-white/50">
+            <div className="text-xs text-gray-500 mb-1">Current Atom</div>
+            <div className="text-sm font-medium text-gray-900">Data Upload</div>
+          </div>
 
-        {/* Warning Dialog for Scenario B */}
-        <AlertDialog open={showWarningDialog} onOpenChange={setShowWarningDialog}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Non-Primed Files Warning</AlertDialogTitle>
-              <AlertDialogDescription>
-                Non-primed files will not be available for analysis. Are you sure you want to continue?
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  onIgnoreAndContinue();
-                  onDismiss();
-                  setShowWarningDialog(false);
-                }}
-              >
-                Continue Anyway
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+          {/* Steps List */}
+          <div className="guided-panel-scroll flex-1 overflow-y-auto p-4 space-y-3">
+            {GUIDED_STEPS.map((step, index) => {
+              const isCompleted = index < GUIDED_STEPS.findIndex(s => s.id === currentStep);
+              const isCurrent = step.id === currentStep;
+              const isUpcoming = index > GUIDED_STEPS.findIndex(s => s.id === currentStep);
+              const IconComponent = step.icon;
 
-        {/* Sample Dataset Dialog for Scenario A */}
-        <AlertDialog open={showSampleDialog} onOpenChange={setShowSampleDialog}>
-          <AlertDialogContent className="max-w-2xl">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Select Sample Dataset</AlertDialogTitle>
-              <AlertDialogDescription>
-                Choose a pre-loaded sample dataset to explore Trinity's features before uploading your own data.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <div className="py-4">
-              <div className="grid grid-cols-1 gap-3">
-                {/* Sample datasets list - can be extended with actual API call */}
-                {[
-                  { id: 'sales', name: 'Sales Data', description: 'Sample sales transaction data with dates, products, and revenue' },
-                  { id: 'customer', name: 'Customer Data', description: 'Customer demographics and behavior data' },
-                  { id: 'inventory', name: 'Inventory Data', description: 'Product inventory levels and stock movements' },
-                ].map((dataset) => (
-                  <button
-                    key={dataset.id}
-                    onClick={() => {
-                      // TODO: Implement actual sample dataset loading
-                      // For now, just close the dialog
-                      setShowSampleDialog(false);
-                      onActionSelected(`sample-dataset-${dataset.id}`);
-                    }}
-                    className="text-left p-4 border rounded-lg hover:bg-gray-50 hover:border-[#458EE2] transition-colors"
-                  >
-                    <div className="font-medium text-gray-900">{dataset.name}</div>
-                    <div className="text-sm text-gray-500 mt-1">{dataset.description}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </>
-    );
-  }
-
-  // Scenario B: Dataset Exists but Not Primed
-  if (scenario === 'B') {
-    const firstUnprimedFile = scenarioData.unprimedFiles[0] || scenarioData.inProgressFiles[0];
-    
-    return (
-      <>
-        <div className="absolute inset-0 bg-white/95 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="max-w-3xl w-full mx-4 bg-white rounded-lg shadow-xl border border-gray-200 p-8">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <FileText className="w-8 h-8 text-amber-600" />
-              </div>
-              <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-                Files Need Priming
-              </h2>
-              <p className="text-gray-600 mb-4">
-                The following files exist in the project but have not been primed. 
-                Data Priming is an important step to ensure interpretability. 
-                Would you like to upload more data or start priming existing files?
-              </p>
-              
-              {scenarioData.unprimedFiles.length > 0 && (
-                <div className="bg-gray-50 rounded-lg p-4 mb-6 text-left max-h-48 overflow-y-auto">
-                  <p className="text-sm font-medium text-gray-700 mb-2">Unprimed Files:</p>
-                  <ul className="text-sm text-gray-600 space-y-1">
-                    {scenarioData.unprimedFiles.slice(0, 5).map((file) => (
-                      <li key={file.object_name} className="truncate">• {file.file_name}</li>
-                    ))}
-                    {scenarioData.unprimedFiles.length > 5 && (
-                      <li className="text-gray-500">...and {scenarioData.unprimedFiles.length - 5} more</li>
-                    )}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Button
-                  onClick={() => {
-                    setGuidedFlowStage('U0');
-                    setGuidedFlowFile(null);
-                    setShowGuidedFlow(true);
-                  }}
-                  className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white flex-1"
-                  size="lg"
+              return (
+                <div
+                  key={step.id}
+                  onClick={() => handleStepClick(step.id)}
+                  className={cn(
+                    "guided-step-card relative p-3 rounded-lg cursor-pointer",
+                    isCompleted && "completed",
+                    isCurrent && "current",
+                    isUpcoming && ""
+                  )}
                 >
-                  <Upload className="w-5 h-5 mr-2" />
-                  Upload Additional Dataset
-                </Button>
-                {firstUnprimedFile && (
-                  <Button
-                    onClick={() => {
-                      setGuidedFlowStage('U1');
-                      setGuidedFlowFile({
-                        name: firstUnprimedFile.file_name,
-                        path: firstUnprimedFile.object_name,
-                      });
-                      setShowGuidedFlow(true);
-                    }}
-                    variant="default"
-                    size="lg"
-                    className="flex-1"
-                  >
-                    <Play className="w-5 h-5 mr-2" />
-                    Start Data Priming
-                  </Button>
-                )}
-              </div>
-              <Button
-                onClick={() => {
-                  setShowWarningDialog(true);
-                }}
-                variant="outline"
-                size="lg"
-                className="w-full"
-              >
-                Ignore and Continue
-              </Button>
-            </div>
+                  <div className="flex items-start gap-3">
+                    {/* Step Icon */}
+                    <div className={cn(
+                      "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all",
+                      isCompleted && "bg-green-500 text-white",
+                      isCurrent && "bg-[#458EE2] text-white",
+                      isUpcoming && "bg-gray-200 text-gray-400"
+                    )}>
+                      {isCompleted ? (
+                        <CheckCircle2 className="w-4 h-4" />
+                      ) : (
+                        <IconComponent className="w-4 h-4" />
+                      )}
+                    </div>
+
+                    {/* Step Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={cn(
+                          "px-2 py-0.5 rounded text-xs font-medium border",
+                          STATUS_COLORS[step.status as keyof typeof STATUS_COLORS]
+                        )}>
+                          {step.status}
+                        </span>
+                        {isCompleted && (
+                          <span className="text-xs text-green-600 font-medium">✓</span>
+                        )}
+                      </div>
+                      <div className={cn(
+                        "text-sm font-medium mb-1",
+                        isCurrent && "text-[#458EE2]",
+                        isCompleted && "text-green-700",
+                        isUpcoming && "text-gray-600"
+                      )}>
+                        {step.label}
+                      </div>
+                      <div className="text-xs text-gray-500 mb-1">
+                        {step.id}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {step.description}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
 
-        {showGuidedFlow && (
-          <GuidedUploadFlow
-            open={showGuidedFlow}
-            onOpenChange={(open) => {
-              setShowGuidedFlow(open);
-              if (!open) {
-                onDismiss();
-              }
-            }}
-            existingDataframe={guidedFlowFile ? {
-              name: guidedFlowFile.name,
-              path: guidedFlowFile.path,
-            } : undefined}
-            initialStage={guidedFlowStage}
-            onComplete={(result) => {
-              setShowGuidedFlow(false);
-              onDismiss();
-              onActionSelected('priming-complete');
-            }}
-          />
-        )}
-      </>
-    );
-  }
-
-  // Scenario C: Upload/Priming Started Previously
-  if (scenario === 'C') {
-    const savedStage = scenarioData.savedFlowState?.currentStage || 'U1';
-    
-    return (
-      <>
-        <div className="absolute inset-0 bg-white/95 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="max-w-2xl w-full mx-4 bg-white rounded-lg shadow-xl border border-gray-200 p-8">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Play className="w-8 h-8 text-blue-600" />
-              </div>
-              <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-                Continue Where You Left Off
-              </h2>
-              <p className="text-gray-600">
-                You began priming your data earlier. Would you like to continue where you left off?
-              </p>
-              {savedStage && (
-                <p className="text-sm text-gray-500 mt-2">
-                  Last stage: {savedStage}
-                </p>
-              )}
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          {/* Action Buttons */}
+          <div className="p-4 border-t border-white/20 bg-white/50 space-y-2">
+            {!hasDatasets ? (
               <Button
                 onClick={async () => {
-                  // Load saved state before opening flow
-                  const loadedState = await loadState();
-                  if (loadedState) {
-                    setSavedFlowState(loadedState);
-                    setGuidedFlowStage(loadedState.currentStage || 'U1');
-                    setShowGuidedFlow(true);
-                  } else {
-                    // Fallback: use scenarioData saved state if available
-                    if (scenarioData.savedFlowState) {
-                      setSavedFlowState(scenarioData.savedFlowState);
-                      setGuidedFlowStage(scenarioData.savedFlowState.currentStage || 'U1');
-                    }
-                    setShowGuidedFlow(true);
+                  if (onCreateDataUploadAtom) {
+                    await onCreateDataUploadAtom();
+                    onDismiss();
                   }
                 }}
-                className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white"
-                size="lg"
+                className="w-full bg-[#458EE2] hover:bg-[#3a7bc7] text-white"
+                size="sm"
               >
-                <Play className="w-5 h-5 mr-2" />
-                Resume Priming Steps
+                <Upload className="w-4 h-4 mr-2" />
+                Upload Dataset
               </Button>
-              <Button
-                onClick={() => {
-                  onRestartFlow();
-                  setSavedFlowState(undefined); // Clear saved state when restarting
-                  setGuidedFlowStage('U0');
-                  setGuidedFlowFile(null);
-                  setShowGuidedFlow(true);
-                }}
-                variant="outline"
-                size="lg"
-              >
-                Restart Upload Process
-              </Button>
-              <Button
-                onClick={() => {
-                  setSavedFlowState(undefined); // Clear saved state when uploading new dataset
-                  setGuidedFlowStage('U0');
-                  setGuidedFlowFile(null);
-                  setShowGuidedFlow(true);
-                }}
-                variant="outline"
-                size="lg"
-              >
-                <Upload className="w-5 h-5 mr-2" />
-                Upload New Dataset
-              </Button>
-            </div>
+            ) : (
+              <div className="space-y-2">
+                <Button
+                  onClick={() => {
+                    onDismiss();
+                    onActionSelected('start-analysis');
+                  }}
+                  className="w-full bg-[#458EE2] hover:bg-[#3a7bc7] text-white"
+                  size="sm"
+                >
+                  <Play className="w-4 h-4 mr-2" />
+                  Start Analysis
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (onCreateDataUploadAtom) {
+                      await onCreateDataUploadAtom();
+                      onDismiss();
+                    }
+                  }}
+                  variant="outline"
+                  className="w-full bg-white/50 hover:bg-white/70"
+                  size="sm"
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload More Data
+                </Button>
+              </div>
+            )}
           </div>
-        </div>
 
-        {showGuidedFlow && (
-          <GuidedUploadFlow
-            open={showGuidedFlow}
-            onOpenChange={(open) => {
-              setShowGuidedFlow(open);
-              if (!open) {
-                setSavedFlowState(undefined);
-                onDismiss();
-              }
-            }}
-            existingDataframe={guidedFlowFile ? {
-              name: guidedFlowFile.name,
-              path: guidedFlowFile.path,
-            } : undefined}
-            initialStage={guidedFlowStage}
-            savedState={savedFlowState}
-            onComplete={(result) => {
-              setShowGuidedFlow(false);
-              setSavedFlowState(undefined);
-              onDismiss();
-              onActionSelected('flow-complete');
-            }}
-          />
-        )}
-      </>
-    );
-  }
-
-  // Scenario D: Dataset Fully Primed
-  if (scenario === 'D') {
-    return (
-      <div className="absolute inset-0 bg-white/95 backdrop-blur-sm flex items-center justify-center z-50">
-        <div className="max-w-3xl w-full mx-4 bg-white rounded-lg shadow-xl border border-gray-200 p-8 max-h-[90vh] overflow-y-auto">
-          <div className="text-center mb-6">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Database className="w-8 h-8 text-green-600" />
-            </div>
-            <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-              Your Data is Ready
-            </h2>
-            <p className="text-gray-600">
-              What would you like to do next?
+          {/* Footer */}
+          <div className="p-3 border-t border-white/20 bg-gray-50/50">
+            <p className="text-xs text-gray-500 italic text-center">
+              Click steps to navigate • All decisions remain under your control
             </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-            <Button
-              onClick={() => {
-                setGuidedFlowStage('U0');
-                setGuidedFlowFile(null);
-                setShowGuidedFlow(true);
-              }}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <Upload className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">Add Another Dataset</div>
-                <div className="text-xs text-gray-500">Upload and prime new data</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => onActionSelected('validate-dataset')}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <FileText className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">Validate Dataset</div>
-                <div className="text-xs text-gray-500">Run validation checks</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => onActionSelected('view-overview')}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <BarChart3 className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">View Overview</div>
-                <div className="text-xs text-gray-500">Explore data features</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => onActionSelected('create-metrics')}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <Plus className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">Create Metrics</div>
-                <div className="text-xs text-gray-500">Add new columns</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => onActionSelected('merge-files')}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <GitMerge className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">Merge Files</div>
-                <div className="text-xs text-gray-500">Combine on common columns</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => onActionSelected('groupby')}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <Layers className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">Aggregate Data</div>
-                <div className="text-xs text-gray-500">Group by higher level</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => onActionSelected('stack-files')}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <Layers className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">Stack Files</div>
-                <div className="text-xs text-gray-500">Concatenate with common columns</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => onActionSelected('visualize-charts')}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <BarChart3 className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">Visualize Charts</div>
-                <div className="text-xs text-gray-500">Create data visualizations</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => onActionSelected('visualize-table')}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <Table className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">Visualize Table</div>
-                <div className="text-xs text-gray-500">View data in table format</div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={() => onActionSelected('trinity-ai-suggest')}
-              variant="outline"
-              className="justify-start h-auto py-3"
-            >
-              <Sparkles className="w-5 h-5 mr-3" />
-              <div className="text-left">
-                <div className="font-medium">Ask Trinity AI</div>
-                <div className="text-xs text-gray-500">Get next step suggestions</div>
-              </div>
-            </Button>
-          </div>
-
-          <div className="flex justify-center gap-3 pt-4 border-t">
-            <Button
-              onClick={onDismiss}
-              variant="outline"
-            >
-              Continue Working
-            </Button>
           </div>
         </div>
       </div>
-    );
-  }
 
-  return null;
+    </>
+  );
+
+
 };
 
