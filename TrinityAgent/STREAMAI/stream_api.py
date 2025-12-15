@@ -1494,7 +1494,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
             clarification_stop.set()
         if clarification_task:
             clarification_task.cancel()
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await asyncio.wait_for(clarification_task, timeout=0.5)
         await _safe_close_websocket(websocket, code=close_code, reason=close_reason)
 
