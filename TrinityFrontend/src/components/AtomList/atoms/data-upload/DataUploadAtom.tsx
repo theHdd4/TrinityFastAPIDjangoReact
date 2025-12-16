@@ -140,6 +140,21 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     return () => clearTimeout(timeoutId);
   }, [fetchSavedDataframes]);
 
+  // Listen for dataframe-saved event to refresh the list after completion
+  useEffect(() => {
+    const handleDataframeSaved = () => {
+      // Add a small delay to ensure backend has saved the file
+      setTimeout(() => {
+        fetchSavedDataframes();
+      }, 500);
+    };
+    
+    window.addEventListener('dataframe-saved', handleDataframeSaved);
+    return () => {
+      window.removeEventListener('dataframe-saved', handleDataframeSaved);
+    };
+  }, [fetchSavedDataframes]);
+
   const handleGuidedFlowComplete = (result: {
     uploadedFiles: any[];
     headerSelections: Record<string, any>;

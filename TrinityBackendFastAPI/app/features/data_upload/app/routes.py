@@ -1,5 +1,5 @@
 # app/routes.py - API Routes
-from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response, Body
 from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any, Optional
 import base64
@@ -34,6 +34,9 @@ from app.features.data_upload.app.schemas import (
 from app.features.data_upload.app.database import (
     log_operation_to_mongo,
     mark_operation_log_deleted,
+    save_guided_workflow_state,
+    get_guided_workflow_state,
+    delete_guided_workflow_state,
 )
 
 from app.redis_cache import cache_master_config
@@ -5762,4 +5765,115 @@ async def finalize_primed_file(request: Request):
         logger.error(f"Error finalizing primed file: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# GUIDED WORKFLOW STATE PERSISTENCE ENDPOINTS
+# ============================================================================
+
+@router.post("/guided-workflow/save-state")
+async def save_guided_workflow_state_endpoint(
+    user_id: str = Body(...),
+    dataset_id: str = Body(...),
+    workflow_state: Dict[str, Any] = Body(...),
+    client_name: str = Body(""),
+    app_name: str = Body(""),
+    project_name: str = Body(""),
+):
+    """
+    Save guided workflow state for a user and dataset.
+    
+    Structure in MongoDB: trinity_guided_workflow collection
+    Document ID: {user_id}:{dataset_id}
+    """
+    try:
+        result = save_guided_workflow_state(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            workflow_state=workflow_state,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to save workflow state"))
+        
+        return {
+            "status": "success",
+            "message": "Workflow state saved successfully",
+            "mongo_id": result.get("mongo_id"),
+            "is_new": result.get("is_new", False),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving guided workflow state: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/guided-workflow/get-state")
+async def get_guided_workflow_state_endpoint(
+    user_id: str = Body(...),
+    dataset_id: str = Body(...),
+):
+    """
+    Get guided workflow state for a user and dataset.
+    """
+    try:
+        result = get_guided_workflow_state(
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to get workflow state"))
+        
+        if result.get("status") == "not_found":
+            return {
+                "status": "not_found",
+                "message": "No workflow state found",
+                "workflow_state": None,
+            }
+        
+        return {
+            "status": "success",
+            "workflow_state": result.get("workflow_state"),
+            "updated_at": result.get("updated_at"),
+            "created_at": result.get("created_at"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting guided workflow state: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/guided-workflow/delete-state")
+async def delete_guided_workflow_state_endpoint(
+    user_id: str = Body(...),
+    dataset_id: str = Body(...),
+):
+    """
+    Delete guided workflow state for a user and dataset.
+    """
+    try:
+        result = delete_guided_workflow_state(
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to delete workflow state"))
+        
+        return {
+            "status": "success",
+            "message": "Workflow state deleted successfully" if result.get("deleted") else "Workflow state not found",
+            "deleted": result.get("deleted", False),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting guided workflow state: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
