@@ -1284,11 +1284,9 @@ class WorkflowContextSectionsMixin:
                 return {}
 
             # Try to find a sequence that contains any of the provided files
-            for sequence_id, files in self._sequence_available_files.items():
-                if any(path in files for path in file_paths):
-                    context = self._sequence_project_context.get(sequence_id) or {}
-                    if context:
-                        return context
+            sequence_id, context = self._resolve_sequence_for_files(file_paths)
+            if context:
+                return context
 
             # Fallback to any known project context
             for context in self._sequence_project_context.values():
@@ -1296,6 +1294,18 @@ class WorkflowContextSectionsMixin:
                     return context
 
             return {}
+
+    def _resolve_sequence_for_files(self, file_paths: List[str]) -> Tuple[Optional[str], Dict[str, Any]]:
+            """Return the sequence/context pair associated with any of the files."""
+
+            available_files_by_sequence = getattr(self, "_sequence_available_files", {}) or {}
+            project_context_by_sequence = getattr(self, "_sequence_project_context", {}) or {}
+
+            for sequence_id, files in available_files_by_sequence.items():
+                if any(path in files for path in file_paths):
+                    return sequence_id, project_context_by_sequence.get(sequence_id) or {}
+
+            return None, {}
 
     def _get_file_metadata(
             self,
@@ -1315,16 +1325,25 @@ class WorkflowContextSectionsMixin:
 
             # Resolve project context so FileReader targets the correct folder
             resolved_context = project_context or {}
-            if not resolved_context and sequence_id:
-                resolved_context = self._sequence_project_context.get(sequence_id, {})
+            candidate_sequence_id = sequence_id
+
+            if not resolved_context and candidate_sequence_id:
+                resolved_context = self._sequence_project_context.get(candidate_sequence_id, {})
+
+            if not candidate_sequence_id or not resolved_context:
+                inferred_sequence_id, inferred_context = self._resolve_sequence_for_files(file_paths)
+                candidate_sequence_id = candidate_sequence_id or inferred_sequence_id
+                if inferred_context and not resolved_context:
+                    resolved_context = inferred_context
+
             if not resolved_context:
                 resolved_context = self._resolve_project_context_for_files(file_paths)
 
             # Preload any stored metadata to avoid re-computation
             atom_ai_store = getattr(self, "atom_ai_context_store", None)
-            if atom_ai_store and sequence_id:
+            if atom_ai_store and candidate_sequence_id:
                 try:
-                    cached_metadata = atom_ai_store.load_metadata(sequence_id, resolved_context)
+                    cached_metadata = atom_ai_store.load_metadata(candidate_sequence_id, resolved_context)
                     if cached_metadata:
                         metadata_dict.update(cached_metadata)
                         logger.info("🧠 Loaded %s file metadata entries from Atom AI context", len(cached_metadata))
@@ -1450,10 +1469,10 @@ class WorkflowContextSectionsMixin:
                 logger.debug(f"⚠️ Failed to get file metadata: {e} (non-critical - files accessible via other means)")
 
             # Persist enriched metadata back to Mongo for deterministic reuse
-            if atom_ai_store and sequence_id and metadata_dict and resolved_context:
+            if atom_ai_store and candidate_sequence_id and metadata_dict and resolved_context:
                 try:
                     atom_ai_store.upsert_metadata(
-                        session_id=sequence_id,
+                        session_id=candidate_sequence_id,
                         project_context=resolved_context,
                         files=metadata_dict,
                         prompt=user_prompt,
