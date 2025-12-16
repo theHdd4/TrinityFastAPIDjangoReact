@@ -25,7 +25,7 @@ const ENDPOINTS: Record<string, string> = {
   'create-column': `${TRINITY_AI_API}/create-transform`,
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
   'explore': `${TRINITY_AI_API}/explore`,
-  'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations-chat`,
+  'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
 };
 
 const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {

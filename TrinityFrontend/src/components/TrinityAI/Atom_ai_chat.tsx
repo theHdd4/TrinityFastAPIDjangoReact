@@ -34,7 +34,7 @@ const ENDPOINTS: Record<string, string> = {
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
   'explore': `${TRINITY_AI_API}/explore`,
   'correlation': `${TRINITY_AI_API}/correlation`,
-  'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations-chat`,
+  'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
   'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
 };
 
