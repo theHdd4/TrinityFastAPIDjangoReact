@@ -658,6 +658,9 @@ class WorkflowCoreMixin:
                     current_step_number = 0
                     execution_history = []
                     previous_results = []
+                # Track how many new executions occur in this session so loop detection
+                # only triggers after we have generated at least one fresh card/run.
+                session_history_baseline = len(execution_history)
                 abort_due_complexity = False
 
                 while not react_state.goal_achieved and current_step_number < max_steps:
@@ -950,7 +953,9 @@ class WorkflowCoreMixin:
                         self._sequence_step_plans.setdefault(sequence_id, {})[current_step_number] = copy.deepcopy(next_step)
 
                         # ENHANCED LOOP DETECTION: Check if we're repeating the same atom with same files
-                        if execution_history:
+                        # Only trigger this guard after at least one new card/run has occurred
+                        # in the current session so the user sees the previous operation.
+                        if execution_history and len(execution_history) > session_history_baseline:
                             last_step = execution_history[-1]
                             last_atom = last_step.get("atom_id")
                             current_atom = next_step.atom_id
@@ -968,11 +973,11 @@ class WorkflowCoreMixin:
                                     logger.warning(f"   Last step description: {last_step.get('description', 'N/A')}")
                                     logger.warning(f"   Current step description: {next_step.description}")
 
-                                    # Force goal achieved to stop the loop
-                                    logger.info("🛑 ReAct: Stopping workflow to prevent infinite loop")
-                                    react_state.goal_achieved = True
+                                    # Record that we need to replan instead of executing the same card twice
+                                    logger.info("🛑 ReAct: Halting duplicate execution and requesting a fresh next step")
+                                    react_state.loop_retry_count = getattr(react_state, "loop_retry_count", 0) + 1
 
-                                    # Send loop detection event
+                                    # Send loop detection event and let the planner try a different step
                                     try:
                                         await self._send_event(
                                             websocket,
@@ -982,7 +987,7 @@ class WorkflowCoreMixin:
                                                     "sequence_id": sequence_id,
                                                     "step_number": current_step_number,
                                                     "repeated_atom": current_atom,
-                                                    "message": f"Loop detected: {current_atom} repeated with same files. Stopping workflow."
+                                                    "message": f"Loop detected: {current_atom} repeated with same files. Replanning next step.",
                                                 }
                                             ),
                                             "react_loop_detected event"
@@ -990,7 +995,15 @@ class WorkflowCoreMixin:
                                     except (WebSocketDisconnect, Exception) as e:
                                         logger.warning(f"⚠️ Failed to send loop detection event: {e}")
 
-                                    break
+                                    # Give the planner up to two attempts to recover before stopping entirely
+                                    if react_state.loop_retry_count >= 2:
+                                        logger.info("🛑 ReAct: Loop guard triggered twice; marking goal achieved to avoid runaway loops")
+                                        react_state.goal_achieved = True
+                                        break
+
+                                    # Back up the step counter so the next iteration replans this position
+                                    current_step_number -= 1
+                                    continue
                                 else:
                                     logger.info(f"ℹ️ ReAct: Same atom '{current_atom}' but different files - allowing")
                                     logger.debug(f"   Last files: {last_files}, Current files: {current_files}")

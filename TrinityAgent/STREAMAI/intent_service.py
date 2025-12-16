@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+from time import monotonic
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Set
 
@@ -43,6 +44,7 @@ class IntentMetrics:
     policy_flips: int = 0
     ambiguous: int = 0
     recent_samples: List[Dict[str, str]] = field(default_factory=list)
+    last_warning_at: float = 0.0
 
     def snapshot(self) -> Dict[str, object]:
         return {
@@ -53,6 +55,19 @@ class IntentMetrics:
             "ambiguous": self.ambiguous,
             "recent_samples": self.recent_samples[-10:],
         }
+
+    def should_warn(self) -> bool:
+        """Throttle noisy ambiguity warnings to once per cooldown window."""
+
+        threshold_hit = self.ambiguous > 5 or self.policy_flips > 2
+        if not threshold_hit:
+            return False
+
+        now = monotonic()
+        if self.last_warning_at == 0.0 or (now - self.last_warning_at) > 60:
+            self.last_warning_at = now
+            return True
+        return False
 
 
 class LaboratoryIntentService:
@@ -146,8 +161,11 @@ class LaboratoryIntentService:
             "tools": ",".join(sorted(merged.required_tools)) or "none",
         })
 
-        if self.metrics.ambiguous > 5 or self.metrics.policy_flips > 2:
-            logger.warning("📊 Elevated ambiguity detected in laboratory intent parsing: %s", self.metrics.snapshot())
+        if self.metrics.should_warn():
+            logger.warning(
+                "📊 Elevated ambiguity detected in laboratory intent parsing: %s",
+                self.metrics.snapshot(),
+            )
 
         return merged
 
@@ -293,7 +311,7 @@ class LaboratoryIntentService:
             issues.append(
                 IntentValidationIssue(
                     field="output_format",
-                    message="Structured output requested but no data tool selected; consider enabling Atom Agent mode.",
+                    message="Structured output requested but no data tool selected; please attach a dataset or choose a text response instead.",
                 )
             )
         return issues
