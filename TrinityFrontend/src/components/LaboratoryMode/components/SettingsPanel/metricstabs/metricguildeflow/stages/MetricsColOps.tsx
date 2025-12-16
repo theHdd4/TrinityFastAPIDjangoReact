@@ -481,6 +481,7 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
   const [selectedIdentifiersForBackend, setSelectedIdentifiersForBackend] = React.useState<string[]>([]);
   const [identifiersListOpen, setIdentifiersListOpen] = React.useState(false);
   const openedBySearchRef = React.useRef(false);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   // Local operations state for guideflow – independent of global laboratory store
@@ -555,6 +556,22 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
       setExploreOpen(true);
     }
   }, [columnSearchQuery]);
+
+  // Maintain focus on search input when layout switches (runs synchronously after DOM update)
+  React.useLayoutEffect(() => {
+    if (columnSearchQuery.trim()) {
+      // Small delay to ensure DOM has updated after conditional render switch
+      const timeoutId = setTimeout(() => {
+        if (searchInputRef.current && document.activeElement !== searchInputRef.current) {
+          searchInputRef.current.focus();
+          // Move cursor to end of input
+          const length = searchInputRef.current.value.length;
+          searchInputRef.current.setSelectionRange(length, length);
+        }
+      }, 10);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [columnSearchQuery, exploreOpen]);
 
   // Simple logic: when explore opens, open all categories. When search is active, open matching ones.
   React.useEffect(() => {
@@ -1759,17 +1776,21 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
     }
   };
 
+  // Determine if we should show centered empty state
+  const showCenteredEmptyState = selectedOperations.length === 0 && !columnSearchQuery.trim() && !exploreOpen;
+
   return (
     <div className="flex flex-col h-full relative">
       <div className="flex-1 overflow-y-auto space-y-4 px-2 pb-2">
-        {/* Conditional layout based on state */}
-        {selectedOperations.length === 0 && !columnSearchQuery.trim() && !exploreOpen ? (
-          // Centered empty state with large search bar
-          <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
+        {/* Search bar - always rendered in consistent location */}
+        <div className={showCenteredEmptyState ? "flex flex-col items-center justify-center min-h-[400px] space-y-4" : "space-y-2"}>
+          {showCenteredEmptyState ? (
             <div className="w-full max-w-2xl space-y-4">
               <div className="relative">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <Input
+                  key="column-search-input"
+                  ref={searchInputRef}
                   value={columnSearchQuery}
                   onChange={(e) => setColumnSearchQuery(e.target.value)}
                   placeholder='Describe what you want to calculate… e.g. "max price by brand", "add two columns", "moving average"'
@@ -1788,15 +1809,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                 </Button>
               </div>
             </div>
-          </div>
-        ) : (
-          // Normal layout with search at top
-          <>
-            <div className="space-y-2">
+          ) : (
+            <>
               <div className="flex items-center gap-2">
                 <div className="flex-1 relative">
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <Input
+                    key="column-search-input"
+                    ref={searchInputRef}
                     value={columnSearchQuery}
                     onChange={(e) => setColumnSearchQuery(e.target.value)}
                     placeholder='Describe what you want to calculate… e.g. "max price by brand", "add two columns", "moving average"'
@@ -1890,38 +1910,12 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                   </Collapsible>
                 </div>
               )}
-            </div>
+            </>
+          )}
+        </div>
 
-            {/* Selected Operations */}
-            {selectedOperations.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-900">
-                      Selected Operations
-                    </span>
-                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-                      {selectedOperations.length} {selectedOperations.length === 1 ? 'operation' : 'operations'}
-                    </span>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedOperations([]);
-                    }}
-                    className="text-xs"
-                  >
-                    Clear All
-                  </Button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-
-
-      {selectedOperations.length > 0 && (
+        {/* Selected Operations */}
+        {selectedOperations.length > 0 && (
         <div className="space-y-2">
           {selectedOperations.map((selectedOperation) => {
             const opType = selectedOperation.type;
