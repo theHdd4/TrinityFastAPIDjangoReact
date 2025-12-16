@@ -1,12 +1,22 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, FileUp, FolderOpen, Sparkles, Database, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Upload, FolderOpen, Database, CheckCircle2, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { useLaboratoryStore, DataUploadSettings, createDefaultDataUploadSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { UPLOAD_API } from '@/lib/api';
+import { UPLOAD_API, VALIDATE_API } from '@/lib/api';
+import { waitForTaskResult } from '@/lib/taskQueue';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 interface DataUploadAtomProps {
   atomId: string;
@@ -22,6 +32,8 @@ interface SavedDataframe {
 const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
   const setActiveGuidedFlow = useLaboratoryStore((state) => state.setActiveGuidedFlow);
+  const updateGuidedFlowStage = useLaboratoryStore((state) => state.updateGuidedFlowStage);
+  const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows);
   const isGuidedModeActive = useLaboratoryStore((state) => state.isGuidedModeActiveForAtom(atomId));
   const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
   
@@ -40,12 +52,25 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   // Use ref to track if we've already synced from settings to prevent infinite loop
   const lastSyncedFilesRef = useRef<string>(JSON.stringify(settings.uploadedFiles || []));
   const hasFetchedRef = useRef(false);
-  const hasStartedGuidedFlowRef = useRef(false);
 
-  const handleStartGuidedFlow = () => {
-    // Set active guided flow in store - CanvasArea will render the inline component
-    setActiveGuidedFlow(atomId, 'U0', {});
-  };
+  // File upload state
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [sheetOptions, setSheetOptions] = useState<string[]>([]);
+  const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [hasMultipleSheets, setHasMultipleSheets] = useState(false);
+  const [tempUploadMeta, setTempUploadMeta] = useState<{ 
+    file_path: string; 
+    file_name: string; 
+    workbook_path?: string | null;
+    upload_session_id?: string;
+    sheetNameMap?: Record<string, string>;
+  } | null>(null);
 
   // Sync primed files from settings only when they actually change
   useEffect(() => {
@@ -56,17 +81,8 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     }
   }, [settings.uploadedFiles]);
 
-  // Auto-start guided flow when atom is created and guided mode is active
-  useEffect(() => {
-    if (isGuidedModeActive && !hasStartedGuidedFlowRef.current && primedFiles.length === 0) {
-      // Only start guided flow if:
-      // 1. Guided mode is active
-      // 2. We haven't started it before
-      // 3. There are no primed files (new atom)
-      hasStartedGuidedFlowRef.current = true;
-      handleStartGuidedFlow();
-    }
-  }, [isGuidedModeActive, primedFiles.length]);
+  // Note: We no longer auto-start the guided flow at U0
+  // The atom's upload area IS step 1 (U0), so the guided flow only starts at U1 after file upload
 
   // Memoized fetch function
   const fetchSavedDataframes = useCallback(async () => {
@@ -169,8 +185,328 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
-    // Start guided flow when files are dropped
-    handleStartGuidedFlow();
+    
+    // Handle dropped files
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const firstFile = files[0];
+      setPendingFile(firstFile);
+      setUploadError('');
+      setSheetOptions([]);
+      setSelectedSheets([]);
+      setHasMultipleSheets(false);
+      setTempUploadMeta(null);
+      setIsUploadModalOpen(true);
+      void uploadSelectedFile(firstFile);
+    }
+  };
+
+  // Helper functions for non-guided upload (same as SavedDataFramesPanel)
+  const appendEnvFields = (form: FormData) => {
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        form.append('client_id', env.CLIENT_ID || '');
+        form.append('app_id', env.APP_ID || '');
+        form.append('project_id', env.PROJECT_ID || '');
+        form.append('client_name', env.CLIENT_NAME || '');
+        form.append('app_name', env.APP_NAME || '');
+        form.append('project_name', env.PROJECT_NAME || '');
+      } catch { /* ignore */ }
+    }
+    if (user?.id) {
+      form.append('user_id', String(user.id));
+    }
+  };
+
+  const deriveFileKey = (name: string) => {
+    const base = name.replace(/\.[^.]+$/, '') || 'dataframe';
+    const sanitized = base.replace(/[^A-Za-z0-9_.-]+/g, '_');
+    return sanitized || 'dataframe';
+  };
+
+  const resetUploadState = () => {
+    setPendingFile(null);
+    setSheetOptions([]);
+    setSelectedSheets([]);
+    setUploadingFile(false);
+    setUploadError('');
+    setHasMultipleSheets(false);
+    setTempUploadMeta(null);
+    setIsUploadModalOpen(false);
+  };
+
+  const uploadSelectedFile = async (file: File, sheets?: string[]) => {
+    setUploadingFile(true);
+    setUploadError('');
+    try {
+      // Sanitize filename
+      const sanitizedFileName = file.name.replace(/\s+/g, '_');
+      const sanitizedFile = sanitizedFileName !== file.name
+        ? new File([file], sanitizedFileName, { type: file.type, lastModified: file.lastModified })
+        : file;
+
+      // Check if it's an Excel file
+      const isExcelFile = sanitizedFileName.toLowerCase().endsWith('.xlsx') || 
+                         sanitizedFileName.toLowerCase().endsWith('.xls');
+
+      if (isExcelFile) {
+        // Use multi-sheet Excel upload endpoint
+        const form = new FormData();
+        form.append('file', sanitizedFile);
+        appendEnvFields(form);
+
+        const res = await fetch(`${VALIDATE_API}/upload-excel-multi-sheet`, {
+          method: 'POST',
+          body: form,
+          credentials: 'include'
+        });
+
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => null);
+          const detail = errorData?.detail || (typeof errorData === 'string' ? errorData : '');
+          throw new Error(detail || 'Upload failed');
+        }
+
+        const data = await res.json();
+        const sheetNames = Array.isArray(data.sheets) ? data.sheets : [];
+        const sheetDetails = Array.isArray(data.sheet_details) ? data.sheet_details : [];
+        const uploadSessionId = data.upload_session_id || data.session_id;
+        const fileName = data.file_name || sanitizedFileName;
+
+        if (sheetNames.length === 0) {
+          throw new Error('No sheets found in Excel file');
+        }
+
+        // Create a map of original sheet names to normalized names
+        const sheetNameMap: Record<string, string> = {};
+        sheetDetails.forEach((detail: any) => {
+          if (detail.original_name && detail.normalized_name) {
+            sheetNameMap[detail.original_name] = detail.normalized_name;
+          }
+        });
+
+        // If no details, normalize names ourselves
+        if (Object.keys(sheetNameMap).length === 0) {
+          sheetNames.forEach((name: string) => {
+            const normalized = name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
+            sheetNameMap[name] = normalized;
+          });
+        }
+
+        setTempUploadMeta({
+          file_path: data.original_file_path || '',
+          file_name: fileName,
+          workbook_path: data.original_file_path || null,
+          upload_session_id: uploadSessionId,
+          sheetNameMap,
+        });
+
+        setSheetOptions(sheetNames);
+        setSelectedSheets(sheets || sheetNames);
+        setHasMultipleSheets(sheetNames.length > 1);
+
+        if (sheetNames.length > 1 && !sheets) {
+          // Show modal to select sheets
+          setUploadingFile(false);
+          setIsUploadModalOpen(true);
+          return;
+        }
+
+        // Save all selected sheets
+        await finalizeSaveMultiSheet(fileName, uploadSessionId, sheets || sheetNames);
+      } else {
+        // CSV or other file - use regular upload endpoint
+        const form = new FormData();
+        form.append('file', sanitizedFile);
+        appendEnvFields(form);
+        const res = await fetch(`${VALIDATE_API}/upload-file`, {
+          method: 'POST',
+          body: form,
+          credentials: 'include'
+        });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || !payload) {
+          const detail = payload?.detail || (typeof payload === 'string' ? payload : '');
+          throw new Error(detail || 'Upload failed');
+        }
+        const data = await waitForTaskResult(payload);
+        await finalizeSave({ file_path: data.file_path, file_name: data.file_name || sanitizedFileName });
+      }
+    } catch (err: any) {
+      setUploadError(err.message || 'Upload failed');
+      setUploadingFile(false);
+    }
+  };
+
+  const finalizeSave = async (meta: { file_path: string; file_name: string }) => {
+    setUploadingFile(true);
+    try {
+      if (globalGuidedModeEnabled) {
+        // Guided mode: Don't save yet, start guided flow at U1 with the temp file
+        const fileKey = deriveFileKey(meta.file_name);
+        const uploadedFileInfo = {
+          name: meta.file_name,
+          path: meta.file_path,
+          size: pendingFile?.size || 0,
+          fileKey: fileKey,
+          processed: false,
+        };
+        
+        // Start guided flow at U1 with the uploaded file
+        setActiveGuidedFlow(atomId, 'U1', {
+          uploadedFiles: [uploadedFileInfo],
+          currentStage: 'U1',
+        });
+        
+        toast({ title: 'File uploaded', description: `${meta.file_name} is ready for processing.` });
+        resetUploadState();
+      } else {
+        // Non-guided mode: Save directly
+        const form = new FormData();
+        form.append('validator_atom_id', 'panel-upload');
+        form.append('file_paths', JSON.stringify([meta.file_path]));
+        const fileKey = deriveFileKey(meta.file_name);
+        form.append('file_keys', JSON.stringify([fileKey]));
+        form.append('overwrite', 'false');
+        const workbookPathsPayload = tempUploadMeta?.workbook_path ? [tempUploadMeta.workbook_path] : [];
+        const sheetMetadataPayload = tempUploadMeta?.workbook_path
+          ? [{ sheet_names: sheetOptions.length ? sheetOptions : selectedSheets.length > 0 ? selectedSheets : [], selected_sheet: selectedSheets.length > 0 ? selectedSheets[0] : sheetOptions[0] || '', original_filename: pendingFile?.name || tempUploadMeta.file_name || '' }]
+          : [];
+        if (workbookPathsPayload.length) {
+          form.append('workbook_paths', JSON.stringify(workbookPathsPayload));
+        }
+        if (sheetMetadataPayload.length) {
+          form.append('sheet_metadata', JSON.stringify(sheetMetadataPayload));
+        }
+        appendEnvFields(form);
+        const res = await fetch(`${VALIDATE_API}/save_dataframes`, {
+          method: 'POST',
+          body: form,
+          credentials: 'include'
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(txt || 'Failed to save dataframe');
+        }
+        toast({ title: 'Dataframe saved', description: `${meta.file_name} uploaded successfully.` });
+        resetUploadState();
+        fetchSavedDataframes();
+      }
+    } catch (err: any) {
+      setUploadError(err.message || 'Failed to save dataframe');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const finalizeSaveMultiSheet = async (fileName: string, uploadSessionId: string, sheetsToSave: string[]) => {
+    setUploadingFile(true);
+    try {
+      if (globalGuidedModeEnabled) {
+        // Guided mode: Create file info for each sheet and start guided flow at U1
+        const uploadedFiles = sheetsToSave.map((sheetName) => {
+          const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
+          const excelFolderName = fileName.replace(/\.[^.]+$/, '').replace(/\s+/g, '_').replace(/\./g, '_');
+          return {
+            name: `${fileName} (${sheetName})`,
+            path: tempUploadMeta?.file_path || '',
+            size: pendingFile?.size || 0,
+            fileKey: `${excelFolderName}_${normalizedSheetName}`,
+            sheetNames: sheetsToSave,
+            selectedSheet: sheetName,
+            totalSheets: sheetsToSave.length,
+            processed: false,
+            uploadSessionId: uploadSessionId,
+            sheetNameMap: tempUploadMeta?.sheetNameMap,
+          };
+        });
+        
+        // Start guided flow at U1 with the uploaded files
+        setActiveGuidedFlow(atomId, 'U1', {
+          uploadedFiles: uploadedFiles,
+          currentStage: 'U1',
+        });
+        
+        toast({ title: 'Files uploaded', description: `${sheetsToSave.length} sheet(s) ready for processing.` });
+        resetUploadState();
+      } else {
+        // Non-guided mode: Save directly
+        for (const sheetName of sheetsToSave) {
+          try {
+            const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
+            const convertForm = new FormData();
+            convertForm.append('upload_session_id', uploadSessionId);
+            convertForm.append('sheet_name', normalizedSheetName);
+            convertForm.append('original_filename', fileName);
+            convertForm.append('use_folder_structure', 'true');
+            appendEnvFields(convertForm);
+            
+            const convertRes = await fetch(`${VALIDATE_API}/convert-session-sheet-to-arrow`, {
+              method: 'POST',
+              body: convertForm,
+              credentials: 'include'
+            });
+            
+            if (!convertRes.ok) {
+              const errorData = await convertRes.json().catch(() => null);
+              const errorText = errorData?.detail || await convertRes.text().catch(() => '');
+              console.warn(`Failed to convert sheet ${sheetName}:`, errorText);
+              setUploadError(`Failed to save sheet "${sheetName}": ${errorText}`);
+              continue;
+            }
+          } catch (err: any) {
+            console.error(`Error saving sheet ${sheetName}:`, err);
+            setUploadError(`Error saving sheet "${sheetName}": ${err.message || 'Unknown error'}`);
+          }
+        }
+        
+        toast({ title: 'Files uploaded successfully', description: `Saved ${sheetsToSave.length} sheet${sheetsToSave.length > 1 ? 's' : ''} from ${fileName}.` });
+        resetUploadState();
+        fetchSavedDataframes();
+      }
+    } catch (err: any) {
+      setUploadError(err.message || 'Failed to save');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleSheetConfirm = () => {
+    if (!pendingFile || selectedSheets.length === 0) return;
+    if (!tempUploadMeta?.upload_session_id) {
+      uploadSelectedFile(pendingFile, [selectedSheets[0]]);
+      return;
+    }
+    finalizeSaveMultiSheet(tempUploadMeta.file_name, tempUploadMeta.upload_session_id, selectedSheets);
+  };
+
+  const triggerFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    const firstFile = files[0];
+    setPendingFile(firstFile);
+    setUploadError('');
+    setSheetOptions([]);
+    setSelectedSheets([]);
+    setHasMultipleSheets(false);
+    setTempUploadMeta(null);
+    setIsUploadModalOpen(true);
+    void uploadSelectedFile(firstFile);
+    event.target.value = '';
+  };
+
+  const handleUploadAreaClick = () => {
+    // Always trigger file picker
+    // In guided mode, after upload completes, the guided flow will start at U1
+    // In non-guided mode, files are saved directly
+    triggerFilePicker();
   };
 
 
@@ -179,17 +515,6 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
       <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white flex-1">
         <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
-          {/* Header - Compact */}
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 shadow-md">
-              <Upload className="w-4 h-4 text-white" />
-          </div>
-          <div>
-              <h2 className="text-sm font-bold text-gray-900">Data Upload</h2>
-              <p className="text-xs text-gray-500">Upload and prime your data files</p>
-          </div>
-        </div>
-
           {/* Saved Dataframes Count - Compact */}
           {savedDataframes.length > 0 && (
             <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
@@ -243,9 +568,19 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           </div>
         )}
 
+          {/* Hidden file input for non-guided upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept=".csv,.xlsx,.xls"
+            multiple
+            onChange={handleFileInput}
+          />
+
           {/* Drag and Drop Area - Compact */}
           <div
-            className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 p-4 ${
+            className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 p-4 cursor-pointer ${
               isDragOver 
                 ? 'border-blue-400 bg-blue-50' 
                 : 'border-blue-300 hover:border-blue-400 bg-blue-50/50'
@@ -253,6 +588,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
+            onClick={handleUploadAreaClick}
           >
             <div className="mb-3">
               <div className={`mx-auto rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md transform transition-transform duration-300 ${
@@ -264,7 +600,9 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
                 {isDragOver ? 'Drop files here' : 'Drag and drop files or click to upload'}
               </p>
               <p className="text-xs text-gray-500">
-                Use our guided workflow to upload, clean, and prime your data files
+                {globalGuidedModeEnabled 
+                  ? 'Use our guided workflow to upload, clean, and prime your data files'
+                  : 'Upload CSV or Excel files directly'}
                 </p>
               </div>
             </div>
@@ -272,6 +610,68 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
 
         </div>
       </Card>
+
+      {/* Upload Modal for non-guided mode (Excel sheet selection) */}
+      <Dialog open={isUploadModalOpen} onOpenChange={(open) => { if (!open) resetUploadState(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Upload File</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {uploadingFile && !hasMultipleSheets && (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                <span className="ml-2 text-sm text-gray-600">Uploading...</span>
+              </div>
+            )}
+            {uploadError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                {uploadError}
+              </div>
+            )}
+            {hasMultipleSheets && sheetOptions.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-600">
+                  This Excel file has multiple sheets. Select which sheets to upload:
+                </p>
+                <div className="max-h-48 overflow-y-auto space-y-2 border rounded-lg p-3">
+                  {sheetOptions.map((sheet) => (
+                    <div key={sheet} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`sheet-${sheet}`}
+                        checked={selectedSheets.includes(sheet)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedSheets(prev => [...prev, sheet]);
+                          } else {
+                            setSelectedSheets(prev => prev.filter(s => s !== sheet));
+                          }
+                        }}
+                      />
+                      <Label htmlFor={`sheet-${sheet}`} className="text-sm cursor-pointer">
+                        {sheet}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={resetUploadState} disabled={uploadingFile}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    onClick={handleSheetConfirm} 
+                    disabled={selectedSheets.length === 0 || uploadingFile}
+                  >
+                    {uploadingFile ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                    Upload {selectedSheets.length} Sheet{selectedSheets.length !== 1 ? 's' : ''}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
       </div>
   );
 };

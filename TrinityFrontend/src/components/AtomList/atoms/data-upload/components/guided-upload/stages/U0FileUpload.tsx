@@ -745,7 +745,7 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
   return (
     <StageLayout
       title="Upload Your Dataset"
-      explanation="Choose one or more CSV or Excel files from your computer. You can upload multiple files at once."
+      explanation="Click the upload area above or drag and drop files to begin."
     >
       <div 
         className="space-y-6"
@@ -753,16 +753,19 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {/* Single Key Action: Select File */}
+        {/* Instruction to use atom upload area */}
         <div className="flex flex-col items-center gap-4">
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white px-8 py-6 text-base"
-          >
-            <FileText className="w-5 h-5 mr-2" />
-            Select File{uploadedFiles.length > 0 ? 's' : ''}
-          </Button>
+          {!isUploading && uploadedFiles.length === 0 && (
+            <div className="text-center py-4">
+              <div className="flex items-center justify-center gap-2 text-gray-500 mb-2">
+                <Upload className="w-5 h-5 text-blue-500" />
+                <span className="text-sm font-medium">Use the upload area above to select files</span>
+              </div>
+              <p className="text-xs text-gray-400">
+                Supported formats: CSV, XLSX, XLS, TSV (up to 2GB)
+              </p>
+            </div>
+          )}
           
           {/* Real-time Upload Progress */}
           {isUploading && uploadProgress.length > 0 && (
@@ -989,30 +992,24 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
           </div>
         )}
 
-        {/* Secondary link: Supported formats */}
-        <div className="text-center">
-          <p className="text-sm text-gray-500">
-            Supported formats: <span className="font-medium">CSV, XLSX, XLS, TSV</span> (up to 2GB)
-          </p>
-        </div>
-
-        {/* Optional: Use Sample Dataset */}
-        <div className="text-center">
-          <button
-            type="button"
-            className="text-sm text-gray-500 hover:text-[#458EE2] hover:underline"
-            onClick={(e) => {
-              e.preventDefault();
-              // TODO: Implement sample dataset loading
-              toast({
-                title: 'Coming soon',
-                description: 'Sample dataset feature will be available soon.',
-              });
-            }}
-          >
-            Optional: Use Sample Dataset
-          </button>
-        </div>
+        {/* Optional: Use Sample Dataset - only show when no files uploaded */}
+        {uploadedFiles.length === 0 && !isUploading && (
+          <div className="text-center">
+            <button
+              type="button"
+              className="text-sm text-gray-500 hover:text-[#458EE2] hover:underline"
+              onClick={(e) => {
+                e.preventDefault();
+                toast({
+                  title: 'Coming soon',
+                  description: 'Sample dataset feature will be available soon.',
+                });
+              }}
+            >
+              Optional: Use Sample Dataset
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Sheet Selection Modal - Same as SavedDataFramesPanel */}

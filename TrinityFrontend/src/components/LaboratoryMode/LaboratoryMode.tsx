@@ -1063,7 +1063,8 @@ const LaboratoryMode = () => {
         data-lab-header="true"
         className="absolute top-[53px] flex items-center justify-center z-50 pointer-events-none"
         style={{
-          left: (auxiliaryMenuLeftOpen || isExhibitionOpen) ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
+          // When guided mode is ON, left panel is always collapsed (48px)
+          left: globalGuidedModeEnabled ? '48px' : (auxiliaryMenuLeftOpen || isExhibitionOpen) ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
           right: (auxActive && auxActive !== 'exhibition') ? '368px' : '48px', // w-12 (48px) icons + w-80 (320px) panel when open (exhibition is on left)
         }}
       >
@@ -1217,21 +1218,34 @@ const LaboratoryMode = () => {
       </div>
 
         <div className="flex-1 flex overflow-hidden relative">
-          {/* Atoms Sidebar */}
-          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
-            <AuxiliaryMenuLeft 
-              onAtomDragStart={handleAtomDragStart}
-              active={auxActive}
-              onActiveChange={(newActive) => {
-                setAuxActive(newActive);
-              }}
-              isExhibitionOpen={isExhibitionOpen}
-              setIsExhibitionOpen={setIsExhibitionOpen}
-              canEdit={canEdit}
-              showFloatingNavigationList={showFloatingNavigationList}
-              setShowFloatingNavigationList={setShowFloatingNavigationList}
-            />
-          </div>
+          {/* Atoms Sidebar - Hidden when guided mode is ON */}
+          {!globalGuidedModeEnabled && (
+            <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
+              <AuxiliaryMenuLeft 
+                onAtomDragStart={handleAtomDragStart}
+                active={auxActive}
+                onActiveChange={(newActive) => {
+                  setAuxActive(newActive);
+                }}
+                isExhibitionOpen={isExhibitionOpen}
+                setIsExhibitionOpen={setIsExhibitionOpen}
+                canEdit={canEdit}
+                showFloatingNavigationList={showFloatingNavigationList}
+                setShowFloatingNavigationList={setShowFloatingNavigationList}
+              />
+            </div>
+          )}
+          
+          {/* Minimal left bar when guided mode is ON - Light theme with gradient */}
+          {globalGuidedModeEnabled && (
+            <div className="w-12 h-full flex-shrink-0 flex flex-col items-center pt-4 bg-gradient-to-b from-purple-50 via-white to-blue-50 border-r border-purple-100 transition-all duration-500 ease-out animate-in slide-in-from-left-2">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-200 transition-all duration-300 hover:scale-110 hover:shadow-xl hover:shadow-purple-300 group cursor-pointer">
+                <Sparkles className="w-4 h-4 text-white transition-transform duration-300 group-hover:rotate-12" />
+              </div>
+              <div className="mt-3 w-6 h-0.5 rounded-full bg-gradient-to-r from-purple-200 to-blue-200" />
+              <span className="mt-2 text-[9px] font-medium text-purple-400 tracking-wider uppercase">Guided</span>
+            </div>
+          )}
 
           {/* Main Canvas Area */}
           <div
@@ -1261,7 +1275,7 @@ const LaboratoryMode = () => {
               />
           </div>
 
-          {/* Auxiliary menu */}
+          {/* Auxiliary menu - Simplified when guided mode is ON */}
           <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
             <AuxiliaryMenu
               selectedAtomId={selectedAtomId}
@@ -1282,7 +1296,7 @@ const LaboratoryMode = () => {
                 }
               }}
               trinityAILayout={trinityAILayout}
-              isTrinityAIVisible={isTrinityAIVisible}
+              isTrinityAIVisible={globalGuidedModeEnabled ? false : isTrinityAIVisible}
               onTrinityAIClose={() => {
                 setIsTrinityAIVisible(false);
                 setAuxActive(null);
@@ -1304,11 +1318,13 @@ const LaboratoryMode = () => {
               }}
               isGuidedModeEnabled={globalGuidedModeEnabled}
             />
-            <FloatingNavigationList
-              isVisible={showFloatingNavigationList}
-              onClose={() => setShowFloatingNavigationList(false)}
-              anchorSelector="[data-lab-header-text]"
-            />
+            {!globalGuidedModeEnabled && (
+              <FloatingNavigationList
+                isVisible={showFloatingNavigationList}
+                onClose={() => setShowFloatingNavigationList(false)}
+                anchorSelector="[data-lab-header-text]"
+              />
+            )}
           </div>
 
 
@@ -1316,7 +1332,8 @@ const LaboratoryMode = () => {
           {/* Trinity AI Panel - Only for horizontal layout */}
           {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
           {/* In horizontal view, panel stays visible and aligned with canvas area */}
-          {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
+          {/* Hidden when guided mode is ON */}
+          {isTrinityAIVisible && trinityAILayout === 'horizontal' && !globalGuidedModeEnabled && (
             <div 
               className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
             >

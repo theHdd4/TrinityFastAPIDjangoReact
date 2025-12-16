@@ -1267,6 +1267,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     const flowState = activeGuidedFlows[atom.id];
     const existingDataframe = flowState?.state?.initialFile as { name: string; path: string; size?: number } | undefined;
     
+    // Skip rendering the separate panel for U0 stage - the atom itself handles U0
+    // The DataUploadAtom's upload area IS step 1 (U0)
+    const currentStage = flowState?.currentStage || 'U0';
+    if (currentStage === 'U0') {
+      return null;
+    }
+    
     return (
       <div className="mt-4">
         <GuidedUploadFlowInline

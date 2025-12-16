@@ -209,92 +209,112 @@ const AuxiliaryMenu: React.FC<Props> = ({
 
 
       {/* Icons Column - Always visible and stays on the right */}
-      <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button
-            onClick={() => {
-              // Toggle between collapsed and expanded, but never completely hide
-              // The panel is always visible, just minimized or expanded
-              openTrinityAI();
-            }}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'trinity' ? 'bg-muted text-foreground' : ''
-            }`}
-            title="Trinity AI - Click to expand/collapse"
-            data-trinity-ai="true"
-            type="button"
-          >
-            <TrinityAIIcon className="text-purple-500" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Trinity AI
-            </span>
-          </button>
-        </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button
-            onClick={openSettings}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'settings' ? 'bg-muted text-foreground' : ''
-            }`}
-            title="Settings"
-            data-settings="true"
-            type="button"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Settings
-            </span>
-          </button>
-        </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button
-            onClick={openFrames}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'frames' ? 'bg-muted text-foreground' : ''
-            }`}
-            title="Saved DataFrames"
-            data-saved-dataframes="true"
-            type="button"
-          >
-            <Database className="w-3.5 h-3.5" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Saved DataFrames
-            </span>
-          </button>
-        </div>
-        {isGuidedModeEnabled && (
+      {/* When guided mode is ON, use light gradient theme with smooth animations */}
+      <div className={`${isGuidedModeEnabled ? 'bg-gradient-to-b from-purple-50 via-white to-blue-50' : 'bg-white'} border-l ${isGuidedModeEnabled ? 'border-purple-100' : 'border-gray-200'} transition-all duration-500 ease-out flex flex-col h-full w-12 flex-shrink-0`}>
+        {/* Trinity AI - Hidden when guided mode is ON */}
+        {!isGuidedModeEnabled && (
           <div className="p-3 border-b border-gray-200 flex items-center justify-center">
             <button
-              onClick={openGuidedWorkflow}
+              onClick={() => {
+                // Toggle between collapsed and expanded, but never completely hide
+                // The panel is always visible, just minimized or expanded
+                openTrinityAI();
+              }}
               className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-                active === 'guided' ? 'bg-muted text-foreground' : ''
+                active === 'trinity' ? 'bg-muted text-foreground' : ''
+              }`}
+              title="Trinity AI - Click to expand/collapse"
+              data-trinity-ai="true"
+              type="button"
+            >
+              <TrinityAIIcon className="text-purple-500" />
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+                Trinity AI
+              </span>
+            </button>
+          </div>
+        )}
+        {/* Settings - Hidden when guided mode is ON */}
+        {!isGuidedModeEnabled && (
+          <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+            <button
+              onClick={openSettings}
+              className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+                active === 'settings' ? 'bg-muted text-foreground' : ''
+              }`}
+              title="Settings"
+              data-settings="true"
+              type="button"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+                Settings
+              </span>
+            </button>
+          </div>
+        )}
+        {/* Guided Workflow - Only shown when guided mode is ON */}
+        {isGuidedModeEnabled && (
+          <div className="p-3 border-b border-purple-100 flex items-center justify-center animate-in fade-in slide-in-from-right-2 duration-300">
+            <button
+              onClick={openGuidedWorkflow}
+              className={`w-9 h-9 rounded-xl transition-all duration-300 group relative flex items-center justify-center ${
+                active === 'guided' 
+                  ? 'bg-gradient-to-br from-purple-500 to-purple-600 text-white shadow-lg shadow-purple-200 scale-105' 
+                  : 'bg-white hover:bg-purple-50 text-purple-600 border border-purple-200 hover:border-purple-300 hover:shadow-md hover:shadow-purple-100'
               }`}
               title="Guided Workflow"
               data-guided-workflow="true"
               type="button"
             >
-              <Wrench className="w-3.5 h-3.5" />
-              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              <Wrench className={`w-4 h-4 transition-transform duration-300 ${active === 'guided' ? 'rotate-12' : 'group-hover:rotate-6'}`} />
+              <span className="absolute right-full mr-2 px-2 py-1 bg-white text-gray-700 text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-purple-100">
                 Guided Workflow
               </span>
             </button>
           </div>
         )}
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center hidden">
+        {/* Saved DataFrames - Always visible */}
+        <div className={`p-3 border-b ${isGuidedModeEnabled ? 'border-purple-100' : 'border-gray-200'} flex items-center justify-center ${isGuidedModeEnabled ? 'animate-in fade-in slide-in-from-right-2 duration-300 delay-75' : ''}`}>
           <button
-            onClick={openHelp}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'help' ? 'bg-muted text-foreground' : ''
+            onClick={openFrames}
+            className={`w-9 h-9 rounded-xl transition-all duration-300 group relative flex items-center justify-center ${
+              isGuidedModeEnabled
+                ? active === 'frames' 
+                  ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-200 scale-105' 
+                  : 'bg-white hover:bg-blue-50 text-blue-600 border border-blue-200 hover:border-blue-300 hover:shadow-md hover:shadow-blue-100'
+                : active === 'frames' 
+                  ? 'bg-muted text-foreground' 
+                  : 'hover:bg-muted'
             }`}
-            title="Help"
+            title="Saved DataFrames"
+            data-saved-dataframes="true"
             type="button"
           >
-            <HelpCircle className="w-4 h-4 text-gray-600" strokeWidth={2} />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Help
+            <Database className={`w-4 h-4 transition-transform duration-300 ${isGuidedModeEnabled ? (active === 'frames' ? 'scale-110' : 'group-hover:scale-105') : ''}`} />
+            <span className={`absolute right-full mr-2 px-2 py-1 text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg ${isGuidedModeEnabled ? 'bg-white text-gray-700 border border-blue-100' : 'bg-popover text-popover-foreground border border-border'}`}>
+              Saved DataFrames
             </span>
           </button>
         </div>
+        {/* Help - Hidden when guided mode is ON */}
+        {!isGuidedModeEnabled && (
+          <div className="p-3 border-b border-gray-200 flex items-center justify-center hidden">
+            <button
+              onClick={openHelp}
+              className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+                active === 'help' ? 'bg-muted text-foreground' : ''
+              }`}
+              title="Help"
+              type="button"
+            >
+              <HelpCircle className="w-4 h-4 text-gray-600" strokeWidth={2} />
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+                Help
+              </span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
