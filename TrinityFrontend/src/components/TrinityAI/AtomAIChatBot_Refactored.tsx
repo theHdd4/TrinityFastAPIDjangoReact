@@ -152,13 +152,23 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         console.warn('Failed to load environment context:', error);
       }
 
+      const atomSettings = useLaboratoryStore.getState().getAtom?.(atomId)?.settings as any;
+      const payload = atomType === 'dataframe-operations'
+        ? {
+            query: userMsg.content,
+            prompt: userMsg.content,
+            current_df_id: atomSettings?.currentDfId || atomSettings?.fileId,
+            selected_file: atomSettings?.selectedFile || atomSettings?.tableData?.fileName,
+          }
+        : { prompt: userMsg.content };
+
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: userMsg.content,
+        body: JSON.stringify({
           session_id: sessionId,
-          ...envContext
+          ...envContext,
+          ...payload
         }),
       });
 

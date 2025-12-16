@@ -170,15 +170,20 @@ async function handleAtomCommand(atomType: string, args: string, context: Comman
   console.log(`📞 Calling ${atomType} agent API:`, endpoint);
   console.log('  - Prompt:', args);
   
+  const basePayload = {
+    session_id: `${atomType}_${Date.now()}`,
+    ...envContext
+  };
+
+  const requestPayload = atomType === 'dataframe-operations'
+    ? { ...basePayload, query: args, prompt: args }
+    : { ...basePayload, prompt: args };
+
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({
-      prompt: args,
-      session_id: `${atomType}_${Date.now()}`,
-      ...envContext
-    })
+    body: JSON.stringify(requestPayload)
   });
 
   if (!res.ok) {
