@@ -434,16 +434,19 @@ def _summarize_known_data(
     summaries: list[str] = []
 
     if initial_prompt:
-        summaries.append(f"Initial intent: {initial_prompt.strip()[:120]}")
+        cleaned_intent = initial_prompt.strip().rstrip(".")[:120]
+        summaries.append(f"You mentioned you want to {cleaned_intent}.")
 
     clarification_notes = atom_ai_context.get("clarifications") or []
     if clarification_notes:
         last_focus = clarification_notes[-1].get("focus") or clarification_notes[-1].get(
             "type"
         )
-        summaries.append(
-            f"Recent clarification ({last_focus}): {clarification_notes[-1].get('response', '')}".strip()
-        )
+        last_response = clarification_notes[-1].get("response", "").strip()
+        if last_response:
+            summaries.append(
+                f"You last clarified {last_focus}: {last_response.rstrip('.')}."
+            )
 
     known_scope = _collect_known_scope_details(
         atom_ai_context, available_files, contextual_prompt
@@ -451,15 +454,15 @@ def _summarize_known_data(
     datasets = known_scope.get("datasets") or []
     if datasets:
         dataset_list = ", ".join(datasets)
-        summaries.append(f"I’ll use: {dataset_list}")
+        summaries.append(f"I’m planning to use {dataset_list} you shared.")
     elif available_files:
         file_list = ", ".join(available_files[:3])
         remaining = len(available_files) - min(3, len(available_files))
         if remaining > 0:
             file_list = f"{file_list} (+{remaining} more)"
-        summaries.append(f"Files shared: {file_list}")
+        summaries.append(f"I see these files on your side: {file_list}.")
 
-    return "; ".join(summaries) if summaries else "your latest request"
+    return " ".join(summaries) if summaries else "your latest request"
 
 
 def _build_conversational_clarification(
@@ -531,8 +534,8 @@ def _build_conversational_clarification(
 
     return (
         "I want to be sure I’m working on the right thing. "
-        f"Here’s what I have so far: {known_summary}. "
-        f"Could you share {request_detail}? Once I have that, I’ll take care of the rest. "
+        f"Here’s what I’m tracking: {known_summary}. "
+        f"Could you share {request_detail}? Once I have that, I’ll keep things moving. "
         f"{guidance}"
     )
 
