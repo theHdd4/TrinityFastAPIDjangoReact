@@ -3,13 +3,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { ProgressStepper } from './ProgressStepper';
 import { useGuidedUploadFlow, type UploadStage } from './useGuidedUploadFlow';
-import { U0FileUpload } from './stages/U0FileUpload';
-import { U1StructuralScan } from './stages/U1StructuralScan';
-import { U2UnderstandingFiles } from './stages/U2UnderstandingFiles';
-import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
+// Import stage components from data-upload folder (shared components)
+import { U0FileUpload } from '../../../data-upload/components/guided-upload/stages/U0FileUpload';
+import { U1StructuralScan } from '../../../data-upload/components/guided-upload/stages/U1StructuralScan';
+import { U2UnderstandingFiles } from '../../../data-upload/components/guided-upload/stages/U2UnderstandingFiles';
+import { U3ReviewColumnNames } from '../../../data-upload/components/guided-upload/stages/U3ReviewColumnNames';
 import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
-import { U5MissingValues } from './stages/U5MissingValues';
-import { U6FinalPreview } from './stages/U6FinalPreview';
+import { U5MissingValues } from '../../../data-upload/components/guided-upload/stages/U5MissingValues';
+import { U6FinalPreview } from '../../../data-upload/components/guided-upload/stages/U6FinalPreview';
 import { U7Success } from './stages/U7Success';
 import { ArrowLeft, RotateCcw, X, Minimize2, Maximize2 } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
@@ -190,6 +191,61 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
         missingValueStrategies: state.missingValueStrategies,
       });
       onOpenChange(false);
+    } else if (state.currentStage === 'U5') {
+      // Apply missing value transformations when leaving U5
+      // Using the same API as SavedDataFramesPanel (/process_saved_dataframe) which works correctly
+      const chosenIndex = state.selectedFileIndex !== undefined && state.selectedFileIndex < state.uploadedFiles.length 
+        ? state.selectedFileIndex : 0;
+      const currentFile = state.uploadedFiles[chosenIndex];
+      
+      if (currentFile?.path) {
+        const currentStrategies = state.missingValueStrategies[currentFile.name] || [];
+        
+        // Build instructions array in the same format as SavedDataFramesPanel
+        const instructions: Array<{ column: string; missing_strategy?: string; custom_value?: string | number }> = [];
+        
+        currentStrategies.forEach(s => {
+          if (s.strategy !== 'none') {
+            const instruction: { column: string; missing_strategy?: string; custom_value?: string | number } = {
+              column: s.columnName,
+              missing_strategy: s.strategy,
+            };
+            if (s.strategy === 'custom' && s.value !== undefined) {
+              instruction.custom_value = s.value;
+            }
+            instructions.push(instruction);
+          }
+        });
+        
+        // Apply missing value transformations if there are any
+        if (instructions.length > 0) {
+          try {
+            console.log('🔄 U5->U6: Applying missing value transformations via process_saved_dataframe:', instructions);
+            
+            const transformRes = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                object_name: currentFile.path,
+                instructions: instructions,
+              }),
+            });
+            
+            if (transformRes.ok) {
+              const result = await transformRes.json();
+              console.log('✅ U5->U6: Missing value transformations applied successfully:', result);
+            } else {
+              const errorText = await transformRes.text();
+              console.warn('⚠️ U5->U6: Failed to apply missing value transformations:', errorText);
+            }
+          } catch (error) {
+            console.error('❌ U5->U6: Error applying missing value transformations:', error);
+          }
+        }
+      }
+      
+      goToNextStage();
     } else {
       goToNextStage();
     }

@@ -68,6 +68,18 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
     });
   }, [currentFile?.name, currentColumnEdits.length, currentDataTypes.length, currentStrategies.length]);
 
+  // Reset loadedFileRef when strategies change to force re-fetch with updated strategies
+  const strategiesKeyRef = useRef<string>('');
+  React.useEffect(() => {
+    const strategiesKey = JSON.stringify(currentStrategies.map(s => ({ col: s.columnName, strategy: s.strategy, value: s.value })));
+    if (strategiesKeyRef.current && strategiesKeyRef.current !== strategiesKey) {
+      console.log('U6: Missing value strategies changed, resetting loadedFileRef to force re-fetch');
+      loadedFileRef.current = null;
+      hasAttemptedFetchRef.current = false;
+    }
+    strategiesKeyRef.current = strategiesKey;
+  }, [currentStrategies]);
+
   // Helper function to build data from state (used when API fails or as fallback)
   const buildStateBasedData = React.useCallback(() => {
     const columnSummaries: ColumnSummary[] = [];
@@ -600,7 +612,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
     };
 
     void fetchPreviewData();
-  }, [currentFile?.name, currentFile?.path, buildStateBasedData]);
+  }, [currentFile?.name, currentFile?.path, buildStateBasedData, currentStrategies.length]);
 
   // Calculate summary statistics - use columns state if available, otherwise fall back to dataTypeSelections
   const getSummaryStats = () => {

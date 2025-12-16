@@ -72,6 +72,7 @@ const getTreatmentOptions = (dataType: string, columnRole: 'identifier' | 'measu
       { value: 'median', label: 'Replace with median' },
       { value: 'ffill', label: 'Forward fill' },
       { value: 'bfill', label: 'Backward fill' },
+      { value: 'drop', label: 'Drop rows with missing' },
       { value: 'none', label: 'Leave missing' },
     ];
   }
@@ -81,6 +82,7 @@ const getTreatmentOptions = (dataType: string, columnRole: 'identifier' | 'measu
     return [
       { value: 'custom', label: 'Replace with "Unknown"' },
       { value: 'mode', label: 'Replace with highest-frequency value' },
+      { value: 'drop', label: 'Drop rows with missing' },
       { value: 'none', label: 'Leave missing' },
     ];
   }
@@ -90,6 +92,7 @@ const getTreatmentOptions = (dataType: string, columnRole: 'identifier' | 'measu
     return [
       { value: 'custom', label: 'Replace with "Unknown"' },
       { value: 'mode', label: 'Replace with highest-frequency category' },
+      { value: 'drop', label: 'Drop rows with missing' },
       { value: 'none', label: 'Leave missing' },
     ];
   }
@@ -99,7 +102,7 @@ const getTreatmentOptions = (dataType: string, columnRole: 'identifier' | 'measu
     return [
       { value: 'ffill', label: 'Forward fill date' },
       { value: 'bfill', label: 'Backward fill' },
-      { value: 'drop', label: 'Drop rows' },
+      { value: 'drop', label: 'Drop rows with missing' },
       { value: 'none', label: 'Leave missing' },
     ];
   }
@@ -109,12 +112,14 @@ const getTreatmentOptions = (dataType: string, columnRole: 'identifier' | 'measu
     return [
       { value: 'custom', label: 'Replace with "Not provided"' },
       { value: 'empty', label: 'Replace with empty string' },
+      { value: 'drop', label: 'Drop rows with missing' },
       { value: 'none', label: 'Leave missing' },
     ];
   }
 
   // Default fallback
   return [
+    { value: 'drop', label: 'Drop rows with missing' },
     { value: 'none', label: 'Leave missing' },
   ];
 };
@@ -634,9 +639,11 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
   }
 
   const handleNext = () => {
-    console.log('🚀 U5 handleNext called - saving before navigation');
+    console.log('🚀 U5 handleNext called - saving strategies to state');
     console.log('🚀 U5 Current columns state:', columns);
     
+    // Save strategies to state - the actual API call is handled by GuidedUploadFlow
+    // using the same /process_saved_dataframe API that SavedDataFramesPanel uses
     handleSave();
     
     console.log('🚀 U5 Navigating to next stage');
