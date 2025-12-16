@@ -324,7 +324,13 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         websocketWarmupCompleteRef.current = true;
       }
     } catch (err) {
-      console.warn('⚠️ WebSocket warmup failed (will retry on next attempt)', err);
+      const isAbortError = err instanceof DOMException && err.name === 'AbortError';
+      if (isAbortError) {
+        websocketWarmupCompleteRef.current = true;
+        console.info('⌛ WebSocket warmup timed out; continuing with connection attempt.');
+      } else {
+        console.warn('⚠️ WebSocket warmup failed (will retry on next attempt)', err);
+      }
     } finally {
       window.clearTimeout(timer);
     }
