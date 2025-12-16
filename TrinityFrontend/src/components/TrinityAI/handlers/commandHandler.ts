@@ -27,7 +27,7 @@ const ATOM_ENDPOINTS: Record<string, string> = {
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
   'explore': `${TRINITY_AI_API}/explore`,
   'correlation': `${TRINITY_AI_API}/correlation`,
-  'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
+  'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations-chat`,
   'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
 };
 
@@ -170,15 +170,20 @@ async function handleAtomCommand(atomType: string, args: string, context: Comman
   console.log(`📞 Calling ${atomType} agent API:`, endpoint);
   console.log('  - Prompt:', args);
   
+  const basePayload = {
+    session_id: `${atomType}_${Date.now()}`,
+    ...envContext
+  };
+
+  const requestPayload = atomType === 'dataframe-operations'
+    ? { ...basePayload, query: args, prompt: args }
+    : { ...basePayload, prompt: args };
+
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({
-      prompt: args,
-      session_id: `${atomType}_${Date.now()}`,
-      ...envContext
-    })
+    body: JSON.stringify(requestPayload)
   });
 
   if (!res.ok) {
