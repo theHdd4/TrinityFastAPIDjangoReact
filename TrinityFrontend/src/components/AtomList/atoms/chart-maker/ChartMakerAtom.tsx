@@ -358,6 +358,13 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
                          prevFileIdRef.current !== settings.fileId && 
                          prevFileIdRef.current !== '';
     
+    // 🔧 CRITICAL FIX: Check if this is initial mount with unrendered charts (inactive mode scenario)
+    // When component mounts in inactive mode after pipeline update, prevFileIdRef is initialized to new fileId
+    // So fileIdChanged is false, but we still need to render charts
+    const hasUnrenderedCharts = settings.charts && settings.charts.length > 0 && 
+                                settings.charts.some((chart: any) => !chart.chartRendered && !chart.chartLoading);
+    const isInitialMountWithUnrenderedCharts = initialMount.current && hasUnrenderedCharts;
+    
     if (fileIdChanged) {
       console.log('🔄 [AUTO-RENDER] File ID changed (pipeline file replacement) - marking all charts for re-render', {
         oldFileId: prevFileIdRef.current,
@@ -388,9 +395,30 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
       // Don't return - we still want to process other charts that aren't rendering
     }
     
-    // 🔧 CRITICAL: Get charts to process - update if autoRenderAfterPipeline flag is set
+    // 🔧 CRITICAL: Get charts to process - update if autoRenderAfterPipeline flag is set or initial mount with unrendered charts
     let chartsToProcess = settings.charts || [];
-    if ((settings as any).autoRenderAfterPipeline) {
+    
+    // 🔧 CRITICAL FIX: Handle initial mount with unrendered charts (inactive mode after pipeline update)
+    if (isInitialMountWithUnrenderedCharts) {
+      console.log('🔄 [AUTO-RENDER] Initial mount with unrendered charts (inactive mode after pipeline) - marking all charts for re-render', {
+        chartsCount: settings.charts.length,
+        unrenderedCount: settings.charts.filter((c: any) => !c.chartRendered).length
+      });
+      // Mark all charts for rendering immediately
+      // Use these charts for processing in this same useEffect run
+      chartsToProcess = settings.charts.map(chart => ({
+        ...chart,
+        chartRendered: false,
+        chartLoading: false,
+        pipelineAutoRender: true,
+      }));
+      
+      // Update settings with marked charts (async, but we use chartsToProcess for immediate processing)
+      updateSettings(atomId, { 
+        charts: chartsToProcess, 
+        pipelineAutoRender: true 
+      });
+    } else if ((settings as any).autoRenderAfterPipeline) {
       console.log('🚀 [AUTO-RENDER] Pipeline restoration detected - marking all charts for render');
       // Clear the flag first
       updateSettings(atomId, { autoRenderAfterPipeline: false });

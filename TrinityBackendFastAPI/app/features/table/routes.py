@@ -1,7 +1,7 @@
 """
 API routes for Table atom.
 """
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Query
 from typing import Dict, Any, List, Tuple, Optional
 import uuid
 import logging
@@ -10,6 +10,7 @@ import polars as pl
 import re
 from urllib.parse import unquote
 from minio.error import S3Error
+from datetime import datetime
 
 from .schemas import (
     TableLoadRequest,
@@ -41,12 +42,106 @@ from .service import (
     get_session_metadata,
     update_session_access_time,
     save_change_log,
+    get_change_log,
     queue_draft_save,
     restore_session_from_draft,
     clear_draft,
 )
 from app.features.data_upload_validate.app.routes import get_object_prefix
+
+
+def normalize_table_settings_for_pipeline(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize table settings for pipeline storage by converting all column names to lowercase.
+    This ensures case-insensitive column matching when files are replaced.
+    
+    Args:
+        settings: Table settings dictionary
+        
+    Returns:
+        Normalized settings with all column names in lowercase
+    """
+    normalized = settings.copy()
+    
+    # Normalize visible_columns (list of column names)
+    if "visible_columns" in normalized and isinstance(normalized["visible_columns"], list):
+        normalized["visible_columns"] = [
+            col.lower() if isinstance(col, str) else col
+            for col in normalized["visible_columns"]
+        ]
+    
+    # Normalize column_order (list of column names)
+    if "column_order" in normalized and isinstance(normalized["column_order"], list):
+        normalized["column_order"] = [
+            col.lower() if isinstance(col, str) else col
+            for col in normalized["column_order"]
+        ]
+    
+    # Normalize column_widths (dict with column names as keys)
+    if "column_widths" in normalized and isinstance(normalized["column_widths"], dict):
+        normalized["column_widths"] = {
+            col.lower() if isinstance(col, str) else col: width
+            for col, width in normalized["column_widths"].items()
+        }
+    
+    # Normalize filters (dict with column names as keys)
+    if "filters" in normalized and isinstance(normalized["filters"], dict):
+        normalized["filters"] = {
+            col.lower() if isinstance(col, str) else col: filter_value
+            for col, filter_value in normalized["filters"].items()
+        }
+    
+    # Normalize sort_config (list of dicts with 'column' field)
+    if "sort_config" in normalized and isinstance(normalized["sort_config"], list):
+        normalized["sort_config"] = [
+            {
+                **item,
+                "column": item.get("column", "").lower() if isinstance(item.get("column"), str) else item.get("column")
+            }
+            for item in normalized["sort_config"]
+        ]
+    
+    # Normalize conditionalFormats (nested dict with column names as keys)
+    if "conditionalFormats" in normalized and isinstance(normalized["conditionalFormats"], dict):
+        normalized["conditionalFormats"] = {
+            col.lower() if isinstance(col, str) else col: format_rules
+            for col, format_rules in normalized["conditionalFormats"].items()
+        }
+    
+    # Normalize cellFormatting (nested dict with column names as keys)
+    if "cellFormatting" in normalized and isinstance(normalized["cellFormatting"], dict):
+        normalized["cellFormatting"] = {
+            col.lower() if isinstance(col, str) else col: cell_format
+            for col, cell_format in normalized["cellFormatting"].items()
+        }
+    
+    # Normalize totalRowConfig (dict with column names as keys)
+    if "totalRowConfig" in normalized and isinstance(normalized["totalRowConfig"], dict):
+        normalized["totalRowConfig"] = {
+            col.lower() if isinstance(col, str) else col: agg_type
+            for col, agg_type in normalized["totalRowConfig"].items()
+        }
+    
+    # Normalize columnAlignment (nested dict with column names as keys)
+    if "design" in normalized and isinstance(normalized["design"], dict):
+        if "columnAlignment" in normalized["design"] and isinstance(normalized["design"]["columnAlignment"], dict):
+            normalized["design"]["columnAlignment"] = {
+                col.lower() if isinstance(col, str) else col: alignment
+                for col, alignment in normalized["design"]["columnAlignment"].items()
+            }
+    
+    # Normalize columnFontStyles (nested dict with column names as keys)
+    if "design" in normalized and isinstance(normalized["design"], dict):
+        if "columnFontStyles" in normalized["design"] and isinstance(normalized["design"]["columnFontStyles"], dict):
+            normalized["design"]["columnFontStyles"] = {
+                col.lower() if isinstance(col, str) else col: font_style
+                for col, font_style in normalized["design"]["columnFontStyles"].items()
+            }
+    
+    return normalized
 from app.features.concat.deps import redis_client
+from app.features.pipeline.service import record_atom_execution
+from app.features.project_state.routes import get_atom_list_configuration
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +157,101 @@ def _get_project_context() -> Tuple[str, str]:
     # For atom_id, we'll use a placeholder - frontend should provide it
     atom_id = "unknown"  # Will be updated when frontend provides it
     return project_id, atom_id
+
+
+async def _record_table_execution(
+    endpoint: str,
+    method: str,
+    params: Dict[str, Any],
+    execution_started_at: datetime,
+    execution_completed_at: datetime,
+    execution_status: str,
+    execution_error: Optional[str],
+    atom_id: Optional[str],
+    object_name: Optional[str] = None,
+    output_files: Optional[List[Dict[str, Any]]] = None,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+    card_id: Optional[str] = None,
+    canvas_position: int = 0,
+):
+    """Helper function to record table atom execution for pipeline tracking."""
+    if not atom_id:
+        return
+    
+    try:
+        # Get client/app/project from params or environment
+        final_client_name = client_name or os.getenv("CLIENT_NAME", "")
+        final_app_name = app_name or os.getenv("APP_NAME", "")
+        final_project_name = project_name or os.getenv("PROJECT_NAME", "")
+        user_id = os.getenv("USER_ID", "unknown")
+        
+        # Get card_id and canvas_position from atom_list_configuration if not provided
+        final_card_id = card_id
+        final_canvas_position = canvas_position or 0
+        
+        if not final_card_id and final_client_name and final_app_name and final_project_name and atom_id:
+            try:
+                atom_config_response = await get_atom_list_configuration(
+                    client_name=final_client_name,
+                    app_name=final_app_name,
+                    project_name=final_project_name,
+                    mode="laboratory"
+                )
+                
+                if atom_config_response.get("status") == "success":
+                    cards = atom_config_response.get("cards", [])
+                    for card in cards:
+                        atoms = card.get("atoms", [])
+                        for atom in atoms:
+                            if atom.get("id") == atom_id:
+                                final_card_id = card.get("id")
+                                final_canvas_position = card.get("canvas_position", 0)
+                                break
+                        if final_card_id:
+                            break
+            except Exception as e:
+                logger.warning(f"Failed to get atom configuration: {e}")
+        
+        # Build API call record
+        api_calls = [{
+            "endpoint": endpoint,
+            "method": method,
+            "params": params,
+            "timestamp": execution_started_at.isoformat()
+        }]
+        
+        # Build configuration from params
+        configuration = params.copy()
+        
+        # Build output files
+        output_files_list = output_files or []
+        
+        if final_client_name and final_app_name and final_project_name:
+            await record_atom_execution(
+                client_name=final_client_name,
+                app_name=final_app_name,
+                project_name=final_project_name,
+                atom_instance_id=atom_id,
+                card_id=final_card_id or "",
+                atom_type="table",
+                atom_title=f"Table - {endpoint.split('/')[-1].title()}",
+                input_files=[object_name] if object_name else [],
+                configuration=configuration,
+                api_calls=api_calls,
+                output_files=output_files_list,
+                execution_started_at=execution_started_at,
+                execution_completed_at=execution_completed_at,
+                execution_status=execution_status,
+                execution_error=execution_error,
+                user_id=user_id,
+                mode="laboratory",
+                canvas_position=final_canvas_position
+            )
+    except Exception as e:
+        # Don't fail the request if pipeline recording fails
+        logger.warning(f"Failed to record table execution for pipeline: {e}")
 
 # ============================================================================
 # Conditional Formatting Cache
@@ -88,7 +278,14 @@ async def test_alive():
 
 
 @router.post("/load", response_model=TableResponse)
-async def load_table(request: TableLoadRequest):
+async def load_table(
+    request: TableLoadRequest,
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
+):
     """
     Load a table from MinIO and create a session.
     Similar to dataframe-operations /load_cached endpoint.
@@ -99,6 +296,8 @@ async def load_table(request: TableLoadRequest):
     Returns:
         TableResponse with table data, columns, and session ID
     """
+    execution_started_at = datetime.utcnow()
+    
     # URL decode the object_name (like dataframe-operations does)
     object_name = unquote(request.object_name)
     logger.info(f"🔵 [TABLE-LOAD] Loading table: {object_name}")
@@ -155,6 +354,87 @@ async def load_table(request: TableLoadRequest):
         if table_metadata:
             response['metadata'] = table_metadata
         
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        # Build API call record
+        api_calls = [{
+            "endpoint": "/table/load",
+            "method": "POST",
+            "params": request.dict(),
+            "timestamp": execution_started_at.isoformat()
+        }]
+        
+        # Build configuration
+        configuration = {
+            "object_name": object_name,
+            "table_id": table_id,
+        }
+        
+        # Build output files (table load doesn't produce new files, but we track the loaded file)
+        output_files = []
+        
+        # Record atom execution for pipeline tracking
+        try:
+            # Get client/app/project from query params or environment
+            final_client_name = client_name or os.getenv("CLIENT_NAME", "")
+            final_app_name = app_name or os.getenv("APP_NAME", "")
+            final_project_name = project_name or os.getenv("PROJECT_NAME", "")
+            user_id = os.getenv("USER_ID", "unknown")
+            
+            # Get card_id and canvas_position from atom_list_configuration if not provided
+            final_card_id = card_id
+            final_canvas_position = canvas_position or 0
+            
+            if not final_card_id and final_client_name and final_app_name and final_project_name and atom_id:
+                try:
+                    atom_config_response = await get_atom_list_configuration(
+                        client_name=final_client_name,
+                        app_name=final_app_name,
+                        project_name=final_project_name,
+                        mode="laboratory"
+                    )
+                    
+                    if atom_config_response.get("status") == "success":
+                        cards = atom_config_response.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            for atom in atoms:
+                                if atom.get("id") == atom_id:
+                                    final_card_id = card.get("id")
+                                    final_canvas_position = card.get("canvas_position", 0)
+                                    break
+                            if final_card_id:
+                                break
+                except Exception as e:
+                    logger.warning(f"Failed to get atom configuration: {e}")
+            
+            if final_client_name and final_app_name and final_project_name and atom_id:
+                await record_atom_execution(
+                    client_name=final_client_name,
+                    app_name=final_app_name,
+                    project_name=final_project_name,
+                    atom_instance_id=atom_id,
+                    card_id=final_card_id or "",
+                    atom_type="table",
+                    atom_title="Table - Load",
+                    input_files=[object_name],
+                    configuration=configuration,
+                    api_calls=api_calls,
+                    output_files=output_files,
+                    execution_started_at=execution_started_at,
+                    execution_completed_at=execution_completed_at,
+                    execution_status=execution_status,
+                    execution_error=execution_error,
+                    user_id=user_id,
+                    mode="laboratory",
+                    canvas_position=final_canvas_position
+                )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record table load execution for pipeline: {e}")
+        
         return TableResponse(**response)
         
     except HTTPException:
@@ -166,7 +446,14 @@ async def load_table(request: TableLoadRequest):
 
 
 @router.post("/update", response_model=TableResponse)
-async def update_table(request: TableUpdateRequest):
+async def update_table(
+    request: TableUpdateRequest,
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
+):
     """
     Update table settings and recompute the view.
     
@@ -176,6 +463,8 @@ async def update_table(request: TableUpdateRequest):
     Returns:
         TableResponse with updated table data
     """
+    execution_started_at = datetime.utcnow()
+    
     logger.info(f"🔵 [TABLE-UPDATE] Updating table: {request.table_id}")
     
     # Clear CF cache for this table (data might have changed)
@@ -203,6 +492,51 @@ async def update_table(request: TableUpdateRequest):
         # Get original object_name from metadata
         metadata = await get_session_metadata(request.table_id)
         object_name = metadata.get("object_name") if metadata else ""
+        
+        # 🔧 CRITICAL FIX: If object_name is not in metadata, try to get it from existing pipeline step
+        # This ensures table operations (filter, sort, etc.) always have the input file
+        if not object_name and atom_id:
+            try:
+                from app.features.pipeline.service import get_pipeline_collection
+                coll = await get_pipeline_collection()
+                project_id_env, _ = _get_project_context()
+                final_project_name = project_name or project_id_env
+                final_client_name = client_name or os.getenv("CLIENT_NAME", "")
+                final_app_name = app_name or os.getenv("APP_NAME", "")
+                
+                if final_client_name and final_app_name and final_project_name:
+                    doc_id = f"{final_client_name}/{final_app_name}/{final_project_name}"
+                    existing_doc = await coll.find_one({"_id": doc_id})
+                    
+                    if existing_doc and "pipeline" in existing_doc:
+                        execution_graph = existing_doc["pipeline"].get("execution_graph", [])
+                        # Find existing step for this atom
+                        for step in execution_graph:
+                            if (step.get("atom_instance_id") == atom_id and 
+                                step.get("atom_type") == "table"):
+                                # Try to get object_name from existing inputs
+                                existing_inputs = step.get("inputs", [])
+                                if existing_inputs and len(existing_inputs) > 0:
+                                    object_name = existing_inputs[0].get("file_key", "")
+                                    if object_name:
+                                        logger.info(f"📋 [TABLE-UPDATE] Got object_name from existing step: {object_name}")
+                                        break
+                                
+                                # Fallback: Try to get from first /table/load API call
+                                api_calls = step.get("api_calls", [])
+                                for api_call in api_calls:
+                                    endpoint = api_call.get("endpoint", "")
+                                    if "/table/load" in endpoint.lower() or endpoint.endswith("/load"):
+                                        params = api_call.get("params", {})
+                                        if params.get("object_name"):
+                                            object_name = params.get("object_name")
+                                            logger.info(f"📋 [TABLE-UPDATE] Got object_name from /load API call: {object_name}")
+                                            break
+                                if object_name:
+                                    break
+            except Exception as e:
+                logger.warning(f"⚠️ [TABLE-UPDATE] Failed to get object_name from pipeline step: {e}")
+                # Continue without object_name - the fix in service.py will preserve existing inputs
         
         # Apply settings (filters, sorting, column selection) for response only
         # NOTE: Do NOT update session with filtered data - session should always contain
@@ -244,6 +578,90 @@ async def update_table(request: TableUpdateRequest):
             table_id=request.table_id,
             settings=request.settings.dict()
         )
+        
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        # Build API call record
+        api_calls = [{
+            "endpoint": "/table/update",
+            "method": "POST",
+            "params": request.dict(),
+            "timestamp": execution_started_at.isoformat()
+        }]
+        
+        # Build configuration
+        # 🔧 CRITICAL: Normalize all column names to lowercase for case-insensitive matching
+        settings_dict = request.settings.dict()
+        normalized_settings = normalize_table_settings_for_pipeline(settings_dict)
+        configuration = {
+            "table_id": request.table_id,
+            "settings": normalized_settings,
+        }
+        
+        # Build output files (update doesn't produce new files)
+        output_files = []
+        
+        # Record atom execution for pipeline tracking
+        try:
+            # Get client/app/project from query params or environment
+            final_client_name = client_name or os.getenv("CLIENT_NAME", "")
+            final_app_name = app_name or os.getenv("APP_NAME", "")
+            final_project_name = project_name or os.getenv("PROJECT_NAME", "")
+            user_id = os.getenv("USER_ID", "unknown")
+            
+            # Get card_id and canvas_position from atom_list_configuration if not provided
+            final_card_id = card_id
+            final_canvas_position = canvas_position or 0
+            
+            if not final_card_id and final_client_name and final_app_name and final_project_name and atom_id:
+                try:
+                    atom_config_response = await get_atom_list_configuration(
+                        client_name=final_client_name,
+                        app_name=final_app_name,
+                        project_name=final_project_name,
+                        mode="laboratory"
+                    )
+                    
+                    if atom_config_response.get("status") == "success":
+                        cards = atom_config_response.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            for atom in atoms:
+                                if atom.get("id") == atom_id:
+                                    final_card_id = card.get("id")
+                                    final_canvas_position = card.get("canvas_position", 0)
+                                    break
+                            if final_card_id:
+                                break
+                except Exception as e:
+                    logger.warning(f"Failed to get atom configuration: {e}")
+            
+            if final_client_name and final_app_name and final_project_name and atom_id:
+                await record_atom_execution(
+                    client_name=final_client_name,
+                    app_name=final_app_name,
+                    project_name=final_project_name,
+                    atom_instance_id=atom_id,
+                    card_id=final_card_id or "",
+                    atom_type="table",
+                    atom_title="Table - Update",
+                    input_files=[object_name] if object_name else [],
+                    configuration=configuration,
+                    api_calls=api_calls,
+                    output_files=output_files,
+                    execution_started_at=execution_started_at,
+                    execution_completed_at=execution_completed_at,
+                    execution_status=execution_status,
+                    execution_error=execution_error,
+                    user_id=user_id,
+                    mode="laboratory",
+                    canvas_position=final_canvas_position
+                )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record table update execution for pipeline: {e}")
         
         logger.info(f"✅ [TABLE-UPDATE] Table updated successfully")
         return TableResponse(**response)
@@ -374,7 +792,14 @@ async def restore_session(request: RestoreSessionRequest):
 
 
 @router.post("/save", response_model=TableSaveResponse)
-async def save_table(request: TableSaveRequest):
+async def save_table(
+    request: TableSaveRequest,
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
+):
     """
     Save table data to MinIO.
     Supports Save (overwrite) and Save As (new file) operations.
@@ -386,6 +811,8 @@ async def save_table(request: TableSaveRequest):
     Returns:
         TableSaveResponse with object_name and status
     """
+    execution_started_at = datetime.utcnow()
+    
     logger.info(f"🔵 [TABLE-SAVE] Saving table: {request.table_id}, filename: {request.filename}, overwrite: {request.overwrite_original}")
     
     # Get DataFrame from session (try restore from draft if missing)
@@ -593,6 +1020,111 @@ async def save_table(request: TableSaveRequest):
             metadata=metadata,
             table_metadata=table_metadata_dict
         )
+        
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        # Build API call record
+        api_calls = [{
+            "endpoint": "/table/save",
+            "method": "POST",
+            "params": request.dict(),
+            "timestamp": execution_started_at.isoformat()
+        }]
+        
+        # Get original object_name from metadata for input file
+        original_metadata = await get_session_metadata(request.table_id)
+        original_object_name = original_metadata.get("object_name") if original_metadata else ""
+        
+        # Build configuration
+        configuration = {
+            "table_id": request.table_id,
+            "filename": request.filename,
+            "overwrite_original": request.overwrite_original,
+            "use_header_row": request.use_header_row,
+        }
+        
+        # Build output files
+        # 🔧 CRITICAL: Only mark as output (derived) if it's a "save as" (new file)
+        # If overwriting original file, don't mark as derived (it's the same file)
+        output_files = []
+        if object_name and not request.overwrite_original:
+            # "Save As" - new file is a derived file (output of table operations)
+            output_files.append({
+                "file_key": object_name,
+                "file_path": object_name,
+                "flight_path": object_name,
+                "save_as_name": object_name.split("/")[-1],
+                "is_default_name": not request.filename,
+                "columns": list(df.columns),
+                "dtypes": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},
+                "row_count": len(df)
+            })
+            logger.info(f"📋 [TABLE-SAVE] Marking '{object_name}' as derived file (save as)")
+        elif object_name and request.overwrite_original:
+            # Overwrite original - don't mark as derived (it's the same file, not a new output)
+            logger.info(f"📋 [TABLE-SAVE] Not marking '{object_name}' as derived (overwriting original file)")
+        
+        # Record atom execution for pipeline tracking
+        try:
+            # Get client/app/project from query params or environment
+            final_client_name = client_name or os.getenv("CLIENT_NAME", "")
+            final_app_name = app_name or os.getenv("APP_NAME", "")
+            final_project_name = project_name or os.getenv("PROJECT_NAME", "")
+            user_id = os.getenv("USER_ID", "unknown")
+            
+            # Get card_id and canvas_position from atom_list_configuration if not provided
+            final_card_id = card_id
+            final_canvas_position = canvas_position or 0
+            
+            if not final_card_id and final_client_name and final_app_name and final_project_name and atom_id:
+                try:
+                    atom_config_response = await get_atom_list_configuration(
+                        client_name=final_client_name,
+                        app_name=final_app_name,
+                        project_name=final_project_name,
+                        mode="laboratory"
+                    )
+                    
+                    if atom_config_response.get("status") == "success":
+                        cards = atom_config_response.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            for atom in atoms:
+                                if atom.get("id") == atom_id:
+                                    final_card_id = card.get("id")
+                                    final_canvas_position = card.get("canvas_position", 0)
+                                    break
+                            if final_card_id:
+                                break
+                except Exception as e:
+                    logger.warning(f"Failed to get atom configuration: {e}")
+            
+            if final_client_name and final_app_name and final_project_name and atom_id:
+                await record_atom_execution(
+                    client_name=final_client_name,
+                    app_name=final_app_name,
+                    project_name=final_project_name,
+                    atom_instance_id=atom_id,
+                    card_id=final_card_id or "",
+                    atom_type="table",
+                    atom_title="Table - Save",
+                    input_files=[original_object_name] if original_object_name else [],
+                    configuration=configuration,
+                    api_calls=api_calls,
+                    output_files=output_files,
+                    execution_started_at=execution_started_at,
+                    execution_completed_at=execution_completed_at,
+                    execution_status=execution_status,
+                    execution_error=execution_error,
+                    user_id=user_id,
+                    mode="laboratory",
+                    canvas_position=final_canvas_position
+                )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record table save execution for pipeline: {e}")
         
         return TableSaveResponse(
             object_name=object_name,
@@ -803,7 +1335,12 @@ async def edit_cell(
     column: str = Body(...),
     value: Any = Body(...),
     atom_id: Optional[str] = Body(None),
-    project_id: Optional[str] = Body(None)
+    project_id: Optional[str] = Body(None),
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
 ):
     """
     Edit a single cell in the table.
@@ -820,6 +1357,8 @@ async def edit_cell(
     Returns:
         Updated table data
     """
+    execution_started_at = datetime.utcnow()
+    
     logger.info(f"✏️ [TABLE-EDIT-CELL] Editing [{row}, {column}] = {value}")
     
     # Get DataFrame from session (try restore from draft if missing)
@@ -857,6 +1396,50 @@ async def edit_cell(
         metadata = await get_session_metadata(table_id)
         object_name = metadata.get("object_name") if metadata else ""
         
+        # 🔧 CRITICAL FIX: If object_name is not in metadata, try to get it from existing pipeline step
+        # This ensures table operations (cell edits, etc.) always have the input file
+        if not object_name and atom_id_final:
+            try:
+                from app.features.pipeline.service import get_pipeline_collection
+                coll = await get_pipeline_collection()
+                final_project_name = project_name or project_id_final
+                final_client_name = client_name or os.getenv("CLIENT_NAME", "")
+                final_app_name = app_name or os.getenv("APP_NAME", "")
+                
+                if final_client_name and final_app_name and final_project_name:
+                    doc_id = f"{final_client_name}/{final_app_name}/{final_project_name}"
+                    existing_doc = await coll.find_one({"_id": doc_id})
+                    
+                    if existing_doc and "pipeline" in existing_doc:
+                        execution_graph = existing_doc["pipeline"].get("execution_graph", [])
+                        # Find existing step for this atom
+                        for step in execution_graph:
+                            if (step.get("atom_instance_id") == atom_id_final and 
+                                step.get("atom_type") == "table"):
+                                # Try to get object_name from existing inputs
+                                existing_inputs = step.get("inputs", [])
+                                if existing_inputs and len(existing_inputs) > 0:
+                                    object_name = existing_inputs[0].get("file_key", "")
+                                    if object_name:
+                                        logger.info(f"📋 [TABLE-EDIT-CELL] Got object_name from existing step: {object_name}")
+                                        break
+                                
+                                # Fallback: Try to get from first /table/load API call
+                                api_calls = step.get("api_calls", [])
+                                for api_call in api_calls:
+                                    endpoint = api_call.get("endpoint", "")
+                                    if "/table/load" in endpoint.lower() or endpoint.endswith("/load"):
+                                        params = api_call.get("params", {})
+                                        if params.get("object_name"):
+                                            object_name = params.get("object_name")
+                                            logger.info(f"📋 [TABLE-EDIT-CELL] Got object_name from /load API call: {object_name}")
+                                            break
+                                if object_name:
+                                    break
+            except Exception as e:
+                logger.warning(f"⚠️ [TABLE-EDIT-CELL] Failed to get object_name from pipeline step: {e}")
+                # Continue without object_name - the fix in service.py will preserve existing inputs
+        
         # Queue draft save (debounced)
         if object_name:
             await queue_draft_save(
@@ -877,6 +1460,37 @@ async def edit_cell(
         
         # Update access time
         await update_session_access_time(table_id)
+        
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        # Record execution for pipeline tracking
+        params = {
+            "table_id": table_id,
+            "row": row,
+            "column": column,
+            "value": value,
+            "atom_id": atom_id_final,
+            "project_id": project_id_final,
+        }
+        
+        await _record_table_execution(
+            endpoint="/table/edit-cell",
+            method="POST",
+            params=params,
+            execution_started_at=execution_started_at,
+            execution_completed_at=execution_completed_at,
+            execution_status=execution_status,
+            execution_error=execution_error,
+            atom_id=atom_id_final,
+            object_name=object_name,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            card_id=card_id,
+            canvas_position=canvas_position,
+        )
         
         # Return updated data
         response = dataframe_to_response(df, table_id)

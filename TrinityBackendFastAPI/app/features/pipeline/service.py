@@ -39,6 +39,243 @@ async def get_pipeline_collection() -> AsyncIOMotorCollection:
     return db["pipeline_execution"]
 
 
+async def save_column_operations(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    input_file: str,
+    output_file: Optional[str],
+    overwrite_original: bool,
+    operations: List[Dict[str, Any]],
+    created_columns: List[str],
+    identifiers: Optional[List[str]] = None,
+    mode: str = "laboratory"
+) -> Dict[str, Any]:
+    """Save column operations to pipeline execution.
+    
+    Args:
+        client_name: Client identifier
+        app_name: App identifier
+        project_name: Project identifier
+        input_file: Input file path
+        output_file: Output file path (if new file created, None if overwrite)
+        overwrite_original: Whether original file was overwritten
+        operations: List of operation dictionaries
+        created_columns: List of created column names
+        mode: Mode (laboratory, workflow, exhibition)
+    
+    Returns:
+        Result dictionary with status
+    """
+    try:
+        coll = await get_pipeline_collection()
+        
+        client_id = client_name
+        app_id = app_name
+        project_id = project_name
+        
+        # Build composite _id
+        doc_id = f"{client_id}/{app_id}/{project_id}"
+        
+        # Get or create pipeline execution document
+        existing_doc = await coll.find_one({"_id": doc_id})
+        
+        execution_timestamp = datetime.utcnow()
+        
+        # Build column operations config
+        col_ops_config = {
+            "input_file": input_file,
+            "output_file": output_file,
+            "overwrite_original": overwrite_original,
+            "operations": operations,
+            "created_columns": created_columns,
+            "identifiers": identifiers,  # Save identifiers for operations that need grouping
+            "saved_at": execution_timestamp,
+            "execution_order": None  # Will be set during pipeline run based on file dependencies
+        }
+        
+        if existing_doc:
+            # Update existing document
+            pipeline = existing_doc.get("pipeline", {})
+            column_operations = pipeline.get("column_operations", [])
+            
+            # Normalize identifiers for comparison (sort and convert to tuple for comparison)
+            new_identifiers_tuple = tuple(sorted(identifiers or []))
+            
+            # FIRST: Remove operations with same created_column_name from ALL configs for this file
+            # This ensures the latest operation replaces older ones regardless of identifier group
+            new_created_column_names = {op.get("created_column_name", "").lower().strip() 
+                                      for op in operations 
+                                      if op.get("created_column_name")}
+            
+            for col_op in column_operations:
+                if col_op.get("input_file") == input_file:
+                    existing_ops = col_op.get("operations", [])
+                    existing_created_cols = col_op.get("created_columns", [])
+                    
+                    # Filter out operations that will be replaced
+                    filtered_ops = []
+                    filtered_created_cols = []
+                    
+                    for op in existing_ops:
+                        created_col = op.get("created_column_name", "").lower().strip()
+                        if created_col and created_col in new_created_column_names:
+                            # This operation will be replaced by a new one, skip it
+                            logger.info(
+                                f"🗑️ Removing old operation for column '{op.get('created_column_name')}' "
+                                f"from file {input_file} (will be replaced by new operation)"
+                            )
+                        else:
+                            filtered_ops.append(op)
+                            created_col_original = op.get("created_column_name")
+                            if created_col_original and created_col_original not in filtered_created_cols:
+                                filtered_created_cols.append(created_col_original)
+                    
+                    # Update the config with filtered operations
+                    col_op["operations"] = filtered_ops
+                    col_op["created_columns"] = filtered_created_cols
+            
+            # Clean up: Remove empty configs (configs with no operations after filtering)
+            column_operations = [col_op for col_op in column_operations 
+                               if col_op.get("operations") or col_op.get("input_file") != input_file]
+            
+            # SECOND: Find existing column operations config for this file with matching identifiers AND overwrite_original
+            # IMPORTANT: Overwrite and save-as operations should be separate configs even if they have same identifiers
+            existing_index = None
+            for idx, col_op in enumerate(column_operations):
+                if col_op.get("input_file") == input_file:
+                    existing_identifiers = col_op.get("identifiers") or []
+                    existing_identifiers_tuple = tuple(sorted(existing_identifiers))
+                    existing_overwrite = col_op.get("overwrite_original", True)
+                    
+                    # Match only if identifiers AND overwrite_original match
+                    if existing_identifiers_tuple == new_identifiers_tuple and existing_overwrite == overwrite_original:
+                        existing_index = idx
+                        break
+            
+            if existing_index is not None:
+                # Merge operations: replace operations with same created_column_name, append others
+                existing_ops = column_operations[existing_index].get("operations", [])
+                existing_created_cols = set(column_operations[existing_index].get("created_columns", []))
+                
+                # Build a map of created_column_name to operation index in existing ops
+                created_col_to_op_idx = {}
+                for idx, op in enumerate(existing_ops):
+                    created_col = op.get("created_column_name")
+                    if created_col:
+                        # Normalize column name for comparison (case-insensitive)
+                        created_col_lower = created_col.lower().strip()
+                        created_col_to_op_idx[created_col_lower] = idx
+                
+                # Process new operations
+                operations_to_append = []
+                replaced_count = 0
+                
+                for new_op in operations:
+                    created_col = new_op.get("created_column_name")
+                    if created_col:
+                        created_col_lower = created_col.lower().strip()
+                        if created_col_lower in created_col_to_op_idx:
+                            # Replace existing operation with same created_column_name
+                            existing_op_idx = created_col_to_op_idx[created_col_lower]
+                            existing_ops[existing_op_idx] = new_op
+                            replaced_count += 1
+                            logger.info(
+                                f"🔄 Replaced operation for column '{created_col}' in file {input_file}"
+                            )
+                        else:
+                            # Append new operation
+                            operations_to_append.append(new_op)
+                            existing_created_cols.add(created_col)
+                    else:
+                        # No created_column_name, always append
+                        operations_to_append.append(new_op)
+                
+                # Append new operations that don't conflict
+                existing_ops.extend(operations_to_append)
+                
+                # Update created_columns list (union of existing and new)
+                updated_created_cols = list(existing_created_cols.union(set(created_columns)))
+                
+                # Update the existing config
+                column_operations[existing_index]["operations"] = existing_ops
+                column_operations[existing_index]["created_columns"] = updated_created_cols
+                column_operations[existing_index]["saved_at"] = execution_timestamp
+                # Update output_file if provided (for save-as, this is the new file; for overwrite, it's None or same as input)
+                if output_file is not None:
+                    column_operations[existing_index]["output_file"] = output_file
+                # overwrite_original should already match (that's how we found this config), but update it anyway
+                column_operations[existing_index]["overwrite_original"] = overwrite_original
+                
+                logger.info(
+                    f"🔄 Merged column operations for file {input_file} (identifiers: {identifiers}, "
+                    f"overwrite: {overwrite_original}) in {doc_id}: {len(operations_to_append)} new, {replaced_count} replaced"
+                )
+            else:
+                # No existing config for this file+identifiers+overwrite combination, add new one
+                column_operations.append(col_ops_config)
+                logger.info(
+                    f"➕ Added new column operations for file {input_file} (identifiers: {identifiers}, "
+                    f"overwrite: {overwrite_original}) in {doc_id}"
+                )
+            
+            # Update document
+            await coll.update_one(
+                {"_id": doc_id},
+                {
+                    "$set": {
+                        "execution_timestamp": execution_timestamp,
+                        "pipeline.column_operations": column_operations
+                    }
+                }
+            )
+        else:
+            # Create new document with column operations
+            doc = {
+                "_id": doc_id,
+                "execution_id": f"exec_{int(time.time() * 1000)}",
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "execution_timestamp": execution_timestamp,
+                "user_id": "unknown",
+                "pipeline": {
+                    "root_files": [],
+                    "execution_graph": [],
+                    "lineage": {
+                        "nodes": [],
+                        "edges": []
+                    },
+                    "column_operations": [col_ops_config]
+                },
+                "summary": {
+                    "total_atoms": 0,
+                    "total_files": 0,
+                    "root_files_count": 0,
+                    "derived_files_count": 0,
+                    "total_duration_ms": 0,
+                    "status": "success"
+                }
+            }
+            
+            await coll.insert_one(doc)
+            logger.info(
+                f"✅ Created new pipeline execution document with column operations for {doc_id}"
+            )
+        
+        return {
+            "status": "success",
+            "message": "Column operations saved successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving column operations: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
 def _get_file_metadata(file_key: str, file_path: Optional[str] = None) -> Dict[str, Any]:
     """Get basic file metadata structure."""
     if file_path is None:
@@ -277,6 +514,96 @@ async def record_atom_execution(
                             f"🔄 [CHART-MAKER] Replaced {chart_rendering_call_count} old chart rendering call(s) "
                             f"with {len([c for c in api_calls if c.get('endpoint') == '/chart-maker/charts'])} new call(s)"
                         )
+                    
+                    # Merge preserved calls with new API calls
+                    merged_api_calls = preserved_api_calls + api_calls
+                    logger.info(
+                        f"📋 [CHART-MAKER] Merged API calls: {len(preserved_api_calls)} preserved + {len(api_calls)} new"
+                    )
+                elif atom_type == "table":
+                    # For table atoms, we need special handling:
+                    # - Keep only the FIRST /table/load call (initial load)
+                    # - Preserve all /table/update, /table/edit-cell, column ops, etc. (operations)
+                    # - If a new /table/load comes in, replace the old one (it's just a refresh)
+                    has_preserved_load = False
+                    load_call_to_preserve = None
+                    
+                    for existing_call in existing_api_calls:
+                        endpoint = existing_call.get("endpoint", "")
+                        
+                        if "/table/load" in endpoint.lower() or endpoint.endswith("/load"):
+                            # Only preserve the first /table/load call
+                            if not has_preserved_load:
+                                load_call_to_preserve = existing_call
+                                has_preserved_load = True
+                                logger.info(
+                                    f"📌 [TABLE] Preserving first /table/load call"
+                                )
+                            else:
+                                # Skip subsequent /table/load calls (they're just refreshes)
+                                logger.info(
+                                    f"🔄 [TABLE] Skipping duplicate /table/load call (refresh)"
+                                )
+                        elif endpoint not in execution_endpoints:
+                            # Preserve all other non-execution calls (update, edit-cell, column ops, etc.)
+                            preserved_api_calls.append(existing_call)
+                            logger.info(
+                                f"📌 [TABLE] Preserving API call: {endpoint}"
+                            )
+                    
+                    # Add the preserved load call at the beginning if it exists
+                    if load_call_to_preserve:
+                        preserved_api_calls.insert(0, load_call_to_preserve)
+                    
+                    # Check if new API calls include a /table/load
+                    new_load_calls = [call for call in api_calls if "/table/load" in call.get("endpoint", "").lower() or call.get("endpoint", "").endswith("/load")]
+                    new_operation_calls = [call for call in api_calls if call not in new_load_calls]
+                    
+                    # 🔧 CRITICAL: Check if the new load is loading a file that's an output from this same atom (save as scenario)
+                    new_load_file = None
+                    is_loading_own_output = False
+                    if new_load_calls:
+                        new_load_params = new_load_calls[0].get("params", {})
+                        new_load_file = new_load_params.get("object_name", "")
+                        
+                        # Check if this file is in the outputs of the existing step (save as scenario)
+                        existing_outputs = existing_step.get("outputs", [])
+                        for output in existing_outputs:
+                            if output.get("file_key") == new_load_file:
+                                is_loading_own_output = True
+                                logger.info(
+                                    f"🔄 [TABLE] New /table/load is loading own output file '{new_load_file}' (save as scenario) - preserving all old operations"
+                                )
+                                break
+                    
+                    if new_load_calls:
+                        if is_loading_own_output:
+                            # Save as scenario: preserve ALL old operations (load, updates, etc.)
+                            # Add new load at the beginning, but keep all old operations
+                            merged_api_calls = new_load_calls + preserved_api_calls + new_operation_calls
+                            logger.info(
+                                f"📋 [TABLE] Save as scenario: {len(new_load_calls)} new load(s) + {len(preserved_api_calls)} preserved operations + {len(new_operation_calls)} new operations"
+                            )
+                        else:
+                            # Regular file refresh: replace old load, preserve operations
+                            if load_call_to_preserve:
+                                logger.info(
+                                    f"🔄 [TABLE] Replacing old /table/load with new one (file refresh)"
+                                )
+                                # Remove the old load call from preserved_api_calls
+                                preserved_api_calls = [call for call in preserved_api_calls if call != load_call_to_preserve]
+                            # Add the new load call at the beginning
+                            # Then preserved operations, then new operations
+                            merged_api_calls = new_load_calls + preserved_api_calls + new_operation_calls
+                            logger.info(
+                                f"📋 [TABLE] Merged API calls: {len(new_load_calls)} load(s) + {len(preserved_api_calls)} preserved + {len(new_operation_calls)} new operations"
+                            )
+                    else:
+                        # No new load call, just append new operation calls (updates, etc.) at the end
+                        merged_api_calls = preserved_api_calls + new_operation_calls
+                        logger.info(
+                            f"📋 [TABLE] Merged API calls: {len(preserved_api_calls)} preserved + {len(new_operation_calls)} new operations"
+                        )
                 else:
                     # For other atom types, use the original logic
                     for existing_call in existing_api_calls:
@@ -287,9 +614,9 @@ async def record_atom_execution(
                             logger.info(
                                 f"📌 Preserving API call: {endpoint} (not execution-related)"
                             )
-                
-                # Add new execution API calls
-                merged_api_calls = preserved_api_calls + api_calls
+                    
+                    # Add new execution API calls
+                    merged_api_calls = preserved_api_calls + api_calls
                 
                 # Update only the fields that might change (configuration, api_calls, outputs, execution)
                 # Preserve step_index and other metadata
@@ -297,7 +624,33 @@ async def record_atom_execution(
                 existing_step["api_calls"] = merged_api_calls
                 existing_step["outputs"] = output_files
                 existing_step["execution"] = execution_info
-                existing_step["inputs"] = input_file_objects  # Update inputs in case file was replaced
+                
+                # 🔧 CRITICAL FIX: Handle input file updates intelligently
+                # 1. If new inputs are empty: preserve existing inputs (for operations like /update, /edit-cell)
+                # 2. If new input is a derived file from this same atom (save as scenario): update inputs but preserve old operations
+                # 3. If new input is a different file (file replacement): update inputs
+                if input_file_objects:
+                    # Check if the new input file is an output from this same step (save as scenario)
+                    new_input_file = input_file_objects[0].get("file_key") if input_file_objects else None
+                    existing_outputs = existing_step.get("outputs", [])
+                    is_loading_own_output = False
+                    
+                    if new_input_file:
+                        for output in existing_outputs:
+                            if output.get("file_key") == new_input_file:
+                                is_loading_own_output = True
+                                logger.info(
+                                    f"🔄 [TABLE] New input file '{new_input_file}' is own output (save as) - updating inputs but preserving operations"
+                                )
+                                break
+                    
+                    if is_loading_own_output:
+                        # Save as scenario: update inputs to the new file, but operations are already preserved above
+                        existing_step["inputs"] = input_file_objects
+                    else:
+                        # Regular file replacement or initial load: update inputs
+                        existing_step["inputs"] = input_file_objects
+                # Otherwise, keep existing inputs (they were set by the initial /load call)
                 
                 # Update the step in place
                 execution_graph[existing_step_index] = existing_step
@@ -320,9 +673,30 @@ async def record_atom_execution(
             root_files = pipeline.get("root_files", [])
             root_file_keys = {rf.get("file_key") for rf in root_files}
             
+            # 🔧 CRITICAL: Remove files from root_files if they become outputs (derived files)
+            # This ensures that when a file is saved (save as), it's marked as derived, not root
+            output_file_keys = {output.get("file_key") for output in output_files}
+            root_files = [rf for rf in root_files if rf.get("file_key") not in output_file_keys]
+            root_file_keys = {rf.get("file_key") for rf in root_files}
+            
             # Check if input files are already in root_files or are outputs from previous steps
+            # Also check if they're outputs from column operations
+            column_operations = pipeline.get("column_operations", [])
+            column_op_output_files = set()
+            for col_op in column_operations:
+                col_op_output = col_op.get("output_file")
+                col_op_input = col_op.get("input_file")
+                overwrite = col_op.get("overwrite_original", True)
+                # Consider it a derived file if:
+                # 1. It's explicitly a save-as (not overwrite), OR
+                # 2. output_file exists and is different from input_file (save-as scenario, even if flag is wrong)
+                if col_op_output:
+                    if not overwrite or (col_op_input and col_op_output != col_op_input):
+                        column_op_output_files.add(col_op_output)
+            
             for input_file_key in input_files:
                 is_output = False
+                # Check if it's an output from a previous atom step
                 for step in execution_graph[:-1]:  # Exclude the step we just added
                     for output in step.get("outputs", []):
                         if output.get("file_key") == input_file_key:
@@ -330,6 +704,10 @@ async def record_atom_execution(
                             break
                     if is_output:
                         break
+                
+                # Also check if it's an output from column operations
+                if not is_output and input_file_key in column_op_output_files:
+                    is_output = True
                 
                 if not is_output and input_file_key not in root_file_keys:
                     root_files.append(_get_file_metadata(input_file_key))
@@ -578,6 +956,323 @@ async def record_atom_execution(
         }
 
 
+async def record_column_operations_execution(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    input_file: str,
+    output_file: Optional[str],
+    operations: List[Dict[str, Any]],
+    created_columns: List[str],
+    execution_started_at: datetime,
+    execution_completed_at: Optional[datetime] = None,
+    execution_status: str = "success",
+    execution_error: Optional[str] = None,
+    identifiers: Optional[List[str]] = None,
+    original_input_file: Optional[str] = None,  # Original file from config (for matching)
+    mode: str = "laboratory"
+) -> Dict[str, Any]:
+    """Record column operations execution to the pipeline execution data.
+    
+    Args:
+        client_name: Client identifier
+        app_name: App identifier
+        project_name: Project identifier
+        input_file: Input file path
+        output_file: Output file path
+        operations: List of operation dictionaries
+        created_columns: List of created column names
+        execution_started_at: When execution started
+        execution_completed_at: When execution completed (optional)
+        execution_status: Execution status (success, failed, pending)
+        execution_error: Error message if failed
+        mode: Mode (laboratory, workflow, exhibition)
+    
+    Returns:
+        Result dictionary with status
+    """
+    try:
+        coll = await get_pipeline_collection()
+        
+        client_id = client_name
+        app_id = app_name
+        project_id = project_name
+        
+        # Build composite _id
+        doc_id = f"{client_id}/{app_id}/{project_id}"
+        
+        # Get existing document (may not exist if cleared and no atoms executed yet)
+        existing_doc = await coll.find_one({"_id": doc_id})
+        
+        execution_timestamp = datetime.utcnow()
+        
+        # Calculate duration
+        duration_ms = 0
+        if execution_completed_at and execution_started_at:
+            duration_ms = int((execution_completed_at - execution_started_at).total_seconds() * 1000)
+        
+        # Build execution info
+        execution_info = {
+            "started_at": execution_started_at,
+            "completed_at": execution_completed_at,
+            "duration_ms": duration_ms,
+            "status": execution_status,
+            "error": execution_error
+        }
+        
+        if existing_doc:
+            # Document exists, update it
+            pipeline = existing_doc.get("pipeline", {})
+            column_operations = pipeline.get("column_operations", [])
+            
+            # Find the column operations config for this input_file
+            # When a file is replaced, input_file will be the replacement file, but we need to match
+            # by the original_input_file (from config) if provided, otherwise by input_file
+            col_op_index = None
+            match_input_file = original_input_file if original_input_file else input_file
+            
+            for idx, col_op in enumerate(column_operations):
+                stored_input_file = col_op.get("input_file")
+                # Match if stored input_file equals the original (for matching) OR the current input_file
+                if stored_input_file == match_input_file or stored_input_file == input_file:
+                    # Also check identifiers match (in case there are multiple configs for same file)
+                    existing_identifiers = tuple(sorted(col_op.get("identifiers") or []))
+                    new_identifiers = tuple(sorted(identifiers or [])) if identifiers is not None else tuple()
+                    # Also check overwrite_original to distinguish between overwrite and save-as
+                    existing_overwrite = col_op.get("overwrite_original", True)
+                    new_overwrite = (output_file is None or output_file == input_file)  # None or same = overwrite
+                    
+                    if existing_identifiers == new_identifiers and existing_overwrite == new_overwrite:
+                        col_op_index = idx
+                        break
+                    # If no identifiers specified, match first config for this file with matching overwrite (backward compatibility)
+                    elif identifiers is None and existing_identifiers == tuple() and existing_overwrite == new_overwrite:
+                        col_op_index = idx
+                        break
+            
+            if col_op_index is not None:
+                # Update existing config with execution info
+                column_operations[col_op_index]["execution"] = execution_info
+                # Update input_file to the replacement file if it was replaced
+                column_operations[col_op_index]["input_file"] = input_file  # Update to replacement file
+                # For overwrite, output_file should be None or same as input_file
+                if output_file is None or output_file == input_file:
+                    column_operations[col_op_index]["output_file"] = None  # Overwrite: no separate output file
+                    column_operations[col_op_index]["overwrite_original"] = True
+                else:
+                    column_operations[col_op_index]["output_file"] = output_file  # Save-as: separate output file
+                    column_operations[col_op_index]["overwrite_original"] = False
+                
+                # If column operations created a new file (save-as scenario), ensure it's NOT in root_files
+                # It should be treated as a derived file (output from column operations)
+                # Check if output_file is different from input_file (save-as) or explicitly not overwrite
+                overwrite_original = column_operations[col_op_index].get("overwrite_original", True)
+                input_file_from_config = column_operations[col_op_index].get("input_file")
+                is_save_as = output_file and (not overwrite_original or (input_file_from_config and output_file != input_file_from_config))
+                if is_save_as:
+                    # Remove output_file from root_files if it exists there
+                    root_files = pipeline.get("root_files", [])
+                    root_files = [rf for rf in root_files if rf.get("file_key") != output_file]
+                    
+                    # Update summary counts
+                    summary = existing_doc.get("summary", {})
+                    root_files_count = len([rf for rf in root_files if rf.get("file_key", "").endswith(".arrow")])
+                    all_file_keys = set()
+                    for rf in root_files:
+                        file_key = rf.get("file_key")
+                        if file_key and file_key.endswith(".arrow"):
+                            all_file_keys.add(file_key)
+                    # Add column operation output files
+                    for col_op in column_operations:
+                        col_op_output = col_op.get("output_file")
+                        col_op_overwrite = col_op.get("overwrite_original", True)
+                        if col_op_output and not col_op_overwrite and col_op_output.endswith(".arrow"):
+                            all_file_keys.add(col_op_output)
+                    # Add atom output files
+                    execution_graph = pipeline.get("execution_graph", [])
+                    for step in execution_graph:
+                        for output in step.get("outputs", []):
+                            file_key = output.get("file_key")
+                            if file_key and file_key.endswith(".arrow"):
+                                all_file_keys.add(file_key)
+                    derived_files_count = len(all_file_keys) - root_files_count
+                    summary["root_files_count"] = root_files_count
+                    summary["derived_files_count"] = derived_files_count
+                    summary["total_files"] = len(all_file_keys)
+                    
+                    # Update document with both column_operations, root_files, and summary
+                    await coll.update_one(
+                        {"_id": doc_id},
+                        {
+                            "$set": {
+                                "pipeline.column_operations": column_operations,
+                                "pipeline.root_files": root_files,
+                                "summary": summary,
+                                "execution_timestamp": execution_timestamp
+                            }
+                        }
+                    )
+                    logger.info(
+                        f"✅ Updated column operations execution for {input_file} in {doc_id}, "
+                        f"removed output file {output_file} from root_files (it's a derived file)"
+                    )
+                else:
+                    # Just update column_operations
+                    await coll.update_one(
+                        {"_id": doc_id},
+                        {
+                            "$set": {
+                                "pipeline.column_operations": column_operations,
+                                "execution_timestamp": execution_timestamp
+                            }
+                        }
+                    )
+                    logger.info(
+                        f"✅ Updated column operations execution for {input_file} in {doc_id}"
+                    )
+            else:
+                # Config not found, create new one (shouldn't happen, but handle gracefully)
+                logger.warning(
+                    f"⚠️ Column operations config not found for {input_file} in {doc_id}, creating new config"
+                )
+                new_col_op_config = {
+                    "input_file": input_file,
+                    "output_file": output_file,
+                    "overwrite_original": True,  # Default
+                    "operations": operations,
+                    "created_columns": created_columns,
+                    "identifiers": identifiers,
+                    "saved_at": execution_timestamp,
+                    "execution_order": None,
+                    "execution": execution_info
+                }
+                column_operations.append(new_col_op_config)
+                
+                # If column operations created a new file (save-as scenario), ensure it's NOT in root_files
+                overwrite_original = new_col_op_config.get("overwrite_original", True)
+                input_file_from_config = new_col_op_config.get("input_file")
+                is_save_as = output_file and (not overwrite_original or (input_file_from_config and output_file != input_file_from_config))
+                if is_save_as:
+                    # Remove output_file from root_files if it exists there
+                    root_files = pipeline.get("root_files", [])
+                    root_files = [rf for rf in root_files if rf.get("file_key") != output_file]
+                    
+                    # Update summary counts
+                    summary = existing_doc.get("summary", {})
+                    root_files_count = len([rf for rf in root_files if rf.get("file_key", "").endswith(".arrow")])
+                    all_file_keys = set()
+                    for rf in root_files:
+                        file_key = rf.get("file_key")
+                        if file_key and file_key.endswith(".arrow"):
+                            all_file_keys.add(file_key)
+                    # Add column operation output files (save-as scenarios)
+                    for col_op in column_operations:
+                        col_op_output = col_op.get("output_file")
+                        col_op_input = col_op.get("input_file")
+                        col_op_overwrite = col_op.get("overwrite_original", True)
+                        # Include if it's a save-as (not overwrite OR output differs from input)
+                        if col_op_output and col_op_output.endswith(".arrow"):
+                            if not col_op_overwrite or (col_op_input and col_op_output != col_op_input):
+                                all_file_keys.add(col_op_output)
+                    # Add atom output files
+                    for step in execution_graph:
+                        for output in step.get("outputs", []):
+                            file_key = output.get("file_key")
+                            if file_key and file_key.endswith(".arrow"):
+                                all_file_keys.add(file_key)
+                    derived_files_count = len(all_file_keys) - root_files_count
+                    summary["root_files_count"] = root_files_count
+                    summary["derived_files_count"] = derived_files_count
+                    summary["total_files"] = len(all_file_keys)
+                    
+                    await coll.update_one(
+                        {"_id": doc_id},
+                        {
+                            "$set": {
+                                "pipeline.column_operations": column_operations,
+                                "pipeline.root_files": root_files,
+                                "summary": summary,
+                                "execution_timestamp": execution_timestamp
+                            }
+                        }
+                    )
+                else:
+                    await coll.update_one(
+                        {"_id": doc_id},
+                        {
+                            "$set": {
+                                "pipeline.column_operations": column_operations,
+                                "execution_timestamp": execution_timestamp
+                            }
+                        }
+                    )
+        else:
+            # Document doesn't exist yet (cleared and no atoms executed), create it
+            import time
+            execution_id = f"exec_{int(time.time() * 1000)}"
+            
+            new_col_op_config = {
+                "input_file": input_file,
+                "output_file": output_file,
+                "overwrite_original": True,  # Default
+                "operations": operations,
+                "created_columns": created_columns,
+                "identifiers": identifiers,
+                "saved_at": execution_timestamp,
+                "execution_order": None,
+                "execution": execution_info
+            }
+            
+            doc = {
+                "_id": doc_id,
+                "execution_id": execution_id,
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "execution_timestamp": execution_timestamp,
+                "user_id": "unknown",
+                "pipeline": {
+                    "root_files": [],
+                    "execution_graph": [],
+                    "lineage": {
+                        "nodes": [],
+                        "edges": []
+                    },
+                    "column_operations": [new_col_op_config]
+                },
+                "summary": {
+                    "total_atoms": 0,
+                    "total_files": 0,
+                    "root_files_count": 0,
+                    "derived_files_count": 0,
+                    "total_duration_ms": duration_ms,
+                    "status": execution_status
+                }
+            }
+            
+            await coll.insert_one(doc)
+            logger.info(
+                f"✅ Created new pipeline document with column operations execution for {doc_id}"
+            )
+        
+        logger.info(
+            f"✅ Recorded column operations execution: {input_file} -> {output_file} "
+            f"for {client_id}/{app_id}/{project_id}"
+        )
+        
+        return {
+            "status": "success",
+            "message": "Column operations execution recorded successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error recording column operations execution: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
 async def get_pipeline_execution(
     client_name: str,
     app_name: str,
@@ -610,7 +1305,8 @@ async def get_pipeline_execution(
         
         if not pipeline_doc:
             logger.info(
-                f"📦 No pipeline execution data found for {client_id}/{app_id}/{project_id}"
+                f"📦 No pipeline execution data found for {client_id}/{app_id}/{project_id} "
+                f"(doc_id: {doc_id})"
             )
             return None
         
@@ -618,9 +1314,22 @@ async def get_pipeline_execution(
         if "_id" in pipeline_doc and not isinstance(pipeline_doc["_id"], str):
             pipeline_doc["_id"] = str(pipeline_doc["_id"])
         
+        # Check if document has valid pipeline structure
+        pipeline = pipeline_doc.get("pipeline", {})
+        execution_graph = pipeline.get("execution_graph", [])
+        column_operations = pipeline.get("column_operations", [])
+        
+        # If document exists but has no execution graph and no column operations, it's essentially empty
+        # But we should still return it if it has at least column operations (they can run even without atoms)
+        if len(execution_graph) == 0 and len(column_operations) == 0:
+            logger.warning(
+                f"⚠️ Pipeline document exists but is empty (no atoms, no column operations) for {doc_id}"
+            )
+            return None
+        
         logger.info(
             f"📦 Retrieved pipeline execution data for {client_id}/{app_id}/{project_id} "
-            f"(atoms: {pipeline_doc.get('summary', {}).get('total_atoms', 0)})"
+            f"(atoms: {len(execution_graph)}, column_ops: {len(column_operations)})"
         )
         
         return pipeline_doc
@@ -693,4 +1402,90 @@ async def save_pipeline_execution(
         return {
             "status": "error",
             "error": str(e)
+        }
+
+
+async def remove_pipeline_steps_by_card_id(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    card_id: str,
+    mode: str = "laboratory"
+) -> Dict[str, Any]:
+    """Remove all pipeline execution steps for a specific card_id.
+    
+    Args:
+        client_name: Client identifier
+        app_name: App identifier
+        project_name: Project identifier
+        card_id: Card ID to remove steps for
+        mode: Mode (laboratory, workflow, exhibition)
+    
+    Returns:
+        Dictionary with status and message
+    """
+    try:
+        coll = await get_pipeline_collection()
+        
+        client_id = client_name
+        app_id = app_name
+        project_id = project_name
+        
+        # Build composite _id
+        doc_id = f"{client_id}/{app_id}/{project_id}"
+        
+        # Get existing document
+        existing_doc = await coll.find_one({"_id": doc_id})
+        
+        if not existing_doc:
+            logger.info(f"📦 No pipeline execution data found for {doc_id}, nothing to remove")
+            return {
+                "status": "success",
+                "message": "No pipeline execution data found",
+                "removed_steps": 0
+            }
+        
+        pipeline = existing_doc.get("pipeline", {})
+        execution_graph = pipeline.get("execution_graph", [])
+        
+        # Filter out steps with matching card_id
+        original_count = len(execution_graph)
+        filtered_graph = [step for step in execution_graph if step.get("card_id") != card_id]
+        removed_count = original_count - len(filtered_graph)
+        
+        if removed_count == 0:
+            logger.info(f"📦 No pipeline steps found for card_id {card_id} in {doc_id}")
+            return {
+                "status": "success",
+                "message": "No steps found for this card",
+                "removed_steps": 0
+            }
+        
+        # Update document with filtered execution graph
+        await coll.update_one(
+            {"_id": doc_id},
+            {
+                "$set": {
+                    "pipeline.execution_graph": filtered_graph
+                }
+            }
+        )
+        
+        logger.info(
+            f"🗑️ Removed {removed_count} pipeline step(s) for card_id {card_id} from {doc_id} "
+            f"(remaining: {len(filtered_graph)})"
+        )
+        
+        return {
+            "status": "success",
+            "message": f"Removed {removed_count} pipeline step(s) for card",
+            "removed_steps": removed_count
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error removing pipeline steps by card_id: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "removed_steps": 0
         }

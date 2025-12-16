@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { PIPELINE_API, VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API, CHART_MAKER_API } from '@/lib/api';
+import { PIPELINE_API, VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API, CHART_MAKER_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { Loader2, FileText, RefreshCw, Clock, CheckCircle2, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +35,9 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
   const { toast } = useToast();
   const updateAtomSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const getAtom = useLaboratoryStore(state => state.getAtom);
+  const subMode = useLaboratoryStore(state => state.subMode);
+  const setCards = useLaboratoryStore(state => state.setCards);
+  const cards = useLaboratoryStore(state => state.cards);
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [pipelineData, setPipelineData] = useState<any>(null);
@@ -103,17 +106,39 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
 
     setLoadingData(true);
     try {
+      // Add timestamp to ensure we always fetch fresh data from MongoDB
       const params = new URLSearchParams({
         client_name: ctx.client_name || '',
         app_name: ctx.app_name || '',
         project_name: ctx.project_name || '',
         mode: mode,
+        _t: Date.now().toString(), // Cache-busting parameter
       });
 
-      const response = await fetch(`${PIPELINE_API}/get?${params}`);
+      const response = await fetch(`${PIPELINE_API}/get?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        cache: 'no-store', // Ensure we always fetch fresh data
+      });
       const result = await response.json();
 
       if (result.status === 'success' && result.data) {
+        console.log('📦 [PIPELINE] Loaded pipeline data:', {
+          total_atoms: result.data?.summary?.total_atoms,
+          execution_graph_length: result.data?.pipeline?.execution_graph?.length,
+          execution_graph: result.data?.pipeline?.execution_graph?.map((step: any) => ({
+            atom_type: step.atom_type,
+            atom_title: step.atom_title,
+            atom_instance_id: step.atom_instance_id,
+            card_id: step.card_id,
+            step_index: step.step_index,
+            has_outputs: !!step.outputs?.length,
+            outputs_count: step.outputs?.length || 0
+          }))
+        });
         setPipelineData(result.data);
         
         // Initialize file replacements with all root files set to keep original
@@ -201,13 +226,88 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
         console.warn('Could not fetch replacement file columns:', e);
       }
 
+      // ========================================================================
+      // EXCLUDE COLUMNS CREATED BY COLUMN OPERATIONS
+      // ========================================================================
+      // Get column operations from pipeline data that target the original file
+      const columnOperations = pipelineData?.pipeline?.column_operations || [];
+      const columnsToExclude = new Set<string>();
+      
+      // Find all column operations that target the original file
+      for (const colOp of columnOperations) {
+        if (colOp.input_file === originalFile) {
+          // Add all created columns to exclusion set (case-insensitive)
+          const createdColumns = colOp.created_columns || [];
+          createdColumns.forEach((col: string) => {
+            if (col) {
+              const colLower = String(col).toLowerCase().trim();
+              columnsToExclude.add(colLower);
+              
+              // Also add normalized versions to handle naming convention mismatches
+              // Backend uses _x_ for multiply, _div_ for divide
+              // Frontend might have saved _times_ or _dividedby_ in old records
+              const normalized = colLower
+                .replace(/_times_/g, '_x_')
+                .replace(/_dividedby_/g, '_div_');
+              if (normalized !== colLower) {
+                columnsToExclude.add(normalized);
+              }
+              
+              // Also add reverse normalization (in case backend naming is in MongoDB)
+              const reverseNormalized = colLower
+                .replace(/_x_/g, '_times_')
+                .replace(/_div_/g, '_dividedby_');
+              if (reverseNormalized !== colLower) {
+                columnsToExclude.add(reverseNormalized);
+              }
+            }
+          });
+          
+          // Also check operations to derive column names if created_columns is missing
+          const operations = colOp.operations || [];
+          operations.forEach((op: any) => {
+            if (op.created_column_name) {
+              const colLower = String(op.created_column_name).toLowerCase().trim();
+              columnsToExclude.add(colLower);
+              
+              // Normalize naming conventions
+              const normalized = colLower
+                .replace(/_times_/g, '_x_')
+                .replace(/_dividedby_/g, '_div_');
+              if (normalized !== colLower) {
+                columnsToExclude.add(normalized);
+              }
+              
+              const reverseNormalized = colLower
+                .replace(/_x_/g, '_times_')
+                .replace(/_div_/g, '_dividedby_');
+              if (reverseNormalized !== colLower) {
+                columnsToExclude.add(reverseNormalized);
+              }
+            }
+          });
+        }
+      }
+      
+      // Filter out columns that will be created by column operations
+      const originalColsFiltered = originalCols.filter((col: string) => {
+        const colLower = String(col).toLowerCase().trim();
+        return !columnsToExclude.has(colLower);
+      });
+      
+      const replacementColsFiltered = replacementCols.filter((col: string) => {
+        const colLower = String(col).toLowerCase().trim();
+        return !columnsToExclude.has(colLower);
+      });
+
       // Compare columns (order doesn't matter, but all columns must match)
-      const originalSet = new Set(originalCols.map((c: string) => String(c).toLowerCase().trim()));
-      const replacementSet = new Set(replacementCols.map((c: string) => String(c).toLowerCase().trim()));
+      // Use filtered columns that exclude column operation-created columns
+      const originalSet = new Set(originalColsFiltered.map((c: string) => String(c).toLowerCase().trim()));
+      const replacementSet = new Set(replacementColsFiltered.map((c: string) => String(c).toLowerCase().trim()));
 
       const isValid = 
-        originalCols.length > 0 &&
-        replacementCols.length > 0 &&
+        originalColsFiltered.length > 0 &&
+        replacementColsFiltered.length > 0 &&
         originalSet.size === replacementSet.size &&
         Array.from(originalSet).every((col: string) => replacementSet.has(col));
 
@@ -217,9 +317,9 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
           isValid,
           error: isValid 
             ? undefined 
-            : `Column mismatch: Original has ${originalCols.length} columns, replacement has ${replacementCols.length} columns`,
-          originalColumns: originalCols,
-          replacementColumns: replacementCols,
+            : `Column mismatch: Original has ${originalColsFiltered.length} columns (excluding ${columnsToExclude.size} column operation columns), replacement has ${replacementColsFiltered.length} columns`,
+          originalColumns: originalColsFiltered,
+          replacementColumns: replacementColsFiltered,
         },
       }));
     } catch (error: unknown) {
@@ -278,6 +378,86 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
     );
   };
 
+  // Helper function to update atom settings for a specific mode without switching modes
+  const updateAtomForMode = async (targetMode: 'analytics' | 'dashboard', atomInstanceId: string, settings: any) => {
+    try {
+      // If it's the current mode, update directly in the store
+      if (targetMode === subMode) {
+        updateAtomSettings(atomInstanceId, settings);
+        return;
+      }
+
+      // For the other mode, fetch cards with mode-specific parameter, update atom, and save back
+      const modeParam = targetMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+      const getUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext?.client_name}/${projectContext?.app_name}/${projectContext?.project_name}?mode=${modeParam}`;
+      const getResponse = await fetch(getUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+
+      if (!getResponse.ok) {
+        console.warn(`Failed to fetch cards for ${targetMode} mode`);
+        return;
+      }
+
+      const data = await getResponse.json();
+      let modeCards = data.cards || [];
+
+      // Filter cards based on mode (dashboard mode filters atoms)
+      if (targetMode === 'dashboard') {
+        const DASHBOARD_ALLOWED_ATOMS = ['dataframe-operations', 'chart-maker', 'correlation', 'table'];
+        const allowedAtomIdsSet = new Set(DASHBOARD_ALLOWED_ATOMS);
+        modeCards = modeCards.map((card: any) => ({
+          ...card,
+          atoms: (card.atoms || []).filter((atom: any) => allowedAtomIdsSet.has(atom.atomId))
+        })).filter((card: any) => (card.atoms || []).length > 0);
+      }
+
+      // Find and update the atom in the cards
+      let updated = false;
+      const updatedCards = modeCards.map((card: any) => {
+        const updatedAtoms = (card.atoms || []).map((atom: any) => {
+          if (atom.id === atomInstanceId) {
+            updated = true;
+            return {
+              ...atom,
+              settings: { ...atom.settings, ...settings }
+            };
+          }
+          return atom;
+        });
+        return { ...card, atoms: updatedAtoms };
+      });
+
+      if (!updated) {
+        console.warn(`Atom ${atomInstanceId} not found in ${targetMode} mode cards`);
+        return;
+      }
+
+      // Save updated cards back to MongoDB with the correct mode
+      const saveUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+      const savePayload = {
+        client_name: projectContext?.client_name || '',
+        app_name: projectContext?.app_name || '',
+        project_name: projectContext?.project_name || '',
+        cards: updatedCards,
+        mode: modeParam,
+      };
+
+      await fetch(saveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(savePayload),
+      });
+
+      console.log(`✅ Updated atom ${atomInstanceId} for ${targetMode} mode`);
+    } catch (error) {
+      console.error(`Error updating atom for ${targetMode} mode:`, error);
+    }
+  };
+
   const handleRunPipeline = async () => {
     if (!projectContext) {
       toast({
@@ -323,39 +503,63 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
           keep_original: false,
         }));
 
-      const requestBody = {
-        client_name: projectContext.client_name || '',
-        app_name: projectContext.app_name || '',
-        project_name: projectContext.project_name || '',
-        mode: mode,
-        file_replacements: replacements,
+      // Run pipeline for both modes simultaneously
+      const modes: ('analytics' | 'dashboard')[] = ['analytics', 'dashboard'];
+      const results = await Promise.all(
+        modes.map(async (currentMode) => {
+          const requestBody = {
+            client_name: projectContext.client_name || '',
+            app_name: projectContext.app_name || '',
+            project_name: projectContext.project_name || '',
+            mode: currentMode,
+            file_replacements: replacements,
+          };
+
+          const response = await fetch(`${PIPELINE_API}/run`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+          });
+
+          const result = await response.json();
+          return { mode: currentMode, result };
+        })
+      );
+
+      // Combine results from both modes
+      const combinedResult = {
+        status: results.every(r => r.result.status === 'success') ? 'success' : 'error',
+        executed_atoms: results.reduce((sum, r) => sum + (r.result.executed_atoms || 0), 0),
+        successful_atoms: results.reduce((sum, r) => sum + (r.result.successful_atoms || 0), 0),
+        failed_atoms: results.reduce((sum, r) => sum + (r.result.failed_atoms || 0), 0),
+        execution_log: results.flatMap(r => r.result.execution_log || []),
+        message: `Pipeline executed for both modes: ${results.map(r => `${r.mode} (${r.result.executed_atoms || 0} atoms)`).join(', ')}`
       };
 
-      const response = await fetch(`${PIPELINE_API}/run`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      const result = await response.json();
-
-      if (result.status === 'success') {
+      if (combinedResult.status === 'success') {
         toast({
           title: 'Pipeline Started',
-          description: `Executing ${result.executed_atoms} atoms. Processing results...`,
+          description: `Executing ${combinedResult.executed_atoms} atoms across both modes. Processing results...`,
           variant: 'default',
         });
         
-        // Process each atom execution and update frontend state
-        const executionLog = result.execution_log || [];
-        let processedCount = 0;
-        let successCount = 0;
-        let failedCount = 0;
-        
-        // Process each atom execution
-        for (const logEntry of executionLog) {
+        // Process each mode's execution log separately
+        let totalProcessedCount = 0;
+        let totalSuccessCount = 0;
+        let totalFailedCount = 0;
+
+        // Process each mode's results
+        for (const { mode: executionMode, result: modeResult } of results) {
+          if (modeResult.status === 'success' && modeResult.execution_log) {
+            const executionLog = modeResult.execution_log || [];
+            let processedCount = 0;
+            let successCount = 0;
+            let failedCount = 0;
+            
+            // Process each atom execution for this mode
+            for (const logEntry of executionLog) {
           if (logEntry.status === 'success' && logEntry.task_response) {
             try {
               const atomInstanceId = logEntry.atom_instance_id;
@@ -368,8 +572,8 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
               // Check for success status (can be 'SUCCESS' or 'success')
               const isSuccess = (taskResult.status === 'SUCCESS' || taskResult.task_status === 'success' || taskResult.status === 'success');
               
-              // Get current atom to preserve existing settings
-              const currentAtom = getAtom(atomInstanceId);
+              // Get current atom to preserve existing settings (from current mode's store)
+              const currentAtom = executionMode === subMode ? getAtom(atomInstanceId) : undefined;
               const currentSettings = currentAtom?.settings || {};
               
               // Handle different atom types
@@ -435,8 +639,8 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                     resultData.unsaved_data = taskResult.results;
                     resultData.result_shape = [taskResult.results.length, Object.keys(taskResult.results[0] || {}).length];
                     
-                    // Update atom settings in Zustand store (include init and config updates)
-                    updateAtomSettings(atomInstanceId, {
+                    // Update atom settings for the specific mode (include init and config updates)
+                    await updateAtomForMode(executionMode, atomInstanceId, {
                       ...settingsUpdate,
                       groupbyResults: resultData,
                     });
@@ -476,15 +680,15 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                         }
                       }
                       
-                      // Update atom settings in Zustand store (include init and config updates)
-                      updateAtomSettings(atomInstanceId, {
+                      // Update atom settings for the specific mode (include init and config updates)
+                      await updateAtomForMode(executionMode, atomInstanceId, {
                         ...settingsUpdate,
                         groupbyResults: resultData,
                       });
                     } catch (fetchError) {
                       console.error('Error fetching cached dataframe:', fetchError);
                       // Still update with what we have
-                      updateAtomSettings(atomInstanceId, {
+                      await updateAtomForMode(executionMode, atomInstanceId, {
                         ...settingsUpdate,
                         groupbyResults: resultData,
                       });
@@ -496,7 +700,7 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 } else {
                   // Even if execution failed, still apply init and config updates
                   if (Object.keys(settingsUpdate).length > 0) {
-                    updateAtomSettings(atomInstanceId, settingsUpdate);
+                    await updateAtomForMode(executionMode, atomInstanceId, settingsUpdate);
                   }
                   
                   failedCount++;
@@ -637,7 +841,7 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 updateData.statDataMap = {};
                 
                 // Update atom settings to trigger re-render and re-fetch
-                updateAtomSettings(atomInstanceId, updateData);
+                await updateAtomForMode(executionMode, atomInstanceId, updateData);
                 
                 successCount++;
                 processedCount++;
@@ -866,7 +1070,7 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 }
                 
                 // Update atom settings
-                updateAtomSettings(atomInstanceId, updateData);
+                await updateAtomForMode(executionMode, atomInstanceId, updateData);
                 
                 successCount++;
                 processedCount++;
@@ -1014,7 +1218,349 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 updateData.pivotError = null;
                 
                 // Update atom settings
-                updateAtomSettings(atomInstanceId, updateData);
+                await updateAtomForMode(executionMode, atomInstanceId, updateData);
+                
+                successCount++;
+                processedCount++;
+              } else if (atomType === 'table') {
+                // Handle table atom updates
+                // Force re-render by updating timestamp (like pivot-table)
+                const stepConfig = logEntry.configuration || {};
+                
+                // CRITICAL FIX: If atomInstanceId is 'unknown', try to find the atom by card_id and canvas_position
+                // This matches how other atoms work - they all need a valid atomInstanceId
+                let resolvedAtomInstanceId = atomInstanceId;
+                if (atomInstanceId === 'unknown' || !atomInstanceId) {
+                  const cards = useLaboratoryStore.getState().cards;
+                  const logCardId = logEntry.card_id;
+                  const logCanvasPosition = logEntry.canvas_position ?? 0;
+                  
+                  // Try to find atom by card_id and canvas_position
+                  if (logCardId) {
+                    const card = cards.find(c => c.id === logCardId);
+                    if (card && Array.isArray(card.atoms)) {
+                      // Find table atom in this card
+                      const tableAtom = card.atoms.find(a => a.atomId === 'table');
+                      if (tableAtom) {
+                        resolvedAtomInstanceId = tableAtom.id;
+                        console.log('🔍 [PIPELINE] Table atom: Found atom by card_id', {
+                          cardId: logCardId,
+                          atomId: resolvedAtomInstanceId
+                        });
+                      }
+                    }
+                  }
+                  
+                  // If still not found, try to find by matching configuration (object_name/sourceFile)
+                  if (resolvedAtomInstanceId === 'unknown' || !resolvedAtomInstanceId) {
+                    const objectName = stepConfig.object_name || logEntry.input_files?.[0];
+                    if (objectName) {
+                      for (const card of cards) {
+                        if (Array.isArray(card.atoms)) {
+                          const matchingAtom = card.atoms.find(a => 
+                            a.atomId === 'table' && 
+                            (a.settings?.sourceFile === objectName || a.settings?.object_name === objectName)
+                          );
+                          if (matchingAtom) {
+                            resolvedAtomInstanceId = matchingAtom.id;
+                            console.log('🔍 [PIPELINE] Table atom: Found atom by object_name match', {
+                              objectName,
+                              atomId: resolvedAtomInstanceId
+                            });
+                            break;
+                          }
+                        }
+                      }
+                    }
+                  }
+                  
+                  // If still not found, try to find by canvas_position match
+                  if (resolvedAtomInstanceId === 'unknown' || !resolvedAtomInstanceId) {
+                    const card = cards.find(c => c.canvas_position === logCanvasPosition);
+                    if (card && Array.isArray(card.atoms)) {
+                      const tableAtom = card.atoms.find(a => a.atomId === 'table');
+                      if (tableAtom) {
+                        resolvedAtomInstanceId = tableAtom.id;
+                        console.log('🔍 [PIPELINE] Table atom: Found atom by canvas_position', {
+                          canvasPosition: logCanvasPosition,
+                          atomId: resolvedAtomInstanceId
+                        });
+                      }
+                    }
+                  }
+                  
+                  if (resolvedAtomInstanceId === 'unknown' || !resolvedAtomInstanceId) {
+                    console.warn('⚠️ [PIPELINE] Table atom: Could not resolve atom_instance_id, skipping update', {
+                      logEntry: {
+                        atom_instance_id: logEntry.atom_instance_id,
+                        card_id: logEntry.card_id,
+                        canvas_position: logEntry.canvas_position,
+                        configuration: stepConfig
+                      }
+                    });
+                    processedCount++;
+                    continue; // Skip this atom if we can't find it
+                  }
+                }
+                
+                // Get current atom with resolved ID
+                const currentAtom = getAtom(resolvedAtomInstanceId);
+                const currentSettings = currentAtom?.settings || {};
+                
+                const updateData: any = {
+                  pipelineExecutionTimestamp: Date.now(), // Force re-render by changing timestamp
+                  mode: 'load', // CRITICAL: Ensure mode is set to 'load' for table atom
+                };
+                
+                // Get additional_results from execution
+                const additionalResults = taskResult.additional_results || taskResult.result?.additional_results || {};
+                const logEntryAdditionalResults = logEntry.additional_results || {};
+                
+                // Get table data from multiple sources (executor returns final state after ALL operations)
+                const tableData = logEntry.table_data 
+                  || logEntryAdditionalResults.table_data 
+                  || additionalResults.table_data 
+                  || taskResponse 
+                  || taskResult;
+                
+                // Check if we have final tableData from executor (with all operations applied)
+                const hasFinalTableData = tableData && tableData.rows && Array.isArray(tableData.rows) && tableData.table_id;
+                
+                // 1. Update sourceFile to replacement file (if it was replaced)
+                // CRITICAL: Table atom uses sourceFile, not object_name or dataSource
+                // Always update even if same, to ensure consistency and trigger reload
+                let replacementFile = null;
+                if (logEntry.input_files && logEntry.input_files.length > 0) {
+                  // Use the first input file (which is the replacement file after pipeline processing)
+                  replacementFile = logEntry.input_files[0];
+                } else if (stepConfig.object_name) {
+                  replacementFile = stepConfig.object_name;
+                } else if (stepConfig.file_key) {
+                  replacementFile = stepConfig.file_key;
+                }
+                
+                // ALWAYS update sourceFile if we have a replacement file
+                // This ensures the file is updated even if it's the same (for consistency)
+                if (replacementFile) {
+                  // CRITICAL: Check if sourceFile is actually changing
+                  const currentSourceFile = currentSettings.sourceFile || '';
+                  const isFileChanging = replacementFile !== currentSourceFile;
+                  
+                  // Update sourceFile to replacement file (for display purposes)
+                  updateData.sourceFile = replacementFile;
+                  
+                  // CRITICAL: If executor returned final tableData (with all operations applied),
+                  // we should use it directly instead of clearing and forcing a reload.
+                  // The executor has already:
+                  // 1. Loaded the replacement file
+                  // 2. Applied all operations (sort, rename, etc.)
+                  // 3. Returned the final state
+                  // So we should use that result, not reload from sourceFile
+                  if (!hasFinalTableData) {
+                    // No final tableData from executor - clear to force reload from sourceFile
+                    updateData.tableData = null;
+                    updateData.tableId = undefined;
+                    // Set reloadTrigger to force reload (TableAtom checks this)
+                    updateData.reloadTrigger = Date.now();
+                    console.log('🔄 [PIPELINE] Table atom: Clearing tableData to force reload (no executor data)', {
+                      from: currentSourceFile,
+                      to: replacementFile,
+                      isFileChanging
+                    });
+                  } else {
+                    // Executor returned final tableData with all operations - use it directly
+                    // Don't clear tableData - it will be set below in step 2
+                    // CRITICAL: Don't set reloadTrigger - we have executor data, so don't trigger reload
+                    // Clear reloadTrigger if it exists to prevent TableAtom from reloading
+                    updateData.reloadTrigger = undefined;
+                    console.log('✅ [PIPELINE] Table atom: Using executor tableData (all operations applied)', {
+                      from: currentSourceFile,
+                      to: replacementFile,
+                      hasTableData: true,
+                      rowCount: tableData.rows.length,
+                      tableId: tableData.table_id,
+                      reloadTriggerCleared: true,
+                      message: 'Will use executor data instead of reloading'
+                    });
+                  }
+                  
+                  // CRITICAL: Ensure mode is 'load' so TableAtom knows to load from sourceFile
+                  // But if we have executor data, TableAtom won't reload (because tableData is set)
+                  updateData.mode = 'load';
+                  
+                  console.log('🔄 [PIPELINE] Table atom: Updating sourceFile', {
+                    from: currentSourceFile,
+                    to: replacementFile,
+                    isFileChanging,
+                    reloadTrigger: updateData.reloadTrigger,
+                    tableDataCleared: !hasFinalTableData,
+                    hasExecutorTableData: hasFinalTableData,
+                    mode: updateData.mode
+                  });
+                } else {
+                  // No replacement file, but still update reloadTrigger to force refresh
+                  updateData.reloadTrigger = Date.now();
+                }
+                
+                // 1a. ALWAYS load column summary (like pivot-table columns)
+                // Priority: logEntry (from backend) > logEntryAdditionalResults > additionalResults
+                // This ensures columns are always up-to-date, even if filename is the same
+                const columnSummary = logEntry.column_summary 
+                  || logEntryAdditionalResults.column_summary 
+                  || additionalResults.column_summary;
+                const columns = logEntry.columns 
+                  || logEntryAdditionalResults.columns 
+                  || additionalResults.columns;
+                
+                // Extract columns from column_summary if not directly available
+                let extractedColumns = columns;
+                
+                if (columnSummary && columnSummary.summary) {
+                  const summary = Array.isArray(columnSummary.summary) ? columnSummary.summary : [];
+                  if (!extractedColumns) {
+                    extractedColumns = summary.map((item: any) => item.column).filter(Boolean);
+                  }
+                }
+                
+                // Always update columns (like pivot-table always updates columns)
+                if (extractedColumns && Array.isArray(extractedColumns) && extractedColumns.length > 0) {
+                  updateData.columns = extractedColumns;
+                }
+                
+                // 2. Update table data if available (from executor after ALL operations)
+                // CRITICAL: Use tableData from executor which includes ALL operations (load, sort, rename, etc.)
+                // This is especially important when there's a replacement file - the executor has already
+                // applied all operations to the replacement file, so we should use that result
+                // ALWAYS use executor tableData if available (whether replacement file or not)
+                // The executor has already executed all operations in sequence, so this is the final state
+                if (hasFinalTableData) {
+                  // Use tableData from executor (includes all operations applied)
+                  updateData.tableData = {
+                    table_id: tableData.table_id,
+                    columns: tableData.columns || extractedColumns || [],
+                    rows: tableData.rows,
+                    row_count: tableData.row_count || tableData.rows.length || 0,
+                    column_types: tableData.column_types || {},
+                    object_name: tableData.object_name || replacementFile,
+                  };
+                  // Also set visibleColumns and columnOrder
+                  if (tableData.columns && Array.isArray(tableData.columns)) {
+                    updateData.visibleColumns = tableData.columns;
+                    updateData.columnOrder = tableData.columns;
+                  }
+                  if (tableData.table_id) {
+                    updateData.tableId = tableData.table_id;
+                  }
+                  
+                  console.log('✅ [PIPELINE] Table atom: Using tableData from executor (all operations applied)', {
+                    tableId: tableData.table_id,
+                    rowCount: tableData.rows.length,
+                    columnCount: tableData.columns?.length,
+                    replacementFile: replacementFile || 'none (using original)',
+                    operationsApplied: 'load, update, rename, etc. (all from api_calls)'
+                  });
+                } else {
+                  // No executor tableData - TableAtom will reload from sourceFile
+                  console.log('⚠️ [PIPELINE] Table atom: No executor tableData, TableAtom will reload from sourceFile', {
+                    replacementFile: replacementFile || 'none',
+                    hasTableData: false
+                  });
+                }
+                
+                // 3. Apply stored configuration from MongoDB
+                // CRITICAL: Extract filters and sort_config from stepConfig.settings and apply at top level
+                // TableAtom expects filters and sortConfig at top level, not nested in settings.settings
+                if (stepConfig.settings) {
+                  const storedSettings = stepConfig.settings;
+                  
+                  // Apply filters (convert snake_case to camelCase if needed)
+                  if (storedSettings.filters !== undefined) {
+                    updateData.filters = storedSettings.filters;
+                  }
+                  if (storedSettings.sort_config !== undefined) {
+                    updateData.sortConfig = storedSettings.sort_config;
+                  }
+                  // Also support camelCase versions
+                  if (storedSettings.sortConfig !== undefined) {
+                    updateData.sortConfig = storedSettings.sortConfig;
+                  }
+                  
+                  // Apply other settings (visible_columns, column_order, etc.)
+                  if (storedSettings.visible_columns !== undefined) {
+                    updateData.visibleColumns = storedSettings.visible_columns;
+                  }
+                  if (storedSettings.column_order !== undefined) {
+                    updateData.columnOrder = storedSettings.column_order;
+                  }
+                  if (storedSettings.show_row_numbers !== undefined) {
+                    updateData.showRowNumbers = storedSettings.show_row_numbers;
+                  }
+                  if (storedSettings.show_summary_row !== undefined) {
+                    updateData.showSummaryRow = storedSettings.show_summary_row;
+                  }
+                  if (storedSettings.frozen_columns !== undefined) {
+                    updateData.frozenColumns = storedSettings.frozen_columns;
+                  }
+                  if (storedSettings.row_height !== undefined) {
+                    updateData.rowHeight = storedSettings.row_height;
+                  }
+                  
+                  // Also preserve any nested settings structure for backward compatibility
+                  updateData.settings = {
+                    ...(currentSettings.settings || {}),
+                    ...storedSettings,
+                  };
+                }
+                
+                // 4. Update saved file if available
+                const savedFile = logEntry.saved_file 
+                  || logEntryAdditionalResults.saved_file 
+                  || additionalResults.saved_file;
+                if (savedFile) {
+                  updateData.savedFile = savedFile;  // Note: camelCase, not snake_case
+                }
+                
+                // 5. Update status
+                updateData.status = 'success';
+                updateData.error = null;
+                
+                // Update atom settings
+                // CRITICAL: Log what we're updating to debug
+                console.log('🔄 [PIPELINE] Table atom: Updating settings', {
+                  originalAtomInstanceId: atomInstanceId,
+                  resolvedAtomInstanceId: resolvedAtomInstanceId,
+                  updateData: {
+                    sourceFile: updateData.sourceFile,
+                    mode: updateData.mode,
+                    reloadTrigger: updateData.reloadTrigger,
+                    tableData: updateData.tableData === null ? 'null (cleared)' : updateData.tableData ? 'exists' : 'undefined',
+                    tableId: updateData.tableId,
+                    pipelineExecutionTimestamp: updateData.pipelineExecutionTimestamp
+                  },
+                  currentSettings: {
+                    sourceFile: currentSettings.sourceFile,
+                    mode: currentSettings.mode,
+                    tableData: currentSettings.tableData ? 'exists' : 'null/undefined',
+                    reloadTrigger: currentSettings.reloadTrigger,
+                    pipelineExecutionTimestamp: currentSettings.pipelineExecutionTimestamp
+                  }
+                });
+                
+                // CRITICAL: Update settings - this should trigger TableAtom useEffect
+                updateAtomSettings(resolvedAtomInstanceId, updateData);
+                
+                // Verify the update was applied
+                const updatedAtom = getAtom(resolvedAtomInstanceId);
+                console.log('✅ [PIPELINE] Table atom: Settings updated', {
+                  originalAtomInstanceId: atomInstanceId,
+                  resolvedAtomInstanceId: resolvedAtomInstanceId,
+                  newSourceFile: updatedAtom?.settings?.sourceFile,
+                  newMode: updatedAtom?.settings?.mode,
+                  newPipelineTimestamp: updatedAtom?.settings?.pipelineExecutionTimestamp,
+                  newReloadTrigger: updatedAtom?.settings?.reloadTrigger,
+                  tableDataAfterUpdate: updatedAtom?.settings?.tableData === null ? 'null (cleared)' : updatedAtom?.settings?.tableData ? 'exists' : 'undefined',
+                  message: 'TableAtom should detect pipelineExecutionTimestamp change and reload'
+                });
                 
                 successCount++;
                 processedCount++;
@@ -1088,7 +1634,7 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                   updateData.joinType = stepConfig.join_type;
                 }
 
-                updateAtomSettings(atomInstanceId, updateData);
+                await updateAtomForMode(executionMode, atomInstanceId, updateData);
                 successCount++;
                 processedCount++;
               } else if (atomType === 'concat') {
@@ -1159,7 +1705,7 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                   updateData.direction = stepConfig.concat_direction;
                 }
 
-                updateAtomSettings(atomInstanceId, updateData);
+                await updateAtomForMode(executionMode, atomInstanceId, updateData);
                 successCount++;
                 processedCount++;
               } else if (atomType === 'chart-maker') {
@@ -1851,12 +2397,14 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 });
 
                 // Update atom settings
-                updateAtomSettings(atomInstanceId, updateData);
+                await updateAtomForMode(executionMode, atomInstanceId, updateData);
                 
                 // 🔧 CRITICAL: Immediately trigger auto-render by updating charts array with pipelineAutoRender flag
                 // This ensures the useEffect in ChartMakerAtom detects the change and renders
-                setTimeout(() => {
-                  const currentAtom = useLaboratoryStore.getState().getAtom(atomInstanceId);
+                setTimeout(async () => {
+                  const currentAtom = executionMode === subMode 
+                    ? useLaboratoryStore.getState().getAtom(atomInstanceId)
+                    : undefined;
                   const currentSettings = currentAtom?.settings || {};
                   const currentCharts = (currentSettings as any).charts || [];
                   
@@ -1869,14 +2417,14 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                       pipelineAutoRender: true, // Set flag to trigger auto-render
                     }));
                     
-                    updateAtomSettings(atomInstanceId, {
+                    await updateAtomForMode(executionMode, atomInstanceId, {
                       charts: chartsToRender, // Update charts array to trigger useEffect
                       pipelineAutoRender: true, // Set atom-level flag
                       autoRenderAfterPipeline: true, // Set flag for useEffect dependency
                     });
                   } else {
                     // Fallback: just set the flag
-                    updateAtomSettings(atomInstanceId, {
+                    await updateAtomForMode(executionMode, atomInstanceId, {
                       autoRenderAfterPipeline: true,
                       pipelineAutoRender: true,
                     });
@@ -1899,25 +2447,32 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
               failedCount++;
               processedCount++;
             }
-          } else if (logEntry.status === 'failed') {
-            failedCount++;
-            processedCount++;
-          } else {
-            processedCount++;
+              } else if (logEntry.status === 'failed') {
+                failedCount++;
+                processedCount++;
+              } else {
+                processedCount++;
+              }
+            }
+            
+            // Accumulate counts for this mode
+            totalProcessedCount += processedCount;
+            totalSuccessCount += successCount;
+            totalFailedCount += failedCount;
           }
         }
         
         toast({
           title: 'Pipeline Completed',
-          description: `Processed ${processedCount} atoms. ${successCount} successful, ${failedCount} failed.`,
-          variant: successCount > 0 ? 'default' : 'destructive',
+          description: `Processed ${totalProcessedCount} atoms across both modes. ${totalSuccessCount} successful, ${totalFailedCount} failed.`,
+          variant: totalSuccessCount > 0 ? 'default' : 'destructive',
         });
         
         onOpenChange(false);
       } else {
         toast({
           title: 'Error',
-          description: result.message || 'Failed to run pipeline',
+          description: combinedResult.message || 'Failed to run pipeline',
           variant: 'destructive',
         });
       }
@@ -1940,10 +2495,20 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
   const rootFiles = pipelineData?.pipeline?.root_files || [];
   const executionGraph = pipelineData?.pipeline?.execution_graph || [];
   
-  // Extract root file keys for display
-  const rootFileKeys = rootFiles.map((rf: any) => rf.file_key || rf);
+  // Helper function to check if a string is a UUID (chartmaker creates these but doesn't save them as files)
+  const isUUID = (str: string): boolean => {
+    if (!str || typeof str !== 'string') return false;
+    // UUID pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (8-4-4-4-12 hex characters)
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidPattern.test(str);
+  };
   
-  // Extract derived files with their execution details (only .arrow files, exclude CSV temp files)
+  // Extract root file keys for display (exclude UUIDs)
+  const rootFileKeys = rootFiles
+    .map((rf: any) => rf.file_key || rf)
+    .filter((fileKey: string) => !isUUID(fileKey));
+  
+  // Extract derived files with their execution details (only .arrow files, exclude CSV temp files and UUIDs)
   const derivedFilesMap = new Map<string, {
     file_key: string;
     save_as_name?: string;
@@ -1954,7 +2519,7 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
   
   executionGraph.forEach((step: any) => {
     step.outputs?.forEach((output: any) => {
-      if (output.file_key && output.file_key.endsWith('.arrow')) {
+      if (output.file_key && output.file_key.endsWith('.arrow') && !isUUID(output.file_key)) {
         derivedFilesMap.set(output.file_key, {
           file_key: output.file_key,
           save_as_name: output.save_as_name,
@@ -2050,26 +2615,16 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                           <div className="flex-1 min-w-0">
                             <Label className="text-sm font-medium mb-1 block">Replacement File</Label>
                             <Select
-                              value={
-                                replacement?.keep_original !== false && !replacement?.replacement_file
-                                  ? 'original'
-                                  : replacement?.replacement_file || 'original'
-                              }
+                              value={replacement?.replacement_file || ''}
                               onValueChange={async (value) => {
-                                if (value === 'original') {
-                                  handleKeepOriginalToggle(file, true);
-                                  await handleFileChange(file, '');
-                                } else {
                                   handleKeepOriginalToggle(file, false);
                                   await handleFileChange(file, value);
-                                }
                               }}
                             >
                               <SelectTrigger className="h-9 text-xs">
                                 <SelectValue placeholder="Select replacement file" />
                               </SelectTrigger>
                               <SelectContent className="z-[20000] max-h-[300px]">
-                                <SelectItem value="original">Keep Original</SelectItem>
                                 {savedDataframes.length > 0 ? (
                                   savedDataframes
                                     .filter((df: any) => {
@@ -2134,7 +2689,9 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                         {/* Execution details below the file */}
                         {executionSteps.length > 0 && (
                           <div className="space-y-2 pt-2 border-t">
-                            <Label className="text-xs font-semibold text-muted-foreground">Executions Using This File</Label>
+                            <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                              Atoms Performed ({executionSteps.length})
+                            </Label>
                             <div className="space-y-2">
                               {executionSteps.map((step: any, idx: number) => {
                                 const exec = step.execution || {};
@@ -2144,89 +2701,78 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                                 const apiCalls = step.api_calls || [];
                                 
                                 return (
-                                  <div key={idx} className="bg-muted/50 rounded p-2 text-xs space-y-2">
+                                  <div key={idx} className="bg-muted/30 rounded-md p-2 space-y-1.5 border border-muted">
+                                    {/* Atom Header */}
                                     <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-1.5">
                                         {status === 'success' && <CheckCircle2 className="h-3 w-3 text-green-500" />}
                                         {status === 'failed' && <XCircle className="h-3 w-3 text-red-500" />}
                                         {status === 'pending' && <Clock className="h-3 w-3 text-yellow-500" />}
-                                        <span className="font-medium">{step.atom_title || step.atom_type}</span>
-                                        <Badge variant="outline" className="text-[10px]">
+                                        <span className="font-medium text-xs">{step.atom_title || step.atom_type}</span>
+                                        <Badge variant="outline" className="text-[9px]">
                                           {step.atom_type}
                                         </Badge>
                                       </div>
-                                      <div className="flex items-center gap-2 text-muted-foreground">
-                                        <Clock className="h-3 w-3" />
+                                      <div className="flex items-center gap-1 text-muted-foreground text-[10px]">
+                                        <Clock className="h-2.5 w-2.5" />
                                         <span>{duration}ms</span>
                                       </div>
                                     </div>
-                                    <div className="text-muted-foreground pl-5">
-                                      Started: {startedAt}
-                                    </div>
+                                    
+                                    {/* Execution Metadata */}
+                                    <div className="text-[10px] text-muted-foreground pl-4">
+                                      <div>Started: {startedAt}</div>
                                     {exec.error && (
-                                      <div className="text-red-500 pl-5 text-[10px]">
+                                        <div className="text-red-500">
                                         Error: {exec.error}
                                       </div>
                                     )}
+                                    </div>
                                     
-                                    {/* API Calls Section */}
+                                    {/* API Calls Section - Collapsible */}
                                     {apiCalls.length > 0 && (
-                                      <div className="pl-5 pt-1 space-y-1 border-t border-muted-foreground/20 mt-1">
-                                        <div className="text-[10px] font-semibold text-muted-foreground">
-                                          API Calls ({apiCalls.length}):
+                                      <details className="pl-4 pt-1 border-t border-muted-foreground/20">
+                                        <summary className="text-[9px] font-semibold text-muted-foreground cursor-pointer hover:text-foreground list-none">
+                                          <div className="flex items-center gap-1">
+                                            <span>Endpoints ({apiCalls.length})</span>
+                                            <span className="text-[8px]">▼</span>
                                         </div>
-                                        <div className="space-y-1">
+                                        </summary>
+                                        <div className="mt-1 space-y-0.5">
                                           {apiCalls.map((apiCall: any, apiIdx: number) => {
-                                            const apiTimestamp = apiCall.timestamp 
-                                              ? new Date(apiCall.timestamp).toLocaleTimeString() 
-                                              : 'N/A';
                                             const apiMethod = apiCall.method || 'N/A';
                                             const apiEndpoint = apiCall.endpoint || 'N/A';
                                             const apiStatus = apiCall.response_status || 0;
                                             const isSuccess = apiStatus >= 200 && apiStatus < 300;
                                             
                                             return (
-                                              <div key={apiIdx} className="bg-background/50 rounded p-1.5 text-[10px] space-y-0.5">
-                                                <div className="flex items-center gap-2">
-                                                  <span className={`font-mono ${isSuccess ? 'text-green-600' : apiStatus >= 400 ? 'text-red-600' : 'text-yellow-600'}`}>
+                                              <div key={apiIdx} className="bg-background/50 rounded px-1.5 py-0.5 text-[9px] border border-muted/30">
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className={`font-mono font-medium ${
+                                                    isSuccess ? 'text-green-600' 
+                                                    : apiStatus >= 400 ? 'text-red-600' 
+                                                    : 'text-yellow-600'
+                                                  }`}>
                                                     {apiMethod}
                                                   </span>
-                                                  <span className="text-muted-foreground truncate flex-1">
+                                                  <span className="text-muted-foreground truncate flex-1 font-mono">
                                                     {apiEndpoint}
                                                   </span>
                                                   {apiStatus > 0 && (
-                                                    <Badge 
-                                                      variant="outline" 
-                                                      className={`text-[9px] ${
-                                                        isSuccess ? 'text-green-600 border-green-600' 
-                                                        : apiStatus >= 400 ? 'text-red-600 border-red-600' 
-                                                        : 'text-yellow-600 border-yellow-600'
-                                                      }`}
-                                                    >
+                                                    <span className={`text-[8px] px-1 py-0.5 rounded ${
+                                                      isSuccess ? 'text-green-600 bg-green-50' 
+                                                      : apiStatus >= 400 ? 'text-red-600 bg-red-50' 
+                                                      : 'text-yellow-600 bg-yellow-50'
+                                                    }`}>
                                                       {apiStatus}
-                                                    </Badge>
+                                                    </span>
                                                   )}
                                                 </div>
-                                                {apiCall.timestamp && (
-                                                  <div className="text-[9px] text-muted-foreground pl-1">
-                                                    {apiTimestamp}
-                                                  </div>
-                                                )}
-                                                {apiCall.response_data && typeof apiCall.response_data === 'object' && (
-                                                  <details className="pl-1 mt-0.5">
-                                                    <summary className="text-[9px] text-muted-foreground cursor-pointer hover:text-foreground">
-                                                      View Response
-                                                    </summary>
-                                                    <pre className="text-[9px] bg-muted p-1 rounded mt-0.5 overflow-x-auto max-h-20 overflow-y-auto">
-                                                      {JSON.stringify(apiCall.response_data, null, 2)}
-                                                    </pre>
-                                                  </details>
-                                                )}
                                               </div>
                                             );
                                           })}
                                         </div>
-                                      </div>
+                                      </details>
                                     )}
                                   </div>
                                 );
@@ -2241,24 +2787,24 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
               </div>
             </div>
 
-            {/* Derived Files with Execution Details */}
+            {/* Derived Files with Execution Details - Collapsible */}
             {derivedFiles.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
+              <details className="space-y-4">
+                <summary className="flex items-center gap-2 cursor-pointer hover:text-foreground list-none">
                   <FileText className="h-4 w-4 text-muted-foreground" />
-                  <h3 className="text-sm font-semibold">Derived Files</h3>
-                </div>
-                <div className="space-y-4 max-h-[400px] overflow-y-auto">
+                  <h3 className="text-sm font-semibold">Derived Files ({derivedFiles.length})</h3>
+                  <span className="text-xs text-muted-foreground">▼</span>
+                </summary>
+                <div className="space-y-4 max-h-[400px] overflow-y-auto mt-4">
                   {derivedFiles.map((derivedFile: any) => {
                     const file = derivedFile.file_key;
-                    const step = derivedFile.step;
                     const output = derivedFile.output;
-                    const exec = step.execution || {};
-                    const status = exec.status || 'pending';
-                    const duration = exec.duration_ms || 0;
-                    const startedAt = exec.started_at ? new Date(exec.started_at).toLocaleString() : 'N/A';
-                    const apiCalls = step.api_calls || [];
                     const fileName = derivedFile.save_as_name || file.split('/').pop() || file;
+                    
+                    // Find execution steps that used this derived file as input (operations performed on it)
+                    const executionSteps = executionGraph.filter((step: any) => 
+                      step.inputs?.some((input: any) => input.file_key === file)
+                    );
                     
                     return (
                       <div key={file} className="border rounded-lg p-4 space-y-3">
@@ -2285,85 +2831,92 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                           </Badge>
                         </div>
                         
-                        {/* Execution details */}
+                        {/* Execution details - operations performed on this derived file */}
+                        {executionSteps.length > 0 ? (
                         <div className="space-y-2 pt-2 border-t">
-                          <Label className="text-xs font-semibold text-muted-foreground">Created By</Label>
-                          <div className="bg-muted/50 rounded p-2 text-xs space-y-2">
+                            <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                              Atoms Performed ({executionSteps.length})
+                            </Label>
+                            <div className="space-y-2">
+                              {executionSteps.map((step: any, idx: number) => {
+                                const exec = step.execution || {};
+                                const status = exec.status || 'pending';
+                                const duration = exec.duration_ms || 0;
+                                const startedAt = exec.started_at ? new Date(exec.started_at).toLocaleString() : 'N/A';
+                                const apiCalls = step.api_calls || [];
+                                
+                                return (
+                                  <div key={idx} className="bg-muted/30 rounded-md p-2 space-y-1.5 border border-muted">
+                                    {/* Atom Header */}
                             <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-1.5">
                                 {status === 'success' && <CheckCircle2 className="h-3 w-3 text-green-500" />}
                                 {status === 'failed' && <XCircle className="h-3 w-3 text-red-500" />}
                                 {status === 'pending' && <Clock className="h-3 w-3 text-yellow-500" />}
-                                <span className="font-medium">{step.atom_title || step.atom_type}</span>
-                                <Badge variant="outline" className="text-[10px]">
+                                        <span className="font-medium text-xs">{step.atom_title || step.atom_type}</span>
+                                        <Badge variant="outline" className="text-[9px]">
                                   {step.atom_type}
                                 </Badge>
                               </div>
-                              <div className="flex items-center gap-2 text-muted-foreground">
-                                <Clock className="h-3 w-3" />
+                                      <div className="flex items-center gap-1 text-muted-foreground text-[10px]">
+                                        <Clock className="h-2.5 w-2.5" />
                                 <span>{duration}ms</span>
                               </div>
                             </div>
-                            <div className="text-muted-foreground pl-5">
-                              Started: {startedAt}
-                            </div>
+                                    
+                                    {/* Execution Metadata */}
+                                    <div className="text-[10px] text-muted-foreground pl-4">
+                                      <div>Started: {startedAt}</div>
                             {exec.error && (
-                              <div className="text-red-500 pl-5 text-[10px]">
+                                        <div className="text-red-500">
                                 Error: {exec.error}
                               </div>
                             )}
+                                    </div>
                             
-                            {/* API Calls Section */}
+                                    {/* API Calls Section - Collapsible */}
                             {apiCalls.length > 0 && (
-                              <div className="pl-5 pt-1 space-y-1 border-t border-muted-foreground/20 mt-1">
-                                <div className="text-[10px] font-semibold text-muted-foreground">
-                                  API Calls ({apiCalls.length}):
+                                      <details className="pl-4 pt-1 border-t border-muted-foreground/20">
+                                        <summary className="text-[9px] font-semibold text-muted-foreground cursor-pointer hover:text-foreground list-none">
+                                          <div className="flex items-center gap-1">
+                                            <span>Endpoints ({apiCalls.length})</span>
+                                            <span className="text-[8px]">▼</span>
                                 </div>
-                                <div className="space-y-1">
+                                        </summary>
+                                        <div className="mt-1 space-y-0.5">
                                   {apiCalls.map((apiCall: any, apiIdx: number) => {
-                                    const apiTimestamp = apiCall.timestamp 
-                                      ? new Date(apiCall.timestamp).toLocaleTimeString() 
-                                      : 'N/A';
                                     const apiMethod = apiCall.method || 'N/A';
                                     const apiEndpoint = apiCall.endpoint || 'N/A';
                                     const apiStatus = apiCall.response_status || 0;
                                     const isSuccess = apiStatus >= 200 && apiStatus < 300;
                                     
                                     return (
-                                      <div key={apiIdx} className="bg-background/50 rounded p-1.5 text-[10px] space-y-0.5">
-                                        <div className="flex items-center gap-2">
-                                          <span className={`font-mono ${isSuccess ? 'text-green-600' : apiStatus >= 400 ? 'text-red-600' : 'text-yellow-600'}`}>
+                                              <div key={apiIdx} className="bg-background/50 rounded px-1.5 py-0.5 text-[9px] border border-muted/30">
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className={`font-mono font-medium ${
+                                                    isSuccess ? 'text-green-600' 
+                                                    : apiStatus >= 400 ? 'text-red-600' 
+                                                    : 'text-yellow-600'
+                                                  }`}>
                                             {apiMethod}
                                           </span>
-                                          <span className="text-muted-foreground truncate flex-1">
+                                                  <span className="text-muted-foreground truncate flex-1 font-mono">
                                             {apiEndpoint}
                                           </span>
                                           {apiStatus > 0 && (
-                                            <Badge 
-                                              variant="outline" 
-                                              className={`text-[9px] ${
-                                                isSuccess ? 'text-green-600 border-green-600' 
-                                                : apiStatus >= 400 ? 'text-red-600 border-red-600' 
-                                                : 'text-yellow-600 border-yellow-600'
-                                              }`}
-                                            >
+                                                    <span className={`text-[8px] px-1 py-0.5 rounded ${
+                                                      isSuccess ? 'text-green-600 bg-green-50' 
+                                                      : apiStatus >= 400 ? 'text-red-600 bg-red-50' 
+                                                      : 'text-yellow-600 bg-yellow-50'
+                                                    }`}>
                                               {apiStatus}
-                                            </Badge>
+                                                    </span>
                                           )}
                                         </div>
-                                        {apiCall.timestamp && (
-                                          <div className="text-[9px] text-muted-foreground pl-1">
-                                            {apiTimestamp}
                                           </div>
-                                        )}
-                                        {apiCall.response_data && typeof apiCall.response_data === 'object' && (
-                                          <details className="pl-1 mt-0.5">
-                                            <summary className="text-[9px] text-muted-foreground cursor-pointer hover:text-foreground">
-                                              View Response
-                                            </summary>
-                                            <pre className="text-[9px] bg-muted p-1 rounded mt-0.5 overflow-x-auto max-h-20 overflow-y-auto">
-                                              {JSON.stringify(apiCall.response_data, null, 2)}
-                                            </pre>
+                                            );
+                                          })}
+                                        </div>
                                           </details>
                                         )}
                                       </div>
@@ -2371,9 +2924,16 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                                   })}
                                 </div>
                               </div>
-                            )}
+                        ) : (
+                          <div className="space-y-2 pt-2 border-t">
+                            <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                              Atoms Performed
+                            </Label>
+                            <div className="text-[10px] text-muted-foreground italic">
+                              No operations performed on this file yet.
                           </div>
                         </div>
+                        )}
                         
                         {/* File metadata */}
                         {(output.row_count > 0 || output.columns?.length > 0) && (
@@ -2393,7 +2953,7 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                     );
                   })}
                 </div>
-              </div>
+              </details>
             )}
           </div>
         )}

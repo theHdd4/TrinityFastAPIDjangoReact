@@ -96,11 +96,38 @@ class Lineage(BaseModel):
     edges: List[LineageEdge] = Field(default_factory=list, description="Lineage edges")
 
 
+class ColumnOperation(BaseModel):
+    """Column operation configuration."""
+    id: str = Field(..., description="Unique operation identifier")
+    type: str = Field(..., description="Operation type (e.g., 'add', 'subtract', 'log')")
+    name: str = Field(..., description="Operation name")
+    columns: List[str] = Field(default_factory=list, description="Input columns")
+    rename: Optional[str] = Field(None, description="Rename/new column name")
+    param: Optional[Any] = Field(None, description="Operation parameters")
+    created_column_name: Optional[str] = Field(None, description="Final created column name")
+
+
+class ColumnOperationsConfig(BaseModel):
+    """Column operations configuration for a file."""
+    input_file: str = Field(..., description="Input file path")
+    output_file: Optional[str] = Field(None, description="Output file path (if new file created)")
+    overwrite_original: bool = Field(False, description="Whether to overwrite original file")
+    operations: List[ColumnOperation] = Field(default_factory=list, description="Column operations")
+    created_columns: List[str] = Field(default_factory=list, description="List of created column names")
+    identifiers: Optional[List[str]] = Field(None, description="Global identifiers for grouping operations")
+    saved_at: Optional[datetime] = Field(None, description="When operations were saved")
+    execution_order: Optional[int] = Field(None, description="Order in which to execute (for derived files)")
+
+
 class PipelineData(BaseModel):
     """Pipeline execution data."""
     root_files: List[FileMetadata] = Field(default_factory=list, description="Root input files")
     execution_graph: List[ExecutionGraphStep] = Field(default_factory=list, description="Execution graph")
     lineage: Lineage = Field(default_factory=Lineage, description="Data lineage")
+    column_operations: List[ColumnOperationsConfig] = Field(
+        default_factory=list, 
+        description="Global column operations from metrics tab"
+    )
 
 
 class PipelineSummary(BaseModel):

@@ -662,8 +662,10 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const handleSaveDataFrame = () => {
     if (preview.length === 0) return;
     
-    // Generate default filename
-    const defaultFilename = `createcolumn_${atom?.settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+    // Generate default filename (remove file extension before timestamp)
+    const sourceFile = atom?.settings?.dataSource?.split('/')?.pop() || 'data';
+    const filenameWithoutExt = sourceFile.includes('.') ? sourceFile.substring(0, sourceFile.lastIndexOf('.')) : sourceFile;
+    const defaultFilename = `createcolumn_${filenameWithoutExt}_${Date.now()}`;
     setSaveFileName(defaultFilename);
     setShowSaveModal(true);
   };

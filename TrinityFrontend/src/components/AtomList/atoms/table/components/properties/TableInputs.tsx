@@ -67,7 +67,13 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
     setLoading(true);
 
     try {
-      const data = await loadTable(fileId);
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
+      const data = await loadTable(fileId, atomId, cardId, canvasPosition);
 
       const newSettings = {
         sourceFile: fileId,

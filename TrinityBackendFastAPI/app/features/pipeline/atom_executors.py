@@ -246,7 +246,12 @@ class GroupByExecutor(BaseAtomExecutor):
                     if isinstance(save_result, dict):
                         save_status = save_result.get("task_status", save_result.get("status", "unknown"))
                         if save_status == "success":
-                            logger.info(f"✅ SaveAs completed successfully for atom {atom_instance_id}")
+                            # Extract saved filename from result
+                            saved_filename = save_result.get("filename") or save_result.get("result_file")
+                            if saved_filename:
+                                logger.info(f"✅ SaveAs completed successfully for atom {atom_instance_id}, saved to: {saved_filename}")
+                            else:
+                                logger.info(f"✅ SaveAs completed successfully for atom {atom_instance_id}")
                         else:
                             logger.warning(f"⚠️ SaveAs failed for atom {atom_instance_id}")
                 except Exception as save_error:
@@ -255,17 +260,24 @@ class GroupByExecutor(BaseAtomExecutor):
             else:
                 logger.warning(f"⚠️ Save endpoint found but no filename in params")
         
+        # Build additional_results with saved file info
+        additional_results_dict = {}
+        if init_result:
+            additional_results_dict["init_result"] = init_result
+        if save_result:
+            additional_results_dict["save_result"] = save_result
+            # Extract saved filename for easy access
+            if isinstance(save_result, dict):
+                saved_filename = save_result.get("filename") or save_result.get("result_file")
+                if saved_filename:
+                    additional_results_dict["saved_file"] = saved_filename
+        
         return {
             "status": "success",
             "result_file": result_file,
             "message": "GroupBy executed successfully",
             "task_response": task_response,
-            "additional_results": {
-                "save_result": save_result,
-                "init_result": init_result  # Include init result for frontend
-            } if (save_result or init_result) else {
-                "init_result": init_result
-            } if init_result else None
+            "additional_results": additional_results_dict if additional_results_dict else None
         }
 
 
@@ -689,6 +701,17 @@ class ChartMakerExecutor(BaseAtomExecutor):
             except Exception as e:
                 logger.error(f"❌ Error executing chart-maker load-saved-dataframe: {e}", exc_info=True)
                 # Don't fail the entire execution if load fails, but log it
+        
+        # If only load-saved-dataframe was called (no charts), return success
+        if has_load_dataframe and not has_generate_chart:
+            logger.info(f"✅ ChartMaker executor: Only load-saved-dataframe was called (no charts to generate)")
+            return {
+                "status": "success",
+                "result_file": file_id or primary_file,
+                "message": "Dataframe loaded successfully",
+                "task_response": additional_results.get("load_dataframe_result"),
+                "additional_results": additional_results
+            }
         
         # Execute charts endpoint if it was called - execute ALL chart API calls
         chart_results = []
@@ -1769,6 +1792,604 @@ class PivotTableExecutor(BaseAtomExecutor):
 
 _pivot_table_executor = PivotTableExecutor()
 register_atom_executor(_pivot_table_executor)
+
+
+class TableExecutor(BaseAtomExecutor):
+    """Executor for table atom.
+    
+    Handles endpoints:
+    - /table/load - Load table from MinIO
+    - /table/update - Update table settings
+    - /table/edit-cell - Edit a cell
+    - /table/delete-column, /table/insert-column, /table/rename-column, etc. - Column operations
+    - /table/create-blank - Create blank table
+    - /table/save - Save table results
+    """
+    
+    def get_atom_type(self) -> str:
+        return "table"
+    
+    def _map_table_settings_columns(self, settings: Dict[str, Any], column_lookup: Dict[str, str]) -> Dict[str, Any]:
+        """
+        Map lowercase column names from MongoDB config to actual column names from replacement file.
+        This enables case-insensitive column matching when files are replaced.
+        
+        Args:
+            settings: Table settings dictionary with lowercase column names
+            column_lookup: Dictionary mapping lowercase -> original case column names
+            
+        Returns:
+            Settings dictionary with column names mapped to actual case from replacement file
+        """
+        mapped = settings.copy()
+        
+        def map_column(col: str) -> str:
+            """Map a single column name from lowercase to actual case."""
+            if not col or not isinstance(col, str):
+                return col
+            col_lower = col.lower()
+            return column_lookup.get(col_lower, col)  # Use original if not found
+        
+        # Map visible_columns (list of column names)
+        if "visible_columns" in mapped and isinstance(mapped["visible_columns"], list):
+            mapped["visible_columns"] = [map_column(col) for col in mapped["visible_columns"]]
+        
+        # Map column_order (list of column names)
+        if "column_order" in mapped and isinstance(mapped["column_order"], list):
+            mapped["column_order"] = [map_column(col) for col in mapped["column_order"]]
+        
+        # Map column_widths (dict with column names as keys)
+        if "column_widths" in mapped and isinstance(mapped["column_widths"], dict):
+            mapped["column_widths"] = {
+                map_column(col): width
+                for col, width in mapped["column_widths"].items()
+            }
+        
+        # Map filters (dict with column names as keys)
+        if "filters" in mapped and isinstance(mapped["filters"], dict):
+            mapped["filters"] = {
+                map_column(col): filter_value
+                for col, filter_value in mapped["filters"].items()
+            }
+        
+        # Map sort_config (list of dicts with 'column' field)
+        if "sort_config" in mapped and isinstance(mapped["sort_config"], list):
+            mapped["sort_config"] = [
+                {
+                    **item,
+                    "column": map_column(item.get("column", ""))
+                }
+                for item in mapped["sort_config"]
+            ]
+        
+        # Map conditionalFormats (nested dict with column names as keys)
+        if "conditionalFormats" in mapped and isinstance(mapped["conditionalFormats"], dict):
+            mapped["conditionalFormats"] = {
+                map_column(col): format_rules
+                for col, format_rules in mapped["conditionalFormats"].items()
+            }
+        
+        # Map cellFormatting (nested dict with column names as keys)
+        if "cellFormatting" in mapped and isinstance(mapped["cellFormatting"], dict):
+            mapped["cellFormatting"] = {
+                map_column(col): cell_format
+                for col, cell_format in mapped["cellFormatting"].items()
+            }
+        
+        # Map totalRowConfig (dict with column names as keys)
+        if "totalRowConfig" in mapped and isinstance(mapped["totalRowConfig"], dict):
+            mapped["totalRowConfig"] = {
+                map_column(col): agg_type
+                for col, agg_type in mapped["totalRowConfig"].items()
+            }
+        
+        # Map columnAlignment (nested dict with column names as keys)
+        if "design" in mapped and isinstance(mapped["design"], dict):
+            if "columnAlignment" in mapped["design"] and isinstance(mapped["design"]["columnAlignment"], dict):
+                mapped["design"]["columnAlignment"] = {
+                    map_column(col): alignment
+                    for col, alignment in mapped["design"]["columnAlignment"].items()
+                }
+        
+        # Map columnFontStyles (nested dict with column names as keys)
+        if "design" in mapped and isinstance(mapped["design"], dict):
+            if "columnFontStyles" in mapped["design"] and isinstance(mapped["design"]["columnFontStyles"], dict):
+                mapped["design"]["columnFontStyles"] = {
+                    map_column(col): font_style
+                    for col, font_style in mapped["design"]["columnFontStyles"].items()
+                }
+        
+        return mapped
+    
+    async def execute(
+        self,
+        atom_instance_id: str,
+        card_id: str,
+        configuration: Dict[str, Any],
+        input_files: List[str],
+        api_calls: List[Dict[str, Any]],
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Execute table atom based on API calls from MongoDB."""
+        from app.features.table.routes import (
+            load_table,
+            update_table,
+            save_table,
+            edit_cell,
+            delete_column,
+            insert_column,
+            rename_column,
+            round_column,
+            retype_column,
+            transform_case,
+            duplicate_column,
+            create_blank_table,
+        )
+        from app.features.table.schemas import (
+            TableLoadRequest,
+            TableUpdateRequest,
+            TableSaveRequest,
+            TableSettings,
+        )
+        from app.features.table.service import SESSIONS
+        
+        # Get primary input file
+        primary_file = input_files[0] if input_files else configuration.get("object_name", "")
+        
+        # Track table_id across operations (set by /load)
+        table_id = None
+        
+        # Check which endpoints were called
+        has_load = False
+        has_save = False
+        load_endpoint = None
+        save_endpoint = None
+        other_endpoints = []  # All other endpoints in order
+        
+        for api_call in api_calls:
+            endpoint = api_call.get("endpoint", "")
+            # Check for load endpoint
+            if "/table/load" in endpoint.lower() or endpoint.endswith("/load"):
+                has_load = True
+                load_endpoint = api_call
+            # Check for save endpoint
+            elif "/table/save" in endpoint.lower() or endpoint.endswith("/save"):
+                has_save = True
+                save_endpoint = api_call
+            # All other endpoints (update, edit-cell, column ops, etc.)
+            else:
+                other_endpoints.append(api_call)
+        
+        task_response = None
+        additional_results = {}
+        result_file = None
+        
+        # 🔧 CRITICAL: Always load column summary for replacement files (similar to pivot-table)
+        # Also build column mapping for case-insensitive matching
+        column_lookup = {}  # Maps lowercase -> original case
+        if primary_file:
+            logger.info(
+                f"📋 Table executor: Loading column summary for file '{primary_file}' "
+                f"(always loads to ensure columns are up-to-date)"
+            )
+            try:
+                from app.features.feature_overview.routes import column_summary
+                column_summary_result = await column_summary(primary_file)
+                
+                # Extract columns from column summary
+                summary = column_summary_result.get("summary", [])
+                columns = [item.get("column") for item in summary if item.get("column")]
+                
+                # Build case-insensitive column lookup (lowercase -> original case)
+                for col in columns:
+                    if col and isinstance(col, str):
+                        col_lower = col.lower()
+                        if col_lower not in column_lookup:
+                            column_lookup[col_lower] = col
+                
+                additional_results["column_summary"] = column_summary_result
+                additional_results["columns"] = columns
+                additional_results["column_lookup"] = column_lookup
+                
+                logger.info(f"✅ Table executor: Loaded {len(columns)} columns for replacement file")
+                logger.info(f"📋 Table executor: Built column lookup with {len(column_lookup)} mappings")
+            except Exception as e:
+                logger.warning(f"⚠️ Table executor: Failed to load column summary for replacement file: {e}")
+                # Don't fail the entire execution if column summary fails
+        
+        # Execute load endpoint first (required to get table_id)
+        if has_load and load_endpoint:
+            logger.info(
+                f"🔄 Table executor: Executing /load for atom {atom_instance_id} "
+                f"with file: {primary_file}"
+            )
+            
+            try:
+                # Extract configuration from API call params
+                load_config = load_endpoint.get("params", {})
+                
+                # 🔧 CRITICAL: Always use replacement file (primary_file) instead of stored object_name
+                stored_object_name = load_config.get("object_name", "")
+                object_name = primary_file if primary_file else stored_object_name
+                
+                if primary_file and primary_file != stored_object_name:
+                    logger.info(f"📋 Table executor: Using replacement file '{object_name}' instead of stored '{stored_object_name}'")
+                
+                # Build TableLoadRequest
+                request = TableLoadRequest(
+                    object_name=object_name,
+                    atom_id=atom_instance_id,
+                    project_id=kwargs.get("project_name"),
+                )
+                
+                # Call load_table endpoint directly
+                result = await load_table(
+                    request=request,
+                    client_name=kwargs.get("client_name"),
+                    app_name=kwargs.get("app_name"),
+                    project_name=kwargs.get("project_name"),
+                    card_id=card_id,
+                    canvas_position=kwargs.get("canvas_position", 0),
+                )
+                
+                # Convert Pydantic model to dict if needed
+                if hasattr(result, 'model_dump'):
+                    result_dict = result.model_dump()
+                elif hasattr(result, 'dict'):
+                    result_dict = result.dict()
+                elif isinstance(result, dict):
+                    result_dict = result
+                else:
+                    return {
+                        "status": "failed",
+                        "result_file": None,
+                        "message": "Table load returned unexpected result type",
+                        "task_response": None,
+                        "additional_results": None
+                    }
+                
+                # Extract table_id from load result
+                table_id = result_dict.get("table_id")
+                if not table_id:
+                    return {
+                        "status": "failed",
+                        "result_file": None,
+                        "message": "Table load did not return table_id",
+                        "task_response": None,
+                        "additional_results": None
+                    }
+                
+                # Store table response for frontend
+                task_response = result_dict
+                additional_results["table_data"] = result_dict
+                
+                logger.info(f"✅ Table executor: Loaded table with table_id: {table_id}")
+                
+            except Exception as e:
+                logger.error(f"❌ Error executing table load: {e}", exc_info=True)
+                return {
+                    "status": "failed",
+                    "result_file": None,
+                    "message": f"Error executing table load: {str(e)}",
+                    "task_response": None,
+                    "additional_results": None
+                }
+        
+        # Execute other endpoints in order (update, edit-cell, column ops, etc.)
+        for endpoint_call in other_endpoints:
+            endpoint = endpoint_call.get("endpoint", "")
+            params = endpoint_call.get("params", {})
+            
+            # 🔧 CRITICAL: ALWAYS override table_id with the one from load operation
+            # The stored params have the old table_id from original execution, but we need
+            # to use the new table_id from the replacement file load
+            if table_id:
+                old_table_id = params.get("table_id")
+                params["table_id"] = table_id
+                if old_table_id and old_table_id != table_id:
+                    logger.info(
+                        f"🔄 Table executor: Overriding table_id from {old_table_id} to {table_id} "
+                        f"(using new table_id from replacement file load)"
+                    )
+            
+            logger.info(
+                f"🔄 Table executor: Executing {endpoint} for atom {atom_instance_id}"
+            )
+            
+            try:
+                # Route to appropriate endpoint handler
+                if "/table/update" in endpoint.lower() or endpoint.endswith("/update"):
+                    # Build TableUpdateRequest
+                    settings_dict = params.get("settings", {})
+                    
+                    # 🔧 CRITICAL: Map lowercase column names from MongoDB config to actual column names from replacement file
+                    # This enables case-insensitive column matching when files are replaced
+                    if column_lookup and settings_dict:
+                        settings_dict = self._map_table_settings_columns(settings_dict, column_lookup)
+                        logger.info(f"📋 Table executor: Mapped column names in settings using column_lookup")
+                    
+                    request = TableUpdateRequest(
+                        table_id=params.get("table_id", table_id),
+                        settings=TableSettings(**settings_dict) if settings_dict else TableSettings(),
+                        atom_id=params.get("atom_id", atom_instance_id),
+                        project_id=params.get("project_id", kwargs.get("project_name")),
+                    )
+                    
+                    result = await update_table(
+                        request=request,
+                        client_name=kwargs.get("client_name"),
+                        app_name=kwargs.get("app_name"),
+                        project_name=kwargs.get("project_name"),
+                        card_id=card_id,
+                        canvas_position=kwargs.get("canvas_position", 0),
+                    )
+                    
+                elif "/table/edit-cell" in endpoint.lower() or endpoint.endswith("/edit-cell"):
+                    # 🔧 CRITICAL: Map column name from lowercase to actual case
+                    column = params.get("column")
+                    if column_lookup and column:
+                        column_lower = column.lower() if isinstance(column, str) else str(column).lower()
+                        column = column_lookup.get(column_lower, column)
+                    
+                    # Call edit_cell directly with params
+                    result = await edit_cell(
+                        table_id=params.get("table_id", table_id),
+                        row=params.get("row"),
+                        column=column,
+                        value=params.get("value"),
+                        atom_id=params.get("atom_id", atom_instance_id),
+                        project_id=params.get("project_id", kwargs.get("project_name")),
+                        client_name=kwargs.get("client_name"),
+                        app_name=kwargs.get("app_name"),
+                        project_name=kwargs.get("project_name"),
+                        card_id=card_id,
+                        canvas_position=kwargs.get("canvas_position", 0),
+                    )
+                    
+                elif "/table/delete-column" in endpoint.lower() or endpoint.endswith("/delete-column"):
+                    # 🔧 CRITICAL: Map column name from lowercase to actual case
+                    column = params.get("column")
+                    if column_lookup and column:
+                        column_lower = column.lower() if isinstance(column, str) else str(column).lower()
+                        column = column_lookup.get(column_lower, column)
+                    
+                    result = await delete_column(
+                        table_id=params.get("table_id", table_id),
+                        column=column,
+                    )
+                    
+                elif "/table/insert-column" in endpoint.lower() or endpoint.endswith("/insert-column"):
+                    result = await insert_column(
+                        table_id=params.get("table_id", table_id),
+                        index=params.get("index"),
+                        name=params.get("name"),
+                        default_value=params.get("default_value"),
+                    )
+                    
+                elif "/table/rename-column" in endpoint.lower() or endpoint.endswith("/rename-column"):
+                    # 🔧 CRITICAL: Map column name from lowercase to actual case
+                    old_name = params.get("old_name")
+                    if column_lookup and old_name:
+                        old_name_lower = old_name.lower() if isinstance(old_name, str) else str(old_name).lower()
+                        old_name = column_lookup.get(old_name_lower, old_name)
+                    
+                    result = await rename_column(
+                        table_id=params.get("table_id", table_id),
+                        old_name=old_name,
+                        new_name=params.get("new_name"),
+                    )
+                    
+                elif "/table/round-column" in endpoint.lower() or endpoint.endswith("/round-column"):
+                    # 🔧 CRITICAL: Map column name from lowercase to actual case
+                    column = params.get("column")
+                    if column_lookup and column:
+                        column_lower = column.lower() if isinstance(column, str) else str(column).lower()
+                        column = column_lookup.get(column_lower, column)
+                    
+                    result = await round_column(
+                        table_id=params.get("table_id", table_id),
+                        column=column,
+                        decimal_places=params.get("decimal_places"),
+                    )
+                    
+                elif "/table/retype-column" in endpoint.lower() or endpoint.endswith("/retype-column"):
+                    # 🔧 CRITICAL: Map column name from lowercase to actual case
+                    column = params.get("column")
+                    if column_lookup and column:
+                        column_lower = column.lower() if isinstance(column, str) else str(column).lower()
+                        column = column_lookup.get(column_lower, column)
+                    
+                    result = await retype_column(
+                        table_id=params.get("table_id", table_id),
+                        column=column,
+                        new_type=params.get("new_type"),
+                    )
+                    
+                elif "/table/transform-case" in endpoint.lower() or endpoint.endswith("/transform-case"):
+                    # 🔧 CRITICAL: Map column name from lowercase to actual case
+                    column = params.get("column")
+                    if column_lookup and column:
+                        column_lower = column.lower() if isinstance(column, str) else str(column).lower()
+                        column = column_lookup.get(column_lower, column)
+                    
+                    result = await transform_case(
+                        table_id=params.get("table_id", table_id),
+                        column=column,
+                        case_type=params.get("case_type"),
+                    )
+                    
+                elif "/table/duplicate-column" in endpoint.lower() or endpoint.endswith("/duplicate-column"):
+                    # 🔧 CRITICAL: Map column name from lowercase to actual case
+                    column = params.get("column")
+                    if column_lookup and column:
+                        column_lower = column.lower() if isinstance(column, str) else str(column).lower()
+                        column = column_lookup.get(column_lower, column)
+                    
+                    result = await duplicate_column(
+                        table_id=params.get("table_id", table_id),
+                        column=column,
+                        new_name=params.get("new_name"),
+                    )
+                    
+                elif "/table/create-blank" in endpoint.lower() or endpoint.endswith("/create-blank"):
+                    result = await create_blank_table(
+                        rows=params.get("rows"),
+                        columns=params.get("columns"),
+                        use_header_row=params.get("use_header_row", False),
+                    )
+                    # Extract table_id from create-blank result
+                    if isinstance(result, dict) and result.get("table_id"):
+                        table_id = result.get("table_id")
+                    
+                else:
+                    # Generic handler: Try to call the endpoint function directly if it exists
+                    # This handles any endpoints we haven't explicitly coded yet
+                    logger.warning(f"⚠️ Table executor: Unknown endpoint {endpoint}, attempting generic execution")
+                    try:
+                        # Try to import and call the endpoint function dynamically
+                        from app.features.table import routes as table_routes
+                        # Get the function from routes module
+                        endpoint_func_name = endpoint.split("/")[-1].replace("-", "_")
+                        if hasattr(table_routes, endpoint_func_name):
+                            endpoint_func = getattr(table_routes, endpoint_func_name)
+                            # Call with params as keyword arguments
+                            result = await endpoint_func(**params)
+                        else:
+                            logger.warning(f"⚠️ Table executor: Could not find function for {endpoint}, skipping")
+                            continue
+                    except Exception as e:
+                        logger.error(f"❌ Table executor: Failed to execute {endpoint} generically: {e}")
+                        continue
+                
+                # Update table_id if it changed (e.g., from create-blank)
+                if isinstance(result, dict) and result.get("table_id"):
+                    table_id = result.get("table_id")
+                
+                # 🔧 CRITICAL: Update table_data after each operation that returns table data
+                # This ensures the final table_data includes all operations (sort, rename, etc.)
+                # Most table operations return a TableResponse with table_id, columns, rows, etc.
+                # Convert Pydantic model to dict if needed (do this FIRST, before checking isinstance)
+                result_dict = None
+                if hasattr(result, 'model_dump'):
+                    result_dict = result.model_dump()
+                elif hasattr(result, 'dict'):
+                    result_dict = result.dict()
+                elif isinstance(result, dict):
+                    result_dict = result
+                
+                # If this result has table_id, it's a table response - update table_data
+                if result_dict and result_dict.get("table_id"):
+                    additional_results["table_data"] = result_dict
+                    task_response = result_dict  # Also update task_response to latest state
+                    logger.info(f"📊 Table executor: Updated table_data after {endpoint} (table_id: {result_dict.get('table_id')}, rows: {len(result_dict.get('rows', []))})")
+                elif result_dict:
+                    logger.warning(f"⚠️ Table executor: Result from {endpoint} does not have table_id, skipping table_data update")
+                
+                logger.info(f"✅ Table executor: Executed {endpoint} successfully")
+                
+            except Exception as e:
+                logger.error(f"❌ Error executing table endpoint {endpoint}: {e}", exc_info=True)
+                # Continue with next endpoint instead of failing entire execution
+                continue
+        
+        # Execute save endpoint if it was called
+        if has_save and save_endpoint:
+            logger.info(
+                f"💾 Table executor: Executing /save for atom {atom_instance_id}"
+            )
+            
+            try:
+                # Extract configuration from API call params
+                save_config = save_endpoint.get("params", {})
+                
+                # Use table_id from load or params
+                save_table_id = save_config.get("table_id", table_id)
+                if not save_table_id:
+                    return {
+                        "status": "failed",
+                        "result_file": None,
+                        "message": "Cannot save: table_id not found",
+                        "task_response": task_response,
+                        "additional_results": additional_results if additional_results else None
+                    }
+                
+                # Build TableSaveRequest
+                request = TableSaveRequest(
+                    table_id=save_table_id,
+                    filename=save_config.get("filename"),
+                    overwrite_original=save_config.get("overwrite_original", False),
+                    use_header_row=save_config.get("use_header_row", False),
+                    conditional_format_rules=save_config.get("conditional_format_rules"),
+                    metadata=save_config.get("metadata"),
+                    atom_id=save_config.get("atom_id", atom_instance_id),
+                    project_id=save_config.get("project_id", kwargs.get("project_name")),
+                )
+                
+                # Call save_table endpoint directly
+                save_result = await save_table(
+                    request=request,
+                    client_name=kwargs.get("client_name"),
+                    app_name=kwargs.get("app_name"),
+                    project_name=kwargs.get("project_name"),
+                    card_id=card_id,
+                    canvas_position=kwargs.get("canvas_position", 0),
+                )
+                
+                # Convert Pydantic model to dict if needed
+                if hasattr(save_result, 'model_dump'):
+                    save_result_dict = save_result.model_dump()
+                elif hasattr(save_result, 'dict'):
+                    save_result_dict = save_result.dict()
+                elif isinstance(save_result, dict):
+                    save_result_dict = save_result
+                else:
+                    logger.warning("⚠️ Table save returned unexpected result")
+                    save_result_dict = {}
+                
+                result_file = save_result_dict.get("object_name")
+                additional_results["saved_file"] = result_file
+                additional_results["save_result"] = save_result_dict
+                
+            except Exception as e:
+                logger.error(f"❌ Error executing table save: {e}", exc_info=True)
+                # Don't fail the whole execution if save fails
+                logger.warning("⚠️ Table save failed, but other operations were successful")
+        
+        # 🔧 CRITICAL: Ensure we have the final table_data after all operations
+        # If the last operation didn't return table_data, use the last one we have
+        if table_id and "table_data" not in additional_results:
+            if task_response and isinstance(task_response, dict) and task_response.get("table_id"):
+                # Use the last task_response we have (from the last operation)
+                additional_results["table_data"] = task_response
+                logger.info(f"📊 Table executor: Using last task_response as final table_data (table_id: {table_id})")
+            else:
+                logger.warning(f"⚠️ Table executor: No table_data available after all operations (table_id: {table_id})")
+        
+        # 🔧 CRITICAL: Always ensure table_data has the latest table_id
+        # This is important because table_id might have changed during operations
+        if "table_data" in additional_results and table_id:
+            additional_results["table_data"]["table_id"] = table_id
+        
+        if has_load:
+            return {
+                "status": "success",
+                "result_file": result_file,
+                "message": "Table executed successfully",
+                "task_response": task_response,
+                "additional_results": additional_results if additional_results else None
+            }
+        else:
+            return {
+                "status": "failed",
+                "result_file": None,
+                "message": "No matching table endpoint found in API calls",
+                "task_response": None,
+                "additional_results": None
+            }
+
+
+_table_executor = TableExecutor()
+register_atom_executor(_table_executor)
 
 
 async def execute_atom_step(
