@@ -2226,18 +2226,9 @@ async def save_dataframes(
                 df_pl = None
             else:
                 data_bytes = fileobj.read()
-                # Use RobustFileReader which handles column preservation automatically
-                df_result, _ = RobustFileReader.read_file_to_polars(
-                    content=data_bytes,
-                    filename=filename,
-                    auto_detect_header=True,
-                    return_raw=False,
-                )
-                # Handle both single DataFrame and dict (multiple sheets)
-                if isinstance(df_result, dict):
-                    df_pl = list(df_result.values())[0]  # Use first sheet
-                else:
-                    df_pl = df_result
+                # Use pl.read_csv with CSV_READ_KWARGS for proper dtype inference
+                # This matches the old routes behavior and preserves numeric types
+                df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
                 df_pl = data_upload_service._normalize_column_names(df_pl)
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)
@@ -5583,6 +5574,8 @@ async def finalize_primed_file(request: Request):
     - file_name: str (desired file name for saved dataframe)
     - client_name, app_name, project_name: str (for prefix)
     - validator_atom_id: str (optional, for flight path)
+    - column_classifications: list[dict] (optional, from guided flow U4 stage)
+      Each dict has: columnName, columnRole ('identifier' | 'measure')
     """
     try:
         body = await request.json()
@@ -5597,6 +5590,8 @@ async def finalize_primed_file(request: Request):
         app_name = body.get("app_name", "")
         project_name = body.get("project_name", "")
         validator_atom_id = body.get("validator_atom_id", "guided-upload")
+        # Column classifications from guided flow (U4 stage)
+        column_classifications = body.get("column_classifications", [])
         
         if not file_path:
             raise HTTPException(status_code=400, detail="file_path is required")
@@ -5684,6 +5679,90 @@ async def finalize_primed_file(request: Request):
         primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
         redis_client.set(primed_key_parts, "true", ttl=86400 * 30)
         
+        # Save column classifications to MongoDB if provided from guided flow
+        if column_classifications:
+            try:
+                # Extract identifiers and measures from guided flow classifications
+                identifiers = []
+                measures = []
+                unclassified = []
+                
+                for col_class in column_classifications:
+                    col_name = str(col_class.get("columnName", "")).strip().lower()
+                    col_role = col_class.get("columnRole", "")
+                    
+                    if col_role == "identifier":
+                        identifiers.append(col_name)
+                    elif col_role == "measure":
+                        measures.append(col_name)
+                    else:
+                        unclassified.append(col_name)
+                
+                # Get project_id from env
+                project_id = None
+                env = None
+                try:
+                    env = await get_env_vars(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                    )
+                    if env:
+                        project_id_str = env.get("PROJECT_ID")
+                        if project_id_str:
+                            project_id = int(project_id_str)
+                except Exception as e:
+                    logger.warning(f"Failed to get project_id: {e}")
+                
+                # Save to MongoDB using same pattern as column classifier atom
+                config_data = {
+                    "project_id": project_id,
+                    "client_name": client_name,
+                    "app_name": app_name,
+                    "project_name": project_name,
+                    "identifiers": identifiers,
+                    "measures": measures,
+                    "unclassified": unclassified,
+                    "dimensions": {},  # Empty dimensions object (same as column classifier)
+                    "file_name": saved_object_name,
+                }
+                
+                # Add env if available
+                if env:
+                    config_data["env"] = env
+                
+                mongo_result = save_classifier_config_to_mongo(config_data)
+                logger.info(f"✅ Saved guided flow classification: {saved_object_name} | {len(identifiers)} identifiers, {len(measures)} measures, {len(unclassified)} unclassified")
+            except Exception as e:
+                logger.warning(f"Failed to save column classifications: {e}")
+                # Don't fail the whole operation if classification save fails
+        else:
+            # No classifications provided - run auto-classification
+            try:
+                project_id = None
+                try:
+                    env = await get_env_vars(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                    )
+                    if env:
+                        project_id_str = env.get("PROJECT_ID")
+                        if project_id_str:
+                            project_id = int(project_id_str)
+                except Exception:
+                    pass
+                
+                await _auto_classify_and_save_file(
+                    object_name=saved_object_name,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    project_id=project_id,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to auto-classify file: {e}")
+        
         # Remove the temp file
         if file_path.startswith(prefix + "tmp/") or "/tmp/" in file_path:
             try:
@@ -5699,6 +5778,7 @@ async def finalize_primed_file(request: Request):
             "flight_path": flight_path,
             "rows": len(df_pl),
             "columns": len(df_pl.columns),
+            "classification_saved": bool(column_classifications),
         }
         
     except HTTPException:

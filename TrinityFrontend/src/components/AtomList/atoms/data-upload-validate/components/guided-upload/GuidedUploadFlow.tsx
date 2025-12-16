@@ -14,6 +14,8 @@ import { U7Success } from './stages/U7Success';
 import { ArrowLeft, RotateCcw, X, Minimize2, Maximize2 } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import { VALIDATE_API } from '@/lib/api';
+import { GuidedUploadFlowState } from '../../../data-upload/components/guided-upload';
 
 interface GuidedUploadFlowProps {
   open: boolean;
@@ -127,12 +129,55 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
       // Move from U6 (Final Preview) to U7 (Success)
       goToNextStage();
     } else if (state.currentStage === 'U7') {
-      // Flow complete - mark files as primed
+      // Flow complete - finalize and save primed files
       const projectContext = getActiveProjectContext();
       if (projectContext && state.uploadedFiles.length > 0) {
-        // Mark each uploaded file as primed
         for (const file of state.uploadedFiles) {
-          await markFileAsPrimed(file.path || file.name);
+          // Finalize the primed file - save transformed data to saved dataframes location
+          try {
+            console.log('🔄 Finalizing primed file:', file.path || file.name);
+            
+            // Get column classifications from dataTypeSelections (U4 stage)
+            const dataTypes = state.dataTypeSelections[file.name] || [];
+            const columnClassifications = dataTypes.map(dt => ({
+              columnName: dt.columnName,
+              columnRole: dt.columnRole || 'identifier', // Default to identifier if not set
+            }));
+            
+            console.log('📊 Sending column classifications:', columnClassifications);
+            
+            const finalizeRes = await fetch(`${VALIDATE_API}/finalize-primed-file`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                file_path: file.path,
+                file_name: file.name,
+                client_name: projectContext.client_name || '',
+                app_name: projectContext.app_name || '',
+                project_name: projectContext.project_name || '',
+                validator_atom_id: 'guided-upload',
+                column_classifications: columnClassifications,
+              }),
+            });
+            
+            if (finalizeRes.ok) {
+              const result = await finalizeRes.json();
+              console.log('✅ File finalized successfully:', result);
+              // Trigger refresh of SavedDataFramesPanel
+              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+                detail: { filePath: result.saved_path, fileName: file.name } 
+              }));
+            } else {
+              console.warn('⚠️ Failed to finalize file:', await finalizeRes.text());
+              // Fallback to just marking as primed
+              await markFileAsPrimed(file.path || file.name);
+            }
+          } catch (error) {
+            console.error('Error finalizing primed file:', error);
+            // Fallback to just marking as primed
+            await markFileAsPrimed(file.path || file.name);
+          }
         }
       }
       

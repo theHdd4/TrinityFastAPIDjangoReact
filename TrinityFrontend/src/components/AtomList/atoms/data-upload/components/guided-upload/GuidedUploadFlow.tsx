@@ -229,6 +229,16 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
           // Finalize the primed file - save transformed data to saved dataframes location
           try {
             console.log('🔄 Finalizing primed file:', file.path || file.name);
+            
+            // Get column classifications from dataTypeSelections (U4 stage)
+            const dataTypes = state.dataTypeSelections[file.name] || [];
+            const columnClassifications = dataTypes.map(dt => ({
+              columnName: dt.columnName,
+              columnRole: dt.columnRole || 'identifier', // Default to identifier if not set
+            }));
+            
+            console.log('📊 Sending column classifications:', columnClassifications);
+            
             const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -240,6 +250,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
                 app_name: projectContext.app_name || '',
                 project_name: projectContext.project_name || '',
                 validator_atom_id: 'guided-upload',
+                column_classifications: columnClassifications,
               }),
             });
             
