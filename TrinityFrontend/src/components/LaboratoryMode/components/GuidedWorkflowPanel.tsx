@@ -3,10 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Upload, Play, X, Settings, ChevronRight, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VerticalProgressStepper } from '@/components/AtomList/atoms/data-upload/components/guided-upload/VerticalProgressStepper';
-import { VerticalProgressStepper as MetricVerticalProgressStepper } from '@/components/LaboratoryMode/components/SettingsPanel/metricstabs/metricguildeflow/VerticalProgressStepper';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import type { UploadStage } from '@/components/AtomList/atoms/data-upload/components/guided-upload/useGuidedUploadFlow';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface GuidedWorkflowPanelProps {
   isCollapsed: boolean;
@@ -21,8 +19,6 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
 }) => {
   // Get active guided flows from the laboratory store
   const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows || {});
-  const activeMetricGuidedFlow = useLaboratoryStore((state) => state.activeMetricGuidedFlow);
-  const isMetricGuidedFlowOpen = useLaboratoryStore((state) => state.isMetricGuidedFlowOpen);
   const getAtom = useLaboratoryStore((state) => state.getAtom);
   const updateGuidedFlowStage = useLaboratoryStore((state) => state.updateGuidedFlowStage);
   const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
@@ -196,43 +192,6 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
             >
               <Play className="w-4 h-4 mr-2" />
               Start Analysis
-            </Button>
-          </div>
-        ) : isMetricGuidedFlowOpen ? (
-          // Metric flow active
-          <div className="space-y-2">
-            <Button
-              onClick={() => openMetricGuidedFlow()}
-              variant="outline"
-              className="w-full"
-              size="sm"
-            >
-              <Settings className="w-4 h-4 mr-2" />
-              Open Metric Flow
-            </Button>
-          </div>
-        ) : (
-          // No active flows - show action buttons
-          <div className="space-y-2">
-            <Button
-              onClick={async () => {
-                if (onCreateDataUploadAtom) {
-                  await onCreateDataUploadAtom();
-                }
-              }}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-              size="sm"
-            >
-              <Upload className="w-4 h-4 mr-2" />
-              Upload Dataset
-            </Button>
-            <Button
-              onClick={() => openMetricGuidedFlow()}
-              className="w-full bg-green-600 hover:bg-green-700 text-white"
-              size="sm"
-            >
-              <Settings className="w-4 h-4 mr-2" />
-              Create Metric
             </Button>
           </div>
         )}

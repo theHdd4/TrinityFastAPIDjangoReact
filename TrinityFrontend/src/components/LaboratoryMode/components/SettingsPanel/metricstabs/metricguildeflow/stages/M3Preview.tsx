@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Sparkles, Table, ExternalLink, Database } from 'lucide-react';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseMetricGuidedFlow } from '../useMetricGuidedFlow';
-import type { CreatedVariable, CreatedColumn } from '../useMetricGuidedFlow';
+import type { CreatedVariable, CreatedColumn, CreatedTable } from '../useMetricGuidedFlow';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 
 interface M3PreviewProps {
@@ -160,6 +160,38 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) =
     return null;
   };
 
+  // Group columns by tableName
+  const columnsByTable = useMemo(() => {
+    const grouped: Record<string, CreatedColumn[]> = {};
+    state.createdColumns.forEach(col => {
+      if (!grouped[col.tableName]) {
+        grouped[col.tableName] = [];
+      }
+      grouped[col.tableName].push(col);
+    });
+    return grouped;
+  }, [state.createdColumns]);
+
+  // Map table names to CreatedTable objects to get original table name
+  const tableMap = useMemo(() => {
+    const map: Record<string, CreatedTable> = {};
+    state.createdTables.forEach(table => {
+      map[table.newTableName] = table;
+    });
+    return map;
+  }, [state.createdTables]);
+
+  // Determine if a table is new (created via Save As) or existing (modified via Save)
+  const isNewTable = (tableName: string): boolean => {
+    // If it exists in createdTables, it's definitely a new table
+    if (tableMap[tableName]) {
+      return true;
+    }
+    // If tableName doesn't match the original dataSource, it's a new table
+    // Otherwise, it's an existing table (modified via Save)
+    return tableName !== state.dataSource;
+  };
+
   const hasCreatedItems = 
     state.createdVariables.length > 0 ||
     state.createdColumns.length > 0 ||
@@ -173,11 +205,19 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) =
       <div className="space-y-6">
         {/* Success Message */}
         <div className="text-sm text-gray-600">
-          {hasCreatedItems && (
-            <span>
-              Successfully created {state.createdVariables.length + state.createdColumns.length + state.createdTables.length} metric(s)
-            </span>
-          )}
+          {hasCreatedItems && (() => {
+            const varCount = state.createdVariables.length;
+            const colCount = state.createdColumns.length;
+            const tableCount = state.createdTables.length;
+            const uniqueTableCount = Object.keys(columnsByTable).length;
+            
+            const parts: string[] = [];
+            if (varCount > 0) parts.push(`${varCount} variable${varCount !== 1 ? 's' : ''}`);
+            if (colCount > 0) parts.push(`${colCount} column${colCount !== 1 ? 's' : ''} in ${uniqueTableCount} table${uniqueTableCount !== 1 ? 's' : ''}`);
+            if (tableCount > 0) parts.push(`${tableCount} new table${tableCount !== 1 ? 's' : ''}`);
+            
+            return <span>Successfully created {parts.join(', ')}</span>;
+          })()}
         </div>
           {!hasCreatedItems ? (
             <div className="text-center py-8 text-gray-500">
@@ -231,7 +271,7 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) =
                 </div>
               )}
 
-              {/* Columns Section */}
+              {/* Columns Section - Grouped by Table */}
               {state.createdColumns.length > 0 && (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
@@ -239,35 +279,64 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) =
                     <h4 className="text-lg font-semibold">Columns</h4>
                     <Badge variant="secondary">{state.createdColumns.length}</Badge>
                   </div>
-                  <div className="space-y-2">
-                    {state.createdColumns.map((column, idx) => (
-                      <div
-                        key={idx}
-                        className="p-4 border rounded-lg bg-green-50/50 border-green-200"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900">{column.columnName}</div>
-                            <div className="text-sm text-gray-600 mt-1">
-                              {buildColumnDescription(column)}
+                  <div className="space-y-3">
+                    {Object.entries(columnsByTable).map(([tableName, columns]) => {
+                      const isNew = isNewTable(tableName);
+                      const tableInfo = tableMap[tableName];
+                      const columnArray: CreatedColumn[] = columns;
+                      const columnCount = columnArray.length;
+                      const firstColumn = columnArray[0];
+                      
+                      // Determine the message
+                      let headerMessage = '';
+                      if (isNew && tableInfo) {
+                        headerMessage = `Created ${columnCount} column${columnCount !== 1 ? 's' : ''} and saved into a new table: ${tableName} from ${tableInfo.originalTableName}`;
+                      } else {
+                        headerMessage = `Created ${columnCount} column${columnCount !== 1 ? 's' : ''} in this table: ${tableName}`;
+                      }
+                      
+                      return (
+                        <div
+                          key={tableName}
+                          className="p-4 border rounded-lg bg-green-50/50 border-green-200"
+                        >
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex-1">
+                              <div className="text-sm font-semibold text-gray-900 mb-2">
+                                {headerMessage}
+                              </div>
+                              <div className="space-y-2 mt-3">
+                                {columnArray.map((column, colIdx) => (
+                                  <div
+                                    key={colIdx}
+                                    className="pl-3 border-l-2 border-green-300 py-2"
+                                  >
+                                    <div className="font-medium text-gray-900 text-sm">
+                                      {column.columnName}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1">
+                                      {buildColumnDescription(column)}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              Table: {column.tableName}
+                            <div className="flex items-center gap-2 ml-4">
+                              <Badge className="bg-green-100 text-green-700">
+                                {columnCount} {columnCount === 1 ? 'Column' : 'Columns'}
+                              </Badge>
+                              <button
+                                onClick={() => handleViewTable(firstColumn.objectName)}
+                                className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                View
+                              </button>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge className="bg-green-100 text-green-700">Column</Badge>
-                            <button
-                              onClick={() => handleViewTable(column.objectName)}
-                              className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              View
-                            </button>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -281,31 +350,42 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) =
                     <Badge variant="secondary">{state.createdTables.length}</Badge>
                   </div>
                   <div className="space-y-2">
-                    {state.createdTables.map((table, idx) => (
-                      <div
-                        key={idx}
-                        className="p-4 border rounded-lg bg-purple-50/50 border-purple-200"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900">{table.newTableName}</div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              From: {table.originalTableName}
+                    {state.createdTables.map((table, idx) => {
+                      // Find columns that belong to this table
+                      const tableColumns: CreatedColumn[] = columnsByTable[table.newTableName] || [];
+                      const columnCount = tableColumns.length;
+                      
+                      return (
+                        <div
+                          key={idx}
+                          className="p-4 border rounded-lg bg-purple-50/50 border-purple-200"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900">{table.newTableName}</div>
+                              <div className="text-xs text-gray-500 mt-1">
+                                From: {table.originalTableName}
+                              </div>
+                              {columnCount > 0 && (
+                                <div className="text-xs text-gray-600 mt-1">
+                                  Contains {columnCount} column{columnCount !== 1 ? 's' : ''}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge className="bg-purple-100 text-purple-700">Table</Badge>
+                              <button
+                                onClick={() => handleViewTable(table.objectName)}
+                                className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                View
+                              </button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Badge className="bg-purple-100 text-purple-700">Table</Badge>
-                            <button
-                              onClick={() => handleViewTable(table.objectName)}
-                              className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              View
-                            </button>
-                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
