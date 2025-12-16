@@ -3,9 +3,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { ProgressStepper } from './ProgressStepper';
 import { useGuidedUploadFlow, type UploadStage } from './useGuidedUploadFlow';
-import { U0FileUpload } from './stages/U0FileUpload';
-import { U1StructuralScan } from './stages/U1StructuralScan';
 import { U2UnderstandingFiles } from './stages/U2UnderstandingFiles';
+import { U1StructuralScan } from './stages/U1StructuralScan';
 import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
 import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
 import { U5MissingValues } from './stages/U5MissingValues';
@@ -40,24 +39,26 @@ interface GuidedUploadFlowProps {
 }
 
 const STAGE_COMPONENTS: Record<UploadStage, React.ComponentType<any>> = {
-  U0: U0FileUpload,
-  U1: U1StructuralScan,
-  U2: U2UnderstandingFiles,
+  U0: U2UnderstandingFiles, // U0 is handled by atom (not used in flow)
+  U1: U1StructuralScan, // Step 2: Structural Scan (first step shown in guided panel)
+  U2: U2UnderstandingFiles, // Step 3: Confirm Headers
   U3: U3ReviewColumnNames,
   U4: U4ReviewDataTypes,
-  U5: U5MissingValues,   // U5: Missing Value Review
-  U6: U6FinalPreview,    // U6: Final Preview & Data Primed
-  U7: U7Success,         // U7: Priming Completed & Next Actions
+  U5: U5MissingValues,
+  U6: U6FinalPreview,
+  U7: U7Success,
 };
 
+// Step 1 (Atom): Split panel for file selection/upload - NOT shown in panel
+// Panel flow shows U1-U7
 const STAGE_TITLES: Record<UploadStage, string> = {
-  U0: 'Upload Your Dataset',
+  U0: 'Choose Your Data Source', // Handled by atom (not shown in panel)
   U1: 'Structural Scan',
-  U2: 'Step 3: Confirm Your Column Headers',
-  U3: 'Step 4: Review Your Column Names',
-  U4: 'Step 5: Review Your Column Types',
-  U5: 'Step 6: Review Missing Values',
-  U6: 'Step 7: Final Preview Before Priming',
+  U2: 'Confirm Your Column Headers',
+  U3: 'Review Your Column Names',
+  U4: 'Review Your Column Types',
+  U5: 'Review Missing Values',
+  U6: 'Final Preview Before Priming',
   U7: 'Your Data Is Ready',
 };
 
@@ -75,8 +76,8 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
   const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage } = flow;
   const { saveState, markFileAsPrimed } = useGuidedFlowPersistence();
 
-  // Determine initial stage
-  const effectiveInitialStage = initialStage || (existingDataframe ? 'U1' : 'U0');
+  // Determine initial stage - always start from U1 now (U0 is handled by atom)
+  const effectiveInitialStage = initialStage || 'U1';
 
   // Initialize flow state on open
   React.useEffect(() => {
@@ -101,8 +102,8 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
       }]);
     }
 
-    // Set initial stage
-    if (state.currentStage === 'U0' && effectiveInitialStage !== 'U0') {
+    // Set initial stage - ensure we start from U1
+    if (state.currentStage !== effectiveInitialStage && effectiveInitialStage) {
       goToStage(effectiveInitialStage);
     }
   }, [open, existingDataframe, initialStage, effectiveInitialStage, savedState, state.currentStage, state.uploadedFiles.length, addUploadedFiles, goToStage]);
@@ -344,19 +345,11 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
   };
 
   const handleBack = () => {
-    // For existing dataframes, prevent going back to U0
-    if (existingDataframe) {
-      if (state.currentStage === 'U1') {
-        onOpenChange(false);
-      } else {
-        goToPreviousStage();
-      }
+    // U1 is now the first stage in the panel (U0 is handled by atom), so close the dialog if we're at U1
+    if (state.currentStage === 'U1') {
+      onOpenChange(false);
     } else {
-      if (state.currentStage === 'U0') {
-        onOpenChange(false);
-      } else {
-        goToPreviousStage();
-      }
+      goToPreviousStage();
     }
   };
 
@@ -369,14 +362,12 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
   };
 
   const CurrentStageComponent = STAGE_COMPONENTS[state.currentStage];
-  // For existing dataframes, don't allow going back to U0
-  const canGoBack = existingDataframe ? state.currentStage !== 'U1' : state.currentStage !== 'U0';
+  // U1 is now the first stage in the panel (U0 is handled by atom)
+  const canGoBack = state.currentStage !== 'U1';
   const isLastStage = state.currentStage === 'U7';
   
-  // Hide U0 stage from progress stepper if existing dataframe
-  const visibleStages = existingDataframe 
-    ? ['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'] as UploadStage[]
-    : ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'] as UploadStage[];
+  // U0 is handled by atom split panel, flow starts from U1
+  const visibleStages = ['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'] as UploadStage[];
 
   const toggleMinimize = () => {
     setIsMinimized(!isMinimized);
@@ -410,7 +401,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
             </h2>
             {!isMinimized && (
               <div className="flex-1">
-                <ProgressStepper currentStage={state.currentStage} hideStages={existingDataframe ? ['U0'] : []} />
+                <ProgressStepper currentStage={state.currentStage} hideStages={['U0']} />
               </div>
             )}
           </div>
@@ -449,7 +440,15 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
 
         {/* Stage Content */}
         <div className={`flex-1 overflow-y-auto ${isMinimized ? 'hidden' : ''} p-6`}>
-          {state.currentStage === 'U1' || state.currentStage === 'U2' ? (
+          {state.currentStage === 'U1' ? (
+            <CurrentStageComponent 
+              flow={flow} 
+              onNext={handleNext} 
+              onBack={handleBack}
+              onRestart={handleRestart}
+              onCancel={handleCancel}
+            />
+          ) : state.currentStage === 'U2' ? (
             <CurrentStageComponent 
               flow={flow} 
               onNext={handleNext} 
@@ -476,7 +475,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
         </div>
 
         {/* Navigation Footer - Consistent across all stages (hidden for U1, U2, U6, and U7 as they have their own controls) */}
-        {!isMinimized && state.currentStage !== 'U1' && state.currentStage !== 'U2' && state.currentStage !== 'U6' && state.currentStage !== 'U7' && (
+        {!isMinimized && !['U1', 'U2', 'U6', 'U7'].includes(state.currentStage) && (
           <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0">
             <div className="flex gap-2">
               {canGoBack && (

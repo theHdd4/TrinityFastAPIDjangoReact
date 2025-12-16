@@ -196,7 +196,10 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
       setSelectedSheets([]);
       setHasMultipleSheets(false);
       setTempUploadMeta(null);
-      setIsUploadModalOpen(true);
+      // In guided mode, don't show modal - just upload directly
+      if (!globalGuidedModeEnabled) {
+        setIsUploadModalOpen(true);
+      }
       void uploadSelectedFile(firstFile);
     }
   };
@@ -344,7 +347,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     setUploadingFile(true);
     try {
       if (globalGuidedModeEnabled) {
-        // Guided mode: Don't save yet, start guided flow at U1 with the temp file
+        // Guided mode: Don't save yet, start guided flow at U1 (Structural Scan)
         const fileKey = deriveFileKey(meta.file_name);
         const uploadedFileInfo = {
           name: meta.file_name,
@@ -354,7 +357,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           processed: false,
         };
         
-        // Start guided flow at U1 with the uploaded file
+        // Start guided flow at U1 (Structural Scan) - atom split panel is Step 1
         setActiveGuidedFlow(atomId, 'U1', {
           uploadedFiles: [uploadedFileInfo],
           currentStage: 'U1',
@@ -362,6 +365,8 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
         
         toast({ title: 'File uploaded', description: `${meta.file_name} is ready for processing.` });
         resetUploadState();
+        // Refresh saved dataframes list in case backend saved it
+        fetchSavedDataframes();
       } else {
         // Non-guided mode: Save directly
         const form = new FormData();
@@ -405,7 +410,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     setUploadingFile(true);
     try {
       if (globalGuidedModeEnabled) {
-        // Guided mode: Create file info for each sheet and start guided flow at U1
+        // Guided mode: Create file info for each sheet and start guided flow at U1 (Structural Scan)
         const uploadedFiles = sheetsToSave.map((sheetName) => {
           const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
           const excelFolderName = fileName.replace(/\.[^.]+$/, '').replace(/\s+/g, '_').replace(/\./g, '_');
@@ -423,7 +428,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           };
         });
         
-        // Start guided flow at U1 with the uploaded files
+        // Start guided flow at U1 (Structural Scan) - atom split panel is Step 1
         setActiveGuidedFlow(atomId, 'U1', {
           uploadedFiles: uploadedFiles,
           currentStage: 'U1',
@@ -431,6 +436,8 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
         
         toast({ title: 'Files uploaded', description: `${sheetsToSave.length} sheet(s) ready for processing.` });
         resetUploadState();
+        // Refresh saved dataframes list in case backend saved it
+        fetchSavedDataframes();
       } else {
         // Non-guided mode: Save directly
         for (const sheetName of sheetsToSave) {
@@ -497,7 +504,10 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     setSelectedSheets([]);
     setHasMultipleSheets(false);
     setTempUploadMeta(null);
-    setIsUploadModalOpen(true);
+    // In guided mode, don't show modal - just upload directly
+    if (!globalGuidedModeEnabled) {
+      setIsUploadModalOpen(true);
+    }
     void uploadSelectedFile(firstFile);
     event.target.value = '';
   };
@@ -511,64 +521,90 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
 
 
 
-  return (
-    <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
-      <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white flex-1">
-        <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
-          {/* Saved Dataframes Count - Compact */}
-          {savedDataframes.length > 0 && (
-            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-              <div className="flex items-center gap-2">
-                <FolderOpen className="w-4 h-4 text-blue-600" />
-                <span className="text-xs text-blue-800">
-                  <strong>{savedDataframes.length}</strong> dataframe{savedDataframes.length !== 1 ? 's' : ''} saved in project
-                </span>
-              </div>
+  // Handle selecting an existing dataframe in guided mode
+  const handleSelectExistingDataframe = (dataframe: SavedDataframe) => {
+    if (!globalGuidedModeEnabled) return;
+    
+    const fileKey = dataframe.object_name.replace(/\.[^.]+$/, '').split('/').pop() || 'dataframe';
+    const uploadedFileInfo = {
+      name: dataframe.csv_name || dataframe.object_name.split('/').pop() || 'dataframe',
+      path: dataframe.object_name,
+      size: 0,
+      fileKey: fileKey,
+      processed: true,
+    };
+    
+    // Start guided flow at U1 (Structural Scan) - atom split panel is Step 1
+    setActiveGuidedFlow(atomId, 'U1', {
+      uploadedFiles: [uploadedFileInfo],
+      currentStage: 'U1',
+    });
+    
+    toast({
+      title: 'File selected',
+      description: `${dataframe.csv_name || dataframe.object_name} selected for processing.`,
+    });
+  };
+
+  // Render guided mode split panel
+  const renderGuidedModeSplitPanel = () => (
+    <div className="w-full h-full flex gap-3 p-3">
+      {/* Left Panel - Select from Saved Dataframes */}
+      <div className="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+          <h3 className="text-sm font-semibold text-gray-800">Select from Saved Dataframes</h3>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+            </div>
+          ) : fetchError ? (
+            <div className="text-center py-4">
+              <p className="text-xs text-gray-500 mb-2">{fetchError}</p>
+              <Button variant="outline" size="sm" onClick={fetchSavedDataframes}>
+                <RefreshCw className="w-3 h-3 mr-1" />
+                Retry
+              </Button>
+            </div>
+          ) : savedDataframes.length === 0 ? (
+            <div className="text-center py-4 text-gray-500">
+              <Database className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+              <p className="text-xs">No saved dataframes available</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {savedDataframes.map((df, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSelectExistingDataframe(df)}
+                  className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors group"
+                >
+                  <div className="flex items-center gap-2">
+                    <Database className="w-4 h-4 text-gray-400 group-hover:text-blue-500" />
+                    <span className="text-sm font-medium text-gray-700 truncate group-hover:text-blue-700">
+                      {df.csv_name || df.object_name.split('/').pop()}
+                    </span>
+                  </div>
+                  {df.last_modified && (
+                    <p className="text-xs text-gray-400 mt-1 ml-6">
+                      Modified: {new Date(df.last_modified).toLocaleDateString()}
+                    </p>
+                  )}
+                </button>
+              ))}
             </div>
           )}
+        </div>
+      </div>
 
-          {/* Primed Files Summary - Compact */}
-        {primedFiles.length > 0 && (
-            <div className="p-3 bg-green-50 rounded-lg border border-green-200">
-              <div className="flex items-center gap-2 mb-1">
-                <CheckCircle2 className="w-4 h-4 text-green-600" />
-                <span className="text-xs font-medium text-green-800">Primed Files ({primedFiles.length})</span>
-            </div>
-              <div className="space-y-0.5">
-                {primedFiles.slice(0, 2).map((file, idx) => (
-                  <div key={idx} className="text-xs text-green-700 flex items-center gap-1.5">
-                    <Database className="w-3 h-3" />
-                    <span className="truncate">{file}</span>
-                </div>
-              ))}
-                {primedFiles.length > 2 && (
-                  <div className="text-xs text-green-600 italic">
-                    +{primedFiles.length - 2} more files
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-          {/* Error notice (non-blocking) - Compact */}
-        {fetchError && savedDataframes.length === 0 && (
-            <div className="p-2 bg-amber-50 rounded-lg border border-amber-200">
-            <div className="flex items-center gap-2">
-                <AlertCircle className="w-3 h-3 text-amber-600 flex-shrink-0" />
-                <span className="text-xs text-amber-700 flex-1">
-                Could not load saved dataframes. You can still upload files.
-              </span>
-              <button
-                onClick={fetchSavedDataframes}
-                  className="text-amber-700 hover:text-amber-800 text-xs underline"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
-
-          {/* Hidden file input for non-guided upload */}
+      {/* Right Panel - Upload New Files */}
+      <div className="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+          <h3 className="text-sm font-semibold text-gray-800">Upload New Files</h3>
+        </div>
+        <div className="flex-1 p-3 flex flex-col">
+          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -577,39 +613,149 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
             multiple
             onChange={handleFileInput}
           />
-
-          {/* Drag and Drop Area - Compact */}
-          <div
-            className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 p-4 cursor-pointer ${
-              isDragOver 
-                ? 'border-blue-400 bg-blue-50' 
-                : 'border-blue-300 hover:border-blue-400 bg-blue-50/50'
-            }`}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onClick={handleUploadAreaClick}
-          >
-            <div className="mb-3">
-              <div className={`mx-auto rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md transform transition-transform duration-300 ${
-                isDragOver ? 'scale-110' : 'hover:scale-105'
-              } w-12 h-12 mb-2`}>
-                <Upload className="text-white drop-shadow-lg w-6 h-6" />
-                </div>
-              <p className="text-xs font-medium text-gray-700 mb-1">
-                {isDragOver ? 'Drop files here' : 'Drag and drop files or click to upload'}
-              </p>
-              <p className="text-xs text-gray-500">
-                {globalGuidedModeEnabled 
-                  ? 'Use our guided workflow to upload, clean, and prime your data files'
-                  : 'Upload CSV or Excel files directly'}
-                </p>
-              </div>
+          
+          {/* Upload Drop Zone or Loading State */}
+          {uploadingFile ? (
+            <div className="flex-1 border-2 border-dashed border-blue-300 rounded-lg flex flex-col items-center justify-center text-center bg-blue-50/50">
+              <Loader2 className="w-10 h-10 animate-spin text-blue-500 mb-3" />
+              <p className="text-sm font-medium text-blue-700 mb-1">Uploading...</p>
+              <p className="text-xs text-blue-500">{pendingFile?.name || 'Processing file'}</p>
             </div>
-
-
+          ) : (
+            <div
+              className={`flex-1 border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer ${
+                isDragOver 
+                  ? 'border-blue-400 bg-blue-50' 
+                  : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/30'
+              }`}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onClick={handleUploadAreaClick}
+            >
+              <div className={`rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md transform transition-transform duration-300 ${
+                isDragOver ? 'scale-110' : 'hover:scale-105'
+              } w-12 h-12 mb-3`}>
+                <Upload className="text-white w-6 h-6" />
+              </div>
+              <p className="text-sm font-medium text-gray-700 mb-1">
+                {isDragOver ? 'Drop files here' : 'Drag and drop files'}
+              </p>
+              <p className="text-xs text-gray-500">or click to browse</p>
+            </div>
+          )}
+          
+          {/* Upload Error */}
+          {uploadError && (
+            <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-xs text-red-600">{uploadError}</p>
+            </div>
+          )}
         </div>
-      </Card>
+      </div>
+    </div>
+  );
+
+  // Render normal mode (original layout)
+  const renderNormalMode = () => (
+    <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white flex-1">
+      <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
+        {/* Saved Dataframes Count - Compact */}
+        {savedDataframes.length > 0 && (
+          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="flex items-center gap-2">
+              <FolderOpen className="w-4 h-4 text-blue-600" />
+              <span className="text-xs text-blue-800">
+                <strong>{savedDataframes.length}</strong> dataframe{savedDataframes.length !== 1 ? 's' : ''} saved in project
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Primed Files Summary - Compact */}
+        {primedFiles.length > 0 && (
+          <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+            <div className="flex items-center gap-2 mb-1">
+              <CheckCircle2 className="w-4 h-4 text-green-600" />
+              <span className="text-xs font-medium text-green-800">Primed Files ({primedFiles.length})</span>
+            </div>
+            <div className="space-y-0.5">
+              {primedFiles.slice(0, 2).map((file, idx) => (
+                <div key={idx} className="text-xs text-green-700 flex items-center gap-1.5">
+                  <Database className="w-3 h-3" />
+                  <span className="truncate">{file}</span>
+                </div>
+              ))}
+              {primedFiles.length > 2 && (
+                <div className="text-xs text-green-600 italic">
+                  +{primedFiles.length - 2} more files
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Error notice (non-blocking) - Compact */}
+        {fetchError && savedDataframes.length === 0 && (
+          <div className="p-2 bg-amber-50 rounded-lg border border-amber-200">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-3 h-3 text-amber-600 flex-shrink-0" />
+              <span className="text-xs text-amber-700 flex-1">
+                Could not load saved dataframes. You can still upload files.
+              </span>
+              <button
+                onClick={fetchSavedDataframes}
+                className="text-amber-700 hover:text-amber-800 text-xs underline"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Hidden file input for non-guided upload */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept=".csv,.xlsx,.xls"
+          multiple
+          onChange={handleFileInput}
+        />
+
+        {/* Drag and Drop Area - Compact */}
+        <div
+          className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 p-4 cursor-pointer ${
+            isDragOver 
+              ? 'border-blue-400 bg-blue-50' 
+              : 'border-blue-300 hover:border-blue-400 bg-blue-50/50'
+          }`}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onClick={handleUploadAreaClick}
+        >
+          <div className="mb-3">
+            <div className={`mx-auto rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md transform transition-transform duration-300 ${
+              isDragOver ? 'scale-110' : 'hover:scale-105'
+            } w-12 h-12 mb-2`}>
+              <Upload className="text-white drop-shadow-lg w-6 h-6" />
+            </div>
+            <p className="text-xs font-medium text-gray-700 mb-1">
+              {isDragOver ? 'Drop files here' : 'Drag and drop files or click to upload'}
+            </p>
+            <p className="text-xs text-gray-500">
+              Upload CSV or Excel files directly
+            </p>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+
+  return (
+    <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
+      {globalGuidedModeEnabled ? renderGuidedModeSplitPanel() : renderNormalMode()}
 
       {/* Upload Modal for non-guided mode (Excel sheet selection) */}
       <Dialog open={isUploadModalOpen} onOpenChange={(open) => { if (!open) resetUploadState(); }}>

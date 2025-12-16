@@ -16,6 +16,7 @@ export const GuidedFlowStepTrackerPanel: React.FC<GuidedFlowStepTrackerPanelProp
 }) => {
   const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows || {});
   const getAtom = useLaboratoryStore((state) => state.getAtom);
+  const updateGuidedFlowStage = useLaboratoryStore((state) => state.updateGuidedFlowStage);
 
   if (!isOpen || Object.keys(activeGuidedFlows).length === 0) {
     return null;
@@ -28,6 +29,13 @@ export const GuidedFlowStepTrackerPanel: React.FC<GuidedFlowStepTrackerPanelProp
 
   const selectedFlow = selectedAtomId ? activeGuidedFlows[selectedAtomId] : null;
   const selectedAtom = selectedAtomId ? getAtom(selectedAtomId) : null;
+
+  // Handle clicking on a step to navigate
+  const handleStageClick = (stage: UploadStage) => {
+    if (selectedAtomId && updateGuidedFlowStage) {
+      updateGuidedFlowStage(selectedAtomId, stage);
+    }
+  };
 
   return (
     <div className="fixed top-0 right-0 h-full w-80 z-50">
@@ -82,12 +90,13 @@ export const GuidedFlowStepTrackerPanel: React.FC<GuidedFlowStepTrackerPanelProp
             <div>
               {selectedAtom && (
                 <div className="mb-4 pb-3 border-b border-white/20">
-                  <div className="text-xs text-gray-500 mb-1">Current Atom</div>
-                  <div className="text-sm font-medium text-gray-900">{selectedAtom.title}</div>
+                  <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Current Atom</div>
+                  <div className="text-lg font-bold text-gray-900">{selectedAtom.title}</div>
                 </div>
               )}
               <VerticalProgressStepper
                 currentStage={selectedFlow.currentStage}
+                onStageClick={handleStageClick}
                 className="w-full"
               />
             </div>
@@ -108,4 +117,3 @@ export const GuidedFlowStepTrackerPanel: React.FC<GuidedFlowStepTrackerPanelProp
     </div>
   );
 };
-

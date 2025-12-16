@@ -575,7 +575,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
 
   return (
     <StageLayout
-      title="Step 3: Confirm Your Column Headers"
+      title=""
       explanation="Some files have empty rows or notes above the headers. Select the row that contains your column names."
       helpText={
         multiRowHeader 

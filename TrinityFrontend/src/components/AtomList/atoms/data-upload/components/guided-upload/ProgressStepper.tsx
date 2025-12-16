@@ -9,15 +9,17 @@ interface ProgressStepperProps {
   hideStages?: UploadStage[];
 }
 
-const STAGES: Array<{ id: UploadStage; label: string; shortLabel: string }> = [
-  { id: 'U0', label: 'Upload Dataset', shortLabel: 'Upload' },
-  { id: 'U1', label: 'Structural Scan', shortLabel: 'Scan' },
-  { id: 'U2', label: 'Confirm Headers', shortLabel: 'Headers' },
-  { id: 'U3', label: 'Column Names', shortLabel: 'Columns' },
-  { id: 'U4', label: 'Data Types', shortLabel: 'Types' },
-  { id: 'U5', label: 'Missing Values', shortLabel: 'Missing' },
-  { id: 'U6', label: 'Final Preview', shortLabel: 'Preview' },
-  { id: 'U7', label: 'Complete', shortLabel: 'Complete' },
+// Step 1 (Atom): Split panel for file selection/upload - NOT shown in stepper
+// Steps 2-8 (U1-U7) are shown in the panel stepper
+const STAGES: Array<{ id: UploadStage; label: string; shortLabel: string; stepNumber: number }> = [
+  { id: 'U0', label: 'Upload Dataset', shortLabel: 'Upload', stepNumber: 1 }, // Handled by atom (hidden)
+  { id: 'U1', label: 'Structural Scan', shortLabel: 'Scan', stepNumber: 2 },
+  { id: 'U2', label: 'Confirm Headers', shortLabel: 'Headers', stepNumber: 3 },
+  { id: 'U3', label: 'Column Names', shortLabel: 'Columns', stepNumber: 4 },
+  { id: 'U4', label: 'Data Types', shortLabel: 'Types', stepNumber: 5 },
+  { id: 'U5', label: 'Missing Values', shortLabel: 'Missing', stepNumber: 6 },
+  { id: 'U6', label: 'Final Preview', shortLabel: 'Preview', stepNumber: 7 },
+  { id: 'U7', label: 'Complete', shortLabel: 'Complete', stepNumber: 8 },
 ];
 
 export const ProgressStepper: React.FC<ProgressStepperProps> = ({ currentStage, className, hideStages = [] }) => {
@@ -75,14 +77,6 @@ export const ProgressStepper: React.FC<ProgressStepperProps> = ({ currentStage, 
                   )}
                 >
                   {stage.shortLabel}
-                </div>
-                <div
-                  className={cn(
-                    'text-[10px] mt-0.5',
-                    isCurrent ? 'text-[#458EE2]' : 'text-gray-500'
-                  )}
-                >
-                  Step {index + 1}
                 </div>
               </div>
             </div>

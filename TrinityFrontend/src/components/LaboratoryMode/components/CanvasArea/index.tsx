@@ -1275,7 +1275,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
     
     return (
-      <div className="mt-4">
+      <div className="mt-2">
         <GuidedUploadFlowInline
           atomId={atom.id}
           onComplete={(result) => {

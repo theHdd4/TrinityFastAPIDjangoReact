@@ -720,7 +720,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
   if (loading) {
     return (
       <StageLayout
-        title="Step 7: Final Preview Before Priming"
+        title=""
         explanation="Preparing your cleaned dataset preview..."
       >
         <div className="text-center py-8">
@@ -734,7 +734,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
   if (error && columns.length === 0) {
     return (
       <StageLayout
-        title="Step 7: Final Preview Before Priming"
+        title=""
         explanation="Here's your cleaned dataset after all preparation steps. Please review the preview and confirm to complete priming."
         helpText="Once confirmed, the dataset will be ready for analysis. You can always make adjustments later if needed."
       >
@@ -750,7 +750,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
 
   return (
     <StageLayout
-      title="Step 7: Final Preview Before Priming"
+      title=""
       explanation="Here's your cleaned dataset after all preparation steps. Please review the preview and confirm to complete priming."
       helpText="Once confirmed, the dataset will be ready for analysis. You can always make adjustments later if needed."
     >

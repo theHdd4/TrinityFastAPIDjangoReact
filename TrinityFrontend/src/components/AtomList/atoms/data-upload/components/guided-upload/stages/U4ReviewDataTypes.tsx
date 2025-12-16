@@ -537,7 +537,7 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
   if (loading) {
     return (
       <StageLayout
-        title="Step 5: Review Your Column Types"
+        title=""
         explanation="Detecting data types and roles for each column..."
       >
         <div className="text-center py-8">
@@ -551,7 +551,7 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
   if (error) {
     return (
       <StageLayout
-        title="Step 5: Review Your Column Types"
+        title=""
         explanation="Error loading column types"
       >
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -572,7 +572,7 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
 
   return (
     <StageLayout
-      title="Step 5: Review Your Column Types"
+      title=""
       explanation="These are the detected column types and roles. You only need to adjust anything that doesn't look right."
       helpText="Correct types help Trinity interpret numbers, dates, and categories properly."
     >

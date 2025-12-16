@@ -106,22 +106,20 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openTrinityAI = () => setActive(active === 'trinity' ? null : 'trinity');
   const openGuidedWorkflow = () => setActive(active === 'guided' ? null : 'guided');
 
-  // Auto-open guided workflow panel when guided mode is first enabled
-  const [hasAutoOpened, setHasAutoOpened] = React.useState(false);
-  
+  // Keep guided workflow panel open when guided mode is enabled
   React.useEffect(() => {
-    if (isGuidedModeEnabled && !hasAutoOpened) {
-      // Only auto-open when guided mode is first enabled
-      setActive('guided');
-      setHasAutoOpened(true);
-    } else if (!isGuidedModeEnabled) {
-      // Close guided panel and reset auto-open flag when guided mode is disabled
+    if (isGuidedModeEnabled) {
+      // Always keep panel open when guided mode is enabled
+      if (active !== 'guided') {
+        setActive('guided');
+      }
+    } else {
+      // Close guided panel when guided mode is disabled
       if (active === 'guided') {
         setActive(null);
       }
-      setHasAutoOpened(false);
     }
-  }, [isGuidedModeEnabled, hasAutoOpened, active, setActive]);
+  }, [isGuidedModeEnabled, active, setActive]);
 
   const [trinityBackgroundStatus, setTrinityBackgroundStatus] = useState<TrinityBackgroundStatus>({
     isProcessing: false,

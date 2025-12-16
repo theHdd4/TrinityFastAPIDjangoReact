@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Upload, Play, X, Settings } from 'lucide-react';
+import { Upload, Play, X, Settings, ChevronRight, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VerticalProgressStepper } from '@/components/AtomList/atoms/data-upload/components/guided-upload/VerticalProgressStepper';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -12,8 +12,6 @@ interface GuidedWorkflowPanelProps {
   onCreateDataUploadAtom?: () => Promise<void>;
 }
 
-
-
 export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
   isCollapsed,
   onToggle,
@@ -22,6 +20,8 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
   // Get active guided flows from the laboratory store
   const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows || {});
   const getAtom = useLaboratoryStore((state) => state.getAtom);
+  const updateGuidedFlowStage = useLaboratoryStore((state) => state.updateGuidedFlowStage);
+  const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
 
   // Get the first active guided flow (or allow user to select if multiple)
   const activeFlowEntries = Object.entries(activeGuidedFlows);
@@ -44,6 +44,21 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
   const selectedFlow = selectedAtomId ? activeGuidedFlows[selectedAtomId] : null;
   const selectedAtom = selectedAtomId ? getAtom(selectedAtomId) : null;
 
+  // State to track if progress stepper is collapsed
+  const [isProgressCollapsed, setIsProgressCollapsed] = useState(false);
+
+  // Handle clicking on a step to navigate
+  const handleStageClick = (stage: UploadStage) => {
+    if (selectedAtomId && updateGuidedFlowStage) {
+      updateGuidedFlowStage(selectedAtomId, stage);
+    }
+  };
+
+  // Toggle progress stepper visibility
+  const toggleProgressStepper = () => {
+    setIsProgressCollapsed(prev => !prev);
+  };
+
   if (isCollapsed) {
     return null;
   }
@@ -58,22 +73,36 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
           </div>
           <h3 className="text-sm font-semibold text-gray-900">Guided Workflow</h3>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggle}
-          className="h-8 w-8 hover:bg-white/50"
-          title="Minimize guided workflow panel"
-        >
-          <X className="w-4 h-4" />
-        </Button>
+        {!globalGuidedModeEnabled && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggle}
+            className="h-8 w-8 hover:bg-white/50"
+            title="Close guided workflow panel"
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        )}
       </div>
 
-      {/* Current Atom Info */}
+      {/* Current Atom Info - Made bigger and bolder */}
       {selectedAtom && (
-        <div className="p-4 border-b border-gray-200 bg-gray-50/50">
-          <div className="text-xs text-gray-500 mb-1">Current Atom</div>
-          <div className="text-sm font-medium text-gray-900">{selectedAtom.title}</div>
+        <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50/30">
+          <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Current Atom</div>
+          <button
+            onClick={toggleProgressStepper}
+            className="w-full text-left flex items-center justify-between group hover:opacity-80 transition-opacity"
+          >
+            <div className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              {selectedAtom.title}
+            </div>
+            {isProgressCollapsed ? (
+              <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
+            )}
+          </button>
         </div>
       )}
 
@@ -88,11 +117,12 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
                 <button
                   key={atomId}
                   onClick={() => setSelectedAtomId(atomId)}
-                  className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
+                  className={cn(
+                    "w-full text-left px-2 py-1.5 rounded text-xs transition-colors",
                     selectedAtomId === atomId
                       ? 'bg-blue-100 text-blue-700 font-medium'
                       : 'bg-white text-gray-600 hover:bg-gray-100'
-                  }`}
+                  )}
                 >
                   {atom?.title || `Atom ${atomId.slice(0, 8)}`}
                 </button>
@@ -103,22 +133,25 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
       )}
 
       {/* Steps List - Using real guided flow data */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {selectedFlow ? (
-          <VerticalProgressStepper
-            currentStage={selectedFlow.currentStage}
-            className="w-full"
-          />
-        ) : (
-          <div className="text-center text-gray-500 py-8">
-            <div className="mb-4">
-              <Upload className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-              <p className="text-sm">No active guided flow</p>
-              <p className="text-xs text-gray-400 mt-1">Start a data upload to begin guided workflow</p>
+      {!isProgressCollapsed && (
+        <div className="flex-1 overflow-y-auto p-4">
+          {selectedFlow ? (
+            <VerticalProgressStepper
+              currentStage={selectedFlow.currentStage}
+              onStageClick={handleStageClick}
+              className="w-full"
+            />
+          ) : (
+            <div className="text-center text-gray-500 py-8">
+              <div className="mb-4">
+                <Upload className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                <p className="text-sm">No files uploaded yet</p>
+                <p className="text-xs text-gray-400 mt-1">Use the guided upload flow to get started</p>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Action Buttons */}
       <div className="p-4 border-t border-gray-200 bg-gray-50/50 space-y-2">
@@ -134,7 +167,7 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
             size="sm"
           >
             <Upload className="w-4 h-4 mr-2" />
-            Upload Dataset
+            Upload More Data
           </Button>
         ) : (
           // Active flow - show contextual actions

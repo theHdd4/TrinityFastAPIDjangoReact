@@ -653,7 +653,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
   if (loading) {
     return (
       <StageLayout
-        title="Step 6: Review Missing Values"
+        title=""
         explanation="Analyzing missing values in your dataset..."
       >
         <div className="text-center py-8">
@@ -667,7 +667,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
   if (error) {
     return (
       <StageLayout
-        title="Step 6: Review Missing Values"
+        title=""
         explanation="Error loading missing value information"
       >
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -680,7 +680,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
   if (columns.length === 0) {
     return (
       <StageLayout
-        title="Step 6: Review Missing Values"
+        title=""
         explanation="These are the missing values across your dataset. Most treatments are suggested automatically, but you can adjust anything if needed."
         helpText="Correctly handling missing data ensures smooth analysis and calculations."
       >
@@ -703,7 +703,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
 
   return (
     <StageLayout
-      title="Step 6: Review Missing Values"
+      title=""
       explanation="These are the missing values across your dataset. Most treatments are suggested automatically, but you can adjust anything if needed."
       helpText="Correctly handling missing data ensures smooth analysis and calculations."
     >

@@ -16,6 +16,7 @@ export const GuidedFlowFloatingPanel: React.FC<GuidedFlowFloatingPanelProps> = (
 }) => {
   const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows || {});
   const getAtom = useLaboratoryStore((state) => state.getAtom);
+  const updateGuidedFlowStage = useLaboratoryStore((state) => state.updateGuidedFlowStage);
   
   const [panelState, setPanelState] = useState<PanelState>('maximized');
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -96,6 +97,13 @@ export const GuidedFlowFloatingPanel: React.FC<GuidedFlowFloatingPanelProps> = (
       setSelectedAtomId(activeFlowEntries[0][0]);
     }
   }, [activeFlowEntries.length, selectedAtomId]);
+
+  // Handle clicking on a step to navigate
+  const handleStageClick = (stage: UploadStage) => {
+    if (selectedAtomId && updateGuidedFlowStage) {
+      updateGuidedFlowStage(selectedAtomId, stage);
+    }
+  };
 
   if (!hasActiveFlows) {
     return null;
@@ -199,12 +207,13 @@ export const GuidedFlowFloatingPanel: React.FC<GuidedFlowFloatingPanelProps> = (
                 <div>
                   {selectedAtom && (
                     <div className="mb-4 pb-3 border-b border-gray-200">
-                      <div className="text-xs text-gray-500 mb-1">Current Atom</div>
-                      <div className="text-sm font-medium text-gray-900">{selectedAtom.title}</div>
+                      <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Current Atom</div>
+                      <div className="text-base font-bold text-gray-900">{selectedAtom.title}</div>
                     </div>
                   )}
                   <VerticalProgressStepper
                     currentStage={selectedFlow.currentStage}
+                    onStageClick={handleStageClick}
                     className="w-full"
                   />
                 </div>

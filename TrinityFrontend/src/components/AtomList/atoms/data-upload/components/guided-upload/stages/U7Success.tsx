@@ -108,7 +108,7 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
 
   return (
     <StageLayout
-      title="Your Data Is Ready"
+      title=""
       explanation=""
       helpText=""
     >
