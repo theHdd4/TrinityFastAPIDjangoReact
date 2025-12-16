@@ -40,12 +40,14 @@ export const U7Success: React.FC<U7SuccessProps> = ({ flow, onClose, onRestart }
 
       const types = dataTypeSelections[file.name] || [];
       totalColumns += types.length;
-      totalTypesChanged += types.filter(t => t.selectedType !== t.detectedType).length;
+      // Use updateType (user's selection from U4) instead of selectedType
+      totalTypesChanged += types.filter(t => (t.updateType || t.selectedType) !== t.detectedType).length;
       totalIdentifiers += types.filter(t => t.columnRole === 'identifier').length;
       totalMeasures += types.filter(t => t.columnRole === 'measure').length;
-      totalNumeric += types.filter(t => t.selectedType === 'number').length;
-      totalCategorical += types.filter(t => t.selectedType === 'category').length;
-      totalDate += types.filter(t => t.selectedType === 'date' || t.selectedType === 'datetime').length;
+      const userType = (t: any) => t.updateType || t.selectedType;
+      totalNumeric += types.filter(t => userType(t) === 'number' || userType(t) === 'int' || userType(t) === 'float').length;
+      totalCategorical += types.filter(t => userType(t) === 'category' || userType(t) === 'string').length;
+      totalDate += types.filter(t => userType(t) === 'date' || userType(t) === 'datetime').length;
 
       const strategies = missingValueStrategies[file.name] || [];
       totalStrategiesSet += strategies.filter(s => s.strategy !== 'none').length;

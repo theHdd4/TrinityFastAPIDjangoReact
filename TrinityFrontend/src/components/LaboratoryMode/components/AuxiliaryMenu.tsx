@@ -106,22 +106,20 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openTrinityAI = () => setActive(active === 'trinity' ? null : 'trinity');
   const openGuidedWorkflow = () => setActive(active === 'guided' ? null : 'guided');
 
-  // Auto-open guided workflow panel when guided mode is first enabled
-  const [hasAutoOpened, setHasAutoOpened] = React.useState(false);
-  
+  // Keep guided workflow panel open when guided mode is enabled
   React.useEffect(() => {
-    if (isGuidedModeEnabled && !hasAutoOpened) {
-      // Only auto-open when guided mode is first enabled
-      setActive('guided');
-      setHasAutoOpened(true);
-    } else if (!isGuidedModeEnabled) {
-      // Close guided panel and reset auto-open flag when guided mode is disabled
+    if (isGuidedModeEnabled) {
+      // Always keep panel open when guided mode is enabled
+      if (active !== 'guided') {
+        setActive('guided');
+      }
+    } else {
+      // Close guided panel when guided mode is disabled
       if (active === 'guided') {
         setActive(null);
       }
-      setHasAutoOpened(false);
     }
-  }, [isGuidedModeEnabled, hasAutoOpened, active, setActive]);
+  }, [isGuidedModeEnabled, active, setActive]);
 
   const [trinityBackgroundStatus, setTrinityBackgroundStatus] = useState<TrinityBackgroundStatus>({
     isProcessing: false,
@@ -209,43 +207,61 @@ const AuxiliaryMenu: React.FC<Props> = ({
 
 
       {/* Icons Column - Always visible and stays on the right */}
+      {/* Same icons in both modes - only add opacity effect on non-clickable icons when guided mode is ON */}
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+        {/* Position 1: Trinity AI - visible but not clickable when guided mode is ON */}
+        <div className={`p-3 border-b border-gray-200 flex items-center justify-center relative ${isGuidedModeEnabled ? 'opacity-40' : ''}`}>
           <button
             onClick={() => {
-              // Toggle between collapsed and expanded, but never completely hide
-              // The panel is always visible, just minimized or expanded
-              openTrinityAI();
+              if (!isGuidedModeEnabled) {
+                openTrinityAI();
+              }
             }}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'trinity' ? 'bg-muted text-foreground' : ''
-            }`}
+            disabled={isGuidedModeEnabled}
+            className={`w-9 h-9 rounded-lg transition-all group relative flex items-center justify-center ${
+              isGuidedModeEnabled 
+                ? 'cursor-not-allowed' 
+                : 'hover:bg-muted hover:scale-105 hover:shadow-lg'
+            } ${active === 'trinity' ? 'bg-muted text-foreground' : ''}`}
             title="Trinity AI - Click to expand/collapse"
             data-trinity-ai="true"
             type="button"
           >
             <TrinityAIIcon className="text-purple-500" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Trinity AI
-            </span>
+            {!isGuidedModeEnabled && (
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+                Trinity AI
+              </span>
+            )}
           </button>
         </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+        {/* Position 2: Settings - visible but not clickable when guided mode is ON */}
+        <div className={`p-3 border-b border-gray-200 flex items-center justify-center ${isGuidedModeEnabled ? 'opacity-40' : ''}`}>
           <button
-            onClick={openSettings}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'settings' ? 'bg-muted text-foreground' : ''
-            }`}
+            onClick={() => {
+              if (!isGuidedModeEnabled) {
+                openSettings();
+              }
+            }}
+            disabled={isGuidedModeEnabled}
+            className={`w-9 h-9 rounded-lg transition-all group relative flex items-center justify-center ${
+              isGuidedModeEnabled 
+                ? 'cursor-not-allowed' 
+                : 'hover:bg-muted hover:scale-105 hover:shadow-lg'
+            } ${active === 'settings' ? 'bg-muted text-foreground' : ''}`}
             title="Settings"
             data-settings="true"
             type="button"
           >
             <Settings className="w-3.5 h-3.5" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Settings
-            </span>
+            {!isGuidedModeEnabled && (
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+                Settings
+              </span>
+            )}
           </button>
         </div>
+        {/* Position 3: Saved DataFrames - Always visible and clickable */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
           <button
             onClick={openFrames}
@@ -256,12 +272,13 @@ const AuxiliaryMenu: React.FC<Props> = ({
             data-saved-dataframes="true"
             type="button"
           >
-            <Database className="w-3.5 h-3.5" />
+            <Database className="w-4 h-4" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Saved DataFrames
             </span>
           </button>
         </div>
+        {/* Position 4: Guided Workflow (Wrench) - Only shown when guided mode is ON */}
         {isGuidedModeEnabled && (
           <div className="p-3 border-b border-gray-200 flex items-center justify-center">
             <button
@@ -273,13 +290,14 @@ const AuxiliaryMenu: React.FC<Props> = ({
               data-guided-workflow="true"
               type="button"
             >
-              <Wrench className="w-3.5 h-3.5" />
+              <Wrench className="w-4 h-4" />
               <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
                 Guided Workflow
               </span>
             </button>
           </div>
         )}
+        {/* Help - Hidden (has hidden class) */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-center hidden">
           <button
             onClick={openHelp}

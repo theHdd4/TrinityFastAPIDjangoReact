@@ -9,6 +9,10 @@ interface StepStatus {
   summary?: string;
   error?: string;
   output_alias?: string;
+  prompt?: string;
+  full_prompt?: string;
+  enriched_description?: string;
+  parameters?: any;
 }
 
 interface StreamStepMonitorProps {

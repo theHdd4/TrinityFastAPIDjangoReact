@@ -103,6 +103,7 @@ const LaboratoryMode = () => {
     cards, 
     setCards: setLabCards, 
     auxiliaryMenuLeftOpen, 
+    setAuxiliaryMenuLeftOpen,
     subMode, 
     setSubMode, 
     activeGuidedFlows,
@@ -197,6 +198,16 @@ const LaboratoryMode = () => {
     url.searchParams.set('mode', subMode);
     window.history.replaceState({}, '', url.toString());
   }, [subMode]);
+
+  // Close left panel and exhibition when guided mode is enabled
+  useEffect(() => {
+    if (globalGuidedModeEnabled) {
+      // Close the atom library panel
+      setAuxiliaryMenuLeftOpen(false);
+      // Close exhibition panel
+      setIsExhibitionOpen(false);
+    }
+  }, [globalGuidedModeEnabled, setAuxiliaryMenuLeftOpen]);
 
   useEffect(() => {
     if (isShareOpen) {
@@ -1063,7 +1074,8 @@ const LaboratoryMode = () => {
         data-lab-header="true"
         className="absolute top-[53px] flex items-center justify-center z-50 pointer-events-none"
         style={{
-          left: (auxiliaryMenuLeftOpen || isExhibitionOpen) ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
+          // Left sidebar is always visible (with opacity when guided mode is ON)
+          left: (auxiliaryMenuLeftOpen || isExhibitionOpen) && !globalGuidedModeEnabled ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
           right: (auxActive && auxActive !== 'exhibition') ? '368px' : '48px', // w-12 (48px) icons + w-80 (320px) panel when open (exhibition is on left)
         }}
       >
@@ -1217,8 +1229,8 @@ const LaboratoryMode = () => {
       </div>
 
         <div className="flex-1 flex overflow-hidden relative">
-          {/* Atoms Sidebar */}
-          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
+          {/* Atoms Sidebar - Always visible, with opacity effect when guided mode is ON */}
+          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10 ${globalGuidedModeEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
             <AuxiliaryMenuLeft 
               onAtomDragStart={handleAtomDragStart}
               active={auxActive}
@@ -1227,7 +1239,7 @@ const LaboratoryMode = () => {
               }}
               isExhibitionOpen={isExhibitionOpen}
               setIsExhibitionOpen={setIsExhibitionOpen}
-              canEdit={canEdit}
+              canEdit={canEdit && !globalGuidedModeEnabled}
               showFloatingNavigationList={showFloatingNavigationList}
               setShowFloatingNavigationList={setShowFloatingNavigationList}
             />
@@ -1261,7 +1273,7 @@ const LaboratoryMode = () => {
               />
           </div>
 
-          {/* Auxiliary menu */}
+          {/* Auxiliary menu - Simplified when guided mode is ON */}
           <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
             <AuxiliaryMenu
               selectedAtomId={selectedAtomId}
@@ -1282,7 +1294,7 @@ const LaboratoryMode = () => {
                 }
               }}
               trinityAILayout={trinityAILayout}
-              isTrinityAIVisible={isTrinityAIVisible}
+              isTrinityAIVisible={globalGuidedModeEnabled ? false : isTrinityAIVisible}
               onTrinityAIClose={() => {
                 setIsTrinityAIVisible(false);
                 setAuxActive(null);
@@ -1304,11 +1316,13 @@ const LaboratoryMode = () => {
               }}
               isGuidedModeEnabled={globalGuidedModeEnabled}
             />
-            <FloatingNavigationList
-              isVisible={showFloatingNavigationList}
-              onClose={() => setShowFloatingNavigationList(false)}
-              anchorSelector="[data-lab-header-text]"
-            />
+            {!globalGuidedModeEnabled && (
+              <FloatingNavigationList
+                isVisible={showFloatingNavigationList}
+                onClose={() => setShowFloatingNavigationList(false)}
+                anchorSelector="[data-lab-header-text]"
+              />
+            )}
           </div>
 
 
@@ -1316,7 +1330,8 @@ const LaboratoryMode = () => {
           {/* Trinity AI Panel - Only for horizontal layout */}
           {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
           {/* In horizontal view, panel stays visible and aligned with canvas area */}
-          {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
+          {/* Hidden when guided mode is ON */}
+          {isTrinityAIVisible && trinityAILayout === 'horizontal' && !globalGuidedModeEnabled && (
             <div 
               className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
             >

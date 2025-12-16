@@ -137,7 +137,15 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
           const currentDataTypes = state.dataTypeSelections[currentFile.name] || [];
           const currentStrategies = state.missingValueStrategies[currentFile.name] || [];
           
-          // Build column_renames from columnNameEdits (U3)
+          // Build columns_to_drop from columnNameEdits (U3) - columns marked as keep=false
+          const columnsToDrop: string[] = [];
+          currentColumnEdits.forEach(edit => {
+            if (edit.keep === false) {
+              columnsToDrop.push(edit.originalName);
+            }
+          });
+          
+          // Build column_renames from columnNameEdits (U3) - only for kept columns
           const columnRenames: Record<string, string> = {};
           currentColumnEdits.forEach(edit => {
             if (edit.keep !== false && edit.editedName && edit.editedName !== edit.originalName) {
@@ -148,14 +156,22 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
           // Build dtype_changes from dataTypeSelections (U4)
           const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
           currentDataTypes.forEach(dt => {
-            if (dt.selectedType && dt.selectedType !== dt.detectedType) {
-              if (dt.selectedType === 'date' && dt.format) {
+            // Use updateType (user's selection from U4) instead of selectedType
+            const userSelectedType = dt.updateType || dt.selectedType;
+            if (userSelectedType && userSelectedType !== dt.detectedType) {
+              if ((userSelectedType === 'date' || userSelectedType === 'datetime') && dt.format) {
                 dtypeChanges[dt.columnName] = { dtype: 'datetime64', format: dt.format };
               } else {
-                const backendType = dt.selectedType === 'number' ? 'float64' : 
-                                   dt.selectedType === 'category' ? 'object' :
-                                   dt.selectedType === 'date' ? 'datetime64' :
-                                   dt.selectedType;
+                // Map frontend types to backend types
+                const backendType = userSelectedType === 'number' ? 'float64' : 
+                                   userSelectedType === 'int' ? 'int64' :
+                                   userSelectedType === 'float' ? 'float64' :
+                                   userSelectedType === 'category' ? 'object' :
+                                   userSelectedType === 'string' ? 'object' :
+                                   userSelectedType === 'date' ? 'datetime64' :
+                                   userSelectedType === 'datetime' ? 'datetime64' :
+                                   userSelectedType === 'boolean' ? 'bool' :
+                                   userSelectedType;
                 dtypeChanges[dt.columnName] = backendType;
               }
             }
@@ -176,8 +192,8 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
           });
           
           // Apply transformations if there are any changes
-          if (Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategiesPayload).length > 0) {
-            console.log('🔄 Applying final transformations before U7:', { columnRenames, dtypeChanges, missingValueStrategiesPayload });
+          if (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategiesPayload).length > 0) {
+            console.log('🔄 Applying final transformations before U7:', { columnsToDrop, columnRenames, dtypeChanges, missingValueStrategiesPayload });
             
             const transformRes = await fetch(`${VALIDATE_API}/apply-data-transformations`, {
               method: 'POST',
@@ -185,6 +201,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
               credentials: 'include',
               body: JSON.stringify({
                 file_path: currentFile.path,
+                columns_to_drop: columnsToDrop,
                 column_renames: columnRenames,
                 dtype_changes: dtypeChanges,
                 missing_value_strategies: missingValueStrategiesPayload,
@@ -205,12 +222,55 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
       // Move from U6 (Final Preview) to U7 (Success)
       goToNextStage();
     } else if (state.currentStage === 'U7') {
-      // Flow complete - mark files as primed
+      // Flow complete - finalize and save primed files
       const projectContext = getActiveProjectContext();
       if (projectContext && state.uploadedFiles.length > 0) {
-        // Mark each uploaded file as primed
         for (const file of state.uploadedFiles) {
-          await markFileAsPrimed(file.path || file.name);
+          // Finalize the primed file - save transformed data to saved dataframes location
+          try {
+            console.log('🔄 Finalizing primed file:', file.path || file.name);
+            
+            // Get column classifications from dataTypeSelections (U4 stage)
+            const dataTypes = state.dataTypeSelections[file.name] || [];
+            const columnClassifications = dataTypes.map(dt => ({
+              columnName: dt.columnName,
+              columnRole: dt.columnRole || 'identifier', // Default to identifier if not set
+            }));
+            
+            console.log('📊 Sending column classifications:', columnClassifications);
+            
+            const finalizeRes = await fetch(`${VALIDATE_API}/finalize-primed-file`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                file_path: file.path,
+                file_name: file.name,
+                client_name: projectContext.client_name || '',
+                app_name: projectContext.app_name || '',
+                project_name: projectContext.project_name || '',
+                validator_atom_id: 'guided-upload',
+                column_classifications: columnClassifications,
+              }),
+            });
+            
+            if (finalizeRes.ok) {
+              const result = await finalizeRes.json();
+              console.log('✅ File finalized successfully:', result);
+              // Trigger refresh of SavedDataFramesPanel
+              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+                detail: { filePath: result.saved_path, fileName: file.name } 
+              }));
+            } else {
+              console.warn('⚠️ Failed to finalize file:', await finalizeRes.text());
+              // Fallback to just marking as primed
+              await markFileAsPrimed(file.path || file.name);
+            }
+          } catch (error) {
+            console.error('Error finalizing primed file:', error);
+            // Fallback to just marking as primed
+            await markFileAsPrimed(file.path || file.name);
+          }
         }
       }
       
@@ -223,6 +283,61 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
         missingValueStrategies: state.missingValueStrategies,
       });
       onOpenChange(false);
+    } else if (state.currentStage === 'U5') {
+      // Apply missing value transformations when leaving U5
+      // Using the same API as SavedDataFramesPanel (/process_saved_dataframe) which works correctly
+      const chosenIndex = state.selectedFileIndex !== undefined && state.selectedFileIndex < state.uploadedFiles.length 
+        ? state.selectedFileIndex : 0;
+      const currentFile = state.uploadedFiles[chosenIndex];
+      
+      if (currentFile?.path) {
+        const currentStrategies = state.missingValueStrategies[currentFile.name] || [];
+        
+        // Build instructions array in the same format as SavedDataFramesPanel
+        const instructions: Array<{ column: string; missing_strategy?: string; custom_value?: string | number }> = [];
+        
+        currentStrategies.forEach(s => {
+          if (s.strategy !== 'none') {
+            const instruction: { column: string; missing_strategy?: string; custom_value?: string | number } = {
+              column: s.columnName,
+              missing_strategy: s.strategy,
+            };
+            if (s.strategy === 'custom' && s.value !== undefined) {
+              instruction.custom_value = s.value;
+            }
+            instructions.push(instruction);
+          }
+        });
+        
+        // Apply missing value transformations if there are any
+        if (instructions.length > 0) {
+          try {
+            console.log('🔄 U5->U6: Applying missing value transformations via process_saved_dataframe:', instructions);
+            
+            const transformRes = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                object_name: currentFile.path,
+                instructions: instructions,
+              }),
+            });
+            
+            if (transformRes.ok) {
+              const result = await transformRes.json();
+              console.log('✅ U5->U6: Missing value transformations applied successfully:', result);
+            } else {
+              const errorText = await transformRes.text();
+              console.warn('⚠️ U5->U6: Failed to apply missing value transformations:', errorText);
+            }
+          } catch (error) {
+            console.error('❌ U5->U6: Error applying missing value transformations:', error);
+          }
+        }
+      }
+      
+      goToNextStage();
     } else {
       goToNextStage();
     }

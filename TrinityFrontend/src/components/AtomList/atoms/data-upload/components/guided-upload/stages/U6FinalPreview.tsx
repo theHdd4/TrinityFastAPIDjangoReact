@@ -68,6 +68,18 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
     });
   }, [currentFile?.name, currentColumnEdits.length, currentDataTypes.length, currentStrategies.length]);
 
+  // Reset loadedFileRef when strategies change to force re-fetch with updated strategies
+  const strategiesKeyRef = useRef<string>('');
+  React.useEffect(() => {
+    const strategiesKey = JSON.stringify(currentStrategies.map(s => ({ col: s.columnName, strategy: s.strategy, value: s.value })));
+    if (strategiesKeyRef.current && strategiesKeyRef.current !== strategiesKey) {
+      console.log('U6: Missing value strategies changed, resetting loadedFileRef to force re-fetch');
+      loadedFileRef.current = null;
+      hasAttemptedFetchRef.current = false;
+    }
+    strategiesKeyRef.current = strategiesKey;
+  }, [currentStrategies]);
+
   // Helper function to build data from state (used when API fails or as fallback)
   const buildStateBasedData = React.useCallback(() => {
     const columnSummaries: ColumnSummary[] = [];
@@ -212,11 +224,19 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           throw new Error('File path is not available');
         }
 
-        // CRITICAL: Apply transformations (column renames + dtype changes + missing value strategies) BEFORE fetching preview
+        // CRITICAL: Apply transformations (column drops + renames + dtype changes + missing value strategies) BEFORE fetching preview
         // This ensures we see the cleaned/transformed data, not raw data
         let transformedFilePath = filePath;
         
-        // Build column_renames from columnNameEdits (U3)
+        // Build columns_to_drop from columnNameEdits (U3) - columns marked as keep=false
+        const columnsToDrop: string[] = [];
+        currentColumnEdits.forEach(edit => {
+          if (edit.keep === false) {
+            columnsToDrop.push(edit.originalName);
+          }
+        });
+        
+        // Build column_renames from columnNameEdits (U3) - only for kept columns
         const columnRenames: Record<string, string> = {};
         currentColumnEdits.forEach(edit => {
           if (edit.keep !== false && edit.editedName && edit.editedName !== edit.originalName) {
@@ -227,15 +247,22 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
         // Build dtype_changes from dataTypeSelections
         const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
         currentDataTypes.forEach(dt => {
-          if (dt.selectedType && dt.selectedType !== dt.detectedType) {
-            if (dt.selectedType === 'date' && dt.dateFormat) {
-              dtypeChanges[dt.columnName] = { dtype: 'datetime64', format: dt.dateFormat };
+          // Use updateType (user's selection from U4) instead of selectedType
+          const userSelectedType = dt.updateType || dt.selectedType;
+          if (userSelectedType && userSelectedType !== dt.detectedType) {
+            if ((userSelectedType === 'date' || userSelectedType === 'datetime') && dt.format) {
+              dtypeChanges[dt.columnName] = { dtype: 'datetime64', format: dt.format };
             } else {
               // Map frontend types to backend types
-              const backendType = dt.selectedType === 'number' ? 'float64' : 
-                                 dt.selectedType === 'category' ? 'object' :
-                                 dt.selectedType === 'date' ? 'datetime64' :
-                                 dt.selectedType;
+              const backendType = userSelectedType === 'number' ? 'float64' : 
+                                 userSelectedType === 'int' ? 'int64' :
+                                 userSelectedType === 'float' ? 'float64' :
+                                 userSelectedType === 'category' ? 'object' :
+                                 userSelectedType === 'string' ? 'object' :
+                                 userSelectedType === 'date' ? 'datetime64' :
+                                 userSelectedType === 'datetime' ? 'datetime64' :
+                                 userSelectedType === 'boolean' ? 'bool' :
+                                 userSelectedType;
               dtypeChanges[dt.columnName] = backendType;
             }
           }
@@ -261,15 +288,16 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
         });
         
         // Only apply transformations if there are any changes
-        if (Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategies).length > 0) {
+        if (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategies).length > 0) {
           try {
-            console.log('Applying transformations before preview:', { columnRenames, dtypeChanges, missingValueStrategies });
+            console.log('Applying transformations before preview:', { columnsToDrop, columnRenames, dtypeChanges, missingValueStrategies });
             const transformRes = await fetch(`${UPLOAD_API}/apply-data-transformations`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
               body: JSON.stringify({
                 file_path: filePath,
+                columns_to_drop: columnsToDrop,
                 column_renames: columnRenames,
                 dtype_changes: dtypeChanges,
                 missing_value_strategies: missingValueStrategies,
@@ -584,7 +612,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
     };
 
     void fetchPreviewData();
-  }, [currentFile?.name, currentFile?.path, buildStateBasedData]);
+  }, [currentFile?.name, currentFile?.path, buildStateBasedData, currentStrategies.length]);
 
   // Calculate summary statistics - use columns state if available, otherwise fall back to dataTypeSelections
   const getSummaryStats = () => {
@@ -692,7 +720,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
   if (loading) {
     return (
       <StageLayout
-        title="Step 7: Final Preview Before Priming"
+        title=""
         explanation="Preparing your cleaned dataset preview..."
       >
         <div className="text-center py-8">
@@ -706,7 +734,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
   if (error && columns.length === 0) {
     return (
       <StageLayout
-        title="Step 7: Final Preview Before Priming"
+        title=""
         explanation="Here's your cleaned dataset after all preparation steps. Please review the preview and confirm to complete priming."
         helpText="Once confirmed, the dataset will be ready for analysis. You can always make adjustments later if needed."
       >
@@ -722,7 +750,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
 
   return (
     <StageLayout
-      title="Step 7: Final Preview Before Priming"
+      title=""
       explanation="Here's your cleaned dataset after all preparation steps. Please review the preview and confirm to complete priming."
       helpText="Once confirmed, the dataset will be ready for analysis. You can always make adjustments later if needed."
     >

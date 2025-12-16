@@ -375,7 +375,7 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
   if (loading) {
     return (
       <StageLayout
-        title="Step 4: Review Your Column Names"
+        title=""
         explanation="Loading column names for review..."
       >
         <div className="text-center py-8">
@@ -392,7 +392,7 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
 
   return (
     <StageLayout
-      title="Step 4: Review Your Column Names"
+      title=""
       explanation="Review your column names. You can edit any name or remove columns you don't need. Most names are automatically classified using your past uploads or AI suggestions."
       helpText="Next, we'll review the data types for each column and ensure they've been read correctly."
     >

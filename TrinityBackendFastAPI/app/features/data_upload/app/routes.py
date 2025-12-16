@@ -2196,18 +2196,9 @@ async def save_dataframes(
                 df_pl = None
             else:
                 data_bytes = fileobj.read()
-                # Use RobustFileReader which handles column preservation automatically
-                df_result, _ = RobustFileReader.read_file_to_polars(
-                    content=data_bytes,
-                    filename=filename,
-                    auto_detect_header=True,
-                    return_raw=False,
-                )
-                # Handle both single DataFrame and dict (multiple sheets)
-                if isinstance(df_result, dict):
-                    df_pl = list(df_result.values())[0]  # Use first sheet
-                else:
-                    df_pl = df_result
+                # Use pl.read_csv with CSV_READ_KWARGS for proper dtype inference
+                # This matches the old routes behavior and preserves numeric types
+                df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
                 df_pl = data_upload_service._normalize_column_names(df_pl)
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)
@@ -4313,6 +4304,13 @@ async def get_file_preview(
     - Rows with stable count = data rows
     Returns separated description_rows and data_rows for user to select header.
     """
+    # Validate object_name is not empty
+    if not object_name or not object_name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="object_name is required and cannot be empty. Please ensure the file was uploaded successfully."
+        )
+    
     try:
         # CRITICAL: If we receive an Arrow file path, try to find the original CSV/Excel file
         # Arrow files are processed files with "col_0", "col_1" column names - we need the original!
@@ -4536,6 +4534,13 @@ async def get_row_issues(
     Scan the full file for structural row issues (delimiter spillover, extra/missing columns, sparse rows).
     Returns total issue counts and a paginated slice of problematic rows to avoid loading everything in the UI.
     """
+    # Validate object_name is not empty
+    if not object_name or not object_name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="object_name is required and cannot be empty. Please ensure the file was uploaded successfully."
+        )
+    
     try:
         # Resolve original file if an Arrow path is provided
         original_object_name = object_name
@@ -5171,9 +5176,10 @@ async def detect_datetime_format(request: Request):
 @router.post("/apply-data-transformations")
 async def apply_data_transformations(request: Request):
     """
-    Apply column renames, dtype changes and missing value strategies to a file.
+    Apply column drops, renames, dtype changes and missing value strategies to a file.
     Expects JSON body with:
     - file_path: str
+    - columns_to_drop: list[str] (column names to remove) - OPTIONAL
     - column_renames: dict[str, str] (old_name -> new_name) - OPTIONAL
     - dtype_changes: dict[str, str | dict] (column_name -> new_dtype or {dtype: str, format: str})
     - missing_value_strategies: dict[str, dict] (column_name -> {strategy: str, value?: str})
@@ -5186,16 +5192,20 @@ async def apply_data_transformations(request: Request):
         logger.info("=" * 80)
         
         file_path = body.get("file_path")
+        columns_to_drop = body.get("columns_to_drop", [])
         column_renames = body.get("column_renames", {})
         dtype_changes = body.get("dtype_changes", {})
         missing_value_strategies = body.get("missing_value_strategies", {})
         
         logger.info(f"Extracted file_path: {file_path}")
+        logger.info(f"Extracted columns_to_drop: {columns_to_drop}")
         logger.info(f"Extracted column_renames: {column_renames}")
         logger.info(f"Extracted dtype_changes: {dtype_changes}")
         logger.info(f"Extracted missing_value_strategies: {missing_value_strategies}")
         
         # Log what transformations are being applied
+        if len(columns_to_drop) > 0:
+            logger.info(f"✅ COLUMN DROPS: {len(columns_to_drop)} columns to drop")
         if len(column_renames) > 0:
             logger.info(f"✅ COLUMN RENAMES: {len(column_renames)} columns to rename")
         if len(dtype_changes) == 0 and len(missing_value_strategies) > 0:
@@ -5232,7 +5242,17 @@ async def apply_data_transformations(request: Request):
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
         
-        # Apply column renames first (before other transformations)
+        # 1. Drop columns first (before renames)
+        if columns_to_drop:
+            logger.info(f"Dropping columns: {columns_to_drop}")
+            cols_to_drop_existing = [col for col in columns_to_drop if col in df.columns]
+            if cols_to_drop_existing:
+                df = df.drop(columns=cols_to_drop_existing)
+                logger.info(f"✅ Dropped columns: {cols_to_drop_existing}")
+            else:
+                logger.info("No columns to drop found in dataframe")
+        
+        # 2. Apply column renames (after drops)
         if column_renames:
             logger.info(f"Applying column renames: {column_renames}")
             # Filter out renames where old_name == new_name
@@ -5516,4 +5536,230 @@ async def mark_file_primed(request: Request):
         return {"status": "success", "message": "File marked as primed"}
     except Exception as e:
         logger.error(f"Error marking file as primed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/finalize-primed-file")
+async def finalize_primed_file(request: Request):
+    """
+    Finalize a primed file by moving it from tmp location to saved dataframes location.
+    This should be called after U7 completion to persist the transformed data.
+    
+    Expects JSON body with:
+    - file_path: str (current path in tmp/)
+    - file_name: str (desired file name for saved dataframe)
+    - client_name, app_name, project_name: str (for prefix)
+    - validator_atom_id: str (optional, for flight path)
+    - column_classifications: list[dict] (optional, from guided flow U4 stage)
+      Each dict has: columnName, columnRole ('identifier' | 'measure')
+    """
+    try:
+        body = await request.json()
+        logger.info("=" * 80)
+        logger.info("finalize_primed_file endpoint called")
+        logger.info(f"Request body: {body}")
+        logger.info("=" * 80)
+        
+        file_path = body.get("file_path", "")
+        file_name = body.get("file_name", "")
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+        validator_atom_id = body.get("validator_atom_id", "guided-upload")
+        # Column classifications from guided flow (U4 stage)
+        column_classifications = body.get("column_classifications", [])
+        
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path is required")
+        if not file_name:
+            # Use the original file name from path
+            file_name = Path(file_path).stem
+        
+        # Read the transformed file from MinIO
+        try:
+            data = read_minio_object(file_path)
+        except Exception as e:
+            logger.error(f"Failed to read file from MinIO: {file_path}, error: {str(e)}")
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        
+        filename = Path(file_path).name
+        
+        # Parse the file based on type
+        if filename.lower().endswith(".csv"):
+            df_result, _ = RobustFileReader.read_file_to_polars(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            if isinstance(df_result, dict):
+                df_pl = list(df_result.values())[0]
+            else:
+                df_pl = df_result
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df_result, _ = RobustFileReader.read_file_to_polars(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            if isinstance(df_result, dict):
+                df_pl = list(df_result.values())[0]
+            else:
+                df_pl = df_result
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+        
+        # Convert to Arrow format
+        arrow_buf = io.BytesIO()
+        arrow_table = df_pl.to_arrow(use_pyarrow=True)
+        with pa.ipc.new_file(arrow_buf, arrow_table.schema) as writer:
+            writer.write(arrow_table)
+        arrow_bytes = arrow_buf.getvalue()
+        
+        # Get the proper prefix for saved dataframes
+        os.environ["CLIENT_NAME"] = client_name
+        os.environ["APP_NAME"] = app_name
+        os.environ["PROJECT_NAME"] = project_name
+        prefix = await get_object_prefix()
+        
+        # Create the arrow file name
+        arrow_name = Path(file_name).stem + ".arrow"
+        
+        # Upload to MinIO with proper prefix (not tmp/)
+        result = upload_to_minio(arrow_bytes, arrow_name, prefix)
+        saved_object_name = result.get("object_name", "")
+        
+        logger.info(f"✅ Saved primed file to: {saved_object_name}")
+        
+        # Upload to Flight for fast access
+        flight_path = f"{validator_atom_id}/{arrow_name}"
+        try:
+            upload_dataframe(df_pl.to_pandas(), flight_path)
+            logger.info(f"✅ Uploaded to Flight: {flight_path}")
+        except Exception as e:
+            logger.warning(f"Failed to upload to Flight: {str(e)}")
+        
+        # Set ticket for Flight access
+        set_ticket(
+            file_name,
+            saved_object_name,
+            flight_path,
+            filename,
+        )
+        redis_client.set(f"flight:{flight_path}", saved_object_name)
+        
+        # Mark as primed in Redis
+        primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+        redis_client.set(primed_key_parts, "true", ttl=86400 * 30)
+        
+        # Save column classifications to MongoDB if provided from guided flow
+        if column_classifications:
+            try:
+                # Extract identifiers and measures from guided flow classifications
+                identifiers = []
+                measures = []
+                unclassified = []
+                
+                for col_class in column_classifications:
+                    col_name = str(col_class.get("columnName", "")).strip().lower()
+                    col_role = col_class.get("columnRole", "")
+                    
+                    if col_role == "identifier":
+                        identifiers.append(col_name)
+                    elif col_role == "measure":
+                        measures.append(col_name)
+                    else:
+                        unclassified.append(col_name)
+                
+                # Get project_id from env
+                project_id = None
+                try:
+                    env = await get_env_vars(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                    )
+                    if env:
+                        project_id_str = env.get("PROJECT_ID")
+                        if project_id_str:
+                            project_id = int(project_id_str)
+                except Exception as e:
+                    logger.warning(f"Failed to get project_id: {e}")
+                
+                # Save to MongoDB using same pattern as column classifier atom
+                config_data = {
+                    "project_id": project_id,
+                    "client_name": client_name,
+                    "app_name": app_name,
+                    "project_name": project_name,
+                    "identifiers": identifiers,
+                    "measures": measures,
+                    "unclassified": unclassified,
+                    "dimensions": {},  # Empty dimensions object (same as column classifier)
+                    "file_name": saved_object_name,
+                }
+                
+                # Add env if available
+                if env:
+                    config_data["env"] = env
+                
+                mongo_result = save_classifier_config_to_mongo(config_data)
+                logger.info(f"✅ Saved guided flow classification: {saved_object_name} | {len(identifiers)} identifiers, {len(measures)} measures, {len(unclassified)} unclassified")
+            except Exception as e:
+                logger.warning(f"Failed to save column classifications: {e}")
+                # Don't fail the whole operation if classification save fails
+        else:
+            # No classifications provided - run auto-classification
+            try:
+                project_id = None
+                try:
+                    env = await get_env_vars(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                    )
+                    if env:
+                        project_id_str = env.get("PROJECT_ID")
+                        if project_id_str:
+                            project_id = int(project_id_str)
+                except Exception:
+                    pass
+                
+                await _auto_classify_and_save_file(
+                    object_name=saved_object_name,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    project_id=project_id,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to auto-classify file: {e}")
+        
+        # Remove the temp file
+        if file_path.startswith(prefix + "tmp/") or "/tmp/" in file_path:
+            try:
+                minio_client.remove_object(MINIO_BUCKET, file_path)
+                logger.info(f"🗑️ Removed temp file: {file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to remove temp file: {str(e)}")
+        
+        return {
+            "status": "success",
+            "message": "File finalized and saved",
+            "saved_path": saved_object_name,
+            "flight_path": flight_path,
+            "rows": len(df_pl),
+            "columns": len(df_pl.columns),
+            "classification_saved": bool(column_classifications),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finalizing primed file: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
