@@ -20,7 +20,6 @@ import { getActiveProjectContext } from '@/utils/projectEnv';
 import MetricsInputFiles from './MetricsInputFiles';
 import MetricsColOps from './MetricsColOps';
 import VariableTab from './VariableTab';
-import MetricGuideFlowModal from './metricguildeflow/MetricGuideFlowModal';
 
 interface CardSettingsTabsProps {
   card: LayoutCard;
@@ -121,7 +120,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   const [editNameError, setEditNameError] = useState<string | null>(null);
   const [appendDialogOpen, setAppendDialogOpen] = useState(false);
   const [pendingAppendVariable, setPendingAppendVariable] = useState<AvailableVariable | null>(null);
-  const [isGuideFlowOpen, setIsGuideFlowOpen] = useState(false);
+  const openMetricGuidedFlow = useLaboratoryStore(state => state.openMetricGuidedFlow);
 
   const generateVariableId = () => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -771,7 +770,10 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
         <Button
           size="sm"
           className="h-8 bg-[#458EE2] hover:bg-[#3c7ac5] text-white px-3"
-          onClick={() => setIsGuideFlowOpen(true)}
+          onClick={() => {
+            console.log('[MetricGuidedFlow] Play button clicked in CardSettingsTabs');
+            openMetricGuidedFlow();
+          }}
         >
           <Play className="w-3.5 h-3.5 mr-2" />
           Play
@@ -830,8 +832,6 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
         cancelLabel="Cancel"
         confirmButtonClass="bg-blue-500 hover:bg-blue-600"
       />
-
-      <MetricGuideFlowModal open={isGuideFlowOpen} onClose={() => setIsGuideFlowOpen(false)} />
     </>
   );
 };

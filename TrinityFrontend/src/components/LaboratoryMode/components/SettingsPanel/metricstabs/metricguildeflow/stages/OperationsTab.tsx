@@ -41,7 +41,7 @@ import { AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import MultiSelectDropdown from '@/templates/dropdown/multiselect/MultiSelectDropdown';
-import type { CreatedVariable, CreatedColumn, CreatedTable } from '../MetricGuideFlowModal';
+import type { CreatedVariable, CreatedColumn, CreatedTable } from '../useMetricGuidedFlow';
 import MetricsColOps from './MetricsColOps';
 
 // Type Definitions
@@ -2119,21 +2119,9 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   }), [variableMode, assignedVars, operations, computeWithinGroup, selectedIdentifiers, columnOperations, dataSource, saving, columnSaveLoading]);
 
   return (
-    <div className="space-y-6 pb-6">
-      {/* Header */}
-      <div className="text-center space-y-1">
-        <h3 className="text-lg font-semibold">Operations</h3>
-        <p className="text-sm text-muted-foreground">
-          {selectedType === 'variable'
-            ? 'Create variables by computing or assigning values'
-            : 'Create new columns by applying transformations'}
-        </p>
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-5 space-y-5">
+    <>
+      <div className="bg-white shadow-sm p-5 space-y-5">
         {/* Selection metadata area */}
-        
-
         {/* If variable chosen: show saved/import and create panels */}
         {selectedType === 'variable' && (
           <>
@@ -2827,6 +2815,8 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
           <MetricsColOps 
             dataSource={dataSource}
             featureOverviewApi={featureOverviewApi}
+            onColumnCreated={onColumnCreated}
+            onTableCreated={onTableCreated}
           />
           // <div className="space-y-4">
           //   {/* Conditional layout based on state */}
@@ -3613,7 +3603,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
           </Card>
         </div>
       )}
-    </div>
+    </>
   );
 });
 

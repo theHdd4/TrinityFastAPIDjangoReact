@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { FEATURE_OVERVIEW_API, CREATECOLUMN_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
+import type { CreatedColumn, CreatedTable } from '../useMetricGuidedFlow';
 
 // Operation type definition
 interface OperationType {
@@ -30,6 +31,8 @@ interface OperationCategory {
 interface MetricsColOpsProps {
   dataSource?: string;
   featureOverviewApi?: string;
+  onColumnCreated?: (column: CreatedColumn) => void;
+  onTableCreated?: (table: CreatedTable) => void;
 }
 
 // All operations - keeping existing ones exactly the same
@@ -456,7 +459,7 @@ const scoreOperation = (
   return Math.max(0, score); // Ensure non-negative score
 };
 
-const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOverviewApi }) => {
+const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOverviewApi, onColumnCreated, onTableCreated }) => {
   const [columnSearchQuery, setColumnSearchQuery] = React.useState('');
   const [exploreOpen, setExploreOpen] = React.useState(false);
   const [openColumnCategories, setOpenColumnCategories] = React.useState<Record<string, boolean>>({});
@@ -1027,9 +1030,12 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
   };
 
   // Perform operations (internal function that returns preview data)
-  const performOperations = async (): Promise<any[]> => {
+  const performOperations = async (operationsToPerform?: typeof selectedOperations): Promise<any[]> => {
+    // Use provided operations or fall back to selectedOperations
+    const ops = operationsToPerform || selectedOperations;
+    
     // Check for duplicate output column names
-    const colNames = selectedOperations.map(getOutputColName).filter(Boolean);
+    const colNames = ops.map(getOutputColName).filter(Boolean);
     const duplicates = colNames.filter((name, idx) => colNames.indexOf(name) !== idx);
     if (duplicates.length > 0) {
       throw new Error(`Duplicate output column name: "${duplicates[0]}". Please use unique names.`);
@@ -1043,14 +1049,14 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
     try {
       // Validate required fields
       if (!dataSource) throw new Error('No input file selected.');
-      if (!selectedOperations.length) throw new Error('No operations selected.');
+      if (!ops.length) throw new Error('No operations selected.');
       // Prepare form data
       const formData = new FormData();
       formData.append('object_names', dataSource);
       formData.append('bucket_name', 'trinity');
       // Add each operation as a key with columns as value
       let operationsAdded = 0;
-      selectedOperations.forEach((op, idx) => {
+      ops.forEach((op, idx) => {
         if (op.columns && op.columns.filter(Boolean).length > 0) {
           let colString = op.columns.filter(Boolean).join(',');
           let rename = (op.rename && typeof op.rename === 'string' && op.rename.trim()) ? op.rename.trim() : '';
@@ -1424,12 +1430,12 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
       }
       
       // Save operations order
-      const addedOperationTypes = selectedOperations
+      const addedOperationTypes = ops
         .map((op, idx) => {
           return op.type;
         })
         .filter((type, idx) => {
-          const op = selectedOperations[idx];
+          const op = ops[idx];
           if (!op.columns || op.columns.filter(Boolean).length === 0) return false;
           
           if (["add", "subtract", "multiply", "divide", "residual"].includes(op.type)) {
@@ -1594,6 +1600,39 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
           ? filename
           : `${filename}.arrow`;
       setPreviewFile(savedFile);
+      
+      // After successful save, call callbacks to trigger navigation
+      if (onColumnCreated || onTableCreated) {
+        // Determine if this is a table operation or column operation
+        const hasDataframeOps = selectedOperations.some(op => dataframeOps.includes(op.type));
+        
+        if (hasDataframeOps && onTableCreated) {
+          // It's a table operation
+          onTableCreated({
+            newTableName: dataSource,
+            originalTableName: dataSource,
+            objectName: savedFile
+          });
+        } else if (onColumnCreated) {
+          // It's a column operation - create entries for all operations
+          selectedOperations.forEach(op => {
+            onColumnCreated({
+              columnName: getOutputColName(op),
+              tableName: dataSource,
+              operations: [op.type],
+              objectName: savedFile,
+              operationDetails: [{
+                type: op.type,
+                columns: op.columns || [],
+                method: typeof op.param === 'object' && op.param?.method ? op.param.method : undefined,
+                identifiers: op.columns.filter(col => allIdentifiers.includes(col)),
+                parameters: op.param || undefined
+              }]
+            });
+          });
+        }
+      }
+      
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
     } catch (err: any) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to save DataFrame';
@@ -1676,6 +1715,39 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
           ? filename
           : `${filename}.arrow`;
       setPreviewFile(savedFile);
+      
+      // After successful save, call callbacks to trigger navigation
+      if (onColumnCreated || onTableCreated) {
+        // Determine if this is a table operation or column operation
+        const hasDataframeOps = selectedOperations.some(op => dataframeOps.includes(op.type));
+        
+        if (hasDataframeOps && onTableCreated) {
+          // It's a table operation
+          onTableCreated({
+            newTableName: saveFileName.trim(),
+            originalTableName: dataSource || '',
+            objectName: savedFile
+          });
+        } else if (onColumnCreated) {
+          // It's a column operation - create entries for all operations
+          selectedOperations.forEach(op => {
+            onColumnCreated({
+              columnName: getOutputColName(op),
+              tableName: saveFileName.trim(),
+              operations: [op.type],
+              objectName: savedFile,
+              operationDetails: [{
+                type: op.type,
+                columns: op.columns || [],
+                method: typeof op.param === 'object' && op.param?.method ? op.param.method : undefined,
+                identifiers: op.columns.filter(col => allIdentifiers.includes(col)),
+                parameters: op.param || undefined
+              }]
+            });
+          });
+        }
+      }
+      
       setShowSaveModal(false);
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
     } catch (err: any) {
@@ -1848,87 +1920,6 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
           </>
         )}
 
-      {/* Identifiers List Section */}
-      {selectedIdentifiers.length > 0 && (
-        <Card className="border border-gray-200 shadow-sm">
-          <Collapsible open={identifiersListOpen} onOpenChange={setIdentifiersListOpen}>
-            <CardHeader className="pb-2 pt-3">
-              <CollapsibleTrigger asChild>
-                <CardTitle className="flex items-center justify-between text-sm font-semibold cursor-pointer hover:bg-gray-50 -mx-4 -my-2 px-4 py-2 rounded transition-colors">
-                  <div className="flex items-center space-x-2">
-                    {/* <Hash className="w-5 h-5 text-gray-600" /> */}
-                    <span>Identifiers</span>
-                    <span className="text-xs text-gray-400 font-normal">
-                      ({getFilteredIdentifiersForBackend().length} of {selectedIdentifiers.length})
-                    </span>
-                  </div>
-                  {identifiersListOpen ? (
-                    <ChevronDown className="w-4 h-4 text-gray-600" />
-                  ) : (
-                    <ChevronRight className="w-4 h-4 text-gray-600" />
-                  )}
-                </CardTitle>
-              </CollapsibleTrigger>
-            </CardHeader>
-            <CollapsibleContent>
-              <CardContent className="pt-0">
-                <div className="space-y-2">
-                  <div className="text-[10px] text-gray-500 mb-2">
-                    These are the identifiers for the selected file. Make sure to remove any date related columns from the selection.
-                  </div>
-                  <div className="max-h-48 overflow-y-auto pr-2 custom-scrollbar rounded-md">
-                    <div className="grid grid-cols-2 gap-1">
-                      {selectedIdentifiers.map((identifier, idx) => {
-                        const idLower = identifier.toLowerCase();
-                        const isDateColumn = idLower.includes('date');
-                        const datetimeSuffixes = ['_year', '_month', '_week', '_day', '_day_name', '_month_name'];
-                        const generatedSuffixes = ['_dummy', '_detrended', '_deseasonalized', '_detrend_deseasonalized', '_log', '_sqrt', '_exp', '_power', '_logistic', '_abs', '_scaled', '_zscore', '_minmax', '_residual', '_outlier', '_rpi', '_lag', '_lead', '_diff', '_growth_rate', '_rolling_mean', '_rolling_sum', '_rolling_min', '_rolling_max', '_cumulative_sum'];
-                        const isGenerated = generatedSuffixes.some(suffix => idLower.endsWith(suffix));
-                        const isDatetimeSuffix = datetimeSuffixes.some(suffix => idLower.endsWith(suffix));
-                        const isFiltered = isDateColumn || isDatetimeSuffix || isGenerated;
-                        const isSelected = selectedIdentifiersForBackendSet.has(identifier);
-                        
-                        return (
-                          <TooltipProvider key={idx} delayDuration={0}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className="flex items-center space-x-1.5 p-1 hover:bg-gray-50 rounded">
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected && !isFiltered}
-                                    disabled={isFiltered}
-                                    onChange={(e) => {
-                                      const newSet = new Set(selectedIdentifiersForBackend);
-                                      if (e.target.checked) {
-                                        newSet.add(identifier);
-                                      } else {
-                                        newSet.delete(identifier);
-                                      }
-                                      setSelectedIdentifiersForBackend(Array.from(newSet));
-                                    }}
-                                    className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500 flex-shrink-0"
-                                  />
-                                  <span className={`text-[10px] flex-1 truncate ${isFiltered ? 'text-gray-400 line-through' : isSelected ? 'text-blue-700 font-medium' : 'text-gray-600'}`} title={identifier}>
-                                    {identifier}
-                                    {isFiltered && <span className="ml-1 text-[9px] text-gray-400">(filtered)</span>}
-                                  </span>
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent side="top" className="text-xs max-w-xs">
-                                <p>{identifier}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </CollapsibleContent>
-          </Collapsible>
-        </Card>
-      )}
 
       {selectedOperations.length > 0 && (
         <div className="space-y-2">
@@ -3624,11 +3615,11 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
           </DialogHeader>
           <div className="py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Filename</label>
+              <label className="text-sm font-medium text-gray-700">Table Name</label>
               <Input
                 value={saveFileName}
                 onChange={(e) => setSaveFileName(e.target.value)}
-                placeholder="Enter filename"
+                placeholder="Enter table name"
                 className="w-full"
               />
               {saveError && (

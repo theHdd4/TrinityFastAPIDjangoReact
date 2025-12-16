@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useImperativeHandle } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -264,7 +264,22 @@ const operationFormulas: Record<string, string> = {
   'date_builder': 'Build date from year, month, day components',
 };
 
-const MetricsColOps: React.FC = () => {
+interface MetricsColOpsProps {
+  hideSaveButtons?: boolean;
+  onSave?: () => void;
+  onSaveAs?: () => void;
+  onColumnCreated?: (column: { columnName: string; tableName: string; objectName: string }) => void;
+  onTableCreated?: (table: { newTableName: string; originalTableName: string; objectName: string }) => void;
+}
+
+export interface MetricsColOpsRef {
+  save: () => void;
+  saveAs: () => void;
+  canSave: () => boolean;
+  isSaving: () => boolean;
+}
+
+const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ hideSaveButtons = false, onSave, onSaveAs, onColumnCreated, onTableCreated }, ref) => {
   const [search, setSearch] = React.useState('');
   const [isOpen, setIsOpen] = React.useState(true);
   const [openCategories, setOpenCategories] = React.useState<Record<string, boolean>>({});
@@ -1330,6 +1345,39 @@ const MetricsColOps: React.FC = () => {
       // ========================================================================
       await handleTableAtomAutoDisplay(savedFile, metricsInputs, true);
       
+      // Call onColumnCreated for each created column (for guided flow)
+      if (onColumnCreated) {
+        const resolveObjectName = (objectName: string) => {
+          if (!objectName) return objectName;
+          if (objectName.includes('/')) return objectName;
+          try {
+            const env = JSON.parse(localStorage.getItem('env') || '{}');
+            const { CLIENT_NAME, APP_NAME, PROJECT_NAME } = env;
+            if (CLIENT_NAME && APP_NAME && PROJECT_NAME) {
+              return `${CLIENT_NAME}/${APP_NAME}/${PROJECT_NAME}/${objectName}`;
+            }
+          } catch {}
+          return objectName;
+        };
+        
+        selectedOperations.forEach(op => {
+          const columnName = op.rename && typeof op.rename === 'string' ? op.rename : getOutputColName(op);
+          if (columnName) {
+            onColumnCreated({
+              columnName: columnName,
+              tableName: filename.split('/').pop() || filename,
+              operations: [op.type],
+              objectName: resolveObjectName(savedFile),
+              operationDetails: [{
+                type: op.type,
+                columns: op.columns || [],
+                parameters: op.param ? (typeof op.param === 'object' ? op.param : { value: op.param }) : undefined,
+              }],
+            });
+          }
+        });
+      }
+      
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
     } catch (err: any) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to save DataFrame';
@@ -1346,6 +1394,14 @@ const MetricsColOps: React.FC = () => {
     setSaveFileName(defaultFilename);
     setShowSaveModal(true);
   };
+
+  // Expose save methods via ref
+  React.useImperativeHandle(ref, () => ({
+    save: handleSave,
+    saveAs: handleSaveAs,
+    canSave: () => selectedOperations.length > 0 && !!metricsInputs.dataSource,
+    isSaving: () => saveLoading,
+  }), [selectedOperations.length, metricsInputs.dataSource, saveLoading]);
 
   // Confirm Save As
   const confirmSaveDataFrame = async () => {
@@ -1418,6 +1474,29 @@ const MetricsColOps: React.FC = () => {
       // AUTO-DISPLAY IN TABLE ATOM (Save As - creates new dataframe)
       // ========================================================================
       await handleTableAtomAutoDisplay(savedFile, metricsInputs, false);
+      
+      // Call onTableCreated (for guided flow)
+      if (onTableCreated) {
+        const resolveObjectName = (objectName: string) => {
+          if (!objectName) return objectName;
+          if (objectName.includes('/')) return objectName;
+          try {
+            const env = JSON.parse(localStorage.getItem('env') || '{}');
+            const { CLIENT_NAME, APP_NAME, PROJECT_NAME } = env;
+            if (CLIENT_NAME && APP_NAME && PROJECT_NAME) {
+              return `${CLIENT_NAME}/${APP_NAME}/${PROJECT_NAME}/${objectName}`;
+            }
+          } catch {}
+          return objectName;
+        };
+        
+        const newTableName = saveFileName.trim().replace('.arrow', '') || `createcolumn_${metricsInputs.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+        onTableCreated({
+          newTableName: newTableName,
+          originalTableName: metricsInputs.dataSource?.split('/').pop() || metricsInputs.dataSource || 'unknown',
+          objectName: resolveObjectName(savedFile),
+        });
+      }
       
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
     } catch (err: any) {
@@ -3371,7 +3450,7 @@ const MetricsColOps: React.FC = () => {
 
       </div>
 
-      {selectedOperations.length > 0 && (
+      {selectedOperations.length > 0 && !hideSaveButtons && (
         <div className="sticky bottom-0 bg-white border-t border-gray-200 px-2 py-2 z-10">
           {error && (
             <div className="mb-2">
@@ -3380,14 +3459,14 @@ const MetricsColOps: React.FC = () => {
           )}
           <div className="flex gap-2">
             <Button 
-              onClick={handleSave} 
+              onClick={onSave || handleSave} 
               disabled={saveLoading || !metricsInputs.dataSource} 
               className="bg-green-600 hover:bg-green-700 text-white h-6 text-[10px] flex-1"
             >
               {saveLoading ? 'Saving...' : 'Save'}
             </Button>
             <Button 
-              onClick={handleSaveAs} 
+              onClick={onSaveAs || handleSaveAs} 
               disabled={saveLoading || !metricsInputs.dataSource} 
               className="bg-blue-600 hover:bg-blue-700 text-white h-6 text-[10px] flex-1"
             >
@@ -3498,7 +3577,9 @@ const MetricsColOps: React.FC = () => {
       `}</style>
     </div>
   );
-};
+});
+
+MetricsColOps.displayName = 'MetricsColOps';
 
 export default MetricsColOps;
 

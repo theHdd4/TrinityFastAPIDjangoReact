@@ -4,6 +4,7 @@ import { atoms as allAtoms } from "@/components/AtomList/data";
 import { ClarificationRequestMessage as ClarificationRequest } from "@/types/streaming";
 import { LABORATORY_API } from "@/lib/api";
 import type { UploadStage, GuidedUploadFlowState } from "@/components/AtomList/atoms/data-upload/components/guided-upload/useGuidedUploadFlow";
+import type { MetricStage, MetricGuidedFlowState } from "@/components/LaboratoryMode/components/SettingsPanel/metricstabs/metricguildeflow/useMetricGuidedFlow";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -2006,6 +2007,9 @@ interface LaboratoryStore {
   pendingClarification?: ClarificationRequest | null;
   activeGuidedFlows: Record<string, { atomId: string; currentStage: UploadStage; state: Partial<GuidedUploadFlowState> }>;
   globalGuidedModeEnabled: boolean;
+  // Metric Guided Flow State
+  isMetricGuidedFlowOpen: boolean;
+  activeMetricGuidedFlow: { currentStage: MetricStage; state: Partial<MetricGuidedFlowState> } | null;
 
   // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
@@ -2063,6 +2067,11 @@ interface LaboratoryStore {
   setGlobalGuidedMode: (enabled: boolean) => void;
   toggleAtomGuidedMode: (atomId: string) => void;
   isGuidedModeActiveForAtom: (atomId: string) => boolean;
+  
+  // --- Metric Guided Flow Actions ---
+  openMetricGuidedFlow: (initialContext?: Partial<MetricGuidedFlowState>) => void;
+  closeMetricGuidedFlow: () => void;
+  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>) => void;
 }
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
@@ -2088,6 +2097,8 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   subMode: 'analytics',  // Default to analytics mode
   activeGuidedFlows: {},
   globalGuidedModeEnabled: false,
+  isMetricGuidedFlowOpen: false,
+  activeMetricGuidedFlow: null,
   setCards: (cards: LayoutCard[]) => {
     const currentSubMode = get().subMode;
     
@@ -2740,6 +2751,42 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     return state.globalGuidedModeEnabled;
   },
 
+  // --- Metric Guided Flow Actions ---
+  openMetricGuidedFlow: (initialContext?: Partial<MetricGuidedFlowState>) => {
+    console.log('[MetricGuidedFlow] openMetricGuidedFlow called', { initialContext });
+    const newState = {
+      isMetricGuidedFlowOpen: true,
+      activeMetricGuidedFlow: initialContext
+        ? {
+            currentStage: initialContext.currentStage || 'type',
+            state: initialContext,
+          }
+        : {
+            currentStage: 'type',
+            state: {},
+          },
+    };
+    console.log('[MetricGuidedFlow] Setting store state:', newState);
+    set(newState);
+    console.log('[MetricGuidedFlow] Store updated, isMetricGuidedFlowOpen should be true');
+  },
+
+  closeMetricGuidedFlow: () => {
+    set({
+      isMetricGuidedFlowOpen: false,
+      activeMetricGuidedFlow: null,
+    });
+  },
+
+  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>) => {
+    set((prev) => ({
+      activeMetricGuidedFlow: {
+        currentStage,
+        state: state || prev.activeMetricGuidedFlow?.state || {},
+      },
+    }));
+  },
+
   reset: () => {
     set({
       cards: [],
@@ -2747,6 +2794,8 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       pendingClarification: null,
       activeGuidedFlows: {},
       globalGuidedModeEnabled: false,
+      isMetricGuidedFlowOpen: false,
+      activeMetricGuidedFlow: null,
     });
     if (typeof window !== 'undefined') {
       localStorage.removeItem('trinity_lab_pending_clarification');

@@ -48,6 +48,7 @@ import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataValidateAtom from '@/components/AtomList/atoms/data-validate/DataValidateAtom';
 import DataUploadAtom from '@/components/AtomList/atoms/data-upload/DataUploadAtom';
 import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
+import { MetricGuidedFlowInline } from '@/components/LaboratoryMode/components/SettingsPanel/metricstabs/metricguildeflow/MetricGuidedFlowInline';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
@@ -1246,7 +1247,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     subMode,
     activeGuidedFlows,
     isGuidedModeActiveForAtom,
-    removeActiveGuidedFlow
+    removeActiveGuidedFlow,
+    isMetricGuidedFlowOpen,
+    activeMetricGuidedFlow,
+    closeMetricGuidedFlow
   } = useLaboratoryStore();
 
   // Calculate allowed atom IDs based on current mode
@@ -1290,6 +1294,30 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           savedState={activeGuidedFlows[atom.id]?.state}
           initialStage={activeGuidedFlows[atom.id]?.currentStage}
           existingDataframe={existingDataframe}
+        />
+      </div>
+    );
+  };
+  // Helper to render the global metric guided workflow inline card on the canvas
+  const renderMetricInlineGuidedFlow = () => {
+    console.log('[MetricGuidedFlow] renderMetricInlineGuidedFlow called', {
+      isMetricGuidedFlowOpen,
+      activeMetricGuidedFlow,
+      currentStage: activeMetricGuidedFlow?.currentStage,
+    });
+    
+    if (!isMetricGuidedFlowOpen) {
+      console.log('[MetricGuidedFlow] Not rendering - isMetricGuidedFlowOpen is false');
+      return null;
+    }
+
+    console.log('[MetricGuidedFlow] Rendering MetricGuidedFlowInline component');
+    return (
+      <div className="w-full mt-4">
+        <MetricGuidedFlowInline
+          initialStage={activeMetricGuidedFlow?.currentStage}
+          savedState={activeMetricGuidedFlow?.state}
+          onClose={closeMetricGuidedFlow}
         />
       </div>
     );
@@ -6022,6 +6050,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 }
                 return null;
               })}
+              
+              {/* Global Metric Guided Workflow inline card (not tied to any atom) */}
+              {renderMetricInlineGuidedFlow()}
             </div>
           </div>
         </div>
@@ -6548,6 +6579,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 </React.Fragment>
               );
             })}
+
+            {/* Global Metric Guided Workflow inline card (not tied to any atom) */}
+            {renderMetricInlineGuidedFlow()}
 
             {/* Add New Card Button */}
             <div className="flex justify-center">

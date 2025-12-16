@@ -1,9 +1,11 @@
 import React from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { VerticalProgressStepper } from '@/components/AtomList/atoms/data-upload/components/guided-upload/VerticalProgressStepper';
+import { VerticalProgressStepper as MetricVerticalProgressStepper } from '@/components/LaboratoryMode/components/SettingsPanel/metricstabs/metricguildeflow/VerticalProgressStepper';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import type { UploadStage } from '@/components/AtomList/atoms/data-upload/components/guided-upload/useGuidedUploadFlow';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface GuidedFlowStepTrackerPanelProps {
   isOpen: boolean;
@@ -15,9 +17,11 @@ export const GuidedFlowStepTrackerPanel: React.FC<GuidedFlowStepTrackerPanelProp
   onClose,
 }) => {
   const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows || {});
+  const activeMetricGuidedFlow = useLaboratoryStore((state) => state.activeMetricGuidedFlow);
+  const isMetricGuidedFlowOpen = useLaboratoryStore((state) => state.isMetricGuidedFlowOpen);
   const getAtom = useLaboratoryStore((state) => state.getAtom);
 
-  if (!isOpen || Object.keys(activeGuidedFlows).length === 0) {
+  if (!isOpen || (Object.keys(activeGuidedFlows).length === 0 && !isMetricGuidedFlowOpen)) {
     return null;
   }
 
@@ -78,19 +82,55 @@ export const GuidedFlowStepTrackerPanel: React.FC<GuidedFlowStepTrackerPanelProp
 
         {/* Step Tracker */}
         <div className="flex-1 overflow-y-auto p-4">
-          {selectedFlow ? (
-            <div>
-              {selectedAtom && (
-                <div className="mb-4 pb-3 border-b border-white/20">
-                  <div className="text-xs text-gray-500 mb-1">Current Atom</div>
-                  <div className="text-sm font-medium text-gray-900">{selectedAtom.title}</div>
-                </div>
-              )}
-              <VerticalProgressStepper
-                currentStage={selectedFlow.currentStage}
-                className="w-full"
-              />
-            </div>
+          {(activeFlowEntries.length > 0 || isMetricGuidedFlowOpen) ? (
+            <Tabs defaultValue={activeFlowEntries.length > 0 ? 'upload' : 'metric'} className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="upload" disabled={activeFlowEntries.length === 0}>
+                  Data Upload
+                </TabsTrigger>
+                <TabsTrigger value="metric" disabled={!isMetricGuidedFlowOpen}>
+                  Metric
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="upload" className="mt-0">
+                {selectedFlow ? (
+                  <div>
+                    {selectedAtom && (
+                      <div className="mb-4 pb-3 border-b border-white/20">
+                        <div className="text-xs text-gray-500 mb-1">Current Atom</div>
+                        <div className="text-sm font-medium text-gray-900">{selectedAtom.title}</div>
+                      </div>
+                    )}
+                    <VerticalProgressStepper
+                      currentStage={selectedFlow.currentStage}
+                      className="w-full"
+                    />
+                  </div>
+                ) : (
+                  <div className="text-center text-sm text-gray-500 py-8">
+                    No active data upload flow
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent value="metric" className="mt-0">
+                {activeMetricGuidedFlow ? (
+                  <div>
+                    <div className="mb-4 pb-3 border-b border-white/20">
+                      <div className="text-xs text-gray-500 mb-1">Current Flow</div>
+                      <div className="text-sm font-medium text-gray-900">Metric Creation</div>
+                    </div>
+                    <MetricVerticalProgressStepper
+                      currentStage={activeMetricGuidedFlow.currentStage}
+                      className="w-full"
+                    />
+                  </div>
+                ) : (
+                  <div className="text-center text-sm text-gray-500 py-8">
+                    No active metric flow
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           ) : (
             <div className="text-center text-sm text-gray-500 py-8">
               No active guided flow
