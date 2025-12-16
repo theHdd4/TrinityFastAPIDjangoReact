@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown, MoreVertical, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -8,6 +8,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from '@/components/ui/dropdown-menu';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { chartMakerApi } from '@/components/AtomList/atoms/chart-maker/services/chartMakerApi';
+import { migrateLegacyChart, buildTracesForAPI, validateChart } from '@/components/AtomList/atoms/chart-maker/utils/traceUtils';
 import type { KPIDashboardData, KPIDashboardSettings } from '../KPIDashboardAtom';
 import { ElementType } from './ElementDropdown';
 import ElementRenderer from './ElementRenderer';
@@ -675,6 +680,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                         defaultValueFormat={'none'}
                         settings={settings}
                         onSettingsChange={onSettingsChange}
+                        data={data}
                       />
                     ))}
                   </div>
@@ -758,6 +764,7 @@ interface ElementBoxProps {
   defaultValueFormat?: 'none' | 'thousands' | 'millions' | 'billions' | 'lakhs';
   settings: KPIDashboardSettings;
   onSettingsChange: (settings: Partial<KPIDashboardSettings>) => void;
+  data: KPIDashboardData | null;
 }
 
 const ElementBox: React.FC<ElementBoxProps> = ({ 
@@ -772,7 +779,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   variables = [],
   defaultValueFormat = 'none',
   settings,
-  onSettingsChange
+  onSettingsChange,
+  data
 }) => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -1770,13 +1778,43 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
           {/* Insights Panel Card */}
           <div className="relative w-full flex-1" style={{ minHeight: 0 }}>
-            {/* Change button (top right corner) */}
-            <button
-              onClick={handleDoubleClick}
-              className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-            >
-              Change
-            </button>
+            {/* Three-dots menu - visible on hover */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute top-2 right-2 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center"
+                  title="More options"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                    Change Element
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-48">
+                    {elementTypes.map((element) => {
+                      const Icon = element.icon;
+                      return (
+                        <DropdownMenuItem
+                          key={element.value}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleElementChange(element.value);
+                          }}
+                          className="flex items-center gap-2"
+                        >
+                          <Icon className="w-4 h-4" />
+                          <span>{element.label}</span>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <div 
               className="w-full h-full rounded-xl overflow-hidden p-6 shadow-lg border-2 border-blue-300"
@@ -2930,13 +2968,43 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           className="relative group/box" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
-          {/* Change button (top right corner) */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-purple-600 hover:bg-purple-50 transition-colors"
-          >
-            Change
-          </button>
+          {/* Three-dots menu - visible on hover */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-2 right-2 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center"
+                title="More options"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                  Change Element
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-48">
+                  {elementTypes.map((element) => {
+                    const Icon = element.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={element.value}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleElementChange(element.value);
+                        }}
+                        className="flex items-center gap-2"
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span>{element.label}</span>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Toolbar - only show when a field is active */}
           {activeQAField && (
@@ -3841,37 +3909,350 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         onSettingsChange({ selectedBoxId: boxId });
       };
 
+      const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+      const [identifierOptions, setIdentifierOptions] = useState<Record<string, string[]>>({});
+      const [selectedFilters, setSelectedFilters] = useState<Record<string, string>>({});
+      const [loadingFilters, setLoadingFilters] = useState(false);
+      const [availableVariables, setAvailableVariables] = useState<any[]>([]);
+
+      // Fetch filter options when variable is selected or filter menu opens
+      useEffect(() => {
+        const variableKey = box.variableNameKey || box.variableName;
+        
+        if (!variableKey) {
+          setIdentifierOptions({});
+          setSelectedFilters({});
+          setAvailableVariables([]);
+          return;
+        }
+        
+        // Fetch options when variable is available (will be used when menu opens)
+        
+        const fetchVariableOptions = async () => {
+          setLoadingFilters(true);
+          try {
+            const projectContext = getActiveProjectContext();
+            if (!projectContext) return;
+
+            const params = new URLSearchParams({
+              clientId: projectContext.client_name,
+              appId: projectContext.app_name,
+              projectId: projectContext.project_name,
+            });
+
+            const response = await fetch(`${LABORATORY_API}/variables?${params.toString()}`, {
+              credentials: 'include',
+            });
+
+            if (response.ok) {
+              const result = await response.json();
+              if (result.variables && Array.isArray(result.variables)) {
+                const currentKey = box.variableNameKey || box.variableName || '';
+                const currentKeyParts = currentKey.split('_');
+                const basePattern = currentKeyParts.slice(0, 2).join('_');
+                
+                const relatedVariables = result.variables.filter((v: any) => {
+                  const vKey = v.variableNameKey || v.variableName;
+                  if (!vKey) return false;
+                  return vKey.startsWith(basePattern + '_') || vKey === basePattern;
+                });
+                
+                setAvailableVariables(relatedVariables);
+                
+                // Parse identifiers from current variable
+                const currentVariableIdentifiers: Set<string> = new Set();
+                if (currentKey) {
+                  const parts = currentKey.split('_');
+                  const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+                  
+                  let i = 2;
+                  while (i < parts.length) {
+                    const key = parts[i].toLowerCase();
+                    if (identifierTypes.includes(key) && i + 1 < parts.length) {
+                      currentVariableIdentifiers.add(key);
+                      let nextIndex = i + 2;
+                      while (nextIndex < parts.length) {
+                        const nextPart = parts[nextIndex].toLowerCase();
+                        if (!identifierTypes.includes(nextPart)) {
+                          nextIndex++;
+                        } else {
+                          break;
+                        }
+                      }
+                      i = nextIndex;
+                    } else {
+                      i++;
+                    }
+                  }
+                }
+                
+                // Parse identifier values from all related variables
+                const identifierMap: Record<string, Set<string>> = {};
+                relatedVariables.forEach((v: any) => {
+                  const vKey = v.variableNameKey || v.variableName;
+                  if (vKey) {
+                    const parts = vKey.split('_');
+                    const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+                    
+                    let i = 2;
+                    while (i < parts.length) {
+                      const key = parts[i].toLowerCase();
+                      if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
+                        let value = parts[i + 1];
+                        let nextIndex = i + 2;
+                        while (nextIndex < parts.length) {
+                          const nextPart = parts[nextIndex].toLowerCase();
+                          if (!identifierTypes.includes(nextPart)) {
+                            value += '_' + parts[nextIndex];
+                            nextIndex++;
+                          } else {
+                            break;
+                          }
+                        }
+                        if (!identifierMap[key]) {
+                          identifierMap[key] = new Set();
+                        }
+                        identifierMap[key].add(value);
+                        i = nextIndex;
+                      } else {
+                        i++;
+                      }
+                    }
+                  }
+                });
+                
+                const options: Record<string, string[]> = {};
+                currentVariableIdentifiers.forEach(key => {
+                  if (identifierMap[key]) {
+                    options[key] = Array.from(identifierMap[key]).sort();
+                  }
+                });
+                
+                setIdentifierOptions(options);
+                
+                // Set initial filter values from current variable
+                if (currentKey) {
+                  const parts = currentKey.split('_');
+                  const currentFilters: Record<string, string> = {};
+                  const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+                  
+                  let i = 2;
+                  while (i < parts.length) {
+                    const key = parts[i].toLowerCase();
+                    if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
+                      let value = parts[i + 1];
+                      let nextIndex = i + 2;
+                      while (nextIndex < parts.length) {
+                        const nextPart = parts[nextIndex].toLowerCase();
+                        if (!identifierTypes.includes(nextPart)) {
+                          value += '_' + parts[nextIndex];
+                          nextIndex++;
+                        } else {
+                          break;
+                        }
+                      }
+                      if (options[key]) {
+                        currentFilters[key] = value;
+                      }
+                      i = nextIndex;
+                    } else {
+                      i++;
+                    }
+                  }
+                  setSelectedFilters(currentFilters);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Failed to fetch variable options:', error);
+          } finally {
+            setLoadingFilters(false);
+          }
+        };
+
+        fetchVariableOptions();
+      }, [box.variableNameKey, box.variableName, filterMenuOpen]);
+
+      // Find matching variable based on selected filters
+      const findMatchingVariable = (filters: Record<string, string>) => {
+        const activeFilters = Object.entries(filters).filter(([_, val]) => val !== '');
+        if (activeFilters.length === 0) return null;
+        
+        const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+        
+        return availableVariables.find((v: any) => {
+          const vKey = v.variableNameKey || v.variableName;
+          if (!vKey) return false;
+          const parts = vKey.split('_');
+          const varIdentifiers: Record<string, string> = {};
+          
+          let i = 2;
+          while (i < parts.length) {
+            const key = parts[i].toLowerCase();
+            if (identifierTypes.includes(key) && i + 1 < parts.length) {
+              let value = parts[i + 1];
+              let nextIndex = i + 2;
+              while (nextIndex < parts.length) {
+                const nextPart = parts[nextIndex].toLowerCase();
+                if (!identifierTypes.includes(nextPart)) {
+                  value += '_' + parts[nextIndex];
+                  nextIndex++;
+                } else {
+                  break;
+                }
+              }
+              if (identifierOptions[key]) {
+                varIdentifiers[key] = value;
+              }
+              i = nextIndex;
+            } else {
+              i++;
+            }
+          }
+          
+          const allMatch = activeFilters.every(([key, val]) => varIdentifiers[key] === val);
+          return allMatch;
+        });
+      };
+
+      // Handle filter change
+      const handleFilterChange = (identifier: string, value: string) => {
+        const filterValue = value === '__all__' ? '' : value;
+        const newFilters = { ...selectedFilters, [identifier]: filterValue };
+        setSelectedFilters(newFilters);
+        
+        const matchingVar = findMatchingVariable(newFilters);
+        if (matchingVar) {
+          onTextBoxUpdate(layoutId, boxId, {
+            variableId: matchingVar.id,
+            variableName: matchingVar.variableName,
+            variableNameKey: matchingVar.variableNameKey || matchingVar.variableName,
+            metricValue: matchingVar.value || '0',
+            value: matchingVar.value,
+            metricLabel: box.metricLabel || matchingVar.variableName,
+          });
+        }
+      };
+
       return (
         <div 
           className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleMetricCardClick}
         >
-          {/* Change button - visible on hover */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-yellow-600 hover:bg-yellow-50 transition-opacity opacity-0 group-hover/box:opacity-100"
-          >
-            Change
-          </button>
-
-          {/* Add/Change Variable button - visible on hover */}
-          {(!box.variableId && !box.variableNameKey) ? (
-            <button
-              onClick={handleAddVariableClick}
-              className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg shadow-md text-xs font-medium transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center gap-1"
-            >
-              <Plus className="w-3 h-3" />
-              Add Variable
-            </button>
-          ) : (
-            <button
-              onClick={handleAddVariableClick}
-              className="absolute top-2 left-2 z-20 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg shadow-md text-xs font-medium transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center gap-1"
-            >
-              Change Variable
-            </button>
-          )}
+          {/* Three-dots menu - visible on hover */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-2 right-2 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center"
+                title="More options"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                  Change Element
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-48">
+                  {elementTypes.map((element) => {
+                    const Icon = element.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={element.value}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleElementChange(element.value);
+                        }}
+                        className="flex items-center gap-2"
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span>{element.label}</span>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAddVariableClick(e as any); }}>
+                {(!box.variableId && !box.variableNameKey) ? (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Variable
+                  </>
+                ) : (
+                  <>
+                    Change Variable
+                  </>
+                )}
+              </DropdownMenuItem>
+              {hasVariable && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSub onOpenChange={(open) => setFilterMenuOpen(open)}>
+                    <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                      <Filter className="w-4 h-4 mr-2" />
+                      Filter by Identifiers
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-64">
+                      {loadingFilters ? (
+                        <div className="p-3 text-center text-xs text-gray-500">
+                          Loading filter options...
+                        </div>
+                      ) : Object.keys(identifierOptions).length > 0 ? (
+                        Object.keys(identifierOptions).map((identifier) => {
+                          const options = identifierOptions[identifier] || [];
+                          const currentValue = selectedFilters[identifier] || '__all__';
+                          
+                          return (
+                            <DropdownMenuSub key={identifier}>
+                              <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                                <span className="capitalize">{identifier.replace(/_/g, ' ')}</span>
+                                {currentValue !== '__all__' && (
+                                  <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                                    {String(currentValue).replace(/_/g, ' ')}
+                                  </span>
+                                )}
+                              </DropdownMenuSubTrigger>
+                              <DropdownMenuSubContent className="w-56">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleFilterChange(identifier, '__all__');
+                                  }}
+                                  className={currentValue === '__all__' ? 'bg-blue-50' : ''}
+                                >
+                                  <span className="text-xs">All {identifier}s</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                {options.map((value) => (
+                                  <DropdownMenuItem
+                                    key={value}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleFilterChange(identifier, value);
+                                    }}
+                                    className={currentValue === value ? 'bg-blue-50' : ''}
+                                  >
+                                    <span className="text-xs">{String(value).replace(/_/g, ' ')}</span>
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuSubContent>
+                            </DropdownMenuSub>
+                          );
+                        })
+                      ) : (
+                        <div className="p-3 text-center text-xs text-gray-500">
+                          No identifier filters available
+                        </div>
+                      )}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Metric Card */}
           <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-yellow-200 shadow-lg p-6 flex flex-col justify-between relative" style={{ minWidth: 0, minHeight: 0 }}>
@@ -4199,17 +4580,192 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Calculate box height: layout height minus padding (about 20px total)
       const boxHeight = Math.max(150, layoutHeight - 20);
 
-      // Handle note changes for the chart
-      const handleNoteChange = (note: string) => {
-        const updatedLayouts = settings.layouts?.map(layout => ({
-          ...layout,
-          boxes: layout.boxes.map(box =>
-            box.id === boxId
-              ? { ...box, chartConfig: { ...chartConfig, note } }
-              : box
-          )
-        }));
-        onSettingsChange({ layouts: updatedLayouts });
+      // Handle note changes for the chart - store notes per filter combination
+      const handleNoteChange = (note: string, noteHtml?: string, noteFormatting?: any, filterKey?: string) => {
+        // Initialize notesByFilter if it doesn't exist
+        const currentNotesByFilter = (chartConfig as any).notesByFilter || {};
+        
+        // If filterKey is provided, save note per filter combination
+        if (filterKey) {
+          const updatedNotesByFilter = {
+            ...currentNotesByFilter,
+            [filterKey]: {
+              note,
+              ...(noteHtml !== undefined && { noteHtml }),
+              ...(noteFormatting !== undefined && { noteFormatting })
+            }
+          };
+          
+          const updatedChartConfig = {
+            ...chartConfig,
+            notesByFilter: updatedNotesByFilter,
+            // Also keep legacy note fields for backward compatibility (use current filter's note)
+            note: note,
+            ...(noteHtml !== undefined && { noteHtml }),
+            ...(noteFormatting !== undefined && { noteFormatting })
+          };
+          
+          const updatedLayouts = settings.layouts?.map(layout => ({
+            ...layout,
+            boxes: layout.boxes.map(box =>
+              box.id === boxId
+                ? { ...box, chartConfig: updatedChartConfig }
+                : box
+            )
+          }));
+          onSettingsChange({ layouts: updatedLayouts });
+        } else {
+          // Fallback for backward compatibility (no filter key provided)
+          const updatedChartConfig = {
+            ...chartConfig,
+            note,
+            ...(noteHtml !== undefined && { noteHtml }),
+            ...(noteFormatting !== undefined && { noteFormatting })
+          };
+          const updatedLayouts = settings.layouts?.map(layout => ({
+            ...layout,
+            boxes: layout.boxes.map(box =>
+              box.id === boxId
+                ? { ...box, chartConfig: updatedChartConfig }
+                : box
+            )
+          }));
+          onSettingsChange({ layouts: updatedLayouts });
+        }
+      };
+
+      // Extract filters from chart config
+      const chartFilters = chartConfig?.filters || {};
+      const hasFilters = Object.keys(chartFilters).length > 0;
+      const [filterEditorOpen, setFilterEditorOpen] = useState(false);
+      const [uniqueValues, setUniqueValues] = useState<Record<string, string[]>>({});
+      const [loadingUniqueValues, setLoadingUniqueValues] = useState(false);
+      const [tempFilters, setTempFilters] = useState<Record<string, string[]>>({});
+
+      // Fetch unique values for filter columns
+      useEffect(() => {
+        if (!filterEditorOpen || !chartConfig || !data) return;
+
+        const fetchUniqueValues = async () => {
+          setLoadingUniqueValues(true);
+          try {
+            const dataSource = (settings as any).selectedFile || (settings as any).dataSource;
+            let objectName = dataSource || data.fileName;
+            
+            if (!objectName) {
+              setLoadingUniqueValues(false);
+              return;
+            }
+
+            if (!objectName.endsWith('.arrow')) {
+              objectName += '.arrow';
+            }
+
+            const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
+            const fileId = uploadResponse.file_id;
+
+            // Get all columns
+            const allColumnsResponse = await chartMakerApi.getAllColumns(fileId);
+            const allColumns = allColumnsResponse.columns || [];
+
+            // Get unique values for all columns
+            const uniqueValuesResponse = await chartMakerApi.getUniqueValues(fileId, allColumns);
+            setUniqueValues(uniqueValuesResponse.values || {});
+          } catch (error) {
+            console.error('Error fetching unique values:', error);
+          } finally {
+            setLoadingUniqueValues(false);
+          }
+        };
+
+        fetchUniqueValues();
+        // Initialize temp filters with current filters
+        const currentFilters: Record<string, string[]> = {};
+        Object.entries(chartFilters).forEach(([key, values]) => {
+          currentFilters[key] = Array.isArray(values) ? values : [values];
+        });
+        setTempFilters(currentFilters);
+      }, [filterEditorOpen, chartConfig, data, settings]);
+
+      // Handle filter change
+      const handleFilterChange = async (column: string, values: string[]) => {
+        const newTempFilters = { ...tempFilters, [column]: values };
+        setTempFilters(newTempFilters);
+
+        // Update chart config immediately
+        const updatedChartConfig = {
+          ...chartConfig,
+          filters: newTempFilters
+        };
+
+        // Re-render chart if it's already rendered
+        if (chartConfig?.chartRendered && data) {
+          try {
+            const dataSource = (settings as any).selectedFile || (settings as any).dataSource;
+            let objectName = dataSource || data.fileName;
+            
+            if (!objectName) return;
+
+            if (!objectName.endsWith('.arrow')) {
+              objectName += '.arrow';
+            }
+
+            const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
+            const fileId = uploadResponse.file_id;
+
+            const migratedChart = migrateLegacyChart(updatedChartConfig);
+            if (!validateChart(migratedChart)) return;
+
+            const traces = buildTracesForAPI(migratedChart);
+            const chartRequest = {
+              file_id: fileId,
+              chart_type: migratedChart.type === 'stacked_bar' ? 'bar' : migratedChart.type,
+              traces: traces,
+              title: migratedChart.title,
+              filters: Object.keys(newTempFilters).length > 0 ? newTempFilters : undefined,
+            };
+
+            const chartResponse = await chartMakerApi.generateChart(chartRequest);
+            
+            const finalChartConfig = {
+              ...updatedChartConfig,
+              chartConfig: chartResponse.chart_config,
+              filteredData: chartResponse.chart_config.data,
+              chartRendered: true,
+            };
+
+            const updatedLayouts = settings.layouts?.map(layout => ({
+              ...layout,
+              boxes: layout.boxes.map(box =>
+                box.id === boxId
+                  ? { ...box, chartConfig: finalChartConfig }
+                  : box
+              )
+            }));
+            onSettingsChange({ layouts: updatedLayouts });
+          } catch (error) {
+            console.error('Error updating chart with new filters:', error);
+          }
+        } else {
+          // Just update the config without re-rendering
+          const updatedLayouts = settings.layouts?.map(layout => ({
+            ...layout,
+            boxes: layout.boxes.map(box =>
+              box.id === boxId
+                ? { ...box, chartConfig: updatedChartConfig }
+                : box
+            )
+          }));
+          onSettingsChange({ layouts: updatedLayouts });
+        }
+      };
+
+      // Get available columns for filtering (exclude x and y axes)
+      const getFilterableColumns = (): string[] => {
+        if (!data || !data.headers) return [];
+        const xAxis = chartConfig?.xAxis;
+        const yAxis = chartConfig?.yAxis;
+        return (data.headers as string[]).filter((col: string) => col !== xAxis && col !== yAxis);
       };
 
       return (
@@ -4218,22 +4774,187 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleChartClick}
         >
-          {/* Change button - visible on hover */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-yellow-600 hover:bg-yellow-50 transition-opacity opacity-0 group-hover/box:opacity-100"
-          >
-            Change
-          </button>
+          {/* Three-dots menu - visible on hover */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-2 right-2 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center"
+                title="More options"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                  Change Element
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-48">
+                  {elementTypes.map((element) => {
+                    const Icon = element.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={element.value}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleElementChange(element.value);
+                        }}
+                        className="flex items-center gap-2"
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span>{element.label}</span>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Chart Container */}
-          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-blue-200 shadow-lg" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-blue-200 shadow-lg relative" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
             <ChartElement 
               chartConfig={chartConfig}
               width={undefined}
               height={boxHeight}
               onNoteChange={handleNoteChange}
             />
+            
+            {/* Filter Display - positioned between title and chart, on the left */}
+            {(hasFilters || filterEditorOpen) && (
+              <div className="absolute left-2 z-10 opacity-0 group-hover/box:opacity-100 transition-opacity duration-200 pointer-events-none" style={{ top: chartConfig?.title ? '52px' : '8px' }}>
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  {Object.entries(tempFilters.length > 0 ? tempFilters : chartFilters).map(([key, values]) => {
+                    const filterValues = Array.isArray(values) ? values : [values];
+                    return filterValues.length > 0 ? filterValues.map((value, idx) => (
+                      <div
+                        key={`${key}-${idx}`}
+                        className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-xs font-medium text-blue-700"
+                      >
+                        <Filter className="w-3 h-3 text-blue-600" />
+                        <span className="text-blue-600 font-semibold capitalize">{key}:</span>
+                        <span className="text-blue-800">{String(value).replace(/_/g, ' ')}</span>
+                      </div>
+                    )) : null;
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Filter Editor Button - visible on hover, positioned top-right, left of three-dots */}
+            <Popover open={filterEditorOpen} onOpenChange={setFilterEditorOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFilterEditorOpen(true);
+                  }}
+                  className="absolute top-2 right-10 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center pointer-events-auto"
+                  title="Edit Filters"
+                >
+                  <Filter className="w-4 h-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent 
+                className="w-80 max-h-96 p-0" 
+                align="end"
+                onClick={(e) => e.stopPropagation()}
+                onOpenAutoFocus={(e) => e.preventDefault()}
+              >
+                <div className="p-3 border-b">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-sm">Chart Filters</h4>
+                    <button
+                      onClick={() => setFilterEditorOpen(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <ScrollArea className="max-h-80">
+                  <div className="p-3 space-y-4">
+                    {loadingUniqueValues ? (
+                      <div className="text-center py-4 text-sm text-gray-500">
+                        Loading filter options...
+                      </div>
+                    ) : (
+                      (getFilterableColumns() || []).map((column: string) => {
+                        const columnValues = uniqueValues[column] || [];
+                        const selectedValues = tempFilters[column] || [];
+                        const allSelected = columnValues.length > 0 && selectedValues.length === columnValues.length;
+
+                        return (
+                          <div key={column} className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-xs font-medium capitalize">
+                                {column.replace(/_/g, ' ')}
+                              </Label>
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  checked={allSelected}
+                                  onCheckedChange={(checked) => {
+                                    handleFilterChange(column, checked ? columnValues : []);
+                                  }}
+                                />
+                                <span className="text-xs text-gray-500">
+                                  Select All
+                                </span>
+                              </div>
+                            </div>
+                            <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                              {columnValues.length === 0 ? (
+                                <p className="text-xs text-gray-400">No values available</p>
+                              ) : (
+                                columnValues.map((value) => (
+                                  <div key={value} className="flex items-center space-x-2">
+                                    <Checkbox
+                                      checked={selectedValues.includes(value)}
+                                      onCheckedChange={(checked) => {
+                                        const newValues = checked
+                                          ? [...selectedValues, value]
+                                          : selectedValues.filter((v) => v !== value);
+                                        handleFilterChange(column, newValues);
+                                      }}
+                                    />
+                                    <span className="text-xs">{String(value).replace(/_/g, ' ')}</span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                    {getFilterableColumns().length === 0 && !loadingUniqueValues && (
+                      <div className="text-center py-4 text-sm text-gray-500">
+                        No filterable columns available
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+                {hasFilters && (
+                  <div className="p-3 border-t bg-gray-50">
+                    <div className="flex flex-wrap gap-1.5">
+                      {Object.entries(tempFilters).map(([key, values]) => {
+                        const filterValues = Array.isArray(values) ? values : [];
+                        if (filterValues.length === 0) return null;
+                        return filterValues.map((value, idx) => (
+                          <div
+                            key={`${key}-${idx}`}
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-xs font-medium text-blue-700"
+                          >
+                            <span className="text-blue-600 font-semibold capitalize">{key}:</span>
+                            <span className="text-blue-800">{String(value).replace(/_/g, ' ')}</span>
+                          </div>
+                        ));
+                      })}
+                    </div>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
       );

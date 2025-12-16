@@ -1435,67 +1435,6 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
             </div>
           ) : null}
 
-          {/* Identifier Filters */}
-          {loadingFilters ? (
-            <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-xs text-muted-foreground text-center">Loading filter options...</p>
-            </div>
-          ) : Object.keys(identifierOptions).length > 0 ? (
-            <div className="space-y-3">
-              <Label className="text-sm font-medium">Filter by Identifiers</Label>
-              {Object.keys(identifierOptions).map((identifier) => (
-                <div key={identifier} className="space-y-2">
-                  <Label htmlFor={`filter-${identifier}`} className="text-xs font-medium capitalize">
-                    {identifier} ({identifierOptions[identifier].length} options)
-                  </Label>
-                  <Select
-                    value={selectedFilters[identifier] ? selectedFilters[identifier] : '__all__'}
-                    onValueChange={(value) => handleFilterChange(identifier, value)}
-                    disabled={loadingFilters}
-                  >
-                    <SelectTrigger className="w-full bg-white border-gray-300">
-                      <SelectValue placeholder={`Select ${identifier}...`} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All {identifier}s</SelectItem>
-                      {identifierOptions[identifier].map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {value.replace(/_/g, ' ')}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-              <p className="text-xs text-muted-foreground">
-                Select identifier values to filter the variable. The metric card will update automatically.
-              </p>
-            </div>
-          ) : (selectedBox.variableNameKey || selectedBox.variableName) ? (
-            <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-              <p className="text-xs text-yellow-800 text-center font-semibold">
-                No identifier filters found.
-              </p>
-              <p className="text-xs text-yellow-700 text-center mt-1 break-all">
-                Variable key: {selectedBox.variableNameKey}
-              </p>
-              <p className="text-xs text-yellow-700 text-center mt-1">
-                Found {availableVariables.length} related variables.
-              </p>
-              {availableVariables.length > 0 && (
-                <div className="mt-2 p-2 bg-yellow-100 rounded text-xs">
-                  <p className="font-semibold mb-1">Sample related variables:</p>
-                  {availableVariables.slice(0, 3).map((v: any, idx: number) => (
-                    <p key={idx} className="break-all">{v.variableNameKey}</p>
-                  ))}
-                </div>
-              )}
-              <p className="text-xs text-yellow-700 text-center mt-2">
-                Make sure variables have identifier patterns like brand_*, year_*, channel_* after the base pattern (e.g., salesvalue_sum_*).
-              </p>
-            </div>
-          ) : null}
-
           {/* Number Format */}
           <div className="space-y-2">
             <Label htmlFor="elementValueFormat" className="text-sm font-medium">
