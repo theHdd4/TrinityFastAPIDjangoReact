@@ -25,14 +25,21 @@ from .deps import (
     redis_client,
     redis_classifier_config,
 )
+from app.core.mongo import build_host_mongo_uri
 
 
 logger = logging.getLogger("app.features.createcolumn.service")
 
+# MongoDB Configuration
+# Use MONGO_URI from environment (set in docker-compose.yml: mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin)
+# Allow override via CREATECOLUMN_MONGO_URI
 MONGO_URI = os.getenv(
     "CREATECOLUMN_MONGO_URI",
-    os.getenv("MONGO_URI", "mongodb://mongo:27017"),
+    os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin")
 )
+
+# Database name for createandtransform_configs collection
+# Note: URI may point to trinity_dev, but we can access trinity_db database
 MONGO_DB = os.getenv("CREATECOLUMN_MONGO_DB", os.getenv("MONGO_DB", "trinity_db"))
 
 _mongo_client: Optional[MongoClient] = None
@@ -41,7 +48,45 @@ _mongo_client: Optional[MongoClient] = None
 def _get_mongo_client() -> MongoClient:
     global _mongo_client
     if _mongo_client is None:
-        _mongo_client = MongoClient(MONGO_URI)
+        # Use MONGO_URI from environment (set in docker-compose.yml)
+        # URI format: mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin
+        try:
+            # Extract credentials from environment or use defaults
+            # Pass explicit auth parameters to ensure proper authentication (same pattern as molecule/database.py)
+            mongo_username = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER") or "root"
+            mongo_password = os.getenv("MONGO_PASSWORD") or "rootpass"
+            mongo_auth_db = os.getenv("MONGO_AUTH_DB", "admin")
+            
+            # Extract host and port from MONGO_URI
+            # Parse: mongodb://user:pass@host:port/db?options
+            from urllib.parse import urlparse
+            parsed = urlparse(MONGO_URI)
+            host = parsed.hostname or "mongo"
+            port = parsed.port or 27017
+            base_uri = f"mongodb://{host}:{port}"
+            
+            # Create client with explicit auth parameters (required for proper authentication)
+            _mongo_client = MongoClient(
+                base_uri,
+                username=mongo_username,
+                password=mongo_password,
+                authSource=mongo_auth_db,
+                serverSelectionTimeoutMS=5000,
+            )
+            # Test connection on admin database
+            _mongo_client.admin.command('ping')
+            # Also test access to trinity_db to ensure authentication works
+            _mongo_client[MONGO_DB].command('ping')
+            logger.info(f"✅ [MONGO] Connected to MongoDB (database: {MONGO_DB})")
+        except Exception as e:
+            logger.error(f"❌ [MONGO] Failed to connect to MongoDB: {e}")
+            # Sanitize URI for logging
+            uri_safe = MONGO_URI
+            if '@' in MONGO_URI:
+                parts = MONGO_URI.split('@')
+                uri_safe = f"mongodb://***:***@{parts[1]}"
+            logger.error(f"❌ [MONGO] URI: {uri_safe}")
+            raise
     return _mongo_client
 
 
@@ -87,47 +132,53 @@ def _resolve_full_object_path(object_name: str, object_prefix: str) -> str:
 
 
 def _store_create_config(document_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    client = _get_mongo_client()
-    collection = client[MONGO_DB]["createandtransform_configs"]
+    try:
+        client = _get_mongo_client()
+        collection = client[MONGO_DB]["createandtransform_configs"]
 
-    existing = collection.find_one({"_id": document_id})
-    payload = dict(payload)
-    payload.setdefault("saved_at", datetime.utcnow())
+        existing = collection.find_one({"_id": document_id})
+        payload = dict(payload)
+        payload.setdefault("saved_at", datetime.utcnow())
 
-    if existing:
-        updated = dict(existing)
-        updated["updated_at"] = datetime.utcnow()
-        files = list(updated.get("files", []))
-        files.append(payload)
-        updated["files"] = files
-        collection.replace_one({"_id": document_id}, updated)
-        operation = "updated"
-    else:
-        document = {
-            "_id": document_id,
-            "operation_type": "createcolumn",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
-            "files": [payload],
-        }
-        document.update(
-            {
-                "client_name": payload.get("client_name", ""),
-                "app_name": payload.get("app_name", ""),
-                "project_name": payload.get("project_name", ""),
-                "user_id": payload.get("user_id", ""),
-                "project_id": payload.get("project_id"),
+        if existing:
+            updated = dict(existing)
+            updated["updated_at"] = datetime.utcnow()
+            files = list(updated.get("files", []))
+            files.append(payload)
+            updated["files"] = files
+            collection.replace_one({"_id": document_id}, updated)
+            operation = "updated"
+            logger.info(f"✅ [CREATE-SAVE] Updated MongoDB document: {document_id}")
+        else:
+            document = {
+                "_id": document_id,
+                "operation_type": "createcolumn",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "files": [payload],
             }
-        )
-        collection.insert_one(document)
-        operation = "inserted"
+            document.update(
+                {
+                    "client_name": payload.get("client_name", ""),
+                    "app_name": payload.get("app_name", ""),
+                    "project_name": payload.get("project_name", ""),
+                    "user_id": payload.get("user_id", ""),
+                    "project_id": payload.get("project_id"),
+                }
+            )
+            collection.insert_one(document)
+            operation = "inserted"
+            logger.info(f"✅ [CREATE-SAVE] Inserted MongoDB document: {document_id}")
 
-    return {
-        "status": "success",
-        "mongo_id": document_id,
-        "operation": operation,
-        "collection": "createandtransform_configs",
-    }
+        return {
+            "status": "success",
+            "mongo_id": document_id,
+            "operation": operation,
+            "collection": "createandtransform_configs",
+        }
+    except Exception as e:
+        logger.error(f"❌ [CREATE-SAVE] MongoDB operation failed: {e}", exc_info=True)
+        raise
 
 
 def fetch_create_results_task(
@@ -2159,7 +2210,19 @@ def save_dataframe_task(
             raise ValueError("filename is required when overwriting original file")
         if not filename.endswith('.arrow'):
             filename = f"{filename}.arrow"
-        final_filename = filename
+        # CRITICAL FIX: When overwriting, filename might be just the name or full path
+        # If it's just the name, we need to construct the full path using object_prefix
+        # This ensures MongoDB stores the full path that matches what the table atom loads
+        if '/' not in filename:
+            # Just filename, need to add prefix
+            prefix = object_prefix or ""
+            if prefix and not prefix.endswith('/'):
+                prefix = f"{prefix}/"
+            final_filename = f"{prefix}{filename}" if prefix else filename
+        else:
+            # Already has full path
+            final_filename = filename
+        logger.info(f"💾 [CREATE-SAVE] Overwriting file: final_filename='{final_filename}', original filename='{filename}', prefix='{object_prefix}'")
         message = "Original file updated successfully"
     else:
         if not filename:
@@ -2192,11 +2255,27 @@ def save_dataframe_task(
                 operation_payload = {"raw": operation_details}
         else:
             operation_payload = dict(operation_details)
+        
+        # Get original columns from input file if available
+        original_columns = []
+        input_file = operation_payload.get("input_file")
+        if input_file:
+            try:
+                # Try to load the input file to get original columns
+                input_df = get_minio_df(MINIO_BUCKET, input_file)
+                original_columns = list(input_df.columns)
+                logger.info(f"📋 [CREATE-SAVE] Original columns from input file: {len(original_columns)} columns")
+            except Exception as e:
+                logger.warning(f"⚠️ [CREATE-SAVE] Could not load input file to get original columns: {e}")
+                # If we can't load, we'll leave original_columns empty
+                # The metadata lookup will still work, just won't distinguish original vs created
+        
         operation_payload.update(
             {
-                "saved_file": final_filename,
+                "saved_file": final_filename,  # CRITICAL: Store full path for proper matching
                 "file_shape": df.shape,
                 "file_columns": list(df.columns),
+                "original_columns": original_columns,  # NEW: Store original columns
                 "client_name": client_name,
                 "app_name": app_name,
                 "project_name": project_name,
@@ -2204,6 +2283,7 @@ def save_dataframe_task(
                 "project_id": project_id,
             }
         )
+        logger.info(f"💾 [CREATE-SAVE] Saving to MongoDB with saved_file='{final_filename}'")
         try:
             mongo_save_result = _store_create_config(document_id, operation_payload)
         except Exception as exc:
@@ -2333,15 +2413,252 @@ def classification_task(
     }
 
 
+def generate_column_formula(
+    operation_type: str,
+    input_columns: List[str],
+    parameters: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Generate human-readable formula for a column operation.
+    
+    Examples:
+        - add: ["colA", "colB"] -> "colA + colB"
+        - subtract: ["colA", "colB"] -> "colA - colB"
+        - exponential: ["colC"], {"exponent": 2} -> "exponential(colC, 2)"
+        - lag: ["colD"], {"period": 1} -> "lag(colD, 1)"
+    """
+    if not input_columns:
+        return f"{operation_type}()"
+    
+    params = parameters or {}
+    
+    # Map operation types to formula templates
+    if operation_type == "add":
+        return " + ".join(input_columns)
+    elif operation_type == "subtract":
+        if len(input_columns) >= 2:
+            return f"{input_columns[0]} - {input_columns[1]}"
+        return f"subtract({', '.join(input_columns)})"
+    elif operation_type == "multiply":
+        return " × ".join(input_columns)
+    elif operation_type == "divide":
+        if len(input_columns) >= 2:
+            return f"{input_columns[0]} ÷ {input_columns[1]}"
+        return f"divide({', '.join(input_columns)})"
+    elif operation_type == "exponential":
+        exponent = params.get("exponent", params.get("exponent_value", 2))
+        return f"exponential({input_columns[0]}, {exponent})"
+    elif operation_type == "log":
+        return f"log({input_columns[0]})"
+    elif operation_type == "sqrt":
+        return f"sqrt({input_columns[0]})"
+    elif operation_type == "lag":
+        period = params.get("period", params.get("lag_period", 1))
+        return f"lag({input_columns[0]}, {period})"
+    elif operation_type == "lead":
+        period = params.get("period", params.get("lead_period", 1))
+        return f"lead({input_columns[0]}, {period})"
+    elif operation_type == "datetime":
+        # Check for datetime conversion parameters
+        if params.get("to_year"):
+            return f"datetime({input_columns[0]}, to_year)"
+        elif params.get("to_month"):
+            return f"datetime({input_columns[0]}, to_month)"
+        elif params.get("to_day"):
+            return f"datetime({input_columns[0]}, to_day)"
+        elif params.get("to_quarter"):
+            return f"datetime({input_columns[0]}, to_quarter)"
+        else:
+            return f"datetime({input_columns[0]})"
+    elif operation_type == "contribution":
+        return f"(Group Sum / Overall Sum) × 100"
+    elif operation_type == "cumsum":
+        return f"cumsum({input_columns[0]})"
+    elif operation_type == "cumprod":
+        return f"cumprod({input_columns[0]})"
+    elif operation_type == "pct_change":
+        period = params.get("period", 1)
+        return f"pct_change({input_columns[0]}, {period})"
+    else:
+        # Generic fallback
+        param_str = ""
+        if params:
+            param_parts = [f"{k}={v}" for k, v in params.items()]
+            param_str = f", {', '.join(param_parts)}"
+        return f"{operation_type}({', '.join(input_columns)}{param_str})"
+
+
+def get_column_metadata_for_file(
+    *,
+    object_name: str,
+    client_name: str,
+    app_name: str,
+    project_name: str,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Retrieve column creation metadata for a given file.
+    
+    Returns:
+        Dict mapping column_name -> {
+            "is_created": bool,
+            "operation_type": str | None,
+            "input_columns": List[str] | None,
+            "parameters": Dict | None,
+            "formula": str | None,
+            "created_column_name": str | None
+        }
+    """
+    try:
+        # Use sync MongoDB client
+        client = _get_mongo_client()
+        collection = client[MONGO_DB]["createandtransform_configs"]
+        
+        document_id = f"{client_name}/{app_name}/{project_name}"
+        config = collection.find_one({"_id": document_id})
+        
+        if not config:
+            return {}
+        
+        # Find configuration where saved_file matches object_name
+        # Note: object_name might be a full path, saved_file might be relative or vice versa
+        files = config.get("files", [])
+        matching_file_config = None
+        
+        logger.info(f"🔍 [COLUMN-METADATA] Looking for file: {object_name}")
+        logger.info(f"🔍 [COLUMN-METADATA] Total files in config: {len(files)}")
+        logger.info(f"🔍 [COLUMN-METADATA] Available saved_file paths: {[f.get('saved_file', '') for f in files[:5]]}")
+        
+        for idx, file_config in enumerate(files):
+            saved_file = file_config.get("saved_file", "")
+            # Normalize paths for comparison (remove leading/trailing slashes, lowercase)
+            saved_file_normalized = saved_file.strip().lower().strip('/')
+            object_name_normalized = object_name.strip().lower().strip('/')
+            
+            logger.debug(f"🔍 [COLUMN-METADATA] Comparing file {idx}: saved_file='{saved_file}' (normalized: '{saved_file_normalized}') vs object_name='{object_name}' (normalized: '{object_name_normalized}')")
+            
+            # Try exact match first (normalized)
+            if saved_file_normalized == object_name_normalized:
+                matching_file_config = file_config
+                logger.info(f"✅ [COLUMN-METADATA] Exact match found (normalized): {saved_file} == {object_name}")
+                break
+            
+            # Try matching by filename (in case paths differ)
+            saved_filename = saved_file.split('/')[-1].lower().strip() if '/' in saved_file else saved_file.lower().strip()
+            object_filename = object_name.split('/')[-1].lower().strip() if '/' in object_name else object_name.lower().strip()
+            if saved_filename == object_filename and saved_filename:
+                matching_file_config = file_config
+                logger.info(f"✅ [COLUMN-METADATA] Filename match found: {saved_file} == {object_name}")
+                break
+            
+            # Try matching by removing common prefixes (create-data/, etc.)
+            saved_file_clean = saved_file_normalized.replace('create-data/', '').replace('create_data/', '')
+            object_name_clean = object_name_normalized.replace('create-data/', '').replace('create_data/', '')
+            if saved_file_clean == object_name_clean and saved_file_clean:
+                matching_file_config = file_config
+                logger.info(f"✅ [COLUMN-METADATA] Clean path match found: {saved_file} == {object_name}")
+                break
+        
+        if not matching_file_config:
+            logger.warning(f"⚠️ [COLUMN-METADATA] No matching file config found for: {object_name}")
+            logger.warning(f"⚠️ [COLUMN-METADATA] Available files: {[f.get('saved_file', '') for f in files]}")
+        
+        if not matching_file_config:
+            return {}
+        
+        # Extract operations array
+        operations = matching_file_config.get("operations", [])
+        if not operations:
+            return {}
+        
+        # Get original columns from input_file
+        original_columns = set()
+        original_columns_list = matching_file_config.get("original_columns", [])
+        if original_columns_list:
+            original_columns = set(col.lower().strip() for col in original_columns_list)
+        
+        # Build column metadata map
+        column_metadata: Dict[str, Dict[str, Any]] = {}
+        
+        logger.info(f"🔍 [COLUMN-METADATA] Processing {len(operations)} operations")
+        
+        for idx, operation in enumerate(operations):
+            created_column_name = operation.get("created_column_name")
+            if not created_column_name:
+                logger.warning(f"⚠️ [COLUMN-METADATA] Operation {idx} missing 'created_column_name': {operation}")
+                continue
+            
+            # Normalize column name (lowercase, strip)
+            normalized_name = created_column_name.lower().strip()
+            
+            operation_type = operation.get("operation_type", "")
+            input_columns = operation.get("columns", [])
+            parameters = operation.get("param")
+            
+            # Generate formula
+            formula = generate_column_formula(operation_type, input_columns, parameters)
+            
+            column_metadata[normalized_name] = {
+                "is_created": True,
+                "operation_type": operation_type,
+                "input_columns": input_columns,
+                "parameters": parameters if parameters else None,
+                "formula": formula,
+                "created_column_name": created_column_name,
+            }
+            
+            logger.info(f"✅ [COLUMN-METADATA] Operation {idx}: Added metadata for column '{created_column_name}' (normalized: '{normalized_name}') -> {formula}")
+        
+        # Debug: Log all created column names
+        logger.info(f"📋 [COLUMN-METADATA] All created columns (normalized): {list(column_metadata.keys())}")
+        
+        logger.info(f"📊 [COLUMN-METADATA] Total columns with metadata: {len(column_metadata)}")
+        return column_metadata
+        
+    except Exception as e:
+        logger.warning(f"⚠️ [COLUMN-METADATA] Failed to get column metadata: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+
+
 def cardinality_task(
     *,
     bucket_name: str,
     object_name: str,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Dict[str, Any]:
+    logger.info(f"🔍 [CARDINALITY] Starting cardinality task for: {object_name}")
+    logger.info(f"🔍 [CARDINALITY] Metadata params: client={client_name}, app={app_name}, project={project_name}")
+    
     dataframe = get_minio_df(bucket_name, object_name)
     dataframe.columns = dataframe.columns.str.strip().str.lower()
+    logger.info(f"📊 [CARDINALITY] DataFrame columns (normalized): {list(dataframe.columns)}")
 
     cardinality_data: List[Dict[str, Any]] = []
+    
+    # Get column metadata if client/app/project provided
+    column_metadata = {}
+    if client_name and app_name and project_name:
+        try:
+            logger.info(f"🔍 [CARDINALITY] Fetching column metadata...")
+            column_metadata = get_column_metadata_for_file(
+                object_name=object_name,
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            )
+            logger.info(f"✅ [CARDINALITY] Retrieved {len(column_metadata)} columns with metadata")
+            logger.info(f"📋 [CARDINALITY] Metadata keys: {list(column_metadata.keys())}")
+        except Exception as e:
+            logger.warning(f"⚠️ [CARDINALITY] Failed to get column metadata: {e}")
+            import traceback
+            logger.warning(f"⚠️ [CARDINALITY] Traceback: {traceback.format_exc()}")
+            # Continue without metadata (backward compatible)
+    else:
+        logger.warning(f"⚠️ [CARDINALITY] Missing metadata params - skipping metadata lookup")
+    
     for col in dataframe.columns:
         series = dataframe[col].dropna()
         try:
@@ -2355,14 +2672,41 @@ def cardinality_task(
             return str(value)
 
         safe_values = [_serialize(v) for v in values]
-        cardinality_data.append(
-            {
-                "column": col,
-                "data_type": str(dataframe[col].dtype),
-                "unique_count": int(len(values)),
-                "unique_values": safe_values,
+        
+        col_info = {
+            "column": col,
+            "data_type": str(dataframe[col].dtype),
+            "unique_count": int(len(values)),
+            "unique_values": safe_values,
+        }
+        
+        # Add metadata if available
+        normalized_col = col.lower().strip()
+        if normalized_col in column_metadata:
+            col_info["metadata"] = column_metadata[normalized_col]
+            logger.info(f"✅ [CARDINALITY] Added metadata for column '{col}' (normalized: '{normalized_col}'): is_created={col_info['metadata'].get('is_created')}, formula={col_info['metadata'].get('formula')}")
+        else:
+            # Original column (not created via operations)
+            col_info["metadata"] = {
+                "is_created": False,
+                "operation_type": None,
+                "formula": None,
             }
-        )
+            # Debug: Log if this is a column we're looking for (like "price")
+            if normalized_col == "price":
+                logger.warning(f"⚠️ [CARDINALITY] PRICE column '{col}' (normalized: '{normalized_col}') NOT found in column_metadata!")
+                logger.warning(f"⚠️ [CARDINALITY] Available metadata keys: {list(column_metadata.keys())}")
+                logger.warning(f"⚠️ [CARDINALITY] Total metadata entries: {len(column_metadata)}")
+            elif normalized_col in ["d1", "d2", "d3", "d4", "d5", "d6", "av1", "av2", "av3", "av4", "av5", "av6", "ev1", "ev2", "ev3", "ev4", "ev5", "ev6"]:
+                logger.debug(f"📝 [CARDINALITY] Column '{col}' (normalized: '{normalized_col}') not in metadata - likely original column")
+            else:
+                logger.debug(f"📝 [CARDINALITY] Column '{col}' is original (no metadata)")
+        
+        cardinality_data.append(col_info)
+    
+    # Debug: Count columns with metadata
+    columns_with_metadata = [c for c in cardinality_data if c.get("metadata", {}).get("is_created")]
+    logger.info(f"📊 [CARDINALITY] Final result: {len(cardinality_data)} total columns, {len(columns_with_metadata)} with is_created=True")
 
     return {"status": "SUCCESS", "cardinality": cardinality_data}
 

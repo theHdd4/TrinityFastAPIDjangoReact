@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
@@ -6,8 +6,6 @@ import { fetchSharedDashboardLayout, type DashboardLayoutResponse } from '@/lib/
 import { Button } from '@/components/ui/button';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
 import ExhibitedAtomRenderer from '@/components/ExhibitionMode/components/ExhibitedAtomRenderer';
-import { useIsMobile } from '@/hooks/use-mobile';
-
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
 type SharedMetadata = {
@@ -19,14 +17,11 @@ type SharedMetadata = {
 
 const SharedDashboard = () => {
     const { token } = useParams<{ token: string }>();
-    const isMobile = useIsMobile();
 
     const [status, setStatus] = useState<LoadState>('idle');
     const [error, setError] = useState<string | null>(null);
     const [metadata, setMetadata] = useState<SharedMetadata | null>(null);
     const [cards, setCards] = useState<any[]>([]);
-    const brandTitleRef = useRef<HTMLSpanElement | null>(null);
-    const [brandAccentWidth, setBrandAccentWidth] = useState<number | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -78,27 +73,6 @@ const SharedDashboard = () => {
         };
     }, [token]);
 
-    useEffect(() => {
-        const updateBrandAccent = () => {
-            if (!brandTitleRef.current) {
-                setBrandAccentWidth(null);
-                return;
-            }
-
-            setBrandAccentWidth(brandTitleRef.current.offsetWidth);
-        };
-
-        updateBrandAccent();
-
-        if (typeof window !== 'undefined') {
-            window.addEventListener('resize', updateBrandAccent);
-            return () => {
-                window.removeEventListener('resize', updateBrandAccent);
-            };
-        }
-
-        return () => undefined;
-    }, []);
 
     useEffect(() => {
         if (typeof document === 'undefined') {
@@ -267,40 +241,34 @@ const SharedDashboard = () => {
                 <div className="absolute bottom-0 -right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
             </div>
             
-            <div className="relative max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-8 sm:space-y-12">
-                <header className="space-y-6 sm:space-y-8 text-center relative z-10">
-                    <div className="flex flex-col items-center justify-center gap-3 text-sm">
-                        <div className="relative">
-                            <AnimatedLogo className="h-14 w-14 sm:h-20 sm:w-20 drop-shadow-[0_0_20px_rgba(255,255,255,0.6)] animate-in zoom-in duration-500" />
-                            <div className="absolute inset-0 bg-white/20 rounded-full blur-xl -z-10 animate-pulse" />
-                        </div>
-                        <div className="space-y-2">
-                            <span ref={brandTitleRef} className="text-3xl sm:text-4xl font-mono font-bold text-white tracking-tight bg-gradient-to-r from-white via-white to-white/80 bg-clip-text text-transparent">
-                                Trinity
-                            </span>
-                            <div
-                                className="h-1.5 bg-gradient-to-r from-transparent via-[#fec107] to-transparent rounded-full mx-auto shadow-lg shadow-[#fec107]/50"
-                                style={brandAccentWidth ? { width: `${Math.min(brandAccentWidth + 40, 300)}px` } : { width: '200px' }}
-                            />
-                        </div>
-                        <span className="text-xs sm:text-sm text-white/60 font-medium tracking-wide">A Quant Matrix AI Experience</span>
-                    </div>
-                    <div className="space-y-3 animate-in fade-in slide-in-from-top-6 duration-700">
-                        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-tight bg-gradient-to-r from-white via-white/95 to-white/90 bg-clip-text text-transparent">
-                            {headerTitle}
-                        </h1>
-                        {updatedLabel && (
-                            <div className="flex items-center justify-center gap-2">
-                                <div className="w-1.5 h-1.5 rounded-full bg-green-400 shadow-lg shadow-green-400/50 animate-pulse" />
-                                <p className="text-xs sm:text-sm text-white/60 flex items-center gap-1.5">
-                                    <span>Last updated</span>
-                                    <span className="font-semibold text-white/70">{updatedLabel}</span>
-                                </p>
+            {/* Compact Sticky Header */}
+            <header className="sticky top-0 z-50 bg-slate-900/80 backdrop-blur-md border-b border-white/10 shadow-lg">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-3">
+                    <div className="flex items-center justify-between gap-4">
+                        {/* Left Section: Branding */}
+                        <div className="flex items-center space-x-3 flex-shrink-0">
+                            <AnimatedLogo className="w-8 h-8 sm:w-10 sm:h-10 drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]" />
+                            <div className="flex flex-col justify-center">
+                                <span className="font-mono font-bold text-lg sm:text-xl text-white leading-tight">
+                                    Trinity
+                                </span>
                             </div>
-                        )}
+                        </div>
+                        
+                        {/* Center Section: Project Name */}
+                        <div className="flex-1 flex items-center justify-center px-4 min-w-0">
+                            <h1 className="text-xs sm:text-base md:text-lg lg:text-xl font-semibold text-white truncate max-w-full">
+                                {headerTitle}
+                            </h1>
+                        </div>
+                        
+                        {/* Right Section: Spacer for balance */}
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0" />
                     </div>
-                </header>
+                </div>
+            </header>
 
+            <div className="relative max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
                 <div className="relative z-10">
                     {renderContent()}
                 </div>

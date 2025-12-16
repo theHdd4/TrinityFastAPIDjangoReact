@@ -18,12 +18,12 @@ const TableRichTextEditor: React.FC<TableRichTextEditorProps> = ({
   onValueChange,
   onCommit,
   onCancel,
-  onFormattingChange: onFormattingChangeProp = () => {},
+  onFormattingChange: onFormattingChangeProp = () => { },
   onClick,
   className,
   style,
 }) => {
-  const onFormattingChange = onFormattingChangeProp ?? (() => {});
+  const onFormattingChange = onFormattingChangeProp ?? (() => { });
 
   const {
     editorRef,
@@ -34,7 +34,7 @@ const TableRichTextEditor: React.FC<TableRichTextEditorProps> = ({
   } = useTableRichTextEditor({
     value,
     html,
-    formatting,
+    formatting: formatting || {}, // Safe default to prevent crash
     isEditing,
     onValueChange,
     onCommit,
@@ -47,26 +47,29 @@ const TableRichTextEditor: React.FC<TableRichTextEditorProps> = ({
     // CRITICAL FIX: Check if HTML matches plain text value
     // If HTML exists but doesn't match value, use value as source of truth
     const htmlMatches = htmlMatchesValue(html, value);
-    
+
     // Use HTML only if it matches the plain text value, otherwise use plain text
     const displayHtml = (htmlMatches && html) ? html : (value || '');
     const hasFormatting = formatting && Object.keys(formatting).length > 0;
     const shouldUseHtml = (hasFormatting || html) && displayHtml && htmlMatches;
-    
+
+    // Safe formatting object
+    const safeFormatting = formatting || {};
+
     // Display mode - don't apply backgroundColor here (applied to cell instead)
     const displayStyle: React.CSSProperties = {
       whiteSpace: 'nowrap',
       textOverflow: 'ellipsis',
       ...style,
-      fontFamily: formatting.fontFamily || 'Arial',
+      fontFamily: safeFormatting.fontFamily || 'Arial',
       fontSize: '12px', // Default font size for display
-      color: formatting.textColor || '#000000',
-      fontWeight: formatting.bold ? 'bold' : 'normal',
-      fontStyle: formatting.italic ? 'italic' : 'normal',
-      textDecoration: formatting.underline ? 'underline' : 'none',
+      color: safeFormatting.textColor || '#000000',
+      fontWeight: safeFormatting.bold ? 'bold' : 'normal',
+      fontStyle: safeFormatting.italic ? 'italic' : 'normal',
+      textDecoration: safeFormatting.underline ? 'underline' : 'none',
       // backgroundColor NOT included - applied to cell instead
     };
-    
+
     // Render with HTML if we have formatting, otherwise render plain text
     if (shouldUseHtml) {
       return (
@@ -74,18 +77,26 @@ const TableRichTextEditor: React.FC<TableRichTextEditorProps> = ({
           className={cn("table-cell-content h-full flex items-center text-left overflow-hidden", className)}
           style={displayStyle}
           title={getPlainTextFromHtml(displayHtml)}
-          onClick={onClick}
+          onClick={(e) => {
+            // Prevent default to avoid interfering with focus transfer
+            e.preventDefault();
+            onClick?.(e);
+          }}
           dangerouslySetInnerHTML={{ __html: displayHtml }}
         />
       );
     }
-    
+
     return (
       <div
         className={cn("table-cell-content h-full flex items-center text-left overflow-hidden", className)}
         style={displayStyle}
         title={value || ''}
-        onClick={onClick}
+        onClick={(e) => {
+          // Prevent default to avoid interfering with focus transfer
+          e.preventDefault();
+          onClick?.(e);
+        }}
       >
         {value || ''}
       </div>

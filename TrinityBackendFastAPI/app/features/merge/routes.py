@@ -72,8 +72,8 @@ async def init_merge(
         df2.columns = df2.columns.str.strip().str.lower()
 
         # Clean string values (strip spaces and make lowercase)
-        df1 = df1.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
-        df2 = df2.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
+        df1 = df1.map(lambda x: x.strip().lower() if isinstance(x, str) else x)
+        df2 = df2.map(lambda x: x.strip().lower() if isinstance(x, str) else x)
         common_cols = get_common_columns(df1, df2)
 
         result = {
@@ -328,8 +328,8 @@ async def perform_merge(
             raise ValueError(f"Join columns not found in second file: {missing_in_df2}")
 
         # Clean string values (strip spaces and make lowercase)
-        df1 = df1.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
-        df2 = df2.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
+        df1 = df1.map(lambda x: x.strip().lower() if isinstance(x, str) else x)
+        df2 = df2.map(lambda x: x.strip().lower() if isinstance(x, str) else x)
 
         merged_df = merge_dataframes(df1, df2, join_cols_lower, join_type)
         

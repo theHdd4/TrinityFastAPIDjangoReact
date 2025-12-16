@@ -1982,7 +1982,8 @@ export const DASHBOARD_ALLOWED_ATOMS = [
   'dataframe-operations',
   'chart-maker',
   'correlation',
-  'table'  // ✅ Enable table atom in dashboard mode
+  'table',
+  'kpi-dashboard'
 ] as const;
 
 // Helper function to get allowed atoms based on mode
@@ -2043,7 +2044,7 @@ interface LaboratoryStore {
   createCardWithTableAtom: (
     objectName: string,
     position?: number
-  ) => Promise<string | null>;
+  ) => Promise<{ tableAtomId: string; cardId: string } | null>;
   updateTableAtomWithFile: (
     atomId: string,
     objectName: string
@@ -2620,8 +2621,15 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       
       set({ cards: updatedCards });
       
-      // console.log('✅ [createCardWithTableAtom] Successfully created card with Table atom');
-      return newTableAtom.id;
+      console.log('✅ [createCardWithTableAtom] Successfully created card with Table atom:', {
+        tableAtomId: newTableAtom.id,
+        cardId: newCard.id,
+        objectName,
+        insertIndex,
+        totalCards: updatedCards.length,
+        cardIds: updatedCards.map(c => c.id)
+      });
+      return { tableAtomId: newTableAtom.id, cardId: newCard.id };
     } catch (error) {
       console.error('❌ [createCardWithTableAtom] Error:', error);
       return null;

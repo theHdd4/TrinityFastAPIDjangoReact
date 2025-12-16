@@ -250,6 +250,156 @@ async def run_pipeline(
             if not repl.keep_original and repl.replacement_file
         }
         
+        # ========================================================================
+        # DROP COLUMNS FROM REPLACEMENT FILES THAT MATCH COLUMN OPERATION COLUMNS
+        # ========================================================================
+        # This ensures column operations can create columns without conflicts
+        if file_replacements and column_operations:
+            from app.features.createcolumn.deps import get_minio_df, minio_client, MINIO_BUCKET
+            from app.features.dataframe_operations.app.routes import get_object_prefix as get_df_prefix
+            import pandas as pd
+            import pyarrow as pa
+            import pyarrow.ipc as ipc
+            import io
+            
+            prefix = await get_df_prefix(
+                client_name=request.client_name,
+                app_name=request.app_name,
+                project_name=request.project_name
+            )
+            
+            # Build a map of replacement_file -> set of columns that will be created by column operations
+            # Column operations have input_file set to the original file name
+            columns_to_drop_by_file = {}
+            for col_op in column_operations:
+                input_file = col_op.get("input_file")
+                if not input_file:
+                    continue
+                
+                # Check if this input_file (original file) has a replacement
+                if input_file in file_replacements:
+                    replacement_file = file_replacements[input_file]
+                    
+                    # Get all columns that will be created by this column operation
+                    created_columns = col_op.get("created_columns", [])
+                    operations = col_op.get("operations", [])
+                    
+                    # Collect all column names (case-insensitive)
+                    columns_to_drop = set()
+                    for col in created_columns:
+                        if col:
+                            columns_to_drop.add(str(col).lower().strip())
+                            # Also add normalized versions
+                            normalized = str(col).lower().strip().replace("_times_", "_x_").replace("_dividedby_", "_div_")
+                            if normalized != str(col).lower().strip():
+                                columns_to_drop.add(normalized)
+                            reverse_normalized = str(col).lower().strip().replace("_x_", "_times_").replace("_div_", "_dividedby_")
+                            if reverse_normalized != str(col).lower().strip():
+                                columns_to_drop.add(reverse_normalized)
+                    
+                    for op in operations:
+                        created_col = op.get("created_column_name")
+                        if created_col:
+                            columns_to_drop.add(str(created_col).lower().strip())
+                            # Also add normalized versions
+                            normalized = str(created_col).lower().strip().replace("_times_", "_x_").replace("_dividedby_", "_div_")
+                            if normalized != str(created_col).lower().strip():
+                                columns_to_drop.add(normalized)
+                            reverse_normalized = str(created_col).lower().strip().replace("_x_", "_times_").replace("_div_", "_dividedby_")
+                            if reverse_normalized != str(created_col).lower().strip():
+                                columns_to_drop.add(reverse_normalized)
+                    
+                    if columns_to_drop:
+                        if replacement_file not in columns_to_drop_by_file:
+                            columns_to_drop_by_file[replacement_file] = set()
+                        columns_to_drop_by_file[replacement_file].update(columns_to_drop)
+            
+            # For each replacement file, drop the conflicting columns
+            for replacement_file, columns_to_drop in columns_to_drop_by_file.items():
+                try:
+                    # Resolve full path
+                    full_object_path = (
+                        replacement_file
+                        if not prefix or replacement_file.startswith(prefix)
+                        else f"{prefix}{replacement_file}"
+                    )
+                    
+                    logger.info(
+                        f"🔧 Dropping {len(columns_to_drop)} conflicting columns from replacement file: {replacement_file}"
+                    )
+                    
+                    # Load the replacement file
+                    df = get_minio_df(MINIO_BUCKET, full_object_path)
+                    original_columns = list(df.columns)
+                    
+                    # Find columns to drop (case-insensitive matching)
+                    columns_to_drop_actual = []
+                    for col in df.columns:
+                        col_lower = str(col).lower().strip()
+                        if col_lower in columns_to_drop:
+                            columns_to_drop_actual.append(col)
+                    
+                    if columns_to_drop_actual:
+                        logger.info(
+                            f"🗑️ Dropping columns from {replacement_file}: {columns_to_drop_actual}"
+                        )
+                        df = df.drop(columns=columns_to_drop_actual)
+                        
+                        # Save back to MinIO
+                        if full_object_path.endswith(".parquet"):
+                            # Save as parquet
+                            buffer = io.BytesIO()
+                            df.to_parquet(buffer, index=False, engine='pyarrow')
+                            buffer.seek(0)
+                            minio_client.put_object(
+                                MINIO_BUCKET,
+                                full_object_path,
+                                data=buffer,
+                                length=buffer.getbuffer().nbytes,
+                                content_type="application/octet-stream"
+                            )
+                        elif full_object_path.endswith(".arrow"):
+                            # Save as arrow
+                            table = pa.Table.from_pandas(df)
+                            arrow_buffer = pa.BufferOutputStream()
+                            with ipc.new_file(arrow_buffer, table.schema) as writer:
+                                writer.write_table(table)
+                            arrow_bytes = arrow_buffer.getvalue().to_pybytes()
+                            minio_client.put_object(
+                                MINIO_BUCKET,
+                                full_object_path,
+                                data=io.BytesIO(arrow_bytes),
+                                length=len(arrow_bytes),
+                                content_type="application/octet-stream"
+                            )
+                        else:
+                            # Default to CSV
+                            buffer = io.BytesIO()
+                            df.to_csv(buffer, index=False)
+                            buffer.seek(0)
+                            minio_client.put_object(
+                                MINIO_BUCKET,
+                                full_object_path,
+                                data=buffer,
+                                length=buffer.getbuffer().nbytes,
+                                content_type="text/csv"
+                            )
+                        
+                        logger.info(
+                            f"✅ Successfully dropped {len(columns_to_drop_actual)} columns from {replacement_file}"
+                        )
+                    else:
+                        logger.info(
+                            f"ℹ️ No conflicting columns found in {replacement_file} (columns to drop: {list(columns_to_drop)})"
+                        )
+                        
+                except Exception as e:
+                    logger.warning(
+                        f"⚠️ Failed to drop columns from replacement file {replacement_file}: {e}. "
+                        f"Continuing with pipeline execution."
+                    )
+                    # Don't fail the entire pipeline if we can't drop columns
+        
         # Execute pipeline using execution_graph
         execution_log = []
         executed_count = 0
@@ -290,27 +440,42 @@ async def run_pipeline(
         # Separate column operations into:
         # 1. Operations on root files or existing files (execute immediately)
         # 2. Operations on derived files (execute after the file is created)
-        root_file_keys = {rf.get("file_key") for rf in pipeline.get("root_files", [])}
+        # CRITICAL FIX: Apply file replacements to root_file_keys so that when files are replaced,
+        # column operations can correctly identify that the replacement file is still a root file
+        root_file_keys_raw = {rf.get("file_key") for rf in pipeline.get("root_files", [])}
+        root_file_keys = set()
+        for root_file in root_file_keys_raw:
+            # Apply file replacements to root file keys
+            replacement_file = file_replacements.get(root_file, root_file)
+            root_file_keys.add(replacement_file)
+            # Also keep the original in case it's referenced elsewhere
+            root_file_keys.add(root_file)
+        
         immediate_col_ops = []
         deferred_col_ops = {}  # Map of file_key -> list of operations
         
         for col_op in column_operations:
             input_file = col_op.get("input_file")
             
+            # CRITICAL FIX: Apply file replacements to input_file BEFORE categorizing
+            # If the original input file has been replaced, use the replacement file
+            # This ensures column operations work with the new file, not the old one
+            actual_input_file = file_replacements.get(input_file, input_file)
+            
             # IMPORTANT: Check if this file is derived in multiple ways:
             # 1. It's in the derived_files set (from execution graph outputs)
             # 2. It's NOT in root_files (it's not an original uploaded file)
             # 3. It contains certain path patterns that indicate it's a saved/processed file
-            is_root_file = input_file in root_file_keys
-            is_in_derived_set = input_file in derived_files
+            is_root_file = actual_input_file in root_file_keys
+            is_in_derived_set = actual_input_file in derived_files
             
             # If it's NOT a root file, treat it as derived (conservative approach)
             # This ensures that any file created by an atom is properly deferred
             if is_in_derived_set or not is_root_file:
                 # Must wait for file to be created - defer this operation
-                if input_file not in deferred_col_ops:
-                    deferred_col_ops[input_file] = []
-                deferred_col_ops[input_file].append(col_op)
+                if actual_input_file not in deferred_col_ops:
+                    deferred_col_ops[actual_input_file] = []
+                deferred_col_ops[actual_input_file].append(col_op)
             else:
                 # File exists (root file) - can execute immediately
                 immediate_col_ops.append(col_op)
@@ -742,9 +907,11 @@ async def run_pipeline(
                 
                 # Build operation_details in the same format as frontend
                 # Frontend sends: { input_file, operations: [{ operation_type, columns, rename, param, created_column_name }] }
+                # IMPORTANT: Use actual_input_file (replacement file if file was replaced) so MongoDB
+                # correctly records which file was actually processed
                 operations_list = col_op.get("operations", [])
                 operation_details_dict = {
-                    "input_file": col_op.get("input_file", input_file),
+                    "input_file": actual_input_file,  # Use actual file (replacement if replaced) for accurate MongoDB record
                     "operations": [
                         {
                             "operation_type": op.get("type", ""),
@@ -1034,7 +1201,7 @@ async def run_pipeline(
                         output_files_to_check.append(result_file)
                         log_entry["result_file"] = result_file
                         logger.info(f"✅ Atom {atom_type} ({atom_instance_id}) created new result file: {result_file}")
-                    
+                        
                     # Also check the step's outputs array for saved files (especially from /save operations)
                     step_outputs = step.get("outputs", [])
                     for output in step_outputs:
@@ -1225,26 +1392,26 @@ async def run_pipeline(
                                         })
                                         failed_count += 1
                                         continue
-                                    
-                                    # Build operation_details in the same format as frontend
-                                    deferred_operations_list = deferred_col_op.get("operations", [])
-                                    deferred_operation_details_dict = {
+                                        
+                                        # Build operation_details in the same format as frontend
+                                        deferred_operations_list = deferred_col_op.get("operations", [])
+                                        deferred_operation_details_dict = {
                                         "input_file": deferred_col_op.get("input_file", output_file),  # Use output_file from the loop
-                                        "operations": [
-                                            {
-                                                "operation_type": op.get("type", ""),
-                                                "columns": op.get("columns", []),
-                                                "rename": op.get("rename") if op.get("rename") else None,
-                                                "param": op.get("param") if op.get("param") else None,
-                                                "created_column_name": op.get("created_column_name", "")
-                                            }
-                                            for op in deferred_operations_list
-                                        ]
-                                    }
-                                    
-                                    # Serialize to JSON string (handles datetime objects)
-                                    deferred_operation_details_str = json.dumps(deferred_operation_details_dict, default=json_serializer)
-                                    
+                                            "operations": [
+                                                {
+                                                    "operation_type": op.get("type", ""),
+                                                    "columns": op.get("columns", []),
+                                                    "rename": op.get("rename") if op.get("rename") else None,
+                                                    "param": op.get("param") if op.get("param") else None,
+                                                    "created_column_name": op.get("created_column_name", "")
+                                                }
+                                                for op in deferred_operations_list
+                                            ]
+                                        }
+                                        
+                                        # Serialize to JSON string (handles datetime objects)
+                                        deferred_operation_details_str = json.dumps(deferred_operation_details_dict, default=json_serializer)
+                                        
                                     # Determine the filename to pass to save task
                                     # CRITICAL: When overwriting, pass the FULL path (save_dataframe_task expects it)
                                     #           When NOT overwriting, pass just the short filename
@@ -1264,104 +1431,104 @@ async def run_pipeline(
                                             deferred_save_filename = deferred_filename_without_ext
                                         else:
                                             deferred_save_filename = "column_ops_result"
-                                    
-                                    deferred_save_submission = submit_save_task(
-                                        csv_data=deferred_csv_data,
-                                        filename=deferred_save_filename,
-                                        object_prefix=prefix,
-                                        overwrite_original=deferred_overwrite,
-                                        client_name=request.client_name,
-                                        app_name=request.app_name,
-                                        project_name=request.project_name,
-                                        user_id="pipeline",
-                                        project_id=None,
-                                        operation_details=deferred_operation_details_str,
-                                    )
-                                    
-                                    # Get deferred save task result
-                                    deferred_save_result = None
-                                    if deferred_save_submission.status == "success" and deferred_save_submission.result:
-                                        deferred_save_result = deferred_save_submission.result
-                                        if isinstance(deferred_save_result, dict):
-                                            deferred_save_result.setdefault("status", "SUCCESS")
-                                    elif deferred_save_submission.status == "pending":
-                                        max_wait = 60
-                                        wait_interval = 0.5
-                                        waited = 0
-                                        while waited < max_wait:
-                                            task_meta = task_result_store.fetch(deferred_save_submission.task_id)
-                                            if task_meta and task_meta.get("status") in ["success", "failure"]:
-                                                deferred_save_result = task_meta.get("result", {})
-                                                if task_meta.get("status") == "success":
-                                                    deferred_save_result.setdefault("status", "SUCCESS")
-                                                else:
-                                                    deferred_save_result = {"status": "FAILURE", "error": task_meta.get("error", "Task failed")}
-                                                break
-                                            await asyncio.sleep(wait_interval)
-                                            waited += wait_interval
-                                        if not deferred_save_result:
-                                            deferred_save_result = {"status": "FAILURE", "error": "Task timed out"}
-                                    else:
-                                        deferred_save_result = {"status": "FAILURE", "error": deferred_save_submission.detail or "Task submission failed"}
-                                    
-                                    deferred_execution_end_time = datetime.utcnow()
-                                    if deferred_save_result and deferred_save_result.get("status") == "SUCCESS":
-                                        logger.info(f"✅ Deferred column operations completed for {output_file} -> {deferred_output_file}")
-                                        execution_log.append({
-                                            "type": "column_operations",
-                                            "input_file": output_file,  # Use output_file from the loop
-                                            "output_file": deferred_output_file,
-                                            "status": "success",
-                                            "message": f"Created {len(deferred_col_op.get('created_columns', []))} columns"
-                                        })
-                                        success_count += 1
                                         
-                                        # Record execution to MongoDB
-                                        await record_column_operations_execution(
+                                        deferred_save_submission = submit_save_task(
+                                            csv_data=deferred_csv_data,
+                                            filename=deferred_save_filename,
+                                            object_prefix=prefix,
+                                            overwrite_original=deferred_overwrite,
                                             client_name=request.client_name,
                                             app_name=request.app_name,
                                             project_name=request.project_name,
-                                            input_file=deferred_col_op.get("input_file", output_file),  # Use original input_file from config
-                                            output_file=deferred_output_file,
-                                            operations=deferred_col_op.get("operations", []),
-                                            created_columns=deferred_col_op.get("created_columns", []),
-                                            execution_started_at=deferred_execution_start_time,
-                                            execution_completed_at=deferred_execution_end_time,
-                                            execution_status="success",
-                                            execution_error=None,
-                                            identifiers=deferred_col_op.get("identifiers"),  # Pass identifiers to match config
-                                            mode=request.mode
+                                            user_id="pipeline",
+                                            project_id=None,
+                                            operation_details=deferred_operation_details_str,
                                         )
                                         
-                                        # Update file replacements
-                                        if deferred_overwrite:
-                                            file_replacements[output_file] = deferred_output_file
-                                    else:
-                                        logger.error(f"❌ Failed to save deferred column operations result for {output_file}")
-                                        execution_log.append({
-                                            "type": "column_operations",
-                                            "input_file": output_file,  # Use output_file from the loop
-                                            "status": "failed",
-                                            "message": deferred_save_result.get("error", "Save failed") if deferred_save_result else "Save failed"
-                                        })
-                                        failed_count += 1
+                                        # Get deferred save task result
+                                        deferred_save_result = None
+                                        if deferred_save_submission.status == "success" and deferred_save_submission.result:
+                                            deferred_save_result = deferred_save_submission.result
+                                            if isinstance(deferred_save_result, dict):
+                                                deferred_save_result.setdefault("status", "SUCCESS")
+                                        elif deferred_save_submission.status == "pending":
+                                            max_wait = 60
+                                            wait_interval = 0.5
+                                            waited = 0
+                                            while waited < max_wait:
+                                                task_meta = task_result_store.fetch(deferred_save_submission.task_id)
+                                                if task_meta and task_meta.get("status") in ["success", "failure"]:
+                                                    deferred_save_result = task_meta.get("result", {})
+                                                    if task_meta.get("status") == "success":
+                                                        deferred_save_result.setdefault("status", "SUCCESS")
+                                                    else:
+                                                        deferred_save_result = {"status": "FAILURE", "error": task_meta.get("error", "Task failed")}
+                                                    break
+                                                await asyncio.sleep(wait_interval)
+                                                waited += wait_interval
+                                            if not deferred_save_result:
+                                                deferred_save_result = {"status": "FAILURE", "error": "Task timed out"}
+                                        else:
+                                            deferred_save_result = {"status": "FAILURE", "error": deferred_save_submission.detail or "Task submission failed"}
                                         
-                                        # Record failed execution to MongoDB
-                                        await record_column_operations_execution(
-                                            client_name=request.client_name,
-                                            app_name=request.app_name,
-                                            project_name=request.project_name,
+                                        deferred_execution_end_time = datetime.utcnow()
+                                        if deferred_save_result and deferred_save_result.get("status") == "SUCCESS":
+                                            logger.info(f"✅ Deferred column operations completed for {output_file} -> {deferred_output_file}")
+                                            execution_log.append({
+                                                "type": "column_operations",
+                                                "input_file": output_file,  # Use output_file from the loop
+                                                "output_file": deferred_output_file,
+                                                "status": "success",
+                                                "message": f"Created {len(deferred_col_op.get('created_columns', []))} columns"
+                                            })
+                                            success_count += 1
+                                            
+                                            # Record execution to MongoDB
+                                            await record_column_operations_execution(
+                                                client_name=request.client_name,
+                                                app_name=request.app_name,
+                                                project_name=request.project_name,
+                                                input_file=deferred_col_op.get("input_file", output_file),  # Use original input_file from config
+                                                output_file=deferred_output_file,
+                                                operations=deferred_col_op.get("operations", []),
+                                                created_columns=deferred_col_op.get("created_columns", []),
+                                                execution_started_at=deferred_execution_start_time,
+                                                execution_completed_at=deferred_execution_end_time,
+                                                execution_status="success",
+                                                execution_error=None,
+                                                identifiers=deferred_col_op.get("identifiers"),  # Pass identifiers to match config
+                                                mode=request.mode
+                                            )
+                                            
+                                            # Update file replacements
+                                            if deferred_overwrite:
+                                                file_replacements[output_file] = deferred_output_file
+                                        else:
+                                            logger.error(f"❌ Failed to save deferred column operations result for {output_file}")
+                                            execution_log.append({
+                                                "type": "column_operations",
+                                                "input_file": output_file,  # Use output_file from the loop
+                                                "status": "failed",
+                                                "message": deferred_save_result.get("error", "Save failed") if deferred_save_result else "Save failed"
+                                            })
+                                            failed_count += 1
+                                            
+                                            # Record failed execution to MongoDB
+                                            await record_column_operations_execution(
+                                                client_name=request.client_name,
+                                                app_name=request.app_name,
+                                                project_name=request.project_name,
                                             input_file=deferred_col_op.get("input_file", output_file),  # Use original input_file from config
                                             output_file=output_file,  # Use input as output on failure
-                                            operations=deferred_col_op.get("operations", []),
-                                            created_columns=deferred_col_op.get("created_columns", []),
-                                            execution_started_at=deferred_execution_start_time,
-                                            execution_completed_at=deferred_execution_end_time,
-                                            execution_status="failed",
-                                            execution_error=deferred_save_result.get("error", "Save failed") if deferred_save_result else "Save failed",
-                                            identifiers=deferred_col_op.get("identifiers"),  # Pass identifiers to match config
-                                            mode=request.mode
-                                        )
+                                                operations=deferred_col_op.get("operations", []),
+                                                created_columns=deferred_col_op.get("created_columns", []),
+                                                execution_started_at=deferred_execution_start_time,
+                                                execution_completed_at=deferred_execution_end_time,
+                                                execution_status="failed",
+                                                execution_error=deferred_save_result.get("error", "Save failed") if deferred_save_result else "Save failed",
+                                                identifiers=deferred_col_op.get("identifiers"),  # Pass identifiers to match config
+                                                mode=request.mode
+                                            )
                                     
                                 except Exception as e:
                                     deferred_execution_end_time = datetime.utcnow()

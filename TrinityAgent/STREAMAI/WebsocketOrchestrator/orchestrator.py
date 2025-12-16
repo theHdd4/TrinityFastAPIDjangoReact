@@ -15,6 +15,8 @@ from .execution_mixin import WorkflowExecutionMixin
 from .settings import settings
 from STREAMAI.lab_context_builder import LabContextBuilder
 from STREAMAI.lab_memory_store import LabMemoryStore
+from STREAMAI.atom_ai_context_store import AtomAIContextStore
+from STREAMAI.file_analyzer import FileAnalyzer
 from ..graphrag import GraphRAGWorkspaceConfig
 from ..graphrag.client import GraphRAGQueryClient
 from ..graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
@@ -86,6 +88,35 @@ class StreamWebSocketOrchestrator(WorkflowExecutionMixin, WorkflowPlanningMixin,
             logger.warning("⚠️ Laboratory memory store unavailable: %s", lab_memory_exc)
             self.lab_memory_store = None
             self.lab_context_builder = None
+
+        self.atom_ai_context_store: Optional[AtomAIContextStore] = None
+        try:
+            self.atom_ai_context_store = AtomAIContextStore()
+            logger.info("✅ Atom AI context store initialized for laboratory metadata")
+        except Exception as atom_ctx_exc:  # pragma: no cover - optional dependency
+            logger.warning("⚠️ Atom AI context store unavailable: %s", atom_ctx_exc)
+
+        self.file_analyzer: Optional[FileAnalyzer] = None
+        try:
+            minio_config = settings.get_minio_config() if hasattr(settings, "get_minio_config") else {}
+            minio_endpoint = minio_config.get("endpoint", getattr(settings, "MINIO_ENDPOINT", "minio:9000"))
+            minio_access_key = minio_config.get("access_key", getattr(settings, "MINIO_ACCESS_KEY", "minio"))
+            minio_secret_key = minio_config.get("secret_key", getattr(settings, "MINIO_SECRET_KEY", "minio123"))
+            minio_bucket = minio_config.get("bucket", getattr(settings, "MINIO_BUCKET", "trinity"))
+            minio_prefix = minio_config.get("prefix", getattr(settings, "MINIO_PREFIX", ""))
+            minio_secure = (getattr(settings, "MINIO_SECURE", "false") or "false").lower() == "true"
+
+            self.file_analyzer = FileAnalyzer(
+                minio_endpoint=minio_endpoint,
+                access_key=minio_access_key,
+                secret_key=minio_secret_key,
+                bucket=minio_bucket,
+                prefix=minio_prefix,
+                secure=minio_secure,
+            )
+            logger.info("✅ FileAnalyzer initialized for AI context enrichment")
+        except Exception as file_analyzer_exc:  # pragma: no cover - optional dependency
+            logger.warning("⚠️ FileAnalyzer unavailable: %s", file_analyzer_exc)
 
         # GraphRAG integration
         self.graph_workspace_config = GraphRAGWorkspaceConfig()

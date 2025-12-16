@@ -141,17 +141,35 @@ async def save_column_operations(
             
             # SECOND: Find existing column operations config for this file with matching identifiers AND overwrite_original
             # IMPORTANT: Overwrite and save-as operations should be separate configs even if they have same identifiers
+            # Also check if input_file matches any existing output_file (operation on previously created file)
             existing_index = None
             for idx, col_op in enumerate(column_operations):
-                if col_op.get("input_file") == input_file:
+                stored_input_file = col_op.get("input_file")
+                stored_output_file = col_op.get("output_file")
+                
+                # Match if input_file matches stored input_file OR stored output_file
+                if stored_input_file == input_file or stored_output_file == input_file:
                     existing_identifiers = col_op.get("identifiers") or []
                     existing_identifiers_tuple = tuple(sorted(existing_identifiers))
                     existing_overwrite = col_op.get("overwrite_original", True)
                     
-                    # Match only if identifiers AND overwrite_original match
-                    if existing_identifiers_tuple == new_identifiers_tuple and existing_overwrite == overwrite_original:
-                        existing_index = idx
-                        break
+                    # If input_file matches stored_output_file, this means we're operating on a previously created file
+                    # In this case, if overwriting, we should update the previous operation
+                    # If save-as, we should create a new operation entry
+                    if stored_output_file == input_file:
+                        # Operating on a previously created file
+                        if overwrite_original:
+                            # Overwriting the previously created file - update that previous operation
+                            existing_index = idx
+                            break
+                        else:
+                            # Creating a new file from the previously created file - don't match, create new entry
+                            continue
+                    else:
+                        # Normal case: matching by input_file with matching identifiers and overwrite flag
+                        if existing_identifiers_tuple == new_identifiers_tuple and existing_overwrite == overwrite_original:
+                            existing_index = idx
+                            break
             
             if existing_index is not None:
                 # Merge operations: replace operations with same created_column_name, append others
@@ -1033,8 +1051,18 @@ async def record_column_operations_execution(
             
             for idx, col_op in enumerate(column_operations):
                 stored_input_file = col_op.get("input_file")
-                # Match if stored input_file equals the original (for matching) OR the current input_file
-                if stored_input_file == match_input_file or stored_input_file == input_file:
+                # CRITICAL FIX: Match using multiple strategies to handle file replacements:
+                # 1. Direct match: stored file == original file OR stored file == current file
+                # 2. Reverse replacement match: Check if stored file is a replacement of the original
+                #    (This handles the case where first operation updated input_file to replacement file)
+                # 3. Also check if original_input_file matches stored file (for when file was replaced)
+                matches_file = (
+                    stored_input_file == match_input_file or  # Original file match
+                    stored_input_file == input_file or  # Current file match
+                    (original_input_file and stored_input_file == original_input_file)  # Original input file match
+                )
+                
+                if matches_file:
                     # Also check identifiers match (in case there are multiple configs for same file)
                     existing_identifiers = tuple(sorted(col_op.get("identifiers") or []))
                     new_identifiers = tuple(sorted(identifiers or [])) if identifiers is not None else tuple()
@@ -1042,12 +1070,21 @@ async def record_column_operations_execution(
                     existing_overwrite = col_op.get("overwrite_original", True)
                     new_overwrite = (output_file is None or output_file == input_file)  # None or same = overwrite
                     
+                    logger.debug(
+                        f"🔍 Matching attempt {idx}: stored_input_file={stored_input_file}, "
+                        f"match_input_file={match_input_file}, input_file={input_file}, "
+                        f"existing_overwrite={existing_overwrite}, new_overwrite={new_overwrite}, "
+                        f"existing_identifiers={existing_identifiers}, new_identifiers={new_identifiers}"
+                    )
+                    
                     if existing_identifiers == new_identifiers and existing_overwrite == new_overwrite:
                         col_op_index = idx
+                        logger.info(f"✅ Found matching config at index {idx}")
                         break
                     # If no identifiers specified, match first config for this file with matching overwrite (backward compatibility)
                     elif identifiers is None and existing_identifiers == tuple() and existing_overwrite == new_overwrite:
                         col_op_index = idx
+                        logger.info(f"✅ Found matching config at index {idx} (backward compatibility)")
                         break
             
             if col_op_index is not None:
@@ -1131,14 +1168,24 @@ async def record_column_operations_execution(
                         f"✅ Updated column operations execution for {input_file} in {doc_id}"
                     )
             else:
-                # Config not found, create new one (shouldn't happen, but handle gracefully)
-                logger.warning(
-                    f"⚠️ Column operations config not found for {input_file} in {doc_id}, creating new config"
+                # Config not found, create new one
+                # This can happen when:
+                # 1. Document was cleared and this is the first operation
+                # 2. Multiple operations on same file with different overwrite_original values
+                # 3. File was replaced and matching failed
+                logger.info(
+                    f"📝 Column operations config not found for input_file={input_file}, "
+                    f"original_input_file={original_input_file}, output_file={output_file}, "
+                    f"overwrite={output_file is None or output_file == input_file} in {doc_id}, creating new config"
                 )
+                # Determine overwrite_original based on output_file
+                # If output_file is None or same as input_file, it's an overwrite operation
+                overwrite_original = (output_file is None or output_file == input_file)
+                
                 new_col_op_config = {
                     "input_file": input_file,
                     "output_file": output_file,
-                    "overwrite_original": True,  # Default
+                    "overwrite_original": overwrite_original,
                     "operations": operations,
                     "created_columns": created_columns,
                     "identifiers": identifiers,
@@ -1185,7 +1232,7 @@ async def record_column_operations_execution(
                     summary["derived_files_count"] = derived_files_count
                     summary["total_files"] = len(all_file_keys)
                     
-                    await coll.update_one(
+                    update_result = await coll.update_one(
                         {"_id": doc_id},
                         {
                             "$set": {
@@ -1196,8 +1243,13 @@ async def record_column_operations_execution(
                             }
                         }
                     )
+                    logger.info(
+                        f"✅ Created new column operations config and updated document for {input_file} -> {output_file} "
+                        f"(save-as) in {doc_id}, matched_count={update_result.matched_count}, "
+                        f"modified_count={update_result.modified_count}"
+                    )
                 else:
-                    await coll.update_one(
+                    update_result = await coll.update_one(
                         {"_id": doc_id},
                         {
                             "$set": {
@@ -1206,15 +1258,24 @@ async def record_column_operations_execution(
                             }
                         }
                     )
+                    logger.info(
+                        f"✅ Created new column operations config and updated document for {input_file} "
+                        f"(overwrite) in {doc_id}, matched_count={update_result.matched_count}, "
+                        f"modified_count={update_result.modified_count}"
+                    )
         else:
             # Document doesn't exist yet (cleared and no atoms executed), create it
             import time
             execution_id = f"exec_{int(time.time() * 1000)}"
             
+            # Determine overwrite_original based on output_file
+            # If output_file is None or same as input_file, it's an overwrite operation
+            overwrite_original = (output_file is None or output_file == input_file)
+            
             new_col_op_config = {
                 "input_file": input_file,
                 "output_file": output_file,
-                "overwrite_original": True,  # Default
+                "overwrite_original": overwrite_original,
                 "operations": operations,
                 "created_columns": created_columns,
                 "identifiers": identifiers,

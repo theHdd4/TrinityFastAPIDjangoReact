@@ -319,6 +319,10 @@ export const CUSTOM_MOLECULES_API =
   normalizeUrl(import.meta.env.VITE_CUSTOM_MOLECULES_API) ||
   `${backendOrigin}${djangoPrefix}/custom-molecules`;
 
+export const KPI_DASHBOARD_API =
+  normalizeUrl(import.meta.env.VITE_KPI_DASHBOARD_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/kpi-dashboard`;
+
 const shouldLogApiConfig =
   typeof window !== 'undefined' &&
   (import.meta.env.DEV || import.meta.env.VITE_SHOW_API_DEBUG === 'true');

@@ -300,16 +300,25 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
         return !columnsToExclude.has(colLower);
       });
 
-      // Compare columns (order doesn't matter, but all columns must match)
+      // Compare columns: replacement file must have all original columns (but can have extra columns)
       // Use filtered columns that exclude column operation-created columns
       const originalSet = new Set(originalColsFiltered.map((c: string) => String(c).toLowerCase().trim()));
       const replacementSet = new Set(replacementColsFiltered.map((c: string) => String(c).toLowerCase().trim()));
 
+      // Check if all original columns exist in replacement file
+      const missingColumns = Array.from(originalSet).filter((col: string) => !replacementSet.has(col));
+      
       const isValid = 
         originalColsFiltered.length > 0 &&
         replacementColsFiltered.length > 0 &&
-        originalSet.size === replacementSet.size &&
-        Array.from(originalSet).every((col: string) => replacementSet.has(col));
+        missingColumns.length === 0;
+
+      // Find the actual column names (with original case) for missing columns
+      const missingColumnsWithCase = missingColumns.map((missingColLower: string) => {
+        return originalColsFiltered.find((col: string) => 
+          String(col).toLowerCase().trim() === missingColLower
+        ) || missingColLower;
+      });
 
       setFileColumnValidation((prev) => ({
         ...prev,
@@ -317,7 +326,9 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
           isValid,
           error: isValid 
             ? undefined 
-            : `Column mismatch: Original has ${originalColsFiltered.length} columns (excluding ${columnsToExclude.size} column operation columns), replacement has ${replacementColsFiltered.length} columns`,
+            : missingColumnsWithCase.length > 0
+              ? `Missing required columns in replacement file: ${missingColumnsWithCase.join(', ')}. Replacement file must contain all original columns but can have additional columns.`
+              : `Column validation failed: Original has ${originalColsFiltered.length} columns (excluding ${columnsToExclude.size} column operation columns), replacement has ${replacementColsFiltered.length} columns`,
           originalColumns: originalColsFiltered,
           replacementColumns: replacementColsFiltered,
         },
@@ -2586,8 +2597,20 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
               <div className="space-y-4 max-h-[500px] overflow-y-auto">
                 {rootFileKeys.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No root files found.</p>
-                ) : (
-                  rootFileKeys.map((file: string) => {
+                ) : (() => {
+                  const filesWithOperations = rootFileKeys.filter((file: string) => {
+                    // Only show files that have operations
+                    const executionSteps = executionGraph.filter((step: any) => 
+                      step.inputs?.some((input: any) => input.file_key === file)
+                    );
+                    return executionSteps.length > 0;
+                  });
+                  
+                  if (filesWithOperations.length === 0) {
+                    return <p className="text-sm text-muted-foreground">No root files with operations found.</p>;
+                  }
+                  
+                  return filesWithOperations.map((file: string) => {
                     const replacement = fileReplacements.find((r) => r.original_file === file);
                     const rootFileObj = rootFiles.find((rf: any) => (rf.file_key || rf) === file);
                     const originalName = rootFileObj?.original_name || file.split('/').pop() || file;
@@ -2612,44 +2635,46 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                               </div>
                             )}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <Label className="text-sm font-medium mb-1 block">Replacement File</Label>
-                            <Select
-                              value={replacement?.replacement_file || ''}
-                              onValueChange={async (value) => {
-                                  handleKeepOriginalToggle(file, false);
-                                  await handleFileChange(file, value);
-                              }}
-                            >
-                              <SelectTrigger className="h-9 text-xs">
-                                <SelectValue placeholder="Select replacement file" />
-                              </SelectTrigger>
-                              <SelectContent className="z-[20000] max-h-[300px]">
-                                {savedDataframes.length > 0 ? (
-                                  savedDataframes
-                                    .filter((df: any) => {
-                                      // Exclude derived files
-                                      const isDerived = derivedFilesMap.has(df.object_name);
-                                      return !isDerived;
-                                    })
-                                    .map((df: any) => (
-                                      <SelectItem key={df.object_name} value={df.object_name}>
-                                        {df.display_name || df.object_name.split('/').pop() || df.object_name}
-                                      </SelectItem>
-                                    ))
-                                ) : (
-                                  <SelectItem value="no-files" disabled>No files available</SelectItem>
-                                )}
-                              </SelectContent>
-                            </Select>
-                          </div>
+                          {executionSteps.length > 0 && (
+                            <div className="flex-1 min-w-0">
+                              <Label className="text-sm font-medium mb-1 block">Replacement File</Label>
+                              <Select
+                                value={replacement?.replacement_file || ''}
+                                onValueChange={async (value) => {
+                                    handleKeepOriginalToggle(file, false);
+                                    await handleFileChange(file, value);
+                                }}
+                              >
+                                <SelectTrigger className="h-9 text-xs">
+                                  <SelectValue placeholder="Select replacement file" />
+                                </SelectTrigger>
+                                <SelectContent className="z-[20000] max-h-[300px]">
+                                  {savedDataframes.length > 0 ? (
+                                    savedDataframes
+                                      .filter((df: any) => {
+                                        // Exclude derived files
+                                        const isDerived = derivedFilesMap.has(df.object_name);
+                                        return !isDerived;
+                                      })
+                                      .map((df: any) => (
+                                        <SelectItem key={df.object_name} value={df.object_name}>
+                                          {df.display_name || df.object_name.split('/').pop() || df.object_name}
+                                        </SelectItem>
+                                      ))
+                                  ) : (
+                                    <SelectItem value="no-files" disabled>No files available</SelectItem>
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
                           <Badge variant="outline" className="text-xs shrink-0">
                             Root
                           </Badge>
                         </div>
                         
                         {/* Column validation status */}
-                        {fileColumnValidation[file] && (
+                        {executionSteps.length > 0 && fileColumnValidation[file] && (
                           <div className={`text-xs p-2 rounded ${
                             fileColumnValidation[file].isValid 
                               ? 'bg-green-50 text-green-700 border border-green-200' 
@@ -2782,8 +2807,8 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                         )}
                       </div>
                     );
-                  })
-                )}
+                  });
+                })()}
               </div>
             </div>
 

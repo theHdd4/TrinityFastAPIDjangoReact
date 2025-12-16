@@ -24,7 +24,11 @@ import Table from '@/templates/tables/table';
 import { MultiSelectDropdown } from '@/templates/dropdown';
 import { CHART_MAKER_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
-import { Input } from '@/components/ui/input';
+import ChartNoteEditor from './rich-text-note/ChartNoteEditor';
+import { TextBoxToolbar } from '@/components/LaboratoryMode/components/CanvasArea/text-box/TextBoxToolbar';
+import { DEFAULT_CHART_NOTE_FORMATTING } from './rich-text-note/types';
+import type { TextAlignOption } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
+import { TEXT_STYLE_PRESETS } from '@/components/LaboratoryMode/components/CanvasArea/text-box/constants';
 
 // FilterMenu component moved outside to prevent recreation on every render
 const FilterMenu = ({ 
@@ -146,24 +150,292 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   // Container ref for responsive layout
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Handle note input change - save directly to chart config
-  const handleNoteChange = (chartId: string, value: string) => {
+  // State for rich text note editing
+  const [editingNoteChartId, setEditingNoteChartId] = useState<string | null>(null);
+  const [showNoteToolbar, setShowNoteToolbar] = useState(false);
+  
+  // Local state for note editing - prevents lag by not saving on every keystroke
+  const [localNoteState, setLocalNoteState] = useState<Record<string, { value: string; html?: string }>>({});
+
+  // Handle note input change - update LOCAL state only (no store update = no lag)
+  const handleNoteChange = (chartId: string, value: string, html?: string) => {
+    // Only update local state - don't call updateSettings to prevent lag
+    setLocalNoteState(prev => ({
+      ...prev,
+      [chartId]: { value, html }
+    }));
+  };
+
+  // Handle note commit - save to store on blur/commit
+  const handleNoteCommit = (chartId: string, value: string, html: string) => {
+    // Now save to store - this only happens on blur/commit, not every keystroke
     const chart = charts.find(c => c.id === chartId);
     if (chart) {
       const updatedCharts = charts.map(c =>
-        c.id === chartId ? { ...c, note: value } : c
+        c.id === chartId ? { ...c, note: value, noteHtml: html } : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    }
+    
+    // Clear local state for this chart
+    setLocalNoteState(prev => {
+      const next = { ...prev };
+      delete next[chartId];
+      return next;
+    });
+    
+    setEditingNoteChartId(null);
+    setShowNoteToolbar(false);
+  };
+
+  // Handle note cancel - discard local changes
+  const handleNoteCancel = (chartId: string) => {
+    // Clear local state without saving
+    setLocalNoteState(prev => {
+      const next = { ...prev };
+      delete next[chartId];
+      return next;
+    });
+    
+    setEditingNoteChartId(null);
+    setShowNoteToolbar(false);
+  };
+
+  // Get current note value - use local state if editing, otherwise use persisted state
+  const getNoteValue = (chartId: string) => {
+    if (editingNoteChartId === chartId && localNoteState[chartId]) {
+      return localNoteState[chartId].value;
+    }
+    const chart = charts.find(c => c.id === chartId);
+    return chart?.note || '';
+  };
+
+  // Get current note HTML - use local state if editing, otherwise use persisted state
+  const getNoteHtml = (chartId: string) => {
+    if (editingNoteChartId === chartId && localNoteState[chartId]) {
+      return localNoteState[chartId].html;
+    }
+    const chart = charts.find(c => c.id === chartId);
+    return chart?.noteHtml;
+  };
+
+  // Get current note formatting for a chart
+  const getNoteFormatting = (chartId: string) => {
+    const chart = charts.find(c => c.id === chartId);
+    return chart?.noteFormatting || DEFAULT_CHART_NOTE_FORMATTING;
+  };
+
+  // Handle note formatting change - map to TextBoxToolbar format
+  // Also capture updated HTML from editor if it's currently being edited
+  const handleNoteFormattingChange = (chartId: string, updates: {
+    fontFamily?: string;
+    fontSize?: number;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strikethrough?: boolean;
+    textColor?: string;
+    backgroundColor?: string;
+    textAlign?: 'left' | 'center' | 'right';
+  }) => {
+    const chart = charts.find(c => c.id === chartId);
+    if (chart) {
+      const currentFormatting = chart.noteFormatting || DEFAULT_CHART_NOTE_FORMATTING;
+      
+      // If editor is active, capture current HTML to preserve formatting applied via execCommand
+      let updatedHtml = chart.noteHtml;
+      if (editingNoteChartId === chartId) {
+        const editorElement = document.querySelector('[data-chart-note-editor="true"]') as HTMLElement;
+        if (editorElement) {
+          updatedHtml = editorElement.innerHTML;
+          // Also update local state with the new HTML
+          setLocalNoteState(prev => {
+            const current = prev[chartId];
+            if (current) {
+              return {
+                ...prev,
+                [chartId]: {
+                  ...current,
+                  html: updatedHtml
+                }
+              };
+            }
+            return prev;
+          });
+        }
+      }
+      
+      // Save formatting to store immediately (formatting changes are less frequent than typing)
+      const updatedCharts = charts.map(c =>
+        c.id === chartId 
+          ? { 
+              ...c, 
+              noteFormatting: { 
+                ...currentFormatting,
+                ...updates
+              },
+              // Update HTML if editor is active to preserve formatting
+              ...(updatedHtml && updatedHtml !== c.noteHtml ? { noteHtml: updatedHtml } : {})
+            } 
+          : c
       );
       updateSettings(atomId, { charts: updatedCharts });
     }
   };
 
-  // Handle note input keydown - save and blur on Enter
-  const handleNoteKeyDown = (chartId: string, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      // Blur the input to trigger save and remove focus
-      e.currentTarget.blur();
+  // Helper to check if editor has selection
+  const hasNoteEditorSelection = (chartId: string): boolean => {
+    if (editingNoteChartId !== chartId) return false;
+    const editorElement = document.querySelector('[data-chart-note-editor="true"]') as HTMLElement;
+    if (!editorElement) return false;
+    const selection = window.getSelection();
+    return !!(selection && selection.rangeCount > 0 && !selection.isCollapsed);
+  };
+
+  // Helper to run execCommand on note editor
+  const runNoteEditorCommand = (chartId: string, command: string, value?: string): boolean => {
+    if (editingNoteChartId !== chartId) return false;
+    const editorElement = document.querySelector('[data-chart-note-editor="true"]') as HTMLElement;
+    if (!editorElement) return false;
+    
+    editorElement.focus();
+    try {
+      return document.execCommand(command, false, value);
+    } catch (e) {
+      return false;
     }
+  };
+
+  // Sync HTML after formatting command - ensures HTML is captured after execCommand
+  const syncNoteHtmlAfterFormatting = (chartId: string) => {
+    if (editingNoteChartId === chartId) {
+      setTimeout(() => {
+        const editorElement = document.querySelector('[data-chart-note-editor="true"]') as HTMLElement;
+        if (editorElement) {
+          const updatedHtml = editorElement.innerHTML;
+          const chart = charts.find(c => c.id === chartId);
+          if (chart && updatedHtml !== chart.noteHtml) {
+            const updatedCharts = charts.map(c =>
+              c.id === chartId ? { ...c, noteHtml: updatedHtml } : c
+            );
+            updateSettings(atomId, { charts: updatedCharts });
+          }
+        }
+      }, 0);
+    }
+  };
+
+  // TextBoxToolbar handlers for chart notes - apply via execCommand when possible
+  const handleNoteFontFamilyChange = (chartId: string, font: string) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'fontName', font);
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { fontFamily: font });
+  };
+
+  const handleNoteIncreaseFontSize = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newSize = Math.min(formatting.fontSize + 1, 72);
+    // Note: execCommand fontSize uses 1-7 scale, so we apply via CSS instead
+    handleNoteFormattingChange(chartId, { fontSize: newSize });
+  };
+
+  const handleNoteDecreaseFontSize = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newSize = Math.max(formatting.fontSize - 1, 8);
+    handleNoteFormattingChange(chartId, { fontSize: newSize });
+  };
+
+  const handleNoteToggleBold = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newBold = !formatting.bold;
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'bold');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { bold: newBold });
+  };
+
+  const handleNoteToggleItalic = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newItalic = !formatting.italic;
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'italic');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { italic: newItalic });
+  };
+
+  const handleNoteToggleUnderline = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newUnderline = !formatting.underline;
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'underline');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { underline: newUnderline });
+  };
+
+  const handleNoteToggleStrikethrough = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newStrikethrough = !formatting.strikethrough;
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'strikeThrough');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { strikethrough: newStrikethrough });
+  };
+
+  const handleNoteAlign = (chartId: string, align: TextAlignOption) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      const command = align === 'center' ? 'justifyCenter' : align === 'right' ? 'justifyRight' : 'justifyLeft';
+      runNoteEditorCommand(chartId, command);
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { textAlign: align });
+  };
+
+  const handleNoteColorChange = (chartId: string, color: string) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'foreColor', color);
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { textColor: color });
+  };
+
+  const handleNoteBackgroundColorChange = (chartId: string, color: string) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'backColor', color) || runNoteEditorCommand(chartId, 'hiliteColor', color);
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { backgroundColor: color });
+  };
+
+  const handleNoteApplyTextStyle = (chartId: string, preset: typeof TEXT_STYLE_PRESETS[number]) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      if (preset.bold) runNoteEditorCommand(chartId, 'bold');
+      if (preset.italic) runNoteEditorCommand(chartId, 'italic');
+      if (preset.underline) runNoteEditorCommand(chartId, 'underline');
+      if (preset.strikethrough) runNoteEditorCommand(chartId, 'strikeThrough');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, {
+      fontSize: preset.fontSize,
+      bold: preset.bold ?? false,
+      italic: preset.italic ?? false,
+      underline: preset.underline ?? false,
+      strikethrough: preset.strikethrough ?? false,
+    });
   };
 
   // Fetch cardinality data when data is available
@@ -1667,14 +1939,84 @@ const renderChart = (
                          {renderChart(chart, index)}
                        </div>
                        {chart.showNote && (
-                         <Input
-                           placeholder="Add note"
-                           value={chart.note || ''}
-                           onChange={(e) => handleNoteChange(chart.id, e.target.value)}
-                           onKeyDown={(e) => handleNoteKeyDown(chart.id, e)}
-                           className="mt-2 w-full text-sm flex-shrink-0"
+                         <div 
+                           className="mt-2 w-full flex-shrink-0 relative" 
                            onClick={(e) => e.stopPropagation()}
-                         />
+                           onFocusCapture={() => {
+                             if (editingNoteChartId === chart.id) {
+                               setShowNoteToolbar(true);
+                             }
+                           }}
+                           onBlurCapture={(e) => {
+                             const relatedTarget = e.relatedTarget as HTMLElement;
+                             // Don't hide toolbar if focus is moving to toolbar
+                             if (relatedTarget && (
+                               relatedTarget.closest('[data-text-toolbar-root]') ||
+                               relatedTarget.closest('[role="popover"]') ||
+                               relatedTarget.closest('[data-radix-popover-content]')
+                             )) {
+                               return;
+                             }
+                             // Delay to allow toolbar interactions
+                             setTimeout(() => {
+                               if (!document.activeElement?.closest('[data-text-toolbar-root]') &&
+                                   !document.activeElement?.closest('[data-chart-note-editor="true"]')) {
+                                 setShowNoteToolbar(false);
+                               }
+                             }, 200);
+                           }}
+                         >
+                           {showNoteToolbar && editingNoteChartId === chart.id && (
+                             <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full mb-2">
+                               <TextBoxToolbar
+                                 fontFamily={chart.noteFormatting?.fontFamily || DEFAULT_CHART_NOTE_FORMATTING.fontFamily}
+                                 onFontFamilyChange={(font) => handleNoteFontFamilyChange(chart.id, font)}
+                                 fontSize={chart.noteFormatting?.fontSize || DEFAULT_CHART_NOTE_FORMATTING.fontSize}
+                                 onIncreaseFontSize={() => handleNoteIncreaseFontSize(chart.id)}
+                                 onDecreaseFontSize={() => handleNoteDecreaseFontSize(chart.id)}
+                                 onApplyTextStyle={(preset) => handleNoteApplyTextStyle(chart.id, preset)}
+                                 bold={chart.noteFormatting?.bold || false}
+                                 italic={chart.noteFormatting?.italic || false}
+                                 underline={chart.noteFormatting?.underline || false}
+                                 strikethrough={chart.noteFormatting?.strikethrough || false}
+                                 onToggleBold={() => handleNoteToggleBold(chart.id)}
+                                 onToggleItalic={() => handleNoteToggleItalic(chart.id)}
+                                 onToggleUnderline={() => handleNoteToggleUnderline(chart.id)}
+                                 onToggleStrikethrough={() => handleNoteToggleStrikethrough(chart.id)}
+                                 align={(chart.noteFormatting?.textAlign || 'left') as TextAlignOption}
+                                 onAlign={(align) => handleNoteAlign(chart.id, align)}
+                                 color={chart.noteFormatting?.textColor || DEFAULT_CHART_NOTE_FORMATTING.textColor}
+                                 onColorChange={(color) => handleNoteColorChange(chart.id, color)}
+                                 backgroundColor={chart.noteFormatting?.backgroundColor || DEFAULT_CHART_NOTE_FORMATTING.backgroundColor}
+                                 onBackgroundColorChange={(color) => handleNoteBackgroundColorChange(chart.id, color)}
+                               />
+                             </div>
+                           )}
+                           <ChartNoteEditor
+                             value={getNoteValue(chart.id)}
+                             html={getNoteHtml(chart.id)}
+                             formatting={chart.noteFormatting || DEFAULT_CHART_NOTE_FORMATTING}
+                             isEditing={editingNoteChartId === chart.id}
+                             onValueChange={(value, html) => handleNoteChange(chart.id, value, html)}
+                             onCommit={(value, html) => handleNoteCommit(chart.id, value, html)}
+                             onCancel={() => handleNoteCancel(chart.id)}
+                             onFormattingChange={(formatting) => handleNoteFormattingChange(chart.id, formatting)}
+                             onClick={() => {
+                               setEditingNoteChartId(chart.id);
+                               setShowNoteToolbar(true);
+                               // Initialize local state with current note when starting to edit
+                               if (!localNoteState[chart.id]) {
+                                 setLocalNoteState(prev => ({
+                                   ...prev,
+                                   [chart.id]: {
+                                     value: chart.note || '',
+                                     html: chart.noteHtml
+                                   }
+                                 }));
+                               }
+                             }}
+                           />
+                         </div>
                        )}
                      </CardContent>
                    </Card>

@@ -155,16 +155,36 @@ def apply_table_settings(df: pl.DataFrame, settings: Dict[str, Any]) -> pl.DataF
                         df = df.filter(pl.col(column) <= max_val)
                     # If both are None, don't filter (show all)
                 else:
-                    # String array filter (multi-select)
+                    # Multi-select filter (could be numeric or string values)
+                    # Check if all values are numeric (except for "(blank)")
+                    non_blank_values = [v for v in filter_value if v != '(blank)']
+                    all_numeric = all(isinstance(v, (int, float)) for v in non_blank_values)
+                    
                     # Handle "(blank)" special case
                     if '(blank)' in filter_value:
                         # Filter for blank values OR selected values
                         blank_filter = (pl.col(column).is_null()) | (pl.col(column) == '') | (pl.col(column).cast(pl.Utf8).str.strip_chars() == '')
-                        value_filter = pl.col(column).is_in([v for v in filter_value if v != '(blank)'])
-                        df = df.filter(blank_filter | value_filter)
+                        
+                        if non_blank_values:
+                            # Convert numeric values to appropriate type for the column if needed
+                            if all_numeric:
+                                # For numeric columns, use numeric values directly
+                                value_filter = pl.col(column).is_in(non_blank_values)
+                            else:
+                                # For string columns, convert to string
+                                value_filter = pl.col(column).is_in([str(v) for v in non_blank_values])
+                            df = df.filter(blank_filter | value_filter)
+                        else:
+                            # Only blank values selected
+                            df = df.filter(blank_filter)
                     else:
-                        # Regular multi-select filter
-                        df = df.filter(pl.col(column).is_in(filter_value))
+                        # Regular multi-select filter (no blanks)
+                        if all_numeric:
+                            # Numeric multi-select filter
+                            df = df.filter(pl.col(column).is_in(filter_value))
+                        else:
+                            # String multi-select filter
+                            df = df.filter(pl.col(column).is_in([str(v) for v in filter_value]))
             elif isinstance(filter_value, dict) and 'min' in filter_value and 'max' in filter_value:
                 # Range filter object
                 min_val = filter_value.get('min')

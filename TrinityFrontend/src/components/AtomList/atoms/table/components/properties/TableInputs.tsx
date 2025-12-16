@@ -188,7 +188,28 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
         )}
       </Card>
 
-      {/* Card 2: Create Blank Table */}
+      {/* Card 2: Show Cardinality View (only for load mode) */}
+      {settings.mode === 'load' && settings.sourceFile && (
+        <Card className="p-4 space-y-3">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="cardinality-toggle"
+              checked={settings.showCardinalityView || false}
+              onCheckedChange={(checked) => {
+                updateSettings(atomId, { showCardinalityView: !!checked });
+              }}
+            />
+            <Label
+              htmlFor="cardinality-toggle"
+              className="text-sm font-medium text-gray-700 cursor-pointer"
+            >
+              Show Cardinality View
+            </Label>
+          </div>
+        </Card>
+      )}
+
+      {/* Card 3: Create Blank Table */}
       <Card className="p-4 space-y-3">
         <div className="flex items-center space-x-2">
           <Checkbox
