@@ -293,7 +293,7 @@ class LaboratoryIntentService:
             issues.append(
                 IntentValidationIssue(
                     field="output_format",
-                    message="Structured output requested but no data tool selected; consider enabling Atom Agent mode.",
+                    message="Structured output requested but no data tool selected; please attach a dataset or choose a text response instead.",
                 )
             )
         return issues
