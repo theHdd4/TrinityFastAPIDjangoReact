@@ -99,6 +99,17 @@ class LabMemoryStore:
             logger.warning("Failed to create MongoDB indices for lab context: %s", exc)
         return collection
 
+    def _context_filter(self, session_id: str) -> Dict[str, Any]:
+        """Return the canonical Mongo filter for a single lab session context."""
+
+        return {
+            "client_name": self.client_name,
+            "app_name": self.app_name,
+            "project_name": self.project_name,
+            "session_id": session_id,
+            "record_type": {"$ne": "atom_snapshot"},
+        }
+
     def update_react_context(
         self,
         *,
@@ -114,6 +125,8 @@ class LabMemoryStore:
         execution_inputs: Optional[Dict[str, Any]] = None,
         react_metadata: Optional[Dict[str, Any]] = None,
         validated_scope: Optional[Dict[str, Any]] = None,
+        envelope: Optional[Dict[str, Any]] = None,
+        analysis_insights: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Persist ReAct loop state so downstream atoms can consume fresh outputs.
 
@@ -122,35 +135,12 @@ class LabMemoryStore:
         next atom can deterministically locate the correct input file.
         """
 
-        if not request_id or not latest_dataset_alias or not output_path:
-            return
-
         self.apply_context(project_context)
 
-        dataset_entry = {
-            "path": output_path,
-            "schema": output_schema,
-            "created_by": created_by,
-            "updated_at": datetime.utcnow(),
-        }
+        existing_doc = self._load_existing_context(session_id=session_id) or {}
+        stable_request_id = request_id or existing_doc.get("request_id") or f"req-{session_id}"
 
-        history_entry = {
-            "step_number": step_number,
-            "atom_id": created_by,
-            "output_alias": latest_dataset_alias,
-            "output_path": output_path,
-            "timestamp": datetime.utcnow(),
-            "inputs": execution_inputs or {},
-        }
-
-        base_filter = {
-            "client_name": self.client_name,
-            "app_name": self.app_name,
-            "project_name": self.project_name,
-            "session_id": session_id,
-            "request_id": request_id,
-            "record_type": {"$ne": "atom_snapshot"},
-        }
+        base_filter = self._context_filter(session_id)
 
         update_doc: Dict[str, Any] = {
             "$set": {
@@ -158,15 +148,24 @@ class LabMemoryStore:
                 "app_name": self.app_name,
                 "project_name": self.project_name,
                 "session_id": session_id,
-                "request_id": request_id,
-                "record_type": "react_context",
-                "latest_dataset_alias": latest_dataset_alias,
-                "react_state.last_output_alias": latest_dataset_alias,
-                f"datasets.{latest_dataset_alias}": dataset_entry,
+                "request_id": stable_request_id,
+                "record_type": existing_doc.get("record_type") or "react_context",
                 "updated_at": datetime.utcnow(),
+                "timestamp": datetime.utcnow(),
+                "atom_history": existing_doc.get("atom_history") or [],
+                "react_state": existing_doc.get("react_state") or {},
+                "freshness_state": existing_doc.get("freshness_state") or {},
+                "input_hash": existing_doc.get("input_hash"),
+                "analysis_insights": existing_doc.get("analysis_insights") or {},
+                "analytics_insights": existing_doc.get("analytics_insights") or {},
+                "envelope": existing_doc.get("envelope"),
+                "atom_execution_metadata": existing_doc.get("atom_execution_metadata") or [],
+                "available_files": existing_doc.get("available_files") or [],
+                "scope": existing_doc.get("scope"),
+                "latest_dataset_alias": existing_doc.get("latest_dataset_alias"),
             },
-            "$push": {
-                "atom_history": history_entry,
+            "$setOnInsert": {
+                "created_at": datetime.utcnow(),
             },
         }
 
@@ -176,13 +175,49 @@ class LabMemoryStore:
             update_doc["$set"]["react_state.metadata"] = react_metadata
         if validated_scope is not None:
             update_doc["$set"]["scope"] = validated_scope
+        if envelope is not None:
+            update_doc["$set"]["envelope"] = envelope
+        if analysis_insights:
+            merged_insights = self._merge_insights(existing_doc.get("analysis_insights"), analysis_insights)
+            update_doc["$set"].update(
+                {
+                    "analysis_insights": merged_insights,
+                    "analytics_insights": merged_insights,
+                }
+            )
+
+        if latest_dataset_alias and output_path:
+            dataset_entry = {
+                "path": output_path,
+                "schema": output_schema,
+                "created_by": created_by,
+                "updated_at": datetime.utcnow(),
+            }
+
+            history_entry = {
+                "step_number": step_number,
+                "atom_id": created_by,
+                "output_alias": latest_dataset_alias,
+                "output_path": output_path,
+                "timestamp": datetime.utcnow(),
+                "inputs": execution_inputs or {},
+            }
+
+            update_doc.setdefault("$set", {}).update(
+                {
+                    "latest_dataset_alias": latest_dataset_alias,
+                    "react_state.last_output_alias": latest_dataset_alias,
+                    f"datasets.{latest_dataset_alias}": dataset_entry,
+                }
+            )
+            update_doc.setdefault("$push", {}).update({"atom_history": history_entry})
 
         try:
             self.mongo_collection.update_one(base_filter, update_doc, upsert=True)
             logger.info(
                 "💾 Updated Trinity_AI_Context for session=%s request=%s with alias %s → %s",
                 session_id,
-                request_id,
+                stable_request_id,
                 latest_dataset_alias,
                 output_path,
             )
@@ -202,13 +237,7 @@ class LabMemoryStore:
         primary request document.
         """
 
-        query: Dict[str, Any] = {
-            "client_name": self.client_name,
-            "app_name": self.app_name,
-            "project_name": self.project_name,
-            "session_id": session_id,
-            "record_type": {"$ne": "atom_snapshot"},
-        }
+        query: Dict[str, Any] = self._context_filter(session_id)
         if request_id:
             query["request_id"] = request_id
 
@@ -234,13 +263,8 @@ class LabMemoryStore:
 
         self.apply_context(project_context)
 
-        query: Dict[str, Any] = {
-            "client_name": self.client_name,
-            "app_name": self.app_name,
-            "project_name": self.project_name,
-            "session_id": session_id,
-            "record_type": "react_context",
-        }
+        query: Dict[str, Any] = self._context_filter(session_id)
+        query["record_type"] = "react_context"
         if request_id:
             query["request_id"] = request_id
 
@@ -287,6 +311,24 @@ class LabMemoryStore:
         merged_list = list(merged.values())
         merged_list.sort(key=_sort_key)
         return merged_list
+
+    @staticmethod
+    def _merge_insights(
+        existing: Optional[Dict[str, Any]], incoming: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Merge analytics/analysis insights by appending new observations."""
+
+        normalized_existing = existing or {}
+        normalized_incoming = incoming or {}
+
+        merged: Dict[str, List[Any]] = {}
+        for key in set(normalized_existing.keys()) | set(normalized_incoming.keys()):
+            existing_values = normalized_existing.get(key) or []
+            incoming_values = normalized_incoming.get(key) or []
+            combined = list(existing_values) + [item for item in incoming_values if item not in existing_values]
+            merged[key] = combined
+
+        return merged
 
     def get_or_create_request_id(
         self, session_id: str, incoming_request_id: Optional[str], project_context: Optional[Dict[str, Any]] = None
@@ -492,16 +534,22 @@ class LabMemoryStore:
                     "feature_flags": document.envelope.feature_flags,
                 },
                 "atom_execution_metadata": merged_metadata,
+                "record_type": existing_doc.get("record_type") or "react_context",
+                "datasets": existing_doc.get("datasets") or {},
+                "atom_history": existing_doc.get("atom_history") or [],
+                "react_state": existing_doc.get("react_state") or {},
+                "latest_dataset_alias": existing_doc.get("latest_dataset_alias"),
+                "available_files": existing_doc.get("available_files") or [],
+                "scope": existing_doc.get("scope"),
             }
-            self.mongo_collection.replace_one(
+            self.mongo_collection.update_one(
+                self._context_filter(document.envelope.session_id),
                 {
-                    "client_name": self.client_name,
-                    "app_name": self.app_name,
-                    "project_name": self.project_name,
-                    "session_id": document.envelope.session_id,
-                    "request_id": document.envelope.request_id,
+                    "$set": mongo_payload,
+                    "$setOnInsert": {
+                        "created_at": datetime.utcnow(),
+                    },
                 },
-                mongo_payload,
                 upsert=True,
             )
             logger.info(
@@ -592,6 +640,7 @@ class LabMemoryStore:
         envelope: LaboratoryEnvelope,
         step_record: WorkflowStepRecord,
         project_context: Optional[Dict[str, Any]] = None,
+        atom_insights: Optional[List[str]] = None,
     ) -> None:
         """Upsert atom execution metadata into the primary context document."""
 
@@ -615,13 +664,12 @@ class LabMemoryStore:
             existing_doc.get("atom_execution_metadata") or [], [incoming_entry]
         )
 
-        base_filter = {
-            "client_name": self.client_name,
-            "app_name": self.app_name,
-            "project_name": self.project_name,
-            "session_id": envelope.session_id,
-            "request_id": envelope.request_id,
-        }
+        merged_insights = self._merge_insights(
+            existing_doc.get("analysis_insights"),
+            {"observations": atom_insights or []},
+        )
+
+        base_filter = self._context_filter(envelope.session_id)
 
         try:
             self.mongo_collection.update_one(
@@ -629,6 +677,8 @@ class LabMemoryStore:
                 {
                     "$set": {
                         "atom_execution_metadata": merged_metadata,
+                        "analysis_insights": merged_insights,
+                        "analytics_insights": merged_insights,
                         "memory_type": "Trinity AI Persistent JSON Memory",
                         "model_version": envelope.model_version,
                         "prompt_template_version": envelope.prompt_template_version,
@@ -640,14 +690,16 @@ class LabMemoryStore:
                             "deterministic_params": envelope.deterministic_params,
                             "retrieved_at": datetime.utcnow(),
                         },
+                        "request_id": envelope.request_id,
+                        "envelope": envelope.model_dump(mode="python", exclude_none=True),
                     },
                     "$setOnInsert": {
                         "app_name": self.app_name,
                         "client_name": self.client_name,
                         "project_name": self.project_name,
                         "session_id": envelope.session_id,
-                        "request_id": envelope.request_id,
                         "timestamp": envelope.timestamp,
+                        "record_type": "react_context",
                     },
                 },
                 upsert=True,
