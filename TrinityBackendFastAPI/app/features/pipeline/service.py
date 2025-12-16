@@ -83,8 +83,12 @@ async def save_column_operations(
         execution_timestamp = datetime.utcnow()
         
         # Build column operations config
+        # IMPORTANT: Save original_input_file to help with matching during pipeline execution
+        # This ensures save-as operations can match correctly even after overwrite operations
+        # update input_file to replacement files
         col_ops_config = {
             "input_file": input_file,
+            "original_input_file": input_file,  # Save original file for matching during pipeline execution
             "output_file": output_file,
             "overwrite_original": overwrite_original,
             "operations": operations,
@@ -219,6 +223,9 @@ async def save_column_operations(
                 column_operations[existing_index]["operations"] = existing_ops
                 column_operations[existing_index]["created_columns"] = updated_created_cols
                 column_operations[existing_index]["saved_at"] = execution_timestamp
+                # Preserve original_input_file if it exists, otherwise set it (for backward compatibility)
+                if "original_input_file" not in column_operations[existing_index]:
+                    column_operations[existing_index]["original_input_file"] = input_file
                 # Update output_file if provided (for save-as, this is the new file; for overwrite, it's None or same as input)
                 if output_file is not None:
                     column_operations[existing_index]["output_file"] = output_file
@@ -1042,24 +1049,31 @@ async def record_column_operations_execution(
             # Document exists, update it
             pipeline = existing_doc.get("pipeline", {})
             column_operations = pipeline.get("column_operations", [])
+            execution_graph = pipeline.get("execution_graph", [])  # Define early so it's available in all branches
             
             # Find the column operations config for this input_file
             # When a file is replaced, input_file will be the replacement file, but we need to match
-            # by the original_input_file (from config) if provided, otherwise by input_file
+            # by the original_input_file from the config (preserved from initial save) or from function parameter
             col_op_index = None
             match_input_file = original_input_file if original_input_file else input_file
             
             for idx, col_op in enumerate(column_operations):
                 stored_input_file = col_op.get("input_file")
+                stored_original_input_file = col_op.get("original_input_file")  # Get original file from config
+                # Use stored_original_input_file if available (for matching against original file),
+                # otherwise fall back to stored_input_file (backward compatibility)
+                config_original_file = stored_original_input_file if stored_original_input_file else stored_input_file
+                
                 # CRITICAL FIX: Match using multiple strategies to handle file replacements:
-                # 1. Direct match: stored file == original file OR stored file == current file
-                # 2. Reverse replacement match: Check if stored file is a replacement of the original
-                #    (This handles the case where first operation updated input_file to replacement file)
-                # 3. Also check if original_input_file matches stored file (for when file was replaced)
+                # 1. Match by original_input_file from config (preserved from initial save)
+                # 2. Match by stored input_file (current file in config, may have been updated by overwrite)
+                # 3. Match by current input_file (replacement file being used now)
+                # This ensures save-as operations can match even after overwrite updates input_file
                 matches_file = (
-                    stored_input_file == match_input_file or  # Original file match
-                    stored_input_file == input_file or  # Current file match
-                    (original_input_file and stored_input_file == original_input_file)  # Original input file match
+                    config_original_file == match_input_file or  # Original file from config matches
+                    stored_input_file == match_input_file or  # Stored file matches original
+                    stored_input_file == input_file or  # Stored file matches current file
+                    (original_input_file and config_original_file == original_input_file)  # Config original matches parameter original
                 )
                 
                 if matches_file:
@@ -1070,21 +1084,12 @@ async def record_column_operations_execution(
                     existing_overwrite = col_op.get("overwrite_original", True)
                     new_overwrite = (output_file is None or output_file == input_file)  # None or same = overwrite
                     
-                    logger.debug(
-                        f"🔍 Matching attempt {idx}: stored_input_file={stored_input_file}, "
-                        f"match_input_file={match_input_file}, input_file={input_file}, "
-                        f"existing_overwrite={existing_overwrite}, new_overwrite={new_overwrite}, "
-                        f"existing_identifiers={existing_identifiers}, new_identifiers={new_identifiers}"
-                    )
-                    
                     if existing_identifiers == new_identifiers and existing_overwrite == new_overwrite:
                         col_op_index = idx
-                        logger.info(f"✅ Found matching config at index {idx}")
                         break
                     # If no identifiers specified, match first config for this file with matching overwrite (backward compatibility)
                     elif identifiers is None and existing_identifiers == tuple() and existing_overwrite == new_overwrite:
                         col_op_index = idx
-                        logger.info(f"✅ Found matching config at index {idx} (backward compatibility)")
                         break
             
             if col_op_index is not None:
@@ -1092,6 +1097,10 @@ async def record_column_operations_execution(
                 column_operations[col_op_index]["execution"] = execution_info
                 # Update input_file to the replacement file if it was replaced
                 column_operations[col_op_index]["input_file"] = input_file  # Update to replacement file
+                # IMPORTANT: Preserve original_input_file - don't overwrite it, it's used for matching
+                # Only set it if it doesn't exist (backward compatibility)
+                if "original_input_file" not in column_operations[col_op_index]:
+                    column_operations[col_op_index]["original_input_file"] = original_input_file if original_input_file else input_file
                 # For overwrite, output_file should be None or same as input_file
                 if output_file is None or output_file == input_file:
                     column_operations[col_op_index]["output_file"] = None  # Overwrite: no separate output file
@@ -1126,7 +1135,6 @@ async def record_column_operations_execution(
                         if col_op_output and not col_op_overwrite and col_op_output.endswith(".arrow"):
                             all_file_keys.add(col_op_output)
                     # Add atom output files
-                    execution_graph = pipeline.get("execution_graph", [])
                     for step in execution_graph:
                         for output in step.get("outputs", []):
                             file_key = output.get("file_key")
@@ -1173,10 +1181,11 @@ async def record_column_operations_execution(
                 # 1. Document was cleared and this is the first operation
                 # 2. Multiple operations on same file with different overwrite_original values
                 # 3. File was replaced and matching failed
-                logger.info(
-                    f"📝 Column operations config not found for input_file={input_file}, "
+                logger.warning(
+                    f"⚠️ Column operations config not found for input_file={input_file}, "
                     f"original_input_file={original_input_file}, output_file={output_file}, "
-                    f"overwrite={output_file is None or output_file == input_file} in {doc_id}, creating new config"
+                    f"overwrite={output_file is None or output_file == input_file} in {doc_id}, creating new config. "
+                    f"Checked {len(column_operations)} existing configs."
                 )
                 # Determine overwrite_original based on output_file
                 # If output_file is None or same as input_file, it's an overwrite operation
@@ -1184,6 +1193,7 @@ async def record_column_operations_execution(
                 
                 new_col_op_config = {
                     "input_file": input_file,
+                    "original_input_file": original_input_file if original_input_file else input_file,  # Save original for matching
                     "output_file": output_file,
                     "overwrite_original": overwrite_original,
                     "operations": operations,
@@ -1222,6 +1232,7 @@ async def record_column_operations_execution(
                             if not col_op_overwrite or (col_op_input and col_op_output != col_op_input):
                                 all_file_keys.add(col_op_output)
                     # Add atom output files
+                    execution_graph = pipeline.get("execution_graph", [])
                     for step in execution_graph:
                         for output in step.get("outputs", []):
                             file_key = output.get("file_key")
@@ -1274,6 +1285,7 @@ async def record_column_operations_execution(
             
             new_col_op_config = {
                 "input_file": input_file,
+                "original_input_file": original_input_file if original_input_file else input_file,  # Save original for matching
                 "output_file": output_file,
                 "overwrite_original": overwrite_original,
                 "operations": operations,
