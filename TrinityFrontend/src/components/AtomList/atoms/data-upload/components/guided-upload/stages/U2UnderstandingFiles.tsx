@@ -115,6 +115,13 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'U2UnderstandingFiles.tsx:107',message:'Starting file preview fetch',data:{fileKey,filePath:currentFile.path},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
       // #endregion
       
+      // Validate file path before making API call
+      if (!currentFile.path || !currentFile.path.trim()) {
+        setError('File path is missing. The file may not have been uploaded correctly. Please go back and re-upload the file.');
+        setLoading(false);
+        return;
+      }
+      
       lastFetchedFileKeyRef.current = fileKey;
       setLoading(true);
       setError('');

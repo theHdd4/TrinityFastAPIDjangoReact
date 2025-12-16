@@ -103,6 +103,7 @@ const LaboratoryMode = () => {
     cards, 
     setCards: setLabCards, 
     auxiliaryMenuLeftOpen, 
+    setAuxiliaryMenuLeftOpen,
     subMode, 
     setSubMode, 
     activeGuidedFlows,
@@ -197,6 +198,16 @@ const LaboratoryMode = () => {
     url.searchParams.set('mode', subMode);
     window.history.replaceState({}, '', url.toString());
   }, [subMode]);
+
+  // Close left panel and exhibition when guided mode is enabled
+  useEffect(() => {
+    if (globalGuidedModeEnabled) {
+      // Close the atom library panel
+      setAuxiliaryMenuLeftOpen(false);
+      // Close exhibition panel
+      setIsExhibitionOpen(false);
+    }
+  }, [globalGuidedModeEnabled, setAuxiliaryMenuLeftOpen]);
 
   useEffect(() => {
     if (isShareOpen) {
@@ -1063,8 +1074,8 @@ const LaboratoryMode = () => {
         data-lab-header="true"
         className="absolute top-[53px] flex items-center justify-center z-50 pointer-events-none"
         style={{
-          // When guided mode is ON, left panel is always collapsed (48px)
-          left: globalGuidedModeEnabled ? '48px' : (auxiliaryMenuLeftOpen || isExhibitionOpen) ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
+          // Left sidebar is always visible (with opacity when guided mode is ON)
+          left: (auxiliaryMenuLeftOpen || isExhibitionOpen) && !globalGuidedModeEnabled ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
           right: (auxActive && auxActive !== 'exhibition') ? '368px' : '48px', // w-12 (48px) icons + w-80 (320px) panel when open (exhibition is on left)
         }}
       >
@@ -1218,34 +1229,21 @@ const LaboratoryMode = () => {
       </div>
 
         <div className="flex-1 flex overflow-hidden relative">
-          {/* Atoms Sidebar - Hidden when guided mode is ON */}
-          {!globalGuidedModeEnabled && (
-            <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
-              <AuxiliaryMenuLeft 
-                onAtomDragStart={handleAtomDragStart}
-                active={auxActive}
-                onActiveChange={(newActive) => {
-                  setAuxActive(newActive);
-                }}
-                isExhibitionOpen={isExhibitionOpen}
-                setIsExhibitionOpen={setIsExhibitionOpen}
-                canEdit={canEdit}
-                showFloatingNavigationList={showFloatingNavigationList}
-                setShowFloatingNavigationList={setShowFloatingNavigationList}
-              />
-            </div>
-          )}
-          
-          {/* Minimal left bar when guided mode is ON - Light theme with gradient */}
-          {globalGuidedModeEnabled && (
-            <div className="w-12 h-full flex-shrink-0 flex flex-col items-center pt-4 bg-gradient-to-b from-purple-50 via-white to-blue-50 border-r border-purple-100 transition-all duration-500 ease-out animate-in slide-in-from-left-2">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-200 transition-all duration-300 hover:scale-110 hover:shadow-xl hover:shadow-purple-300 group cursor-pointer">
-                <Sparkles className="w-4 h-4 text-white transition-transform duration-300 group-hover:rotate-12" />
-              </div>
-              <div className="mt-3 w-6 h-0.5 rounded-full bg-gradient-to-r from-purple-200 to-blue-200" />
-              <span className="mt-2 text-[9px] font-medium text-purple-400 tracking-wider uppercase">Guided</span>
-            </div>
-          )}
+          {/* Atoms Sidebar - Always visible, with opacity effect when guided mode is ON */}
+          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10 ${globalGuidedModeEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
+            <AuxiliaryMenuLeft 
+              onAtomDragStart={handleAtomDragStart}
+              active={auxActive}
+              onActiveChange={(newActive) => {
+                setAuxActive(newActive);
+              }}
+              isExhibitionOpen={isExhibitionOpen}
+              setIsExhibitionOpen={setIsExhibitionOpen}
+              canEdit={canEdit && !globalGuidedModeEnabled}
+              showFloatingNavigationList={showFloatingNavigationList}
+              setShowFloatingNavigationList={setShowFloatingNavigationList}
+            />
+          </div>
 
           {/* Main Canvas Area */}
           <div

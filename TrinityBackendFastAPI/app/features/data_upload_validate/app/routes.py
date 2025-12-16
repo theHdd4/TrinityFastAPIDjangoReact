@@ -4342,6 +4342,13 @@ async def get_file_preview(
     - Rows with stable count = data rows
     Returns separated description_rows and data_rows for user to select header.
     """
+    # Validate object_name is not empty
+    if not object_name or not object_name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="object_name is required and cannot be empty. Please ensure the file was uploaded successfully."
+        )
+    
     try:
         # CRITICAL: If we receive an Arrow file path, try to find the original CSV/Excel file
         # Arrow files are processed files with "col_0", "col_1" column names - we need the original!

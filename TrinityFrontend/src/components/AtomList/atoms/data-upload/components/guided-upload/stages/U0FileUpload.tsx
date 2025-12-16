@@ -335,6 +335,8 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       // Process the response based on file type
       if (isExcelFile) {
         const data = uploadResult;
+        console.log('[U0FileUpload] Excel upload response:', JSON.stringify(data, null, 2));
+        
         const sheetNames = Array.isArray(data.sheets) ? data.sheets : [];
         const sheetDetails = Array.isArray(data.sheet_details) ? data.sheet_details : [];
         const fileName = data.file_name || sanitizedFileName;
@@ -360,7 +362,14 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
         }
         
         // Store temp path (will be processed in U2 stage)
-        const tempPath = data.original_file_path || '';
+        // Try multiple possible path fields from the response
+        const tempPath = data.original_file_path || data.folder_path || '';
+        console.log('[U0FileUpload] Excel file path:', tempPath, 'original_file_path:', data.original_file_path, 'folder_path:', data.folder_path);
+        
+        if (!tempPath) {
+          console.error('[U0FileUpload] WARNING: No file path returned from upload. Response:', data);
+        }
+        
         const fileKey = deriveFileKey(fileName);
         
         // Auto-select all sheets for parallel uploads

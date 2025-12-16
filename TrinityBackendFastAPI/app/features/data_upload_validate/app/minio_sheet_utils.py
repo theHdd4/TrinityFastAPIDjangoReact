@@ -88,6 +88,8 @@ def extract_all_sheets_from_excel(
         
         # Store original Excel file in the folder
         original_path = f"{folder_prefix}original.xlsx"
+        logger.info(f"[extract_all_sheets] Setting original_path: {original_path}")
+        
         excel_bytes_for_storage = io.BytesIO(excel_content)
         minio_client.put_object(
             MINIO_BUCKET,
