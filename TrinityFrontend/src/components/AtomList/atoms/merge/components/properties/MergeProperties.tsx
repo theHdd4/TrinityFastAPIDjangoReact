@@ -33,6 +33,20 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
     const handleChange = (newSettings: any) => {
       try {
         updateSettings(atomId, newSettings);
+
+        // Record the current dataframe selection for this atom in the laboratory store.
+        // For merge operations, always use the primary source (file1) as the metrics context.
+        if (newSettings.file1 && typeof newSettings.file1 === 'string') {
+          try {
+            const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+            const normalized = newSettings.file1.endsWith('.arrow')
+              ? newSettings.file1
+              : `${newSettings.file1}.arrow`;
+            setAtomCurrentDataframe(atomId, normalized);
+          } catch {
+            // best-effort; do not block merge on metrics sync
+          }
+        }
       } catch (err) {
         console.error('🔧 MergeProperties: Error updating settings:', err);
         setError('Failed to update settings. Please try again.');

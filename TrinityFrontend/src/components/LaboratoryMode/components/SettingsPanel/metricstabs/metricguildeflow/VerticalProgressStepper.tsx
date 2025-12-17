@@ -9,8 +9,8 @@ interface VerticalProgressStepperProps {
 }
 
 const STAGES: Array<{ id: MetricStage; label: string; shortLabel: string; category?: string }> = [
-  { id: 'type', label: 'Select Metric Type', shortLabel: 'Type', category: 'SETUP' },
-  { id: 'dataset', label: 'Configure Dataset', shortLabel: 'Dataset', category: 'CONFIGURATION' },
+  { id: 'type', label: 'Select The Type Of Metric You Want To Create', shortLabel: 'Type', category: 'SETUP' },
+  { id: 'dataset', label: 'Confirm Your Data Source', shortLabel: 'Dataset', category: 'CONFIGURATION' },
   { id: 'operations', label: 'Operations', shortLabel: 'Operations', category: 'CONFIGURATION' },
   { id: 'preview', label: 'Complete', shortLabel: 'Complete', category: 'EXECUTION' },
 ];

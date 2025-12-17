@@ -1378,6 +1378,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           initialStage={activeMetricGuidedFlow?.currentStage}
           savedState={activeMetricGuidedFlow?.state}
           onClose={closeMetricGuidedFlow}
+          contextAtomId={metricsInputs.contextAtomId}
         />
       </div>
     );
@@ -6621,6 +6622,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         initialStage={activeMetricGuidedFlow?.currentStage}
                         savedState={activeMetricGuidedFlow?.state}
                         onClose={closeMetricGuidedFlow}
+                        contextAtomId={metricsInputs.contextAtomId}
                       />
                     </div>
                   )}

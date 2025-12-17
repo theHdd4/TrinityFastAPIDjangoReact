@@ -121,12 +121,13 @@ const MetricsInputFiles: React.FC<MetricsInputFilesProps> = ({ cardId }) => {
       matchedObjectName: matchedObjectName || null,
     });
 
+    // Only auto-sync from the context atom when the context or frames change.
+    // Do NOT react to manual changes of metricsInputs.dataSource, so users can override it.
     if (matchedObjectName && matchedObjectName !== metricsInputs.dataSource) {
       updateMetricsInputs({ dataSource: matchedObjectName });
     }
   }, [
     metricsInputs.contextAtomId,
-    metricsInputs.dataSource,
     frames,
     getAtom,
     updateMetricsInputs,

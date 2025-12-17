@@ -20,7 +20,6 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
 
   const handleSelection = (type: 'variable' | 'column') => {
     setState(prev => {
-      // If type changes, clear all created items as they're type-specific
       if (prev.selectedType !== type) {
         return {
           ...prev,
@@ -35,17 +34,15 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
   };
 
   return (
-    <StageLayout
-      title=""
-      explanation=""
-    >
+    <StageLayout title="" explanation="" className="max-w-xl mx-auto">
       <div className="flex justify-center">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl w-full px-6 justify-items-center">
-          {/* Variable */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full px-4 justify-items-center">
+
+          {/* ================= Variable ================= */}
           <button
             onClick={() => handleSelection('variable')}
             className={cn(
-              'w-full max-w-sm relative rounded-xl border p-6 text-center transition-all flex flex-col items-center justify-between',
+              'w-full max-w-sm relative rounded-xl border p-6 transition-all flex items-center justify-center',
               selected === 'variable'
                 ? 'border-primary bg-primary/5'
                 : 'border-border hover:border-primary/50'
@@ -67,15 +64,20 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
               </div>
             </div>
 
-            <div className="flex flex-col items-center space-y-4 w-full flex-1">
-              {/* Icon at top center */}
-              <div className="rounded-lg bg-muted p-3 mt-4">
-                <Sparkles className="h-8 w-8 text-primary" />
+            {/* Content */}
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg bg-muted p-2">
+              <Sparkles
+                  className={cn(
+                    'h-6 w-6 transition-colors',
+                    selected === 'variable' ? 'text-blue-600' : 'text-muted-foreground'
+                  )}
+                />
+
               </div>
 
-              {/* Header with info icon */}
-              <div className="flex items-center gap-2">
-                <h4 className="font-medium text-base">Create a Variable</h4>
+              <div className="flex items-center gap-1">
+                <h4 className="font-medium text-base">Variable</h4>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -85,33 +87,26 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
                       <div className="space-y-2 text-xs">
                         <p className="font-medium">Variable</p>
                         <p className="text-muted-foreground">
-                          A standalone number or label that can be computed or manually assigned.
+                          A standalone value that is either computed from data or manually assigned.
                         </p>
                         <p className="italic text-muted-foreground">
                           Examples:
-                          <br />• total_sales
-                          <br />• avg_discount
-                          <br />• growth_target = 1.12
+                          <br />• g = 9.8
+                          <br />• total_sales_in_2024
                         </p>
                       </div>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
-
-              {/* Bullet points at bottom */}
-              <ul className="text-sm text-muted-foreground space-y-1 mt-auto mb-4">
-                <li>• Compute Variable</li>
-                <li>• Assign Variable</li>
-              </ul>
             </div>
           </button>
 
-          {/* Column */}
+          {/* ================= Column ================= */}
           <button
             onClick={() => handleSelection('column')}
             className={cn(
-              'w-full max-w-sm relative rounded-xl border p-6 text-center transition-all flex flex-col items-center justify-between',
+              'w-full max-w-sm relative rounded-xl border p-6 transition-all flex items-center justify-center',
               selected === 'column'
                 ? 'border-primary bg-primary/5'
                 : 'border-border hover:border-primary/50'
@@ -133,15 +128,19 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
               </div>
             </div>
 
-            <div className="flex flex-col items-center space-y-4 w-full flex-1">
-              {/* Icon at top center */}
-              <div className="rounded-lg bg-muted p-3 mt-4">
-                <Table className="h-8 w-8 text-primary" />
+            {/* Content */}
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg bg-muted p-2">
+              <Table
+                className={cn(
+                  'h-6 w-6 transition-colors',
+                  selected === 'column' ? 'text-blue-600' : 'text-muted-foreground'
+                )}
+              />
               </div>
 
-              {/* Header with info icon */}
-              <div className="flex items-center gap-2">
-                <h4 className="font-medium text-base">Create a New Column</h4>
+              <div className="flex items-center gap-1">
+                <h4 className="font-medium text-base">Column</h4>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -155,23 +154,18 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
                         </p>
                         <p className="italic text-muted-foreground">
                           Examples:
-                          <br />• lagged_price
-                          <br />• sum_by_brand
-                          <br />• SKU_rank_by_region
+                          <br />• growth_rate
+                          <br />• Z_transformation
+                          <br />• ratio
                         </p>
                       </div>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
-
-              {/* Bullet points at bottom */}
-              <ul className="text-sm text-muted-foreground space-y-1 mt-auto mb-4">
-                <li>• Row-wise operations</li>
-                <li>• Grouped transformations</li>
-              </ul>
             </div>
           </button>
+
         </div>
       </div>
     </StageLayout>

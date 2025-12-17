@@ -18,6 +18,17 @@ const CorrelationProperties: React.FC<Props> = ({ atomId }) => {
 
   const handleChange = (newSettings: Partial<SettingsType>) => {
     updateSettings(atomId, newSettings);
+
+    // Sync current dataframe for this atom into the laboratory store whenever the file changes
+    if (newSettings.selectedFile) {
+      try {
+        const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+        const objectName = newSettings.selectedFile;
+        setAtomCurrentDataframe(atomId, objectName);
+      } catch {
+        // best-effort; do not block correlation updates on metrics sync
+      }
+    }
   };
 
   return (

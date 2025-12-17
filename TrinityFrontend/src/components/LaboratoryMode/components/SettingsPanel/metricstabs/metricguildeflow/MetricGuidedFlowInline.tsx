@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useMetricGuidedFlow, type MetricStage, type MetricGuidedFlowState } from './useMetricGuidedFlow';
@@ -23,6 +23,8 @@ interface MetricGuidedFlowInlineProps {
   savedState?: Partial<MetricGuidedFlowState>;
   /** Callback when flow should be closed (e.g. user cancels) */
   onClose?: () => void;
+  /** Current metrics context atom (if any), used for dataset preselection */
+  contextAtomId?: string;
 }
 
 const STAGE_COMPONENTS: Record<MetricStage, React.ComponentType<any>> = {
@@ -33,8 +35,8 @@ const STAGE_COMPONENTS: Record<MetricStage, React.ComponentType<any>> = {
 };
 
 const STAGE_TITLES: Record<MetricStage, string> = {
-  type: 'Select Metric Type',
-  dataset: 'Configure Dataset',
+  type: 'Select The Type Of Metric You Want To Create',
+  dataset: 'Confirm Your Data Source',
   operations: 'Select Operation',
   preview: 'Preview & Save',
 };
@@ -50,11 +52,13 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
   initialStage,
   savedState,
   onClose,
+  contextAtomId,
 }) => {
   console.log('[MetricGuidedFlowInline] Component mounted/rendered', {
     initialStage,
     savedState,
     hasOnClose: !!onClose,
+    contextAtomId,
   });
   
   const flow = useMetricGuidedFlow(savedState);
@@ -286,7 +290,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
   }, [restartFlow, goToStage, setActiveMetricGuidedFlow]);
 
   const handleClose = useCallback(() => {
-    console.log('[MetricGuidedFlowInline] handleClose called - clearing all state');
+    //console.log('[MetricGuidedFlowInline] handleClose called - clearing all state');
     
     // Clear localStorage persistence
     const projectContext = getActiveProjectContext();
@@ -311,8 +315,9 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
   const canGoBack = state.currentStage !== 'type';
   const isLastStage = state.currentStage === 'preview';
 
-  // Track expanded/collapsed completed stages
+  // Track expanded/collapsed completed stages and current stage expansion
   const [expandedCompletedStages, setExpandedCompletedStages] = useState<Set<MetricStage>>(new Set());
+  const [isCurrentExpanded, setIsCurrentExpanded] = useState(true);
   const stageRefs = useRef<Record<MetricStage, HTMLDivElement | null>>({} as Record<
     MetricStage,
     HTMLDivElement | null
@@ -371,6 +376,8 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
         });
       }, 100);
     }
+    // Whenever we change stages, expand the new current stage by default
+    setIsCurrentExpanded(true);
   }, [state.currentStage]);
 
   const toggleCompletedStage = useCallback((stage: MetricStage) => {
@@ -391,7 +398,9 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
       const isCurrent = stage === state.currentStage;
       const isUpcoming = !isCompleted && !isCurrent;
       const StageComponent = STAGE_COMPONENTS[stage];
-      const isExpanded = isCurrent || (isCompleted && expandedCompletedStages.has(stage));
+      const isExpanded =
+        (isCurrent && isCurrentExpanded) ||
+        (!isCurrent && isCompleted && expandedCompletedStages.has(stage));
 
       let statusIcon: React.ReactNode;
       let headerBg = 'bg-white';
@@ -433,6 +442,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
         >
           {/* Stage Header */}
           {isCompleted ? (
+            // Completed stages: clickable to expand/collapse
             <button
               onClick={() => toggleCompletedStage(stage)}
               className={`flex items-center justify-between px-6 py-4 border-b ${headerBg} hover:bg-opacity-80 transition-colors cursor-pointer w-full text-left`}
@@ -450,18 +460,33 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
                 <ChevronDown className="w-5 h-5 text-gray-500" />
               )}
             </button>
+          ) : isCurrent ? (
+            // Current stage: also clickable to expand/collapse
+            <button
+              onClick={() => setIsCurrentExpanded(prev => !prev)}
+              className={`flex items-center justify-between px-6 py-4 border-b ${headerBg} hover:bg-opacity-80 transition-colors cursor-pointer w-full text-left`}
+            >
+              <div className="flex items-center gap-3">
+                {statusIcon}
+                <h2 className={`text-lg font-semibold ${headerTextColor}`}>{STAGE_TITLES[stage]}</h2>
+                <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
+                  Current
+                </span>
+              </div>
+              {isExpanded ? (
+                <ChevronUp className="w-5 h-5 text-gray-500" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-gray-500" />
+              )}
+            </button>
           ) : (
+            // Upcoming stages: non-interactive (still show label)
             <div
               className={`flex items-center justify-between px-6 py-4 border-b ${headerBg} flex-shrink-0`}
             >
               <div className="flex items-center gap-3">
                 {statusIcon}
                 <h2 className={`text-lg font-semibold ${headerTextColor}`}>{STAGE_TITLES[stage]}</h2>
-                {isCurrent && (
-                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
-                    Current
-                  </span>
-                )}
                 {isUpcoming && (
                   <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">
                     Upcoming
@@ -476,7 +501,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">
               {isCurrent ? (
                 <>
-                  <div className="p-6 min-h-[320px]">
+                  <div className={`p-6 ${stage === 'type' ? 'min-h-[120px]' : 'min-h-[320px]'}`}>
                     {stage === 'preview' ? (
                       <StageComponent 
                         flow={flow} 
@@ -485,6 +510,8 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
                       />
                     ) : stage === 'operations' ? (
                       <StageComponent ref={m2OperationsRef} flow={flow} />
+                    ) : stage === 'dataset' ? (
+                      <StageComponent flow={flow} contextAtomId={contextAtomId} />
                     ) : (
                       <StageComponent flow={flow} />
                     )}
@@ -512,9 +539,9 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
                       </Button>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" onClick={handleClose}>
-                        {stage === 'preview' ? 'Exit' : 'Cancel'}
-                      </Button>
+                      {stage === 'preview' && <Button variant="outline" onClick={handleClose}>
+                        Exit
+                      </Button>}
                       {!isLastStage && stage === 'operations' ? (
                         // Operations stage: Show Save/Save As buttons based on selectedType
                         state.selectedType === 'variable' ? (
@@ -612,14 +639,13 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     <Card className="w-full bg-white border-2 border-gray-200 rounded-lg shadow-sm p-6">
       <div className="w-full flex flex-col">
         {/* Header describing the inline metric workflow */}
-        <div className="mb-4 px-1">
+        <div className="mb-4 px-1 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">
-            Guided workflow for metric
+          Follow these steps to build and review your metric
           </h2>
-          <p className="text-sm text-gray-600">
-            Follow these steps to configure, compute, and review your metric directly on the
-            canvas.
-          </p>
+          <button onClick={handleClose} className="text-sm text-gray-600">
+            <XIcon className="w-4 h-4" />
+          </button>
         </div>
         {/* Render all stages in sequence (Shopify-style), mirroring GuidedUploadFlowInline */}
         {STAGE_ORDER.map(stage => renderStageItem(stage))}
