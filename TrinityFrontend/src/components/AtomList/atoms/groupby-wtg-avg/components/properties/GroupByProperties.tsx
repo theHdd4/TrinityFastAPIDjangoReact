@@ -453,6 +453,12 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
       }
       
       // Prepare form data
+      // Find the card containing this atom
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
       const formData = new FormData();
       formData.append('validator_atom_id', atomId);
       formData.append('file_key', settings.dataSource || '');
@@ -460,6 +466,8 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
       formData.append('object_names', settings.dataSource || '');
       formData.append('identifiers', JSON.stringify(identifiers));
       formData.append('aggregations', JSON.stringify(aggregations));
+      formData.append('card_id', cardId);
+      formData.append('canvas_position', canvasPosition.toString());
       
       console.log('📤 FormData being sent:', {
         validator_atom_id: atomId,

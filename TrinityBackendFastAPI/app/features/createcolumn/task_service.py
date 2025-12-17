@@ -165,6 +165,26 @@ def submit_cardinality_task(
     )
 
 
+def submit_columns_with_missing_values_task(
+    *,
+    bucket_name: str,
+    object_name: str,
+) -> TaskSubmission:
+    return celery_task_client.submit_callable(
+        name="createcolumn.columns_with_missing_values",
+        dotted_path="app.features.createcolumn.service.columns_with_missing_values_task",
+        kwargs={
+            "bucket_name": bucket_name,
+            "object_name": object_name,
+        },
+        metadata={
+            "atom": "createcolumn",
+            "operation": "columns_with_missing_values",
+            "object_name": object_name,
+        },
+    )
+
+
 __all__ = [
     "submit_perform_task",
     "submit_results_task",
@@ -172,4 +192,5 @@ __all__ = [
     "submit_cached_dataframe_task",
     "submit_classification_task",
     "submit_cardinality_task",
+    "submit_columns_with_missing_values_task",
 ]

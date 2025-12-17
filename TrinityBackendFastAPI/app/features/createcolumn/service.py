@@ -396,10 +396,17 @@ def perform_createcolumn_task(
             if not date_col:
                 raise ValueError("Date column not found for STL outlier detection")
 
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
+
             def stl_outlier_func(subdf: pd.DataFrame) -> pd.DataFrame:
                 working = subdf.copy()
-                working[date_col] = pd.to_datetime(working[date_col], errors="coerce")
-                working = working.sort_values(by=date_col)
+                working = working.sort_values(by=temp_date_col)
                 new_col = rename_val or "is_outlier"
                 working[new_col] = 0
                 if len(working) < 14:
@@ -414,6 +421,11 @@ def perform_createcolumn_task(
                 return working
 
             df = group_apply(df, stl_outlier_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
+            
             new_cols_total.append(rename_val or "is_outlier")
         elif op == "dummy":
             for col in columns:
@@ -903,32 +915,64 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for STL operations")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
+            
             period_param = form_payload.get(f"{op}_{op_idx}_period")
             if period_param is not None:
                 period = int(period_param)
                 if period < 2:
                     raise ValueError("Period must be at least 2")
             else:
-                date_series = df[date_col].sort_values().drop_duplicates()
+                # Try to auto-detect period from date frequency
+                date_series = df[temp_date_col].sort_values().drop_duplicates()
                 diffs = date_series.diff().dropna()
+                
                 if diffs.empty:
-                    raise ValueError("Unable to detect frequency from the date column")
-                mode_diff = diffs.mode()[0]
-                mode_days = mode_diff.total_seconds() / (24 * 3600)
-                if 0.9 <= mode_days <= 1.1:
-                    period = 7
-                elif 6 <= mode_days <= 8:
-                    period = 52
-                elif 25 <= mode_days <= 35:
+                    # If no differences can be calculated, use default period
+                    # Default to 12 (monthly seasonality) as a safe default
                     period = 12
-                elif 85 <= mode_days <= 95:
-                    period = 4
-                elif 350 <= mode_days <= 380:
-                    period = 1
+                    logger.warning("Unable to detect frequency from date column, using default period=12. Please specify period parameter if this is incorrect.")
                 else:
-                    raise ValueError("Unsupported or custom frequency for STL decomposition")
+                    mode_diff = diffs.mode()[0]
+                    mode_days = mode_diff.total_seconds() / (24 * 3600)
+                    # More flexible frequency detection with wider ranges
+                    if 0.5 <= mode_days <= 1.5:
+                        # Daily data - use weekly seasonality (7)
+                        period = 7
+                    elif 5 <= mode_days <= 9:
+                        # Weekly data - use yearly seasonality (52 weeks)
+                        period = 52
+                    elif 20 <= mode_days <= 40:
+                        # Monthly data - use yearly seasonality (12 months)
+                        period = 12
+                    elif 80 <= mode_days <= 100:
+                        # Quarterly data - use yearly seasonality (4 quarters)
+                        period = 4
+                    elif 300 <= mode_days <= 400:
+                        # Yearly data - no seasonality
+                        period = 1
+                    else:
+                        # Fallback: try to infer period from number of unique dates
+                        # If we have at least 2 years of data, use yearly seasonality
+                        # Otherwise, use a default based on data length
+                        unique_dates = len(date_series)
+                        if unique_dates >= 104:  # At least 2 years of weekly data
+                            period = 52
+                        elif unique_dates >= 24:  # At least 2 years of monthly data
+                            period = 12
+                        elif unique_dates >= 8:  # At least 2 years of quarterly data
+                            period = 4
+                        else:
+                            # Default to monthly seasonality (12) for small datasets
+                            period = 12
+                        logger.warning(f"Could not auto-detect frequency from date differences (mode={mode_days:.2f} days), using inferred period={period}. Please specify period parameter if this is incorrect.")
 
             def stl_transform(subdf: pd.DataFrame) -> pd.DataFrame:
                 for col in columns:
@@ -946,6 +990,11 @@ def perform_createcolumn_task(
                 return subdf
 
             df = group_apply(df, stl_transform)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
+            
             for col in columns:
                 if op == "detrend":
                     new_cols_total.append(rename_val or f"{col}_detrended")
@@ -978,8 +1027,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for lag operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             param = form_payload.get(f"{op}_{op_idx}_param")
             if param is None:
@@ -995,6 +1050,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, lag_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1004,8 +1063,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for lead operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             param = form_payload.get(f"{op}_{op_idx}_param")
             if param is None:
@@ -1021,6 +1086,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, lead_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1030,8 +1099,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for diff operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             param = form_payload.get(f"{op}_{op_idx}_param")
             if param is None:
@@ -1048,6 +1123,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, diff_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1057,8 +1136,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for growth_rate operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             # Parse parameters - can be JSON string or simple period number
             param = form_payload.get(f"{op}_{op_idx}_param")
@@ -1119,9 +1204,9 @@ def perform_createcolumn_task(
                         # Frequency-based growth rate (e.g., this month vs last month, this year vs last year)
                         freq_code = freq_map[frequency.lower()]
                         
-                        # Create period labels (e.g., '2024-01' for monthly, '2024' for yearly)
-                        subdf_copy = subdf[[date_col, col]].copy()
-                        subdf_copy['period'] = subdf_copy[date_col].dt.to_period(freq_code)
+                        # Create period labels using temporary date column (e.g., '2024-01' for monthly, '2024' for yearly)
+                        subdf_copy = subdf[[temp_date_col, col]].copy()
+                        subdf_copy['period'] = subdf_copy[temp_date_col].dt.to_period(freq_code)
                         
                         # Aggregate values within each period (using mean as default aggregation)
                         # This handles cases where there are multiple rows per period
@@ -1184,6 +1269,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, growth_rate_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1193,8 +1282,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError(f"No date column found for {op} operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             param = form_payload.get(f"{op}_{op_idx}_param")
             if param is None:
@@ -1220,6 +1315,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, rolling_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1236,8 +1335,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for cumulative_sum operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             def cumulative_sum_func(subdf: pd.DataFrame) -> pd.DataFrame:
                 for col in columns:
@@ -1246,6 +1351,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, cumulative_sum_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1578,8 +1687,6 @@ def perform_createcolumn_task(
             columns = resolved_columns
             
             # Get parameters from form_payload - support multiple metric columns
-            import json
-            
             metric_cols_param = form_payload.get(f"{op}_{op_idx}_metric_cols")
             
             # Parse JSON array of metric columns (new format) or fall back to single metric_col (backward compatibility)
@@ -1769,8 +1876,6 @@ def perform_createcolumn_task(
             columns = resolved_columns
             
             # Get parameters from form_payload - support multiple metric columns
-            import json
-            
             metric_cols_param = form_payload.get(f"{op}_{op_idx}_metric_cols")
             
             # Parse JSON array of metric columns (new format) or fall back to single metric_col (backward compatibility)
@@ -1906,8 +2011,6 @@ def perform_createcolumn_task(
             columns = resolved_columns
             
             # Get parameters from form_payload - support multiple metric columns
-            import json
-            
             metric_cols_param = form_payload.get(f"{op}_{op_idx}_metric_cols")
             
             # Parse JSON array of metric columns (new format) or fall back to single metric_col (backward compatibility)

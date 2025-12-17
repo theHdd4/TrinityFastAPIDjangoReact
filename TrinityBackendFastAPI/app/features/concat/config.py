@@ -11,5 +11,3 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
-print("MONGO_URI:", settings.MONGO_URI)
-print("MONGO_DB:", settings.MONGO_DB)

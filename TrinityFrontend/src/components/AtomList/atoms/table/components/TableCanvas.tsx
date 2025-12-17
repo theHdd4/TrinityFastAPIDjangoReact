@@ -7,6 +7,7 @@ import BlankTableCanvas from './BlankTableCanvas';
 import { getTheme } from './design/tableThemes';
 import { calculateAggregation, formatAggregation, getBorderClasses, getNextColKey } from '../utils/tableUtils';
 import { cn } from '@/lib/utils';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import {
   editTableCell,
   loadTable,
@@ -50,6 +51,18 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   cellStyles = {},
   onSettingsChange
 }) => {
+  // Helper function to get pipeline tracking parameters
+  const getPipelineParams = () => {
+    const atomId = (settings as any).atomId || '';
+    const cards = useLaboratoryStore.getState().cards;
+    const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+    return {
+      atomId,
+      cardId: card?.id || '',
+      canvasPosition: card?.canvas_position ?? 0
+    };
+  };
+  
   // Cell editing state
   const [editingCell, setEditingCell] = useState<{row: number, col: string} | null>(null);
   const [editingCellValue, setEditingCellValue] = useState<string>('');
@@ -187,7 +200,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   // When headerRow is true: Show separate header row with data.columns
   const effectiveColumns = useMemo(() => {
     // Always use backend column names (fixed, not from first row)
-    return data.columns;
+    // 🔧 CRITICAL FIX: Ensure data.columns is always an array to prevent null.includes() errors
+    // This can happen during pipeline execution when data is being updated
+    return Array.isArray(data.columns) ? data.columns : [];
   }, [data.columns]);
 
   // Column key mapping: effectiveColumns === data.columns (1:1 mapping, always)
@@ -203,11 +218,22 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   // Helper function to get data column key by index
   // Since effectiveColumns === data.columns always, just use the index directly
   const getDataColumnKeyByIndex = useCallback((colIdx: number): string => {
-    return effectiveColumns[colIdx] || data.columns[colIdx] || `Column_${colIdx + 1}`;
+    // 🔧 CRITICAL FIX: Ensure arrays exist before accessing by index
+    if (Array.isArray(effectiveColumns) && effectiveColumns[colIdx]) {
+      return effectiveColumns[colIdx];
+    }
+    if (Array.isArray(data.columns) && data.columns[colIdx]) {
+      return data.columns[colIdx];
+    }
+    return `Column_${colIdx + 1}`;
   }, [effectiveColumns, data.columns]);
 
   // Get visible columns (filtered by settings if needed)
   const visibleColumns = useMemo(() => {
+    // 🔧 CRITICAL FIX: Ensure effectiveColumns is an array before calling includes()
+    if (!Array.isArray(effectiveColumns)) {
+      return [];
+    }
     if (settings.visibleColumns && settings.visibleColumns.length > 0) {
       return settings.visibleColumns.filter(col => effectiveColumns.includes(col));
     }
@@ -338,10 +364,17 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     }
 
     try {
-      const resp = await updateTable(settings.tableId, {
-        ...settings,
-        sort_config: newSortConfig,
-      });
+      const pipelineParams = getPipelineParams();
+      const resp = await updateTable(
+        settings.tableId, 
+        {
+          ...settings,
+          sort_config: newSortConfig,
+        },
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
 
       onSettingsChange({
         sortConfig: newSortConfig,
@@ -397,11 +430,18 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       }
 
       // Update table with new filters while preserving current sort order
-      const resp = await updateTable(settings.tableId, {
-        ...settings,
-        filters: newFilters,
-        sort_config: settings.sortConfig, // keep current sort when filtering
-      });
+      const pipelineParams = getPipelineParams();
+      const resp = await updateTable(
+        settings.tableId, 
+        {
+          ...settings,
+          filters: newFilters,
+          sort_config: settings.sortConfig, // keep current sort when filtering
+        },
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
 
       // Update tableData from response
       onSettingsChange({
@@ -458,11 +498,18 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
       delete tempFilters[column];
       
       // Load data with all filters EXCEPT current column's filter, but preserve sort
-      const resp = await updateTable(settings.tableId, {
-        ...settings,
-        filters: tempFilters,  // All filters EXCEPT current column
-        sort_config: settings.sortConfig, // preserve current sort while previewing filter options
-      });
+      const pipelineParams = getPipelineParams();
+      const resp = await updateTable(
+        settings.tableId, 
+        {
+          ...settings,
+          filters: tempFilters,  // All filters EXCEPT current column
+          sort_config: settings.sortConfig, // preserve current sort while previewing filter options
+        },
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
       
       // Store this data for filter component (shows all options for this column)
       setFilterData({
@@ -575,8 +622,9 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     // Check if there are multiple selected columns
     if (multiSelectedColumns.size > 1) {
       // Filter out hidden columns and ensure column is in selection
+      // 🔧 CRITICAL FIX: Ensure data.columns is an array before calling includes()
       const columnsToDelete = Array.from(multiSelectedColumns).filter(col => 
-        data.columns.includes(col)
+        Array.isArray(data.columns) && data.columns.includes(col)
       );
       
       if (columnsToDelete.length > 1) {
@@ -1062,6 +1110,10 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
   // Frontend-only operations
   const handleHideColumn = (column: string) => {
+    // 🔧 CRITICAL FIX: Ensure settings.visibleColumns is an array before filtering
+    if (!Array.isArray(settings.visibleColumns)) {
+      return;
+    }
     const newVisibleColumns = settings.visibleColumns.filter(col => col !== column);
     onSettingsChange({ visibleColumns: newVisibleColumns });
     toast({
@@ -1071,8 +1123,11 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   };
 
   const handleUnhideColumn = (column: string) => {
-    if (!data.columns.includes(column)) return;
-    const newVisibleColumns = [...settings.visibleColumns, column];
+    // 🔧 CRITICAL FIX: Ensure data.columns is an array before calling includes()
+    if (!Array.isArray(data.columns) || !data.columns.includes(column)) return;
+    // 🔧 CRITICAL FIX: Ensure settings.visibleColumns is an array before spreading
+    const currentVisibleColumns = Array.isArray(settings.visibleColumns) ? settings.visibleColumns : [];
+    const newVisibleColumns = [...currentVisibleColumns, column];
     onSettingsChange({ visibleColumns: newVisibleColumns });
     toast({
       title: 'Column unhidden',
@@ -1081,7 +1136,10 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   };
 
   // Get hidden columns (use effectiveColumns, not data.columns)
-  const hiddenColumns = effectiveColumns.filter(col => !settings.visibleColumns.includes(col));
+  // 🔧 CRITICAL FIX: Ensure settings.visibleColumns is an array before calling includes()
+  const hiddenColumns = effectiveColumns.filter(col => 
+    !Array.isArray(settings.visibleColumns) || !settings.visibleColumns.includes(col)
+  );
 
   // Close context menu on outside click
   useEffect(() => {
@@ -1233,7 +1291,16 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     }
 
     try {
-      const reloadedData = await loadTable(settings.sourceFile);
+      // Get atomId from settings (passed from TableAtom)
+      const atomId = (settings as any).atomId || '';
+      
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
+      const reloadedData = await loadTable(settings.sourceFile, atomId, cardId, canvasPosition);
       
       // Update settings with new session ID and data
       onSettingsChange({
@@ -1446,11 +1513,18 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   const refreshTableWithCurrentView = useCallback(async (): Promise<TableData | null> => {
     if (!settings.tableId) return null;
     try {
-      const resp = await updateTable(settings.tableId, {
-        ...settings,
-        filters: settings.filters,
-        sort_config: settings.sortConfig,
-      });
+      const pipelineParams = getPipelineParams();
+      const resp = await updateTable(
+        settings.tableId, 
+        {
+          ...settings,
+          filters: settings.filters,
+          sort_config: settings.sortConfig,
+        },
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
       return {
         table_id: resp.table_id,
         columns: resp.columns,
@@ -1479,7 +1553,16 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     try {
       // Call backend to update cell
       // globalRowIndex is the actual row index in the full dataset (already calculated)
-      const resp = await editTableCell(activeTableId, globalRowIndex, column, newValue);
+      const pipelineParams = getPipelineParams();
+      const resp = await editTableCell(
+        activeTableId, 
+        globalRowIndex, 
+        column, 
+        newValue,
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
       
       // After edit, refresh data with current filters/sort so view stays consistent
       const refreshed = await refreshTableWithCurrentView();
@@ -1525,7 +1608,16 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
           
           if (newTableId) {
             // Retry the edit with new session ID
-            const resp = await editTableCell(newTableId, globalRowIndex, column, newValue);
+            const pipelineParams = getPipelineParams();
+            const resp = await editTableCell(
+              newTableId, 
+              globalRowIndex, 
+              column, 
+              newValue,
+              pipelineParams.atomId,
+              pipelineParams.cardId,
+              pipelineParams.canvasPosition
+            );
 
             // After recovery edit, refresh with current view to keep filters/sort
             const refreshed = await refreshTableWithCurrentView();
