@@ -326,7 +326,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
         version: '1.0',
       };
       
-      // ✅ STEP 2: Save to kpi_dashboard_configs collection (with atom_id for per-instance storage)
+      // ✅ STEP 2: Save to atom_list_configuration collection (with atom_id for per-instance storage)
       const response = await fetch(
         `${KPI_DASHBOARD_API}/save-config?` +
         `client_name=${encodeURIComponent(projectContext.client_name)}&` +
@@ -345,7 +345,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
       
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ KPI Dashboard saved to kpi_dashboard_configs:', {
+        console.log('✅ KPI Dashboard saved to atom_list_configuration:', {
           collection: result.collection,
           operation: result.operation,
           mongo_id: result.mongo_id
@@ -681,6 +681,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                         settings={settings}
                         onSettingsChange={onSettingsChange}
                         data={data}
+                        atomId={atomId}
                       />
                     ))}
                   </div>
@@ -765,6 +766,7 @@ interface ElementBoxProps {
   settings: KPIDashboardSettings;
   onSettingsChange: (settings: Partial<KPIDashboardSettings>) => void;
   data: KPIDashboardData | null;
+  atomId: string; // CRITICAL: Required for TableElement to work correctly
 }
 
 const ElementBox: React.FC<ElementBoxProps> = ({ 
@@ -780,7 +782,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   defaultValueFormat = 'none',
   settings,
   onSettingsChange,
-  data
+  data,
+  atomId
 }) => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -852,6 +855,19 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   const [isResizing, setIsResizing] = useState(false);
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const imageRef = useRef<HTMLImageElement>(null);
+  
+  // Metric card filter state - moved to top level to avoid conditional hook calls
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [identifierOptions, setIdentifierOptions] = useState<Record<string, string[]>>({});
+  const [selectedFilters, setSelectedFilters] = useState<Record<string, string>>({});
+  const [loadingFilters, setLoadingFilters] = useState(false);
+  const [availableVariables, setAvailableVariables] = useState<any[]>([]);
+  
+  // Chart filter state - moved to top level to avoid conditional hook calls
+  const [filterEditorOpen, setFilterEditorOpen] = useState(false);
+  const [uniqueValues, setUniqueValues] = useState<Record<string, string[]>>({});
+  const [loadingUniqueValues, setLoadingUniqueValues] = useState(false);
+  const [tempFilters, setTempFilters] = useState<Record<string, string[]>>({});
   
   const selectedElement = elementTypes.find(e => e.value === box.elementType);
   
@@ -1154,6 +1170,238 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isResizing, resizeStart, layoutId, boxId, onTextBoxUpdate, box.elementType]);
+
+  // Fetch filter options for metric cards when variable is selected or filter menu opens
+  useEffect(() => {
+    // Only run for metric cards
+    if (box.elementType !== 'metric-card') {
+      return;
+    }
+
+    const variableKey = box.variableNameKey || box.variableName;
+    
+    if (!variableKey) {
+      setIdentifierOptions({});
+      setSelectedFilters({});
+      setAvailableVariables([]);
+      return;
+    }
+    
+    // Fetch options when variable is available (will be used when menu opens)
+    
+    const fetchVariableOptions = async () => {
+      setLoadingFilters(true);
+      try {
+        const projectContext = getActiveProjectContext();
+        if (!projectContext) return;
+
+        const params = new URLSearchParams({
+          clientId: projectContext.client_name,
+          appId: projectContext.app_name,
+          projectId: projectContext.project_name,
+        });
+
+        const response = await fetch(`${LABORATORY_API}/variables?${params.toString()}`, {
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.variables && Array.isArray(result.variables)) {
+            const currentKey = box.variableNameKey || box.variableName || '';
+            const currentKeyParts = currentKey.split('_');
+            const basePattern = currentKeyParts.slice(0, 2).join('_');
+            
+            const relatedVariables = result.variables.filter((v: any) => {
+              const vKey = v.variableNameKey || v.variableName;
+              if (!vKey) return false;
+              return vKey.startsWith(basePattern + '_') || vKey === basePattern;
+            });
+            
+            setAvailableVariables(relatedVariables);
+            
+            // Parse identifiers from current variable
+            const currentVariableIdentifiers: Set<string> = new Set();
+            if (currentKey) {
+              const parts = currentKey.split('_');
+              const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+              
+              let i = 2;
+              while (i < parts.length) {
+                const key = parts[i].toLowerCase();
+                if (identifierTypes.includes(key) && i + 1 < parts.length) {
+                  currentVariableIdentifiers.add(key);
+                  let nextIndex = i + 2;
+                  while (nextIndex < parts.length) {
+                    const nextPart = parts[nextIndex].toLowerCase();
+                    if (!identifierTypes.includes(nextPart)) {
+                      nextIndex++;
+                    } else {
+                      break;
+                    }
+                  }
+                  i = nextIndex;
+                } else {
+                  i++;
+                }
+              }
+            }
+            
+            // Parse identifier values from all related variables
+            const identifierMap: Record<string, Set<string>> = {};
+            relatedVariables.forEach((v: any) => {
+              const vKey = v.variableNameKey || v.variableName;
+              if (vKey) {
+                const parts = vKey.split('_');
+                const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+                
+                let i = 2;
+                while (i < parts.length) {
+                  const key = parts[i].toLowerCase();
+                  if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
+                    let value = parts[i + 1];
+                    let nextIndex = i + 2;
+                    while (nextIndex < parts.length) {
+                      const nextPart = parts[nextIndex].toLowerCase();
+                      if (!identifierTypes.includes(nextPart)) {
+                        value += '_' + parts[nextIndex];
+                        nextIndex++;
+                      } else {
+                        break;
+                      }
+                    }
+                    if (!identifierMap[key]) {
+                      identifierMap[key] = new Set();
+                    }
+                    identifierMap[key].add(value);
+                    i = nextIndex;
+                  } else {
+                    i++;
+                  }
+                }
+              }
+            });
+            
+            const options: Record<string, string[]> = {};
+            currentVariableIdentifiers.forEach(key => {
+              if (identifierMap[key]) {
+                options[key] = Array.from(identifierMap[key]).sort();
+              }
+            });
+            
+            setIdentifierOptions(options);
+            
+            // Set initial filter values from current variable
+            if (currentKey) {
+              const parts = currentKey.split('_');
+              const currentFilters: Record<string, string> = {};
+              const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+              
+              let i = 2;
+              while (i < parts.length) {
+                const key = parts[i].toLowerCase();
+                if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
+                  let value = parts[i + 1];
+                  let nextIndex = i + 2;
+                  while (nextIndex < parts.length) {
+                    const nextPart = parts[nextIndex].toLowerCase();
+                    if (!identifierTypes.includes(nextPart)) {
+                      value += '_' + parts[nextIndex];
+                      nextIndex++;
+                    } else {
+                      break;
+                    }
+                  }
+                  if (options[key]) {
+                    currentFilters[key] = value;
+                  }
+                  i = nextIndex;
+                } else {
+                  i++;
+                }
+              }
+              setSelectedFilters(currentFilters);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch variable options:', error);
+      } finally {
+        setLoadingFilters(false);
+      }
+    };
+
+    fetchVariableOptions();
+  }, [box.elementType, box.variableNameKey, box.variableName, filterMenuOpen]);
+
+  // Fetch unique values for chart filter columns
+  useEffect(() => {
+    // Only run for charts
+    if (box.elementType !== 'chart') {
+      return;
+    }
+
+    if (!filterEditorOpen) return;
+
+    // Parse chartConfig if it's a string (from MongoDB)
+    let chartConfig: any = undefined;
+    if (box.chartConfig) {
+      if (typeof box.chartConfig === 'string') {
+        try {
+          chartConfig = JSON.parse(box.chartConfig);
+        } catch (e) {
+          console.error('Failed to parse chartConfig:', e);
+          return;
+        }
+      } else {
+        chartConfig = box.chartConfig;
+      }
+    }
+
+    if (!chartConfig || !data) return;
+
+    const fetchUniqueValues = async () => {
+      setLoadingUniqueValues(true);
+      try {
+        const dataSource = (settings as any).selectedFile || (settings as any).dataSource;
+        let objectName = dataSource || data.fileName;
+        
+        if (!objectName) {
+          setLoadingUniqueValues(false);
+          return;
+        }
+
+        if (!objectName.endsWith('.arrow')) {
+          objectName += '.arrow';
+        }
+
+        const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
+        const fileId = uploadResponse.file_id;
+
+        // Get all columns
+        const allColumnsResponse = await chartMakerApi.getAllColumns(fileId);
+        const allColumns = allColumnsResponse.columns || [];
+
+        // Get unique values for all columns
+        const uniqueValuesResponse = await chartMakerApi.getUniqueValues(fileId, allColumns);
+        setUniqueValues(uniqueValuesResponse.values || {});
+      } catch (error) {
+        console.error('Error fetching unique values:', error);
+      } finally {
+        setLoadingUniqueValues(false);
+      }
+    };
+
+    fetchUniqueValues();
+    
+    // Initialize temp filters with current filters
+    const chartFilters = chartConfig?.filters || {};
+    const currentFilters: Record<string, string[]> = {};
+    Object.entries(chartFilters).forEach(([key, values]) => {
+      currentFilters[key] = Array.isArray(values) ? values : [values];
+    });
+    setTempFilters(currentFilters);
+  }, [box.elementType, box.chartConfig, filterEditorOpen, data, settings]);
 
   // If element is selected and NOT in edit mode, show the full element
   if (box.elementType && !isEditMode) {
@@ -3909,170 +4157,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         onSettingsChange({ selectedBoxId: boxId });
       };
 
-      const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-      const [identifierOptions, setIdentifierOptions] = useState<Record<string, string[]>>({});
-      const [selectedFilters, setSelectedFilters] = useState<Record<string, string>>({});
-      const [loadingFilters, setLoadingFilters] = useState(false);
-      const [availableVariables, setAvailableVariables] = useState<any[]>([]);
-
-      // Fetch filter options when variable is selected or filter menu opens
-      useEffect(() => {
-        const variableKey = box.variableNameKey || box.variableName;
-        
-        if (!variableKey) {
-          setIdentifierOptions({});
-          setSelectedFilters({});
-          setAvailableVariables([]);
-          return;
-        }
-        
-        // Fetch options when variable is available (will be used when menu opens)
-        
-        const fetchVariableOptions = async () => {
-          setLoadingFilters(true);
-          try {
-            const projectContext = getActiveProjectContext();
-            if (!projectContext) return;
-
-            const params = new URLSearchParams({
-              clientId: projectContext.client_name,
-              appId: projectContext.app_name,
-              projectId: projectContext.project_name,
-            });
-
-            const response = await fetch(`${LABORATORY_API}/variables?${params.toString()}`, {
-              credentials: 'include',
-            });
-
-            if (response.ok) {
-              const result = await response.json();
-              if (result.variables && Array.isArray(result.variables)) {
-                const currentKey = box.variableNameKey || box.variableName || '';
-                const currentKeyParts = currentKey.split('_');
-                const basePattern = currentKeyParts.slice(0, 2).join('_');
-                
-                const relatedVariables = result.variables.filter((v: any) => {
-                  const vKey = v.variableNameKey || v.variableName;
-                  if (!vKey) return false;
-                  return vKey.startsWith(basePattern + '_') || vKey === basePattern;
-                });
-                
-                setAvailableVariables(relatedVariables);
-                
-                // Parse identifiers from current variable
-                const currentVariableIdentifiers: Set<string> = new Set();
-                if (currentKey) {
-                  const parts = currentKey.split('_');
-                  const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
-                  
-                  let i = 2;
-                  while (i < parts.length) {
-                    const key = parts[i].toLowerCase();
-                    if (identifierTypes.includes(key) && i + 1 < parts.length) {
-                      currentVariableIdentifiers.add(key);
-                      let nextIndex = i + 2;
-                      while (nextIndex < parts.length) {
-                        const nextPart = parts[nextIndex].toLowerCase();
-                        if (!identifierTypes.includes(nextPart)) {
-                          nextIndex++;
-                        } else {
-                          break;
-                        }
-                      }
-                      i = nextIndex;
-                    } else {
-                      i++;
-                    }
-                  }
-                }
-                
-                // Parse identifier values from all related variables
-                const identifierMap: Record<string, Set<string>> = {};
-                relatedVariables.forEach((v: any) => {
-                  const vKey = v.variableNameKey || v.variableName;
-                  if (vKey) {
-                    const parts = vKey.split('_');
-                    const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
-                    
-                    let i = 2;
-                    while (i < parts.length) {
-                      const key = parts[i].toLowerCase();
-                      if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
-                        let value = parts[i + 1];
-                        let nextIndex = i + 2;
-                        while (nextIndex < parts.length) {
-                          const nextPart = parts[nextIndex].toLowerCase();
-                          if (!identifierTypes.includes(nextPart)) {
-                            value += '_' + parts[nextIndex];
-                            nextIndex++;
-                          } else {
-                            break;
-                          }
-                        }
-                        if (!identifierMap[key]) {
-                          identifierMap[key] = new Set();
-                        }
-                        identifierMap[key].add(value);
-                        i = nextIndex;
-                      } else {
-                        i++;
-                      }
-                    }
-                  }
-                });
-                
-                const options: Record<string, string[]> = {};
-                currentVariableIdentifiers.forEach(key => {
-                  if (identifierMap[key]) {
-                    options[key] = Array.from(identifierMap[key]).sort();
-                  }
-                });
-                
-                setIdentifierOptions(options);
-                
-                // Set initial filter values from current variable
-                if (currentKey) {
-                  const parts = currentKey.split('_');
-                  const currentFilters: Record<string, string> = {};
-                  const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
-                  
-                  let i = 2;
-                  while (i < parts.length) {
-                    const key = parts[i].toLowerCase();
-                    if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
-                      let value = parts[i + 1];
-                      let nextIndex = i + 2;
-                      while (nextIndex < parts.length) {
-                        const nextPart = parts[nextIndex].toLowerCase();
-                        if (!identifierTypes.includes(nextPart)) {
-                          value += '_' + parts[nextIndex];
-                          nextIndex++;
-                        } else {
-                          break;
-                        }
-                      }
-                      if (options[key]) {
-                        currentFilters[key] = value;
-                      }
-                      i = nextIndex;
-                    } else {
-                      i++;
-                    }
-                  }
-                  setSelectedFilters(currentFilters);
-                }
-              }
-            }
-          } catch (error) {
-            console.error('Failed to fetch variable options:', error);
-          } finally {
-            setLoadingFilters(false);
-          }
-        };
-
-        fetchVariableOptions();
-      }, [box.variableNameKey, box.variableName, filterMenuOpen]);
-
       // Find matching variable based on selected filters
       const findMatchingVariable = (filters: Record<string, string>) => {
         const activeFilters = Object.entries(filters).filter(([_, val]) => val !== '');
@@ -4637,55 +4721,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Extract filters from chart config
       const chartFilters = chartConfig?.filters || {};
       const hasFilters = Object.keys(chartFilters).length > 0;
-      const [filterEditorOpen, setFilterEditorOpen] = useState(false);
-      const [uniqueValues, setUniqueValues] = useState<Record<string, string[]>>({});
-      const [loadingUniqueValues, setLoadingUniqueValues] = useState(false);
-      const [tempFilters, setTempFilters] = useState<Record<string, string[]>>({});
-
-      // Fetch unique values for filter columns
-      useEffect(() => {
-        if (!filterEditorOpen || !chartConfig || !data) return;
-
-        const fetchUniqueValues = async () => {
-          setLoadingUniqueValues(true);
-          try {
-            const dataSource = (settings as any).selectedFile || (settings as any).dataSource;
-            let objectName = dataSource || data.fileName;
-            
-            if (!objectName) {
-              setLoadingUniqueValues(false);
-              return;
-            }
-
-            if (!objectName.endsWith('.arrow')) {
-              objectName += '.arrow';
-            }
-
-            const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
-            const fileId = uploadResponse.file_id;
-
-            // Get all columns
-            const allColumnsResponse = await chartMakerApi.getAllColumns(fileId);
-            const allColumns = allColumnsResponse.columns || [];
-
-            // Get unique values for all columns
-            const uniqueValuesResponse = await chartMakerApi.getUniqueValues(fileId, allColumns);
-            setUniqueValues(uniqueValuesResponse.values || {});
-          } catch (error) {
-            console.error('Error fetching unique values:', error);
-          } finally {
-            setLoadingUniqueValues(false);
-          }
-        };
-
-        fetchUniqueValues();
-        // Initialize temp filters with current filters
-        const currentFilters: Record<string, string[]> = {};
-        Object.entries(chartFilters).forEach(([key, values]) => {
-          currentFilters[key] = Array.isArray(values) ? values : [values];
-        });
-        setTempFilters(currentFilters);
-      }, [filterEditorOpen, chartConfig, data, settings]);
 
       // Handle filter change
       const handleFilterChange = async (column: string, values: string[]) => {
@@ -4991,7 +5026,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
       // Handle table settings change (for pagination)
       const handleTableSettingsChange = (newSettings: Partial<typeof tableSettings>) => {
-        const updatedLayouts = layouts.map(l => ({
+        const currentLayouts = settings.layouts || [];
+        const updatedLayouts = currentLayouts.map(l => ({
           ...l,
           boxes: l.boxes.map(b =>
             b.id === boxId
@@ -5005,7 +5041,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               : b
           )
         }));
-        setLayouts(updatedLayouts);
         onSettingsChange({ layouts: updatedLayouts });
       };
 
@@ -5030,6 +5065,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               width={undefined}
               height={boxHeight}
               onSettingsChange={handleTableSettingsChange}
+              atomId={atomId}
+              boxId={boxId}
             />
           </div>
         </div>

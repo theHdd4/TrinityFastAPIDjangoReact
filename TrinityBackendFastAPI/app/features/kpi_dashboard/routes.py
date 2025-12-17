@@ -24,9 +24,17 @@ async def save_kpi_dashboard_configuration(
     atom_id: str = Query(..., description="Atom ID for per-instance storage"),
     kpi_data: dict = Body(..., description="KPI Dashboard configuration data to save"),
     user_id: str = Query("", description="User ID"),
-    project_id: Optional[int] = Query(None, description="Project ID")
+    project_id: Optional[int] = Query(None, description="Project ID"),
+    explicit_save: bool = Query(False, description="If True, saves table row data to MinIO (explicit save). If False (autosave), only strips rows from MongoDB.")
 ):
-    """Save KPI Dashboard configuration to MongoDB (per atom instance)"""
+    """
+    Save KPI Dashboard configuration to MongoDB (per atom instance).
+    
+    Note: Table row data is handled separately:
+    - Table element's Save/Save As buttons save via table API (creates MinIO files)
+    - Autosave (explicit_save=False) only strips rows from MongoDB, doesn't create new MinIO files
+    - Explicit save (explicit_save=True) would create MinIO files, but typically not used since tables save independently
+    """
     try:
         result = await save_kpi_dashboard_config(
             client_name=client_name,
@@ -35,7 +43,8 @@ async def save_kpi_dashboard_configuration(
             atom_id=atom_id,
             kpi_dashboard_data=kpi_data,
             user_id=user_id,
-            project_id=project_id
+            project_id=project_id,
+            explicit_save=explicit_save
         )
         
         if result["status"] == "success":

@@ -1993,14 +1993,16 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
   }, [layout.totalRow, totalRowConfig, visibleColumns, dataRowsToDisplay]);
 
   // If blank table mode, use BlankTableCanvas
-  if (settings.mode === 'blank' && settings.blankTableConfig?.created && data.table_id) {
+  // CRITICAL: Check both data.table_id and settings.tableId (data might be null/undefined initially)
+  const blankTableId = data?.table_id || settings.tableId;
+  if (settings.mode === 'blank' && settings.blankTableConfig?.created && blankTableId) {
     return (
       <BlankTableCanvas
         atomId={(settings as any).atomId || ''}
-        tableId={data.table_id}
+        tableId={blankTableId}
         rows={settings.blankTableConfig.rows}
         columns={settings.blankTableConfig.columns}
-        columnNames={settings.blankTableConfig.columnNames || settings.visibleColumns || data.columns}
+        columnNames={settings.blankTableConfig.columnNames || settings.visibleColumns || data?.columns || []}
         settings={settings}
         onSettingsChange={onSettingsChange}
       />

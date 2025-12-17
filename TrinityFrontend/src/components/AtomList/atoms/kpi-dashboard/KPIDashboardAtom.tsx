@@ -81,7 +81,7 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
         
         console.log('🔍 Loading KPI Dashboard configuration from MongoDB...', { atomId });
         
-        // PRIORITY 1: Try kpi_dashboard_configs (most recent auto-saves) with atom_id
+        // PRIORITY 1: Try atom_list_configuration (most recent auto-saves) with atom_id
         const response = await fetch(
           `${KPI_DASHBOARD_API}/get-config?` +
           `client_name=${encodeURIComponent(projectContext.client_name)}&` +
@@ -98,7 +98,7 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
             const hasLayouts = result.data.layouts && result.data.layouts.length > 0;
             
             if (hasLayouts) {
-              console.log('✅ Loaded from kpi_dashboard_configs (auto-saved data):', result.data.layouts.length, 'layouts');
+              console.log('✅ Loaded from atom_list_configuration (auto-saved data):', result.data.layouts.length, 'layouts');
               
               if (isMounted) {
                 // ✅ FIX: Build fresh settings object without spreading stale closure
@@ -112,10 +112,10 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
               }
               return; // Done - use this data
             } else {
-              console.log('ℹ️ No layouts in kpi_dashboard_configs, using laboratory store data');
+              console.log('ℹ️ No layouts in atom_list_configuration, using laboratory store data');
             }
           } else {
-            console.log('ℹ️ No data in kpi_dashboard_configs, using laboratory store data');
+            console.log('ℹ️ No data in atom_list_configuration, using laboratory store data');
           }
         }
         
