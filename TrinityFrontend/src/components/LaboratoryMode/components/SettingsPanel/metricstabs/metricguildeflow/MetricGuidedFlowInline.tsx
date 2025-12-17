@@ -473,7 +473,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
 
           {/* Stage Content */}
           {isExpanded && (
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">
               {isCurrent ? (
                 <>
                   <div className="p-6 min-h-[320px]">

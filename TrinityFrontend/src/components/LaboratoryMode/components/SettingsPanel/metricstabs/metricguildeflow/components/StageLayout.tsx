@@ -31,7 +31,7 @@ export const StageLayout: React.FC<StageLayoutProps> = ({
 
       {/* Main Content - Single Key Action or Decision */}
       <div className="flex-1 overflow-y-auto w-full min-w-0">
-        <div className="w-full min-w-0 overflow-hidden">
+        <div className="w-full min-w-0 overflow-x-hidden">
         {children}
         </div>
       </div>

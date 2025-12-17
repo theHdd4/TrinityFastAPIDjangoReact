@@ -23,11 +23,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -39,7 +34,14 @@ import {
 } from '@/components/ui/context-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import Table from '@/templates/tables/table';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableHead,
+  TableRow,
+  TableCell,
+} from '@/components/ui/table';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseMetricGuidedFlow } from '../useMetricGuidedFlow';
 
@@ -55,6 +57,10 @@ interface ColumnMetadata {
   classification?: 'numerical' | 'identifiers';
 }
 
+interface PreviewRow {
+  [column: string]: string | number | null;
+}
+
 export const M1Dataset: React.FC<M1DatasetProps> = ({ flow }) => {
   const { state, setState } = flow;
   const { frames, loading: framesLoading, error: framesError } = useSavedDataframes();
@@ -64,12 +70,61 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow }) => {
   const [isSelectionConfirmed, setIsSelectionConfirmed] = useState(false);
   const [tempSelectedDataSource, setTempSelectedDataSource] = useState('');
   const [isCardinalityExpanded, setIsCardinalityExpanded] = useState(true);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(true);
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [previewColumns, setPreviewColumns] = useState<string[]>([]);
+  const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
 
   const cardinalityRequestId = useRef(0);
 
+  const PreviewTable = ({
+    columns,
+    rows,
+  }: {
+    columns: string[];
+    rows: PreviewRow[];
+  }) => {
+    if (!columns.length || !rows.length) return null;
+
+    return (
+      <Table className="min-w-max" maxHeight="max-h-[260px]">
+        <TableHeader>
+          <TableRow>
+            {columns.map((col) => (
+              <TableHead
+                key={col}
+                className="border-r last:border-r-0 whitespace-nowrap min-w-[120px]"
+              >
+                {col}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+
+        <TableBody>
+          {rows.map((row, idx) => (
+            <TableRow key={idx}>
+              {columns.map((col) => (
+                <TableCell
+                  key={col}
+                  className="border-r last:border-r-0 whitespace-nowrap min-w-[120px]"
+                >
+                  {row[col] !== null && row[col] !== undefined ? (
+                    String(row[col])
+                  ) : (
+                    <span className="text-slate-400 italic">null</span>
+                  )}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    );
+  };
+  
   const resolveObjectName = useCallback((objectName: string) => {
     if (!objectName) return objectName;
     if (objectName.includes('/')) return objectName;
@@ -154,6 +209,53 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow }) => {
       classification: classifyColumn(col.data_type)
     }));
   }, [cardinalityData, classifyColumn]);
+
+  // Build simple preview rows from cardinality API data (unique_values)
+  useEffect(() => {
+    if (!cardinalityData || cardinalityData.length === 0) {
+      setPreviewColumns([]);
+      setPreviewRows([]);
+      return;
+    }
+
+    const columns = cardinalityData.map((col) => col.column);
+    setPreviewColumns(columns);
+
+    const maxSamples = Math.max(
+      ...cardinalityData.map((col) =>
+        Array.isArray(col.unique_values) ? col.unique_values.length : 0
+      )
+    );
+
+    const rowCount = Math.min(maxSamples || 0, 20);
+
+    if (!rowCount || !Number.isFinite(rowCount)) {
+      setPreviewRows([]);
+      return;
+    }
+
+    const rows: PreviewRow[] = [];
+
+    for (let i = 0; i < rowCount; i++) {
+      const row: PreviewRow = {};
+
+      cardinalityData.forEach((col) => {
+        const values = Array.isArray(col.unique_values) ? col.unique_values : [];
+
+        if (values.length > 0) {
+          const value = values[i % values.length];
+          row[col.column] =
+            typeof value === 'number' || value === null ? value : String(value);
+        } else {
+          row[col.column] = null;
+        }
+      });
+
+      rows.push(row);
+    }
+
+    setPreviewRows(rows);
+  }, [cardinalityData]);
 
   // Filter and sort cardinality data
   const displayedCardinality = useMemo(() => {
@@ -295,31 +397,39 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow }) => {
           </div>
         )}
 
-        {/* Cardinality View */}
+        {/* Cardinality & Preview (only after dataset is confirmed) */}
         {isSelectionConfirmed && (
           <div className="space-y-4 w-full min-w-0 overflow-hidden">
             {/* Cardinality View Section */}
-            <Collapsible open={isCardinalityExpanded} onOpenChange={setIsCardinalityExpanded}>
             <div className="space-y-3">
-                <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors">
-              <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-md bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
-                  <Hash className="w-4 h-4" />
-                </div>
-                    <span className="text-sm font-semibold text-slate-900">Cardinality View</span>
+              <button
+                type="button"
+                onClick={() => setIsCardinalityExpanded((prev) => !prev)}
+                className="flex items-center justify-between w-full p-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-md bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
+                    <Hash className="w-4 h-4" />
                   </div>
-                  {isCardinalityExpanded ? (
-                    <ChevronUp className="w-4 h-4 text-slate-600" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 text-slate-600" />
-                  )}
-                </CollapsibleTrigger>
-                <CollapsibleContent>
+                  <span className="text-sm font-semibold text-slate-900">
+                    Cardinality View
+                  </span>
+                </div>
+                {isCardinalityExpanded ? (
+                  <ChevronUp className="w-4 h-4 text-slate-600" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-slate-600" />
+                )}
+              </button>
+              {isCardinalityExpanded && (
+                <>
                   {loadingCardinality ? (
                     <div className="flex items-center justify-center p-8">
-                      <Loader2 className="w-5 h-5 animate-spin text-blue-600 mr-2" />
-                      <span className="text-sm text-slate-600">Loading cardinality data...</span>
-              </div>
+                      <Loader2 className="w-5 h-5 animate-spin text-blue-600 mr-0.5" />
+                      <span className="text-sm text-slate-600">
+                        Loading cardinality data...
+                      </span>
+                    </div>
                   ) : displayedCardinality.length > 0 ? (
                     <CardinalityTable
                       data={displayedCardinality}
@@ -334,11 +444,41 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow }) => {
                   ) : (
                     <div className="p-4 text-center text-sm text-slate-500">
                       No cardinality data available
-              </div>
+                    </div>
                   )}
-                </CollapsibleContent>
+                </>
+              )}
             </div>
-            </Collapsible>
+
+            {/* Preview Data Section */}
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setIsPreviewExpanded((prev) => !prev)}
+                className="flex items-center justify-between p-3 bg-slate-50 border rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <span className="text-sm font-semibold text-slate-900">
+                  Preview Data
+                </span>
+                {isPreviewExpanded ? (
+                  <ChevronUp className="w-4 h-4 text-slate-600" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-slate-600" />
+                )}
+              </button>
+
+              {isPreviewExpanded && (
+                <div className="border rounded-lg p-2 bg-white max-w-[1050px] overflow-auto">
+                  {previewColumns.length > 0 && previewRows.length > 0 ? (
+                    <PreviewTable columns={previewColumns} rows={previewRows} />
+                  ) : (
+                    <div className="p-4 text-center text-sm text-slate-500">
+                      No preview data available
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -419,193 +559,222 @@ const CardinalityTable = ({
   getUniqueColumnValues: (column: string) => string[];
 }) => {
   return (
-    <Table
-      headers={[
-        <ContextMenu key="Column">
-          <ContextMenuTrigger asChild>
-            <div className="flex items-center gap-1 cursor-pointer">
-              Column
-              {sortColumn === 'column' && (
-                sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-              )}
-            </div>
-          </ContextMenuTrigger>
-          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-            <ContextMenuSub>
-              <ContextMenuSubTrigger className="flex items-center">
-                <ArrowUp className="w-4 h-4 mr-2" /> Sort
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                <ContextMenuItem onClick={() => onSort('column', 'asc')}>
-                  <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => onSort('column', 'desc')}>
-                  <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                </ContextMenuItem>
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            <ContextMenuSeparator />
-            <ContextMenuSub>
-              <ContextMenuSubTrigger className="flex items-center">
-                <FilterIcon className="w-4 h-4 mr-2" /> Filter
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                <FilterMenu
-                  column="column"
-                  uniqueValues={getUniqueColumnValues('column')}
-                  current={columnFilters['column'] || []}
-                  onApply={(values) => onColumnFilter('column', values)}
-                />
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            {columnFilters['column']?.length > 0 && (
-              <>
+    <Table maxHeight="max-h-[300px]">
+      <TableHeader>
+        <TableRow>
+          {/* Column header */}
+          <TableHead className="w-[30%]">
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div className="flex items-center gap-1 cursor-pointer">
+                  Column
+                  {sortColumn === 'column' && (
+                    sortDirection === 'asc' ? (
+                      <ArrowUp className="w-3 h-3" />
+                    ) : (
+                      <ArrowDown className="w-3 h-3" />
+                    )
+                  )}
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger className="flex items-center">
+                    <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuItem onClick={() => onSort('column', 'asc')}>
+                      <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => onSort('column', 'desc')}>
+                      <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                    </ContextMenuItem>
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
                 <ContextMenuSeparator />
-                <ContextMenuItem onClick={() => onClearFilter('column')}>
-                  Clear Filter
-                </ContextMenuItem>
-              </>
-            )}
-          </ContextMenuContent>
-        </ContextMenu>,
-        <ContextMenu key="Classification">
-          <ContextMenuTrigger asChild>
-            <div className="flex items-center gap-1 cursor-pointer">
-              Classification
-              {sortColumn === 'classification' && (
-                sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-              )}
-            </div>
-          </ContextMenuTrigger>
-          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-            <ContextMenuSub>
-              <ContextMenuSubTrigger className="flex items-center">
-                <ArrowUp className="w-4 h-4 mr-2" /> Sort
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                <ContextMenuItem onClick={() => onSort('classification', 'asc')}>
-                  <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => onSort('classification', 'desc')}>
-                  <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                </ContextMenuItem>
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            <ContextMenuSeparator />
-            <ContextMenuSub>
-              <ContextMenuSubTrigger className="flex items-center">
-                <FilterIcon className="w-4 h-4 mr-2" /> Filter
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                <FilterMenu
-                  column="classification"
-                  uniqueValues={getUniqueColumnValues('classification')}
-                  current={columnFilters['classification'] || []}
-                  onApply={(values) => onColumnFilter('classification', values)}
-                />
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            {columnFilters['classification']?.length > 0 && (
-              <>
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger className="flex items-center">
+                    <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                    <FilterMenu
+                      column="column"
+                      uniqueValues={getUniqueColumnValues('column')}
+                      current={columnFilters['column'] || []}
+                      onApply={(values) => onColumnFilter('column', values)}
+                    />
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+                {columnFilters['column']?.length > 0 && (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => onClearFilter('column')}>
+                      Clear Filter
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
+          </TableHead>
+
+          {/* Classification header */}
+          <TableHead className="w-[20%]">
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div className="flex items-center gap-1 cursor-pointer">
+                  Classification
+                  {sortColumn === 'classification' && (
+                    sortDirection === 'asc' ? (
+                      <ArrowUp className="w-3 h-3" />
+                    ) : (
+                      <ArrowDown className="w-3 h-3" />
+                    )
+                  )}
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger className="flex items-center">
+                    <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuItem onClick={() => onSort('classification', 'asc')}>
+                      <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => onSort('classification', 'desc')}>
+                      <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                    </ContextMenuItem>
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
                 <ContextMenuSeparator />
-                <ContextMenuItem onClick={() => onClearFilter('classification')}>
-                  Clear Filter
-                </ContextMenuItem>
-              </>
-            )}
-          </ContextMenuContent>
-        </ContextMenu>,
-        <ContextMenu key="Unique count">
-          <ContextMenuTrigger asChild>
-            <div className="flex items-center gap-1 cursor-pointer">
-              Unique count
-              {sortColumn === 'unique_count' && (
-                sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-              )}
-            </div>
-          </ContextMenuTrigger>
-          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-            <ContextMenuSub>
-              <ContextMenuSubTrigger className="flex items-center">
-                <ArrowUp className="w-4 h-4 mr-2" /> Sort
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                <ContextMenuItem onClick={() => onSort('unique_count', 'asc')}>
-                  <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => onSort('unique_count', 'desc')}>
-                  <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                </ContextMenuItem>
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            <ContextMenuSeparator />
-            <ContextMenuSub>
-              <ContextMenuSubTrigger className="flex items-center">
-                <FilterIcon className="w-4 h-4 mr-2" /> Filter
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                <FilterMenu
-                  column="unique_count"
-                  uniqueValues={getUniqueColumnValues('unique_count')}
-                  current={columnFilters['unique_count'] || []}
-                  onApply={(values) => onColumnFilter('unique_count', values)}
-                />
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            {columnFilters['unique_count']?.length > 0 && (
-              <>
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger className="flex items-center">
+                    <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                    <FilterMenu
+                      column="classification"
+                      uniqueValues={getUniqueColumnValues('classification')}
+                      current={columnFilters['classification'] || []}
+                      onApply={(values) => onColumnFilter('classification', values)}
+                    />
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+                {columnFilters['classification']?.length > 0 && (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => onClearFilter('classification')}>
+                      Clear Filter
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
+          </TableHead>
+
+          {/* Unique count header */}
+          <TableHead className="w-[15%]">
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div className="flex items-center gap-1 cursor-pointer">
+                  Unique count
+                  {sortColumn === 'unique_count' && (
+                    sortDirection === 'asc' ? (
+                      <ArrowUp className="w-3 h-3" />
+                    ) : (
+                      <ArrowDown className="w-3 h-3" />
+                    )
+                  )}
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger className="flex items-center">
+                    <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuItem onClick={() => onSort('unique_count', 'asc')}>
+                      <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => onSort('unique_count', 'desc')}>
+                      <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                    </ContextMenuItem>
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
                 <ContextMenuSeparator />
-                <ContextMenuItem onClick={() => onClearFilter('unique_count')}>
-                  Clear Filter
-                </ContextMenuItem>
-              </>
-            )}
-          </ContextMenuContent>
-        </ContextMenu>,
-        "Sample values"
-      ]}
-      colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
-      bodyClassName="max-h-[300px] overflow-y-auto"
-      defaultMinimized={false}
-      borderColor="border-blue-200"
-    >
-      {data.map(col => (
-        <tr key={col.column} className="table-row">
-          <td className="table-cell-primary">
-            <span>{col.column}</span>
-          </td>
-          <td className="table-cell">{col.classification || 'identifiers'}</td>
-          <td className="table-cell">{col.unique_count.toLocaleString()}</td>
-          <td className="table-cell">
-            <div className="flex flex-wrap items-center gap-1">
-              {col.unique_values?.slice(0, 2).map((val, i) => (
-                <Badge
-                  key={i}
-                  className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
-                >
-                  {String(val)}
-                </Badge>
-              ))}
-              {col.unique_values && col.unique_values.length > 2 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                    <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
-                      <Plus className="w-3 h-3" />
-                      {col.unique_values.length - 2}
-                    </span>
-                </TooltipTrigger>
-                  <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
-                    {col.unique_values
-                      .slice(2)
-                      .map(val => String(val))
-                      .join(', ')}
-                </TooltipContent>
-              </Tooltip>
-          )}
-        </div>
-          </td>
-        </tr>
-      ))}
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger className="flex items-center">
+                    <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                    <FilterMenu
+                      column="unique_count"
+                      uniqueValues={getUniqueColumnValues('unique_count')}
+                      current={columnFilters['unique_count'] || []}
+                      onApply={(values) => onColumnFilter('unique_count', values)}
+                    />
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+                {columnFilters['unique_count']?.length > 0 && (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => onClearFilter('unique_count')}>
+                      Clear Filter
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
+          </TableHead>
+
+        {/* Sample values header */}
+        <TableHead className="w-[35%]">Sample values</TableHead>
+      </TableRow>
+      </TableHeader>
+
+      <TableBody>
+        {data.map(col => (
+          <TableRow key={col.column} className="table-row">
+            <TableCell className="table-cell-primary">
+              <span>{col.column}</span>
+            </TableCell>
+            <TableCell className="table-cell">
+              {col.classification || 'identifiers'}
+            </TableCell>
+            <TableCell className="table-cell">
+              {col.unique_count.toLocaleString()}
+            </TableCell>
+            <TableCell className="table-cell">
+              <div className="flex flex-wrap items-center gap-1">
+                {col.unique_values?.slice(0, 2).map((val, i) => (
+                  <Badge
+                    key={i}
+                    className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
+                  >
+                    {String(val)}
+                  </Badge>
+                ))}
+                {col.unique_values && col.unique_values.length > 2 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                        <Plus className="w-3 h-3" />
+                        {col.unique_values.length - 2}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                      {col.unique_values
+                        .slice(2)
+                        .map(val => String(val))
+                        .join(', ')}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
     </Table>
-);
+  );
 };

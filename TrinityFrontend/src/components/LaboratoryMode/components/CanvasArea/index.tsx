@@ -1250,7 +1250,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     removeActiveGuidedFlow,
     isMetricGuidedFlowOpen,
     activeMetricGuidedFlow,
-    closeMetricGuidedFlow
+    closeMetricGuidedFlow,
+    metricsInputs,
+    findCardByAtomId,
   } = useLaboratoryStore();
 
   // Calculate allowed atom IDs based on current mode
@@ -1260,6 +1262,49 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
     return undefined; // undefined = show all atoms for analytics mode
   }, [subMode]);
+
+  // Resolve which card (if any) should have the MetricGuidedFlowInline attached underneath it
+  const metricContextCardId = useMemo(() => {
+    if (!isMetricGuidedFlowOpen) {
+      return undefined;
+    }
+
+    const contextAtomId = metricsInputs.contextAtomId;
+    const contextCardId = metricsInputs.contextCardId;
+
+    let targetCardId: string | undefined;
+
+    // Prefer atom-level context: find the card that contains this atom
+    if (contextAtomId && typeof findCardByAtomId === 'function') {
+      const card = findCardByAtomId(contextAtomId);
+      if (card) {
+        targetCardId = card.id;
+      }
+    }
+
+    // Fallback to card-level context if no card was found by atom
+    if (!targetCardId && contextCardId && Array.isArray(layoutCards)) {
+      const exists = layoutCards.some(card => card.id === contextCardId);
+      if (exists) {
+        targetCardId = contextCardId;
+      }
+    }
+
+    console.log('[MetricGuidedFlow] Resolved target card for inline flow', {
+      isMetricGuidedFlowOpen,
+      contextCardId: contextCardId || null,
+      contextAtomId: contextAtomId || null,
+      targetCardId: targetCardId || null,
+    });
+
+    return targetCardId;
+  }, [
+    isMetricGuidedFlowOpen,
+    metricsInputs.contextAtomId,
+    metricsInputs.contextCardId,
+    findCardByAtomId,
+    layoutCards,
+  ]);
 
   // Helper function to render inline guided flow for an atom
   const renderInlineGuidedFlow = (atom: DroppedAtom) => {
@@ -1315,6 +1360,14 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     
     if (!isMetricGuidedFlowOpen) {
       console.log('[MetricGuidedFlow] Not rendering - isMetricGuidedFlowOpen is false');
+      return null;
+    }
+
+    // When we have a specific card context, the inline flow is rendered under that card instead of at the bottom
+    if (metricContextCardId) {
+      console.log('[MetricGuidedFlow] Not rendering at bottom - inline flow is attached to card', {
+        metricContextCardId,
+      });
       return null;
     }
 
@@ -6561,6 +6614,16 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                       {renderAppendedVariables(card)}
                     </div>
                   </Card>
+                  {/* Global Metric Guided Workflow inline card anchored below the target card when context is available */}
+                  {isMetricGuidedFlowOpen && metricContextCardId === card.id && (
+                    <div className="w-full mt-4">
+                      <MetricGuidedFlowInline
+                        initialStage={activeMetricGuidedFlow?.currentStage}
+                        savedState={activeMetricGuidedFlow?.state}
+                        onClose={closeMetricGuidedFlow}
+                      />
+                    </div>
+                  )}
                   {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
                     <div className="flex justify-center my-4">
                       <button

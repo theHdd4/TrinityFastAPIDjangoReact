@@ -202,7 +202,7 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) =
       title="Preview & Save"
       explanation="Review your created metrics before finalizing"
     >
-      <div className="space-y-6">
+      <div className="space-y-6 w-full min-w-0">
         {/* Success Message */}
         <div className="text-sm text-gray-600">
           {hasCreatedItems && (() => {
@@ -352,14 +352,11 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) =
                   <div className="space-y-2">
                     {state.createdTables.map((table, idx) => {
                       // Find columns that belong to this table
-                      const tableColumns: CreatedColumn[] = columnsByTable[table.newTableName] || [];
-                      const columnCount = tableColumns.length;
+                      const createdColumnsForTable: CreatedColumn[] = columnsByTable[table.newTableName] || [];
+                      const columnCount = createdColumnsForTable.length;
                       
                       return (
-                        <div
-                          key={idx}
-                          className="p-4 border rounded-lg bg-purple-50/50 border-purple-200"
-                        >
+                        <div key={idx} className="p-4 border rounded-lg bg-purple-50/50 border-purple-200">
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <div className="font-medium text-gray-900">{table.newTableName}</div>

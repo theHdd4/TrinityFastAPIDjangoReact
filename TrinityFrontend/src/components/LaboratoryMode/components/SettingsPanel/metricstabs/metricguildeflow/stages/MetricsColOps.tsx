@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { forwardRef, useImperativeHandle } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,14 @@ interface MetricsColOpsProps {
   featureOverviewApi?: string;
   onColumnCreated?: (column: CreatedColumn) => void;
   onTableCreated?: (table: CreatedTable) => void;
+}
+
+// Ref interface for exposing save functions
+export interface MetricsColOpsRef {
+  save: () => void;
+  saveAs: () => void;
+  canSave: () => boolean;
+  isSaving: () => boolean;
 }
 
 // All operations - keeping existing ones exactly the same
@@ -459,7 +467,7 @@ const scoreOperation = (
   return Math.max(0, score); // Ensure non-negative score
 };
 
-const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOverviewApi, onColumnCreated, onTableCreated }) => {
+const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSource, featureOverviewApi, onColumnCreated, onTableCreated }, ref) => {
   const [columnSearchQuery, setColumnSearchQuery] = React.useState('');
   const [exploreOpen, setExploreOpen] = React.useState(false);
   const [openColumnCategories, setOpenColumnCategories] = React.useState<Record<string, boolean>>({});
@@ -573,7 +581,7 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
     }
   }, [columnSearchQuery, exploreOpen]);
 
-  // Simple logic: when explore opens, open all categories. When search is active, open matching ones.
+  // When search is active, auto-open matching categories. Otherwise, categories stay collapsed.
   React.useEffect(() => {
     if (!exploreOpen) {
       return;
@@ -588,14 +596,8 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
         }
       });
       setOpenColumnCategories(categoriesWithMatches);
-    } else {
-      // No search: open ALL categories immediately - use source directly, no dependencies
-      const allCategoriesOpen: Record<string, boolean> = {};
-      operationCategories.forEach(category => {
-        allCategoriesOpen[category.name] = true;
-      });
-      setOpenColumnCategories(allCategoriesOpen);
     }
+    // When search is empty, don't modify openColumnCategories - let them stay collapsed
   }, [exploreOpen, columnSearchQuery, filteredColumnCategories]);
 
   // Handler for explore button - immediately open all categories if opening without search
@@ -613,15 +615,8 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
   const toggleColumnCategory = (categoryName: string) => {
     setOpenColumnCategories(prev => {
       const isCurrentlyOpen = prev[categoryName] ?? false;
-      if (columnSearchQuery.trim()) {
-        return { ...prev, [categoryName]: !isCurrentlyOpen };
-      } else {
-        const newState: Record<string, boolean> = {};
-        if (!isCurrentlyOpen) {
-          newState[categoryName] = true;
-        }
-        return newState;
-      }
+      // Simple toggle - allow multiple categories open simultaneously
+      return { ...prev, [categoryName]: !isCurrentlyOpen };
     });
   };
 
@@ -1779,12 +1774,20 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
   // Determine if we should show centered empty state
   const showCenteredEmptyState = selectedOperations.length === 0 && !columnSearchQuery.trim() && !exploreOpen;
 
+  // Expose save functions via ref
+  useImperativeHandle(ref, () => ({
+    save: handleSave,
+    saveAs: handleSaveAs,
+    canSave: () => selectedOperations.length > 0 && !!dataSource && !saveLoading,
+    isSaving: () => saveLoading,
+  }), [selectedOperations.length, dataSource, saveLoading]);
+
   return (
     <div className="flex flex-col h-full relative">
       <div className="flex-1 overflow-y-auto space-y-4 px-2 pb-2">
         {/* Search bar - always rendered in consistent location */}
-        <div className={showCenteredEmptyState ? "flex flex-col items-center justify-center min-h-[400px] space-y-4" : "space-y-2"}>
-          {showCenteredEmptyState ? (
+        {showCenteredEmptyState ? (
+          <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
             <div className="w-full max-w-2xl space-y-4">
               <div className="relative">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -1809,110 +1812,111 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
                 </Button>
               </div>
             </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 relative">
-                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <Input
-                    key="column-search-input"
-                    ref={searchInputRef}
-                    value={columnSearchQuery}
-                    onChange={(e) => setColumnSearchQuery(e.target.value)}
-                    placeholder='Describe what you want to calculate… e.g. "max price by brand", "add two columns", "moving average"'
-                    className="h-12 pl-10 text-base"
-                    aria-label="Search column operations"
-                  />
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={handleExploreToggle}
-                  className="flex items-center gap-2"
-                >
-                  {exploreOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  Explore Operations
-                </Button>
+          </div>
+        ) : (
+          <>
+            {/* Search bar and Explore button */}
+            <div className="flex items-center gap-2 pt-2">
+              <div className="flex-1 relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <Input
+                  key="column-search-input"
+                  ref={searchInputRef}
+                  value={columnSearchQuery}
+                  onChange={(e) => setColumnSearchQuery(e.target.value)}
+                  placeholder='Describe what you want to calculate… e.g. "max price by brand", "add two columns", "moving average"'
+                  className="h-12 pl-10 text-base"
+                  aria-label="Search column operations"
+                />
               </div>
+              <Button
+                variant="outline"
+                onClick={handleExploreToggle}
+                className="flex items-center gap-2"
+              >
+                {exploreOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                Explore Operations
+              </Button>
+            </div>
 
-              {/* Operations Browser */}
-              {exploreOpen && (
-                <div className="p-3">
-                  <Collapsible open={exploreOpen} onOpenChange={handleExploreToggle}>
-                    <CollapsibleContent>
-                      {(() => {
-                        // Determine what to show: filtered results if searching, all categories if not
-                        const categoriesToShow = columnSearchQuery.trim() 
-                          ? filteredColumnCategories 
-                          : operationCategories;
-                            
-                        if (categoriesToShow.length === 0) {
-                          return (
-                            <p className="text-xs text-gray-500 text-center py-4">
-                              {columnSearchQuery.trim() 
-                                ? "No operations match your search."
-                                : "No operations available."}
-                            </p>
-                          );
-                        }
-                            
-                        return categoriesToShow.map((category) => (
-                          <Collapsible
-                            key={category.name}
-                            open={openColumnCategories[category.name] ?? false}
-                            onOpenChange={() => toggleColumnCategory(category.name)}
-                          >
-                            <CollapsibleTrigger className="flex items-center justify-between w-full p-1.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 rounded transition-colors">
-                              <div className="flex items-center space-x-1.5 flex-1 min-w-0">
-                                <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded flex items-center justify-center flex-shrink-0">
-                                  <category.icon className="w-2.5 h-2.5 text-gray-700" />
-                                </div>
-                                <span className="font-medium text-gray-900 text-xs truncate">{category.name}</span>
-                                <span className="text-[10px] text-gray-400 flex-shrink-0">({category.operations.length})</span>
+            {/* Operations Browser */}
+            {exploreOpen && (
+              <div className="p-3">
+                <Collapsible open={exploreOpen} onOpenChange={handleExploreToggle}>
+                  <CollapsibleContent>
+                    {(() => {
+                      // Determine what to show: filtered results if searching, all categories if not
+                      const categoriesToShow = columnSearchQuery.trim() 
+                        ? filteredColumnCategories 
+                        : operationCategories;
+                          
+                      if (categoriesToShow.length === 0) {
+                        return (
+                          <p className="text-xs text-gray-500 text-center py-4">
+                            {columnSearchQuery.trim() 
+                              ? "No operations match your search."
+                              : "No operations available."}
+                          </p>
+                        );
+                      }
+                          
+                      return categoriesToShow.map((category) => (
+                        <Collapsible
+                          key={category.name}
+                          open={openColumnCategories[category.name] ?? false}
+                          onOpenChange={() => toggleColumnCategory(category.name)}
+                        >
+                          <CollapsibleTrigger className="flex items-center justify-between w-full p-1.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 rounded transition-colors">
+                            <div className="flex items-center space-x-1.5 flex-1 min-w-0">
+                              <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded flex items-center justify-center flex-shrink-0">
+                                <category.icon className="w-2.5 h-2.5 text-gray-700" />
                               </div>
-                              {openColumnCategories[category.name] ? (
-                                <ChevronDown className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
-                              ) : (
-                                <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
-                              )}
-                            </CollapsibleTrigger>
-                            <CollapsibleContent className="pt-1.5 pb-1.5">
-                              <div className="ml-2 pl-2 border-l-2 border-gray-200 grid grid-cols-2 gap-1.5">
-                                {category.operations.map((op) => (
-                                  <TooltipProvider key={op.type} delayDuration={0}>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <div
-                                          onClick={() => handleOperationClick(op)}
-                                          className="p-1.5 border border-gray-200 rounded-lg bg-white transition-all cursor-pointer group relative flex items-center space-x-1.5 hover:shadow-md hover:border-gray-300"
-                                        >
-                                          <Plus className="w-3 h-3 text-gray-600" />
-                                          <span className="text-[10px] font-medium text-gray-900">{op.name}</span>
-                                        </div>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="text-xs max-w-xs">
-                                        <p className="font-semibold mb-1">{op.name}</p>
-                                        <p className="mb-1">{op.description}</p>
-                                        {operationFormulas[op.type] && (
-                                          <p className="text-[10px] text-gray-400 italic">
-                                            Formula: {operationFormulas[op.type]}
-                                          </p>
-                                        )}
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                ))}
-                              </div>
-                            </CollapsibleContent>
-                          </Collapsible>
-                        ));
-                      })()}
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+                              <span className="font-medium text-gray-900 text-xs truncate">{category.name}</span>
+                              <span className="text-[10px] text-gray-400 flex-shrink-0">({category.operations.length})</span>
+                            </div>
+                            {openColumnCategories[category.name] ? (
+                              <ChevronDown className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
+                            ) : (
+                              <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
+                            )}
+                          </CollapsibleTrigger>
+                          <CollapsibleContent className="pt-1.5 pb-1.5">
+                            <div className="ml-2 pl-2 border-l-2 border-gray-200 grid grid-cols-2 gap-1.5">
+                              {category.operations.map((op) => (
+                                <TooltipProvider key={op.type} delayDuration={0}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div
+                                        onClick={() => handleOperationClick(op)}
+                                        className="p-1.5 border border-gray-200 rounded-lg bg-white transition-all cursor-pointer group relative flex items-center space-x-1.5 hover:shadow-md hover:border-gray-300"
+                                      >
+                                        <Plus className="w-3 h-3 text-gray-600" />
+                                        <span className="text-[10px] font-medium text-gray-900">{op.name}</span>
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="text-xs max-w-xs">
+                                      <p className="font-semibold mb-1">{op.name}</p>
+                                      <p className="mb-1">{op.description}</p>
+                                      {operationFormulas[op.type] && (
+                                        <p className="text-[10px] text-gray-400 italic">
+                                          Formula: {operationFormulas[op.type]}
+                                        </p>
+                                      )}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              ))}
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      ));
+                    })()}
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            )}
+          </>
+        )}
 
         {/* Selected Operations */}
         {selectedOperations.length > 0 && (
@@ -3575,7 +3579,8 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
 
       </div>
 
-      {selectedOperations.length > 0 && (
+      {/* Commented out: Save and Save As buttons moved to footer only */}
+      {/* {selectedOperations.length > 0 && (
         <div className="sticky bottom-0 bg-white border-t border-gray-200 px-2 py-2 z-10">
           {error && (
             <div className="mb-2">
@@ -3599,7 +3604,7 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
             </Button>
           </div>
         </div>
-      )}
+      )} */}
 
       {/* Save As Dialog */}
       <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>
@@ -3702,7 +3707,7 @@ const MetricsColOps: React.FC<MetricsColOpsProps> = ({ dataSource, featureOvervi
       `}</style>
     </div>
   );
-};
+});
 
 export default MetricsColOps;
 

@@ -42,7 +42,7 @@ import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import MultiSelectDropdown from '@/templates/dropdown/multiselect/MultiSelectDropdown';
 import type { CreatedVariable, CreatedColumn, CreatedTable } from '../useMetricGuidedFlow';
-import MetricsColOps from './MetricsColOps';
+import MetricsColOps, { MetricsColOpsRef } from './MetricsColOps';
 
 // Type Definitions
 export type SavedVar = {
@@ -702,6 +702,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   const [createdVarsPreview, setCreatedVarsPreview] = useState<SavedVar[] | null>(null);
   const newVarRef = useRef<HTMLInputElement | null>(null);
   const openedBySearchRef = useRef(false);
+  const metricsColOpsRef = useRef<MetricsColOpsRef>(null);
 
   // Compute state
   const [computeWithinGroup, setComputeWithinGroup] = useState(false);
@@ -2095,10 +2096,22 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
       }
     },
     saveColumn: () => {
-      setShowColumnOverwriteConfirm(true);
+      // Use MetricsColOps save function if available (for column operations)
+      if (metricsColOpsRef.current) {
+        metricsColOpsRef.current.save();
+      } else {
+        // Fallback to old behavior for variable operations or when ref not available
+        setShowColumnOverwriteConfirm(true);
+      }
     },
     saveColumnAs: () => {
-      setShowColumnSaveAs(true);
+      // Use MetricsColOps saveAs function if available (for column operations)
+      if (metricsColOpsRef.current) {
+        metricsColOpsRef.current.saveAs();
+      } else {
+        // Fallback to old behavior for variable operations or when ref not available
+        setShowColumnSaveAs(true);
+      }
     },
     canSaveVariable: () => {
       if (variableMode === 'assign') {
@@ -2111,9 +2124,19 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
       return false;
     },
     canSaveColumn: () => {
+      // Use MetricsColOps canSave if available (for column operations)
+      if (metricsColOpsRef.current) {
+        return metricsColOpsRef.current.canSave();
+      }
+      // Fallback to old behavior
       return columnOperations.length > 0 && !!dataSource;
     },
     isSaving: () => {
+      // Use MetricsColOps isSaving if available (for column operations)
+      if (metricsColOpsRef.current) {
+        return metricsColOpsRef.current.isSaving();
+      }
+      // Fallback to old behavior
       return saving || columnSaveLoading;
     },
   }), [variableMode, assignedVars, operations, computeWithinGroup, selectedIdentifiers, columnOperations, dataSource, saving, columnSaveLoading]);
@@ -2813,6 +2836,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
         {/* Column operations UI */}
         {selectedType === 'column' && (
           <MetricsColOps 
+            ref={metricsColOpsRef}
             dataSource={dataSource}
             featureOverviewApi={featureOverviewApi}
             onColumnCreated={onColumnCreated}

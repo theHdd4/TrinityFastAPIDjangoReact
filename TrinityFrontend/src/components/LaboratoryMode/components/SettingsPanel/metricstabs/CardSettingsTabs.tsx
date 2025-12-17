@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreHorizontal, Trash2, Pencil, Layers, Upload, Play } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Pencil, Layers, Upload } from 'lucide-react';
 import { useLaboratoryStore, CardVariable, LayoutCard } from '../../../store/laboratoryStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { LABORATORY_API } from '@/lib/api';
@@ -120,7 +120,6 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   const [editNameError, setEditNameError] = useState<string | null>(null);
   const [appendDialogOpen, setAppendDialogOpen] = useState(false);
   const [pendingAppendVariable, setPendingAppendVariable] = useState<AvailableVariable | null>(null);
-  const openMetricGuidedFlow = useLaboratoryStore(state => state.openMetricGuidedFlow);
 
   const generateVariableId = () => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -762,24 +761,6 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
 
   return (
     <>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <h4 className="text-sm font-semibold text-gray-900">Metrics</h4>
-          <span className="text-xs text-gray-500">Guided creation</span>
-        </div>
-        <Button
-          size="sm"
-          className="h-8 bg-[#458EE2] hover:bg-[#3c7ac5] text-white px-3"
-          onClick={() => {
-            console.log('[MetricGuidedFlow] Play button clicked in CardSettingsTabs');
-            openMetricGuidedFlow();
-          }}
-        >
-          <Play className="w-3.5 h-3.5 mr-2" />
-          Play
-        </Button>
-      </div>
-
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="input" className="text-xs font-medium">
@@ -837,4 +818,3 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
 };
 
 export default CardSettingsTabs;
-
