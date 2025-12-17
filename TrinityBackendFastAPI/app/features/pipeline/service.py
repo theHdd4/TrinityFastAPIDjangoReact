@@ -629,6 +629,15 @@ async def record_atom_execution(
                         logger.info(
                             f"📋 [TABLE] Merged API calls: {len(preserved_api_calls)} preserved + {len(new_operation_calls)} new operations"
                         )
+                elif atom_type == "groupby-wtg-avg":
+                    # For groupby atoms: Preserve ALL API calls (including execution markers) to maintain full sequence
+                    # This allows multiple init/run sequences for different files
+                    # Example: init(file1) -> run(file1) -> init(file2) -> run(file2) -> save
+                    merged_api_calls = existing_api_calls + api_calls
+                    logger.info(
+                        f"📋 [GROUPBY] Appended {len(api_calls)} new API call(s) to existing {len(existing_api_calls)} call(s). "
+                        f"Total: {len(merged_api_calls)} API calls preserved."
+                    )
                 else:
                     # For other atom types, use the original logic
                     for existing_call in existing_api_calls:
@@ -647,35 +656,133 @@ async def record_atom_execution(
                 # Preserve step_index and other metadata
                 existing_step["configuration"] = configuration
                 existing_step["api_calls"] = merged_api_calls
-                existing_step["outputs"] = output_files
                 existing_step["execution"] = execution_info
                 
-                # 🔧 CRITICAL FIX: Handle input file updates intelligently
-                # 1. If new inputs are empty: preserve existing inputs (for operations like /update, /edit-cell)
-                # 2. If new input is a derived file from this same atom (save as scenario): update inputs but preserve old operations
-                # 3. If new input is a different file (file replacement): update inputs
-                if input_file_objects:
-                    # Check if the new input file is an output from this same step (save as scenario)
-                    new_input_file = input_file_objects[0].get("file_key") if input_file_objects else None
+                # Handle outputs: append for groupby, replace for others
+                if atom_type == "groupby-wtg-avg":
+                    # For groupby: append new output files to existing ones (avoid duplicates)
                     existing_outputs = existing_step.get("outputs", [])
-                    is_loading_own_output = False
+                    existing_output_keys = {out.get("file_key") for out in existing_outputs if out.get("file_key")}
                     
-                    if new_input_file:
-                        for output in existing_outputs:
-                            if output.get("file_key") == new_input_file:
-                                is_loading_own_output = True
-                                logger.info(
-                                    f"🔄 [TABLE] New input file '{new_input_file}' is own output (save as) - updating inputs but preserving operations"
-                                )
-                                break
+                    for new_output in output_files:
+                        new_output_key = new_output.get("file_key")
+                        if new_output_key and new_output_key not in existing_output_keys:
+                            existing_outputs.append(new_output)
+                            existing_output_keys.add(new_output_key)
+                            logger.info(
+                                f"➕ [GROUPBY] Appended output file: {new_output_key}"
+                            )
+                        elif new_output_key in existing_output_keys:
+                            # Update existing output with new data (e.g., updated save_as_name)
+                            for idx, existing_out in enumerate(existing_outputs):
+                                if existing_out.get("file_key") == new_output_key:
+                                    existing_outputs[idx] = new_output
+                                    logger.info(
+                                        f"🔄 [GROUPBY] Updated existing output file: {new_output_key}"
+                                    )
+                                    break
                     
-                    if is_loading_own_output:
-                        # Save as scenario: update inputs to the new file, but operations are already preserved above
-                        existing_step["inputs"] = input_file_objects
-                    else:
-                        # Regular file replacement or initial load: update inputs
-                        existing_step["inputs"] = input_file_objects
-                # Otherwise, keep existing inputs (they were set by the initial /load call)
+                    existing_step["outputs"] = existing_outputs
+                else:
+                    # For other atom types, replace outputs
+                    existing_step["outputs"] = output_files
+                
+                # 🔧 Handle input file updates intelligently
+                if atom_type == "groupby-wtg-avg":
+                    # For groupby: append input files (avoid duplicates)
+                    # Also extract input files from API call params to ensure all files are tracked
+                    existing_inputs = existing_step.get("inputs", [])
+                    existing_input_keys = {inp.get("file_key") for inp in existing_inputs if inp.get("file_key")}
+                    
+                    # Add input files from the new API calls' params
+                    for api_call in api_calls:
+                        params = api_call.get("params", {})
+                        # Check multiple possible param keys that might contain file paths
+                        file_param_keys = ["object_names", "file_key", "object_name", "source_object", "data_source", 
+                                         "input_file", "input_files", "file1", "file2", "left_file", "right_file"]
+                        for key in file_param_keys:
+                            if key in params:
+                                file_value = params[key]
+                                # Handle both string and list of strings
+                                if isinstance(file_value, str) and file_value:
+                                    if file_value not in existing_input_keys:
+                                        # Check if this file is an output from a previous atom
+                                        parent_atom_id = None
+                                        if existing_doc and "pipeline" in existing_doc and "execution_graph" in existing_doc["pipeline"]:
+                                            for prev_step in existing_doc["pipeline"]["execution_graph"]:
+                                                for output in prev_step.get("outputs", []):
+                                                    if output.get("file_key") == file_value:
+                                                        parent_atom_id = prev_step.get("atom_instance_id")
+                                                        break
+                                                if parent_atom_id:
+                                                    break
+                                        
+                                        new_input_obj = _build_input_file(file_value, file_value, parent_atom_id)
+                                        existing_inputs.append(new_input_obj)
+                                        existing_input_keys.add(file_value)
+                                        logger.info(
+                                            f"➕ [GROUPBY] Appended input file from API call params: {file_value} (param: {key})"
+                                        )
+                                elif isinstance(file_value, list):
+                                    # Handle list of files
+                                    for file_item in file_value:
+                                        if isinstance(file_item, str) and file_item and file_item not in existing_input_keys:
+                                            # Check if this file is an output from a previous atom
+                                            parent_atom_id = None
+                                            if existing_doc and "pipeline" in existing_doc and "execution_graph" in existing_doc["pipeline"]:
+                                                for prev_step in existing_doc["pipeline"]["execution_graph"]:
+                                                    for output in prev_step.get("outputs", []):
+                                                        if output.get("file_key") == file_item:
+                                                            parent_atom_id = prev_step.get("atom_instance_id")
+                                                            break
+                                                    if parent_atom_id:
+                                                        break
+                                            
+                                            new_input_obj = _build_input_file(file_item, file_item, parent_atom_id)
+                                            existing_inputs.append(new_input_obj)
+                                            existing_input_keys.add(file_item)
+                                            logger.info(
+                                                f"➕ [GROUPBY] Appended input file from API call params: {file_item} (param: {key})"
+                                            )
+                    
+                    # Also add input files from input_file_objects (from the function parameter)
+                    for new_input in input_file_objects:
+                        new_input_key = new_input.get("file_key")
+                        if new_input_key and new_input_key not in existing_input_keys:
+                            existing_inputs.append(new_input)
+                            existing_input_keys.add(new_input_key)
+                            logger.info(
+                                f"➕ [GROUPBY] Appended input file: {new_input_key}"
+                            )
+                    
+                    existing_step["inputs"] = existing_inputs
+                else:
+                    # For other atom types, use the original logic
+                    # 1. If new inputs are empty: preserve existing inputs (for operations like /update, /edit-cell)
+                    # 2. If new input is a derived file from this same atom (save as scenario): update inputs but preserve old operations
+                    # 3. If new input is a different file (file replacement): update inputs
+                    if input_file_objects:
+                        # Check if the new input file is an output from this same step (save as scenario)
+                        new_input_file = input_file_objects[0].get("file_key") if input_file_objects else None
+                        existing_outputs = existing_step.get("outputs", [])
+                        is_loading_own_output = False
+                        
+                        if new_input_file:
+                            for output in existing_outputs:
+                                if output.get("file_key") == new_input_file:
+                                    is_loading_own_output = True
+                                    logger.info(
+                                        f"🔄 [TABLE] New input file '{new_input_file}' is own output (save as) - updating inputs but preserving operations"
+                                    )
+                                    break
+                        
+                        if is_loading_own_output:
+                            # Save as scenario: update inputs to the new file, but operations are already preserved above
+                            existing_step["inputs"] = input_file_objects
+                        else:
+                            # Regular file replacement or initial load: update inputs
+                            existing_step["inputs"] = input_file_objects
+                    # Otherwise, keep existing inputs (they were set by the initial /load call)
                 
                 # Update the step in place
                 execution_graph[existing_step_index] = existing_step

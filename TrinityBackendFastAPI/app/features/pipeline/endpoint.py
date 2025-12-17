@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional
 import logging
 import json
 import asyncio
+import os
 
 from .schemas import (
     PipelineGetResponse,
@@ -1157,6 +1158,53 @@ async def run_pipeline(
             # Get API calls from step for execution AND frontend access
             api_calls = step.get("api_calls", [])
             
+            # For groupby, merge, concat, pivot-table, and table atoms, apply file replacements to each API call's params
+            # This ensures each API call uses the correct replacement file based on the original file used
+            # This is critical because these atoms can have multiple API calls with different input files
+            if atom_type in ["groupby-wtg-avg", "merge", "concat", "pivot-table", "table"] or atom_type.startswith("groupby"):
+                updated_api_calls = []
+                for api_call in api_calls:
+                    # Create a copy to avoid modifying the original
+                    updated_call = api_call.copy()
+                    params = updated_call.get("params", {}).copy()
+                    
+                    # Apply file replacements to file-related params
+                    # Check multiple possible param keys that might contain file paths
+                    file_param_keys = ["object_names", "file_key", "object_name", "source_object", "data_source", 
+                                     "input_file", "input_files", "file1", "file2", "left_file", "right_file"]
+                    for key in file_param_keys:
+                        if key in params:
+                            original_file = params[key]
+                            # Handle both string and list of strings
+                            if isinstance(original_file, str):
+                                replacement = file_replacements.get(original_file, original_file)
+                                if replacement != original_file:
+                                    params[key] = replacement
+                                    logger.info(
+                                        f"🔄 [{atom_type.upper()}] Applied file replacement in API call '{updated_call.get('endpoint', '')}': "
+                                        f"{original_file} -> {replacement} (param: {key})"
+                                    )
+                            elif isinstance(original_file, list):
+                                # Replace each file in the list
+                                replaced_list = []
+                                for file_item in original_file:
+                                    if isinstance(file_item, str):
+                                        replacement = file_replacements.get(file_item, file_item)
+                                        replaced_list.append(replacement)
+                                        if replacement != file_item:
+                                            logger.info(
+                                                f"🔄 [{atom_type.upper()}] Applied file replacement in API call '{updated_call.get('endpoint', '')}': "
+                                                f"{file_item} -> {replacement} (param: {key}[{original_file.index(file_item)}])"
+                                            )
+                                    else:
+                                        replaced_list.append(file_item)
+                                params[key] = replaced_list
+                    
+                    updated_call["params"] = params
+                    updated_api_calls.append(updated_call)
+                
+                api_calls = updated_api_calls
+            
             log_entry = {
                 "step_index": step.get("step_index"),
                 "atom_instance_id": atom_instance_id,
@@ -1797,6 +1845,92 @@ async def run_pipeline(
                         log_entry["additional_results"] = additional_results
                     
                     success_count += 1
+                    
+                    # 🔧 CRITICAL: Record full execution back to MongoDB to preserve all API calls (init/run/save)
+                    # This ensures that when pipeline runs, all API calls are preserved with file replacements applied
+                    # For groupby/merge/concat/pivot/table atoms, this preserves the full sequence of operations
+                    if atom_type in ["groupby-wtg-avg", "merge", "concat", "pivot-table", "table"] or atom_type.startswith("groupby"):
+                        try:
+                            from datetime import datetime
+                            from .service import record_atom_execution
+                            
+                            # Build output files from execution result and step outputs
+                            recorded_output_files = []
+                            
+                            # Add result file if available
+                            if result_file:
+                                recorded_output_files.append({
+                                    "file_key": result_file,
+                                    "file_path": result_file,
+                                    "flight_path": result_file,
+                                    "save_as_name": "groupby_result" if atom_type.startswith("groupby") else None,
+                                    "is_default_name": True,
+                                    "columns": task_response.get("columns", []) if task_response else [],
+                                    "dtypes": {},
+                                    "row_count": task_response.get("row_count", 0) if task_response else 0
+                                })
+                            
+                            # Add saved files from API calls (preserve save_as_name)
+                            for api_call in api_calls:
+                                endpoint = api_call.get("endpoint", "")
+                                if "/save" in endpoint:
+                                    response_data = api_call.get("response_data", {})
+                                    if response_data and response_data.get("status") == "SUCCESS":
+                                        saved_filename = response_data.get("filename")
+                                        if saved_filename:
+                                            # Check if already added
+                                            if not any(out.get("file_key") == saved_filename for out in recorded_output_files):
+                                                save_params = api_call.get("params", {})
+                                                recorded_output_files.append({
+                                                    "file_key": saved_filename,
+                                                    "file_path": saved_filename,
+                                                    "flight_path": saved_filename,
+                                                    "save_as_name": save_params.get("filename", "saved_file"),
+                                                    "is_default_name": save_params.get("is_default_name", True),
+                                                    "columns": [],
+                                                    "dtypes": {},
+                                                    "row_count": 0
+                                                })
+                            
+                            # Also preserve existing outputs from step (for files that were saved in previous runs)
+                            for existing_output in step.get("outputs", []):
+                                existing_key = existing_output.get("file_key")
+                                if existing_key and not any(out.get("file_key") == existing_key for out in recorded_output_files):
+                                    recorded_output_files.append(existing_output)
+                            
+                            # Record execution with all API calls preserved (file replacements already applied)
+                            execution_started_at = datetime.utcnow()
+                            execution_completed_at = datetime.utcnow() if execution_result["status"] == "success" else None
+                            execution_status = execution_result["status"]
+                            execution_error = None if execution_result["status"] == "success" else execution_result.get("message", "Execution failed")
+                            
+                            await record_atom_execution(
+                                client_name=request.client_name,
+                                app_name=request.app_name,
+                                project_name=request.project_name,
+                                atom_instance_id=atom_instance_id,
+                                card_id=card_id,
+                                atom_type=atom_type,
+                                atom_title=atom_title,
+                                input_files=updated_input_files,  # Use updated input files (with replacements)
+                                configuration=updated_config,  # Use updated config (with replacements)
+                                api_calls=api_calls,  # All API calls with file replacements applied
+                                output_files=recorded_output_files,
+                                execution_started_at=execution_started_at,
+                                execution_completed_at=execution_completed_at,
+                                execution_status=execution_status,
+                                execution_error=execution_error,
+                                user_id=os.getenv("USER_ID", "unknown"),
+                                mode=request.mode,
+                                canvas_position=step.get("canvas_position", 0)
+                            )
+                            logger.info(
+                                f"✅ Recorded full execution for {atom_type} ({atom_instance_id}) with {len(api_calls)} API calls preserved"
+                            )
+                        except Exception as record_error:
+                            # Don't fail pipeline execution if recording fails
+                            logger.warning(f"⚠️ Failed to record execution for {atom_type} ({atom_instance_id}): {record_error}")
+                    
                 elif execution_result["status"] == "failed":
                     log_entry["status"] = "failed"
                     log_entry["message"] = execution_result.get("message", "Atom execution failed")
