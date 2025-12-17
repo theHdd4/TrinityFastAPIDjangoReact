@@ -92,185 +92,232 @@ class GroupByExecutor(BaseAtomExecutor):
         from app.features.groupby.service import load_dataframe, MINIO_BUCKET
         import json
         
-        # Get primary input file
+        # Get primary input file (fallback for backward compatibility)
         primary_file = input_files[0] if input_files else configuration.get("file_key", "")
         
-        # Check which endpoints were called
-        has_init = False
-        has_run = False
-        has_save = False
-        init_endpoint = None
-        save_endpoint = None
+        # For groupby atoms, process each API call SEQUENTIALLY to maintain init->run->save sequences
+        # Each API call may have its own input file in params
+        # This allows multiple init/run/save sequences for different files/configurations
         
-        for api_call in api_calls:
-            endpoint = api_call.get("endpoint", "")
-            # Check for init endpoint
-            if endpoint in ["/api/groupby/init", "/groupby/init"] or endpoint.endswith("/init"):
-                has_init = True
-                init_endpoint = api_call
-            # Check for run endpoint (could be atom_execution_start, /groupby/run, etc.)
-            if endpoint in ["atom_execution_start", "/api/groupby/run", "/groupby/run"] or ("run" in endpoint.lower() and "init" not in endpoint.lower()):
-                has_run = True
-            # Check for save endpoint
-            if endpoint in ["/api/groupby/save", "/groupby/save"] or endpoint.endswith("/save"):
-                has_save = True
-                save_endpoint = api_call
+        # 🔧 CRITICAL: Track current file context for execution markers
+        # Execution markers (atom_execution_start, atom_execution_complete) don't have file info
+        # So we use the file from the most recent /init call
+        current_file_context = primary_file  # Default to primary file
         
         result_file = None
         task_response = None
-        save_result = None
-        init_result = None
+        save_results = []  # Track all save results (not just the last one)
+        init_results = []
+        all_saved_files = []  # Track all saved files
         
-        # Execute init endpoint if it was called (for replacement files)
-        if has_init and init_endpoint:
-            logger.info(
-                f"🔄 GroupBy executor: Executing /init for atom {atom_instance_id} "
-                f"with file: {primary_file}"
-            )
+        # Process API calls sequentially to maintain sequence: init -> run -> save -> init -> run -> save
+        i = 0
+        while i < len(api_calls):
+            api_call = api_calls[i]
+            endpoint = api_call.get("endpoint", "")
+            params = api_call.get("params", {})
             
-            try:
-                # Extract configuration from API call params
-                init_config = init_endpoint.get("params", {})
-                bucket_name = configuration.get("bucket_name", init_config.get("bucket_name", "trinity"))
-                object_names = init_config.get("object_names", primary_file)
-                
-                # Get client/app/project from config or environment
-                client_name = init_config.get("client_name") or os.getenv("CLIENT_NAME", "")
-                app_name = init_config.get("app_name") or os.getenv("APP_NAME", "")
-                project_name = init_config.get("project_name") or os.getenv("PROJECT_NAME", "")
-                
-                # Call initialize_groupby directly
-                from app.features.groupby.service import initialize_groupby
-                init_result = initialize_groupby(
-                    bucket_name=bucket_name,
-                    object_name=object_names,
-                    client_name=client_name,
-                    app_name=app_name,
-                    project_name=project_name,
-                    file_key=primary_file,
+            # Extract file from params (file_replacements already applied in endpoint.py)
+            # For execution markers, use the current file context (from previous init)
+            call_file = None
+            if endpoint in ["atom_execution_start", "atom_execution_complete"]:
+                # Execution markers don't have file info, use context from previous init
+                call_file = current_file_context
+                logger.info(
+                    f"📋 [GROUPBY] Execution marker '{endpoint}' using file context: {call_file}"
                 )
-                
-                if init_result.get("status") != "SUCCESS":
-                    logger.warning(f"⚠️ GroupBy init returned non-success status: {init_result.get('status')}")
-                else:
-                    logger.info(f"✅ GroupBy init completed successfully for replacement file: {primary_file}")
-                    
-            except Exception as e:
-                logger.error(f"❌ Error executing groupby init: {e}", exc_info=True)
-                # Don't fail the entire execution if init fails, but log it
-        
-        # Execute run endpoint if it was called
-        if has_run:
-            logger.info(
-                f"🔄 GroupBy executor: Executing /run for atom {atom_instance_id} "
-                f"with file: {primary_file}"
-            )
-            
-            # Extract configuration
-            identifiers = configuration.get("identifiers", [])
-            aggregations = configuration.get("aggregations", {})
-            bucket_name = configuration.get("bucket_name", "trinity")
-            
-            try:
-                # Call run_groupby directly
-                result = await run_groupby(
-                    validator_atom_id=atom_instance_id,
-                    file_key=primary_file,
-                    bucket_name=bucket_name,
-                    object_names=primary_file,
-                    identifiers=json.dumps(identifiers),
-                    aggregations=json.dumps(aggregations),
-                    card_id=card_id,
-                    canvas_position=kwargs.get("canvas_position", 0),
-                )
-                
-                if isinstance(result, dict):
-                    task_response = result
-                    task_status = result.get("task_status", result.get("status", "unknown"))
-                    result_file = result.get("result_file")
-                    
-                    if task_status != "success" or not result_file:
-                        return {
-                            "status": "failed" if task_status == "failure" else "pending",
-                            "result_file": result_file,
-                            "message": result.get("detail", "GroupBy execution failed"),
-                            "task_response": task_response,
-                            "additional_results": None
-                        }
-                else:
-                    return {
-                        "status": "failed",
-                        "result_file": None,
-                        "message": "GroupBy execution returned unexpected result",
-                        "task_response": None,
-                        "additional_results": None
-                    }
-                    
-            except Exception as e:
-                logger.error(f"❌ Error executing groupby run: {e}", exc_info=True)
-                return {
-                    "status": "failed",
-                    "result_file": None,
-                    "message": f"Error executing groupby: {str(e)}",
-                    "task_response": None,
-                    "additional_results": None
-                }
-        
-        # Execute save endpoint if it was called and we have a result file
-        if has_save and save_endpoint and result_file:
-            logger.info(
-                f"💾 GroupBy executor: Executing /save for atom {atom_instance_id} "
-                f"with result file: {result_file}"
-            )
-            
-            save_config = save_endpoint.get("params", {})
-            filename = save_config.get("filename")
-            
-            if filename:
-                try:
-                    # Load result file and convert to CSV
-                    df = load_dataframe(MINIO_BUCKET, result_file)
-                    csv_data = df.to_csv(index=False)
-                    
-                    # Call save_groupby
-                    save_payload = {
-                        "csv_data": csv_data,
-                        "filename": filename,
-                        "validator_atom_id": atom_instance_id,
-                        "card_id": card_id,
-                        "canvas_position": kwargs.get("canvas_position", 0),
-                    }
-                    
-                    save_result = await save_groupby(save_payload)
-                    
-                    if isinstance(save_result, dict):
-                        save_status = save_result.get("task_status", save_result.get("status", "unknown"))
-                        if save_status == "success":
-                            # Extract saved filename from result
-                            saved_filename = save_result.get("filename") or save_result.get("result_file")
-                            if saved_filename:
-                                logger.info(f"✅ SaveAs completed successfully for atom {atom_instance_id}, saved to: {saved_filename}")
-                            else:
-                                logger.info(f"✅ SaveAs completed successfully for atom {atom_instance_id}")
-                        else:
-                            logger.warning(f"⚠️ SaveAs failed for atom {atom_instance_id}")
-                except Exception as save_error:
-                    logger.error(f"❌ Error executing groupby save: {save_error}", exc_info=True)
-                    save_result = {"status": "failed", "error": str(save_error)}
             else:
-                logger.warning(f"⚠️ Save endpoint found but no filename in params")
+                # For other endpoints, try to extract file from params
+                call_file = (
+                    params.get("object_names") or 
+                    params.get("file_key") or 
+                    params.get("object_name") or
+                    current_file_context  # Fall back to current context
+                )
+            
+            # Check for init endpoint
+            if endpoint in ["/api/groupby/init", "/groupby/init"] or endpoint.endswith("/init"):
+                # Update current file context when we see an init call
+                current_file_context = call_file
+                logger.info(
+                    f"🔄 [GROUPBY] Executing /init for atom {atom_instance_id} with file: {call_file}"
+                )
+                
+                try:
+                    # Extract configuration from API call params
+                    init_config = params
+                    bucket_name = configuration.get("bucket_name", init_config.get("bucket_name", "trinity"))
+                    object_names = call_file
+                    
+                    # Get client/app/project from config or environment
+                    client_name = init_config.get("client_name") or os.getenv("CLIENT_NAME", "")
+                    app_name = init_config.get("app_name") or os.getenv("APP_NAME", "")
+                    project_name = init_config.get("project_name") or os.getenv("PROJECT_NAME", "")
+                    
+                    # Call initialize_groupby directly
+                    from app.features.groupby.service import initialize_groupby
+                    init_result = initialize_groupby(
+                        bucket_name=bucket_name,
+                        object_name=object_names,
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        file_key=call_file,
+                    )
+                    
+                    init_results.append(init_result)
+                    
+                    if init_result.get("status") != "SUCCESS":
+                        logger.warning(f"⚠️ GroupBy init returned non-success status: {init_result.get('status')}")
+                    else:
+                        logger.info(f"✅ GroupBy init completed successfully for file: {call_file}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error executing groupby init: {e}", exc_info=True)
+                    # Don't fail the entire execution if init fails, but log it
+                
+                i += 1
+                
+            # Check for run endpoint (could be atom_execution_start, /groupby/run, etc.)
+            elif endpoint in ["atom_execution_start", "/api/groupby/run", "/groupby/run"] or ("run" in endpoint.lower() and "init" not in endpoint.lower()):
+                # Find the matching atom_execution_complete (next call if this is start)
+                run_start_call = api_call if endpoint == "atom_execution_start" else None
+                run_complete_call = None
+                run_file = call_file
+                
+                # If this is atom_execution_start, find the matching complete
+                if endpoint == "atom_execution_start":
+                    # Look ahead for atom_execution_complete
+                    if i + 1 < len(api_calls):
+                        next_call = api_calls[i + 1]
+                        if next_call.get("endpoint") == "atom_execution_complete":
+                            run_complete_call = next_call
+                            i += 1  # Skip the complete call, we'll process it here
+                
+                logger.info(
+                    f"🔄 [GROUPBY] Executing /run for atom {atom_instance_id} with file: {run_file}"
+                )
+                
+                try:
+                    # Extract configuration from API call params (use complete if available, else start)
+                    run_params = run_complete_call.get("params", {}) if run_complete_call else params
+                    
+                    # Get identifiers and aggregations from this specific API call's params
+                    identifiers = run_params.get("identifiers")
+                    if not identifiers:
+                        identifiers = configuration.get("identifiers", [])
+                    
+                    aggregations = run_params.get("aggregations")
+                    if not aggregations:
+                        aggregations = configuration.get("aggregations", {})
+                    
+                    bucket_name = configuration.get("bucket_name", run_params.get("bucket_name", "trinity"))
+                    
+                    # Call run_groupby with file from this API call (already has replacements applied)
+                    result = await run_groupby(
+                        validator_atom_id=atom_instance_id,
+                        file_key=run_file,
+                        bucket_name=bucket_name,
+                        object_names=run_file,
+                        identifiers=json.dumps(identifiers) if isinstance(identifiers, list) else identifiers,
+                        aggregations=json.dumps(aggregations) if isinstance(aggregations, dict) else aggregations,
+                        card_id=card_id,
+                        canvas_position=kwargs.get("canvas_position", 0),
+                    )
+                    
+                    if isinstance(result, dict):
+                        task_response = result
+                        task_status = result.get("task_status", result.get("status", "unknown"))
+                        # Update result_file for this sequence
+                        if result.get("result_file"):
+                            result_file = result.get("result_file")
+                        
+                        if task_status == "failure":
+                            logger.error(f"❌ GroupBy run failed: {result.get('detail', 'Unknown error')}")
+                            # Continue to next sequence instead of failing entirely
+                        else:
+                            logger.info(f"✅ GroupBy run completed successfully, result_file: {result_file}")
+                    else:
+                        logger.error(f"❌ GroupBy run returned unexpected result type")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error executing groupby run: {e}", exc_info=True)
+                    # Continue to next sequence instead of failing entirely
+                
+                i += 1
+                
+            # Check for save endpoint
+            elif endpoint in ["/api/groupby/save", "/groupby/save"] or endpoint.endswith("/save"):
+                logger.info(
+                    f"💾 [GROUPBY] Executing /save for atom {atom_instance_id} "
+                    f"with result file: {result_file}"
+                )
+                
+                save_config = params
+                filename = save_config.get("filename")
+                
+                if filename and result_file:
+                    try:
+                        # Load result file and convert to CSV
+                        df = load_dataframe(MINIO_BUCKET, result_file)
+                        csv_data = df.to_csv(index=False)
+                        
+                        # Call save_groupby
+                        save_payload = {
+                            "csv_data": csv_data,
+                            "filename": filename,
+                            "validator_atom_id": atom_instance_id,
+                            "card_id": card_id,
+                            "canvas_position": kwargs.get("canvas_position", 0),
+                        }
+                        
+                        save_result = await save_groupby(save_payload)
+                        
+                        if isinstance(save_result, dict):
+                            save_status = save_result.get("task_status", save_result.get("status", "unknown"))
+                            if save_status == "success":
+                                # Extract saved filename from result
+                                saved_filename = save_result.get("filename") or save_result.get("result_file")
+                                if saved_filename:
+                                    all_saved_files.append(saved_filename)
+                                    save_results.append(save_result)
+                                    logger.info(f"✅ SaveAs completed successfully for atom {atom_instance_id}, saved to: {saved_filename}")
+                                else:
+                                    logger.info(f"✅ SaveAs completed successfully for atom {atom_instance_id}")
+                            else:
+                                logger.warning(f"⚠️ SaveAs failed for atom {atom_instance_id}")
+                    except Exception as save_error:
+                        logger.error(f"❌ Error executing groupby save: {save_error}", exc_info=True)
+                        save_results.append({"status": "failed", "error": str(save_error)})
+                else:
+                    if not filename:
+                        logger.warning(f"⚠️ Save endpoint found but no filename in params")
+                    if not result_file:
+                        logger.warning(f"⚠️ Save endpoint found but no result_file available")
+                
+                i += 1
+            else:
+                # Unknown endpoint, skip it
+                logger.warning(f"⚠️ [GROUPBY] Unknown endpoint: {endpoint}, skipping")
+                i += 1
         
         # Build additional_results with saved file info
         additional_results_dict = {}
-        if init_result:
-            additional_results_dict["init_result"] = init_result
-        if save_result:
-            additional_results_dict["save_result"] = save_result
-            # Extract saved filename for easy access
-            if isinstance(save_result, dict):
-                saved_filename = save_result.get("filename") or save_result.get("result_file")
-                if saved_filename:
-                    additional_results_dict["saved_file"] = saved_filename
+        if init_results:
+            additional_results_dict["init_results"] = init_results
+            # For backward compatibility, also include last init result
+            if len(init_results) > 0:
+                additional_results_dict["init_result"] = init_results[-1]
+        if save_results:
+            # Include all save results (not just the last one)
+            additional_results_dict["save_results"] = save_results
+            # For backward compatibility, include last save result
+            if len(save_results) > 0:
+                additional_results_dict["save_result"] = save_results[-1]
+            # Include all saved files
+            if all_saved_files:
+                additional_results_dict["saved_files"] = all_saved_files
+                additional_results_dict["saved_file"] = all_saved_files[-1]  # Last saved file for backward compatibility
         
         return {
             "status": "success",
@@ -312,8 +359,14 @@ class FeatureOverviewExecutor(BaseAtomExecutor):
         from app.features.feature_overview.routes import _as_bool
         import json
         
-        # Get primary input file
-        primary_file = input_files[0] if input_files else configuration.get("file_key", "")
+        # Get primary input file (keep original case - file paths are case-sensitive)
+        # ALWAYS use input_files[0] - never fall back to configuration.get("file_key") as it may be lowercase
+        primary_file = input_files[0] if input_files else ""
+        if not primary_file:
+            logger.warning(
+                f"⚠️ FeatureOverview executor: No input_files provided for atom {atom_instance_id}, "
+                f"this may cause file path issues"
+            )
         
         # Check which endpoints were called
         has_uniquecount = False
@@ -346,11 +399,27 @@ class FeatureOverviewExecutor(BaseAtomExecutor):
                 # Extract configuration from API call params
                 uniquecount_config = uniquecount_endpoint.get("params", {})
                 bucket_name = configuration.get("bucket_name", uniquecount_config.get("bucket_name", "trinity"))
-                object_names = uniquecount_config.get("object_names", [primary_file])
                 
-                # Ensure object_names is a list
+                # 🔧 CRITICAL: ALWAYS use primary_file from input_files to preserve original case
+                # Never use stored object_names from params as they may be lowercase
+                # input_files comes from pipeline execution with correct case
+                if not primary_file:
+                    return {
+                        "status": "failed",
+                        "result_file": None,
+                        "message": "No input file provided for feature_overview uniquecount",
+                        "task_response": None,
+                        "additional_results": None
+                    }
+                
+                # Always use primary_file - never fall back to stored params
+                object_names = [primary_file]
+                
+                # Ensure object_names is a list (keep original case - file paths are case-sensitive)
                 if isinstance(object_names, str):
                     object_names = [object_names]
+                else:
+                    object_names = [str(name) for name in object_names]
                 
                 # Resolve dependencies manually
                 results_collection = await get_unique_dataframe_results_collection()
@@ -369,8 +438,9 @@ class FeatureOverviewExecutor(BaseAtomExecutor):
                     from app.features.column_classifier.database import get_classifier_config_from_mongo
                     cfg = get_classifier_config_from_mongo(client_name, app_name, project_name, primary_file)
                     if cfg:
-                        identifiers = [col for col in cfg.get("identifiers", []) if isinstance(col, str)]
-                        measures = [col for col in cfg.get("measures", []) if isinstance(col, str)]
+                        # Convert identifiers and measures to lowercase for consistency with file columns
+                        identifiers = [col.lower() if isinstance(col, str) else col for col in cfg.get("identifiers", []) if isinstance(col, str)]
+                        measures = [col.lower() if isinstance(col, str) else col for col in cfg.get("measures", []) if isinstance(col, str)]
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to get classifier config for feature-overview: {e}")
                 
@@ -471,11 +541,27 @@ class FeatureOverviewExecutor(BaseAtomExecutor):
                 # Extract configuration from API call params
                 summary_config = summary_endpoint.get("params", {})
                 bucket_name = configuration.get("bucket_name", summary_config.get("bucket_name", "trinity"))
-                object_names = summary_config.get("object_names", [primary_file])
                 
-                # Ensure object_names is a list
+                # 🔧 CRITICAL: ALWAYS use primary_file from input_files to preserve original case
+                # Never use stored object_names from params as they may be lowercase
+                # input_files comes from pipeline execution with correct case
+                if not primary_file:
+                    return {
+                        "status": "failed",
+                        "result_file": None,
+                        "message": "No input file provided for feature_overview summary",
+                        "task_response": task_response,
+                        "additional_results": additional_results
+                    }
+                
+                # Always use primary_file - never fall back to stored params
+                object_names = [primary_file]
+                
+                # Ensure object_names is a list (keep original case - file paths are case-sensitive)
                 if isinstance(object_names, str):
                     object_names = [object_names]
+                else:
+                    object_names = [str(name) for name in object_names]
                 
                 create_hierarchy = summary_config.get("create_hierarchy", False)
                 create_summary = summary_config.get("create_summary", False)
