@@ -436,7 +436,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
               stageRefs.current[stage] = el;
             }
           }}
-          className={`w-full bg-white border-2 ${borderColor} rounded-lg shadow-sm mb-4 flex flex-col transition-all duration-200 ${
+          className={`w-full min-w-0 overflow-hidden bg-white border-2 ${borderColor} rounded-lg shadow-sm mb-4 flex flex-col transition-all duration-200 ${
             isCurrent ? 'shadow-md' : ''
           }`}
         >
@@ -636,7 +636,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
   );
 
   return (
-    <Card className="w-full bg-white border-2 border-gray-200 rounded-lg shadow-sm p-6">
+    <Card className="w-full min-w-0 overflow-hidden bg-white border-2 border-gray-200 rounded-lg shadow-sm p-6">
       <div className="w-full flex flex-col">
         {/* Header describing the inline metric workflow */}
         <div className="mb-4 px-1 flex items-center justify-between">

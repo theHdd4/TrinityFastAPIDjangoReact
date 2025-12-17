@@ -1250,7 +1250,7 @@ const LaboratoryMode = () => {
           {/* Main Canvas Area */}
           <div
             data-lab-canvas="true"
-            className={`flex-1 pt-[2.1rem] px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
+            className={`flex-1 min-w-0 overflow-hidden pt-[2.1rem] px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
             onClick={
               canEdit
                 ? () => {

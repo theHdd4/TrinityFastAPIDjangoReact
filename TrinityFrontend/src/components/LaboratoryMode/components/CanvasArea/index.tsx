@@ -1373,7 +1373,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
     console.log('[MetricGuidedFlow] Rendering MetricGuidedFlowInline component');
     return (
-      <div className="w-full mt-4">
+      <div className="w-full min-w-0 overflow-hidden mt-4">
         <MetricGuidedFlowInline
           initialStage={activeMetricGuidedFlow?.currentStage}
           savedState={activeMetricGuidedFlow?.state}
@@ -6328,10 +6328,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         cancelLabel="Cancel"
         confirmButtonClass="bg-red-500 hover:bg-red-600"
       />
-      <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
-        <div className={canEdit ? '' : 'pointer-events-none'}>
+      <div className="h-full w-full min-w-0 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
+        <div className={`${canEdit ? '' : 'pointer-events-none'} min-w-0`}>
           {/* Layout Cards Container */}
-          <div data-lab-cards-container="true" className="p-2 space-y-6 w-full">
+          <div data-lab-cards-container="true" className="p-2 space-y-6 w-full min-w-0">
             {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
               const cardTitle = card.moleculeTitle
                 ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
@@ -6617,7 +6617,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                   </Card>
                   {/* Global Metric Guided Workflow inline card anchored below the target card when context is available */}
                   {isMetricGuidedFlowOpen && metricContextCardId === card.id && (
-                    <div className="w-full mt-4">
+                    <div className="w-full min-w-0 overflow-hidden mt-4">
                       <MetricGuidedFlowInline
                         initialStage={activeMetricGuidedFlow?.currentStage}
                         savedState={activeMetricGuidedFlow?.state}
