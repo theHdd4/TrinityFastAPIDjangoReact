@@ -1936,6 +1936,11 @@ export interface MetricsInputSettings {
   dataSource: string;
   operations: MetricsOperation[];
   currentTab: 'input' | 'variables' | 'column-operations' | 'exhibition';
+  /**
+   * Per-atom mapping of the last selected dataframe (object_name) in that atom's settings.
+   * Key: atomId, Value: resolved object_name (ideally including client/app/project prefix).
+   */
+  atomDataframes?: Record<string, string>;
   // Variable tab specific settings
   variableComputeMode?: 'whole-dataframe' | 'within-group';
   variableType?: 'dataframe' | 'constant';
@@ -1959,6 +1964,7 @@ export const DEFAULT_METRICS_INPUT_SETTINGS: MetricsInputSettings = {
   dataSource: '',
   operations: [],
   currentTab: 'input',
+  atomDataframes: {},
   variableComputeMode: 'whole-dataframe',
   variableType: 'dataframe',
   computeWithinGroup: false,
@@ -2037,6 +2043,7 @@ interface LaboratoryStore {
 
   // --- Metrics Actions ---
   updateMetricsInputs: (updates: Partial<MetricsInputSettings>) => void;
+  setAtomCurrentDataframe: (atomId: string, objectName: string) => void;
   addMetricsOperation: (operation: MetricsOperation) => void;
   updateMetricsOperation: (operationId: string, updates: Partial<MetricsOperation>) => void;
   removeMetricsOperation: (operationId: string) => void;
@@ -2384,6 +2391,18 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       metricsInputs: {
         ...state.metricsInputs,
         ...updates,
+      },
+    }));
+  },
+
+  setAtomCurrentDataframe: (atomId: string, objectName: string) => {
+    set(state => ({
+      metricsInputs: {
+        ...state.metricsInputs,
+        atomDataframes: {
+          ...(state.metricsInputs.atomDataframes || {}),
+          [atomId]: objectName,
+        },
       },
     }));
   },

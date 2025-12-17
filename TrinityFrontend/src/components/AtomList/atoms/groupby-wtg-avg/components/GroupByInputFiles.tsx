@@ -104,6 +104,14 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     if (!val.endsWith('.arrow')) {
       val += '.arrow';
     }
+
+    // Record the current dataframe selection for this atom in the laboratory store
+    try {
+      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+      setAtomCurrentDataframe(atomId, val);
+    } catch {
+      // best-effort; do not block group-by on metrics sync
+    }
     const res = await fetch(
       `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
     );

@@ -51,6 +51,14 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
     setSavedId(value);
     // Update validatorId in settings so it syncs properly
     updateSettings(atomId, { validatorId: value });
+
+    // Record the current dataframe selection for this atom in the laboratory store
+    try {
+      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+      setAtomCurrentDataframe(atomId, value);
+    } catch {
+      // best-effort; do not block classifier on metrics sync
+    }
   };
 
   const { requestChange: confirmSavedIdChange, dialog } = useDataSourceChangeWarning(async value => {

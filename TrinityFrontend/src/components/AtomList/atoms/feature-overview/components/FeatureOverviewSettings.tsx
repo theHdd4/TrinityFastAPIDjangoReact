@@ -6,6 +6,7 @@ import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { cancelPrefillController } from '@/components/AtomList/atoms/column-classifier/prefillManager';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface FeatureOverviewSettingsProps {
   atomId: string;
@@ -148,6 +149,14 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       frameList.find(f => f.object_name === activeSource)?.csv_name ||
       frameList.find(f => f.object_name === normalized)?.csv_name ||
       activeSource;
+
+    // Record the current dataframe selection for this atom in the laboratory store
+    try {
+      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+      setAtomCurrentDataframe(atomId, activeSource);
+    } catch {
+      // best-effort; do not break feature overview if store access fails
+    }
 
     onSettingsChange({
       dataSource: activeSource,

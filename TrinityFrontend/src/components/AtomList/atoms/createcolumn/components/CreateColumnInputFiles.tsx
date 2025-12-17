@@ -202,6 +202,15 @@ const CreateColumnInputFiles: React.FC<Props> = ({ atomId, selectedIdentifiers, 
       setShowCatSelector(true);
       setSelectedIdentifiers(cats);
     }
+
+    // Record the current dataframe selection for this atom in the laboratory store
+    try {
+      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+      setAtomCurrentDataframe(atomId, val);
+    } catch {
+      // best-effort; do not block create-column on metrics sync
+    }
+
     updateSettings(atomId, {
       dataSource: val,
       csvDisplay:
