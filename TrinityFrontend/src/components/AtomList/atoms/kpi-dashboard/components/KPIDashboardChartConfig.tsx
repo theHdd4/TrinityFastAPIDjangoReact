@@ -142,7 +142,9 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
 
   // Fetch available dataframes from database
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+    fetch(`${VALIDATE_API}/list_saved_dataframes`, {
+      credentials: 'include'
+    })
       .then(r => r.json())
       .then(d => {
         // Filter to only show Arrow files
@@ -160,6 +162,9 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
 
   // Load dataframe data when file is selected
   const handleFileSelect = async (fileId: string) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:164',message:'handleFileSelect entry',data:{fileId,onDataUploadType:typeof onDataUpload,onDataUploadIsFunc:typeof onDataUpload==='function',onSettingsChangeType:typeof onSettingsChange,onSettingsChangeIsFunc:typeof onSettingsChange==='function'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     setSelectedFile(fileId);
     setLoadingDataSource(true);
     setDataSourceError(null);
@@ -168,17 +173,33 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
       const response = await fetch(`${VALIDATE_API}/load_dataframe_by_key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ key: fileId })
       });
 
       if (!response.ok) {
-        throw new Error('Failed to load dataframe');
+        // Try to get the actual error message from the backend
+        let errorMessage = 'Failed to load dataframe';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.message || errorMessage;
+        } catch {
+          // If response is not JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
       const responseData = await response.json();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:190',message:'Response data received',data:{hasHeaders:!!responseData.headers,headersType:typeof responseData.headers,headersIsArray:Array.isArray(responseData.headers),headersLength:Array.isArray(responseData.headers)?responseData.headers.length:'N/A',hasRows:!!responseData.rows,rowsType:typeof responseData.rows,rowsIsArray:Array.isArray(responseData.rows),rowsLength:Array.isArray(responseData.rows)?responseData.rows.length:'N/A',responseDataKeys:Object.keys(responseData)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       const frame = frames.find(f => f.object_name === fileId);
       const fileName = frame?.arrow_name?.split('/').pop() || fileId;
       
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:195',message:'Before onSettingsChange call',data:{fileName,onSettingsChangeType:typeof onSettingsChange,onSettingsChangeIsFunc:typeof onSettingsChange==='function'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       // Save selected file to settings so it's available for chart rendering
       onSettingsChange({ 
         ...settings,
@@ -186,17 +207,27 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
         dataSource: fileName
       } as any);
       
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:201',message:'Before onDataUpload call',data:{onDataUploadType:typeof onDataUpload,onDataUploadIsFunc:typeof onDataUpload==='function',uploadDataHeaders:Array.isArray(responseData.headers)?responseData.headers.length:'N/A',uploadDataRows:Array.isArray(responseData.rows)?responseData.rows.length:'N/A',fileName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       onDataUpload({
         headers: responseData.headers || [],
         rows: responseData.rows || [],
         fileName: fileName,
         metrics: []
       });
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:207',message:'After onDataUpload call',data:{success:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
 
       setLoadingDataSource(false);
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:209',message:'Error in handleFileSelect',data:{errorType:err instanceof Error?err.constructor.name:'unknown',errorMessage:err instanceof Error?err.message:String(err),errorStack:err instanceof Error?err.stack:'N/A'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
       console.error('Error loading dataframe:', err);
-      setDataSourceError('Failed to load dataframe');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load dataframe';
+      setDataSourceError(errorMessage);
       setLoadingDataSource(false);
     }
   };
@@ -543,18 +574,7 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
     );
   }
 
-  if (!data) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 text-center p-4">
-        <BarChart3 className="w-12 h-12 text-muted-foreground mb-3" />
-        <p className="text-sm text-muted-foreground">
-          Upload data in the Settings tab to configure charts
-        </p>
-      </div>
-    );
-  }
-
-  if (loading && !chartData) {
+  if (loading && !chartData && data) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center p-4">
         <BarChart3 className="w-12 h-12 text-muted-foreground mb-3 animate-pulse" />
@@ -601,11 +621,20 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Chart Configuration</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      {!data && (
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <p className="text-sm text-muted-foreground">
+            Select a dataframe above to configure your chart
+          </p>
+        </div>
+      )}
+
+      {data && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Chart Configuration</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
           {/* Chart Title and Type */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -877,17 +906,20 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
           </div>
         </CardContent>
       </Card>
+      )}
 
-      <div className="sticky bottom-0 pt-4 border-t bg-white z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
-        <Button 
-          onClick={handleRenderChart} 
-          className="w-full"
-          disabled={!chartData || !validateChart(migrateLegacyChart(chartConfig)) || loading}
-        >
-          <BarChart3 className="w-4 h-4 mr-2" />
-          {loading ? 'Rendering...' : 'Render Chart'}
-        </Button>
-      </div>
+      {data && (
+        <div className="sticky bottom-0 pt-4 border-t bg-white z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+          <Button 
+            onClick={handleRenderChart} 
+            className="w-full"
+            disabled={!chartData || !validateChart(migrateLegacyChart(chartConfig)) || loading}
+          >
+            <BarChart3 className="w-4 h-4 mr-2" />
+            {loading ? 'Rendering...' : 'Render Chart'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

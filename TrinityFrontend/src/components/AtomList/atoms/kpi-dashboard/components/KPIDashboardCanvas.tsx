@@ -868,6 +868,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   const [uniqueValues, setUniqueValues] = useState<Record<string, string[]>>({});
   const [loadingUniqueValues, setLoadingUniqueValues] = useState(false);
   const [tempFilters, setTempFilters] = useState<Record<string, string[]>>({});
+  const [expandedIdentifiers, setExpandedIdentifiers] = useState<Record<string, boolean>>({});
+  const [searchTerms, setSearchTerms] = useState<Record<string, string>>({});
   
   const selectedElement = elementTypes.find(e => e.value === box.elementType);
   
@@ -1402,6 +1404,31 @@ const ElementBox: React.FC<ElementBoxProps> = ({
     });
     setTempFilters(currentFilters);
   }, [box.elementType, box.chartConfig, filterEditorOpen, data, settings]);
+
+  // Initialize expanded state for first few identifiers when filter editor opens
+  useEffect(() => {
+    if (!filterEditorOpen || box.elementType !== 'chart' || !data) return;
+    
+    const getFilterableColumns = () => {
+      if (!data || !data.headers) return [];
+      const chartConfig = box.chartConfig ? (typeof box.chartConfig === 'string' ? JSON.parse(box.chartConfig) : box.chartConfig) : null;
+      if (!chartConfig) return [];
+      const xAxis = chartConfig?.xAxis;
+      const yAxis = chartConfig?.yAxis;
+      return (data.headers as string[]).filter((col: string) => col !== xAxis && col !== yAxis);
+    };
+    
+    const filterableColumns = getFilterableColumns();
+    const newExpanded: Record<string, boolean> = {};
+    filterableColumns.slice(0, 3).forEach(col => {
+      if (expandedIdentifiers[col] === undefined) {
+        newExpanded[col] = true;
+      }
+    });
+    if (Object.keys(newExpanded).length > 0) {
+      setExpandedIdentifiers(prev => ({ ...prev, ...newExpanded }));
+    }
+  }, [filterEditorOpen, box.elementType, box.chartConfig, data, expandedIdentifiers]);
 
   // If element is selected and NOT in edit mode, show the full element
   if (box.elementType && !isEditMode) {
@@ -4892,12 +4919,12 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                 </button>
               </PopoverTrigger>
               <PopoverContent 
-                className="w-80 max-h-96 p-0" 
+                className="w-80 max-h-[550px] p-0 flex flex-col" 
                 align="end"
                 onClick={(e) => e.stopPropagation()}
                 onOpenAutoFocus={(e) => e.preventDefault()}
               >
-                <div className="p-3 border-b">
+                <div className="p-3 border-b flex-shrink-0">
                   <div className="flex items-center justify-between">
                     <h4 className="font-semibold text-sm">Chart Filters</h4>
                     <button
@@ -4908,8 +4935,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     </button>
                   </div>
                 </div>
-                <ScrollArea className="max-h-80">
-                  <div className="p-3 space-y-4">
+                <ScrollArea className="h-[450px]">
+                  <div className="p-3 space-y-2">
                     {loadingUniqueValues ? (
                       <div className="text-center py-4 text-sm text-gray-500">
                         Loading filter options...
@@ -4919,45 +4946,105 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                         const columnValues = uniqueValues[column] || [];
                         const selectedValues = tempFilters[column] || [];
                         const allSelected = columnValues.length > 0 && selectedValues.length === columnValues.length;
+                        const isExpanded = expandedIdentifiers[column] ?? false;
+                        const searchTerm = searchTerms[column] || '';
+                        
+                        // Filter values based on search term
+                        const filteredValues = searchTerm
+                          ? columnValues.filter(value => 
+                              String(value).toLowerCase().includes(searchTerm.toLowerCase())
+                            )
+                          : columnValues;
 
                         return (
-                          <div key={column} className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <Label className="text-xs font-medium capitalize">
-                                {column.replace(/_/g, ' ')}
-                              </Label>
-                              <div className="flex items-center gap-2">
+                          <div key={column} className="border border-gray-200 rounded-lg overflow-hidden">
+                            {/* Header - Clickable to expand/collapse */}
+                            <button
+                              onClick={() => {
+                                setExpandedIdentifiers(prev => ({
+                                  ...prev,
+                                  [column]: !prev[column]
+                                }));
+                              }}
+                              className="w-full flex items-center justify-between p-2.5 bg-gray-50 hover:bg-gray-100 transition-colors"
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <ChevronDown 
+                                  className={`w-4 h-4 text-gray-500 transition-transform flex-shrink-0 ${
+                                    isExpanded ? 'transform rotate-180' : ''
+                                  }`}
+                                />
+                                <Label className="text-sm font-medium capitalize text-left truncate">
+                                  {column.replace(/_/g, ' ')}
+                                </Label>
+                                {selectedValues.length > 0 && (
+                                  <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                                    {selectedValues.length}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
                                 <Checkbox
                                   checked={allSelected}
                                   onCheckedChange={(checked) => {
                                     handleFilterChange(column, checked ? columnValues : []);
                                   }}
+                                  onClick={(e) => e.stopPropagation()}
                                 />
                                 <span className="text-xs text-gray-500">
-                                  Select All
+                                  All
                                 </span>
                               </div>
-                            </div>
-                            <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                              {columnValues.length === 0 ? (
-                                <p className="text-xs text-gray-400">No values available</p>
-                              ) : (
-                                columnValues.map((value) => (
-                                  <div key={value} className="flex items-center space-x-2">
-                                    <Checkbox
-                                      checked={selectedValues.includes(value)}
-                                      onCheckedChange={(checked) => {
-                                        const newValues = checked
-                                          ? [...selectedValues, value]
-                                          : selectedValues.filter((v) => v !== value);
-                                        handleFilterChange(column, newValues);
+                            </button>
+                            
+                            {/* Collapsible Content */}
+                            {isExpanded && (
+                              <div className="p-2.5 space-y-2 bg-white">
+                                {/* Search Input */}
+                                {columnValues.length > 5 && (
+                                  <div className="relative">
+                                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                    <Input
+                                      type="text"
+                                      placeholder="Search values..."
+                                      value={searchTerm}
+                                      onChange={(e) => {
+                                        setSearchTerms(prev => ({
+                                          ...prev,
+                                          [column]: e.target.value
+                                        }));
                                       }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="pl-8 h-8 text-xs"
                                     />
-                                    <span className="text-xs">{String(value).replace(/_/g, ' ')}</span>
                                   </div>
-                                ))
-                              )}
-                            </div>
+                                )}
+                                
+                                {/* Values List */}
+                                <div className="space-y-1 max-h-[200px] overflow-y-auto">
+                                  {filteredValues.length === 0 ? (
+                                    <p className="text-xs text-gray-400 text-center py-2">
+                                      {searchTerm ? 'No matching values' : 'No values available'}
+                                    </p>
+                                  ) : (
+                                    filteredValues.map((value) => (
+                                      <div key={value} className="flex items-center space-x-2 py-0.5">
+                                        <Checkbox
+                                          checked={selectedValues.includes(value)}
+                                          onCheckedChange={(checked) => {
+                                            const newValues = checked
+                                              ? [...selectedValues, value]
+                                              : selectedValues.filter((v) => v !== value);
+                                            handleFilterChange(column, newValues);
+                                          }}
+                                        />
+                                        <span className="text-xs text-gray-700">{String(value).replace(/_/g, ' ')}</span>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })
@@ -4970,7 +5057,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                   </div>
                 </ScrollArea>
                 {hasFilters && (
-                  <div className="p-3 border-t bg-gray-50">
+                  <div className="p-3 border-t bg-gray-50 flex-shrink-0">
                     <div className="flex flex-wrap gap-1.5">
                       {Object.entries(tempFilters).map(([key, values]) => {
                         const filterValues = Array.isArray(values) ? values : [];
