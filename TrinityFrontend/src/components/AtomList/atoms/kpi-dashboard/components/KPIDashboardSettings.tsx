@@ -973,58 +973,10 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                         const previousLocalFilters = settings.previousLocalFilters || {};
                         
                         if (value === '__all__') {
+                          // Remove this identifier's filter (set to empty array)
                           currentFilter.values = [];
-                          // Restore previous local filters when global filter is removed
-                          let restoredLayouts = settings.layouts;
-                          
-                          // Restore chart filters
-                          restoredLayouts = restoredLayouts?.map(layout => ({
-                            ...layout,
-                            boxes: layout.boxes.map(box => {
-                              if (box.elementType === 'chart' && box.chartConfig) {
-                                const originalChartConfig = box.chartConfig;
-                                const chartConfig = migrateLegacyChart(originalChartConfig);
-                                const previousFilters = previousLocalFilters[`chart_${box.id}`] || {};
-                                
-                                return {
-                                  ...box,
-                                  chartConfig: {
-                                    ...originalChartConfig,
-                                    ...chartConfig,
-                                    filters: previousFilters,
-                                    chartRendered: false
-                                  }
-                                };
-                              }
-                              return box;
-                            })
-                          }));
-                          
-                          // Restore table filters
-                          restoredLayouts = restoredLayouts?.map(layout => ({
-                            ...layout,
-                            boxes: layout.boxes.map(box => {
-                              if (box.elementType === 'table' && box.tableSettings) {
-                                const previousFilters = previousLocalFilters[`table_${box.id}`] || {};
-                                
-                                return {
-                                  ...box,
-                                  tableSettings: {
-                                    ...box.tableSettings,
-                                    filters: previousFilters
-                                  }
-                                };
-                              }
-                              return box;
-                            })
-                          }));
-                          
-                          onSettingsChange({ 
-                            globalFilters: newGlobalFilters,
-                            layouts: restoredLayouts,
-                            previousLocalFilters: {} // Clear stored previous filters
-                          });
-                          return;
+                          // If the filter has no values, we can optionally delete it from newGlobalFilters
+                          // But keep it with empty values so the structure is maintained
                         } else {
                           currentFilter.values = [value];
                         }
@@ -1100,33 +1052,36 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                               // Add all active global filters for charts, using original column name if available
                               Object.entries(newGlobalFilters).forEach(([id, filterConfig]) => {
                                 const config = filterConfig as { values: string[] };
-                                // Only apply if identifier is in enabled list (or if no enabled list, apply all active filters)
+                                // Check if this filter should be applied or removed
+                                const hasActiveValues = config.values && config.values.length > 0 && !config.values.includes('__all__');
                                 const isEnabled = enabledIdentifiers.length === 0 || validGlobalFilterIdentifiers.has(id.toLowerCase());
                                 
-                                // If values exist and not "__all__", add to chart filters
-                                if (isEnabled && config.values && config.values.length > 0 && !config.values.includes('__all__')) {
-                                  // Use original column name if we found one
-                                  let columnName = identifierToColumnName.get(id.toLowerCase());
-                                  
-                                  // If no existing filter found, try to find matching column name from chart data
-                                  if (!columnName && (chartConfig as any)?.filteredData?.columns) {
-                                    const columns = (chartConfig as any).filteredData.columns;
-                                    const matchingColumn = columns.find((col: string) => 
-                                      col.toLowerCase() === id.toLowerCase()
-                                    );
-                                    if (matchingColumn) {
-                                      columnName = matchingColumn;
-                                      identifierToColumnName.set(id.toLowerCase(), matchingColumn);
-                                    }
+                                // Get column name first (needed for both applying and removing)
+                                let columnName = identifierToColumnName.get(id.toLowerCase());
+                                
+                                // If no existing filter found, try to find matching column name from chart data
+                                if (!columnName && (chartConfig as any)?.filteredData?.columns) {
+                                  const columns = (chartConfig as any).filteredData.columns;
+                                  const matchingColumn = columns.find((col: string) => 
+                                    col.toLowerCase() === id.toLowerCase()
+                                  );
+                                  if (matchingColumn) {
+                                    columnName = matchingColumn;
+                                    identifierToColumnName.set(id.toLowerCase(), matchingColumn);
                                   }
-                                  
-                                  // Fallback to lowercase identifier (backend handles case-insensitive matching)
-                                  if (!columnName) {
-                                    columnName = id;
-                                  }
-                                  
-                                  // Override existing filter with global filter value
+                                }
+                                
+                                // Fallback to lowercase identifier (backend handles case-insensitive matching)
+                                if (!columnName) {
+                                  columnName = id;
+                                }
+                                
+                                if (hasActiveValues && isEnabled) {
+                                  // Apply the global filter value
                                   chartSpecificFilters[columnName] = config.values;
+                                } else {
+                                  // Remove this specific filter (filter was removed or disabled)
+                                  delete chartSpecificFilters[columnName];
                                 }
                               });
                               
@@ -1150,6 +1105,13 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                           ...layout,
                           boxes: layout.boxes.map(box => {
                             if (box.elementType === 'table' && box.tableSettings) {
+                              // Only update table filters if table is in a valid state (has tableId and is loaded)
+                              // Skip if table is blank or not yet loaded
+                              if (!box.tableSettings.tableId || box.tableSettings.mode !== 'load' || !box.tableSettings.tableData) {
+                                // Table is not ready yet, skip filter update
+                                return box;
+                              }
+                              
                               // Store previous local filters before applying global filter
                               if (!previousLocalFilters[`table_${box.id}`]) {
                                 previousLocalFilters[`table_${box.id}`] = { ...(box.tableSettings.filters || {}) };
@@ -1195,37 +1157,36 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                               // Apply all active global filters to table filters with correct column name
                               Object.entries(newGlobalFilters).forEach(([id, filterConfig]) => {
                                 const config = filterConfig as { values: string[] };
-                                // Only apply if identifier is in enabled list (or if no enabled list, apply all active filters)
+                                // Find the actual column name (case-insensitive match) - do this first so we can remove it if needed
+                                let actualColumnName = columnMap.get(id.toLowerCase());
+                                
+                                // If not found, try to find a column that contains the identifier (for variations like "Brand" vs "brand")
+                                if (!actualColumnName && tableColumns.length > 0) {
+                                  const matchingCol = tableColumns.find(col => 
+                                    col.toLowerCase() === id.toLowerCase() || 
+                                    col.toLowerCase().includes(id.toLowerCase()) ||
+                                    id.toLowerCase().includes(col.toLowerCase())
+                                  );
+                                  if (matchingCol) {
+                                    actualColumnName = matchingCol;
+                                    columnMap.set(id.toLowerCase(), matchingCol);
+                                  }
+                                }
+                                
+                                // Fallback to identifier name if no match found
+                                if (!actualColumnName) {
+                                  actualColumnName = id;
+                                }
+                                
+                                // Check if this filter should be applied or removed
+                                const hasActiveValues = config.values && config.values.length > 0 && !config.values.includes('__all__');
                                 const isEnabled = enabledIdentifiers.length === 0 || validGlobalFilterIdentifiers.has(id.toLowerCase());
                                 
-                                if (isEnabled && config.values && config.values.length > 0 && !config.values.includes('__all__')) {
-                                  // Find the actual column name (case-insensitive match)
-                                  // Try exact match first, then try with different cases
-                                  let actualColumnName = columnMap.get(id.toLowerCase());
-                                  
-                                  // If not found, try to find a column that contains the identifier (for variations like "Brand" vs "brand")
-                                  if (!actualColumnName && tableColumns.length > 0) {
-                                    const matchingCol = tableColumns.find(col => 
-                                      col.toLowerCase() === id.toLowerCase() || 
-                                      col.toLowerCase().includes(id.toLowerCase()) ||
-                                      id.toLowerCase().includes(col.toLowerCase())
-                                    );
-                                    if (matchingCol) {
-                                      actualColumnName = matchingCol;
-                                      columnMap.set(id.toLowerCase(), matchingCol);
-                                    }
-                                  }
-                                  
-                                  // Fallback to identifier name if no match found
-                                  if (!actualColumnName) {
-                                    actualColumnName = id;
-                                  }
-                                  
-                                  // Override table filter with global filter value
+                                if (hasActiveValues && isEnabled) {
+                                  // Apply the global filter value
                                   tableFilters[actualColumnName] = config.values;
                                 } else {
-                                  // Remove global filter from table filters if set to "__all__" or not enabled
-                                  const actualColumnName = columnMap.get(id.toLowerCase()) || id;
+                                  // Remove this specific filter from table filters (filter was removed or disabled)
                                   delete tableFilters[actualColumnName];
                                 }
                               });
@@ -1235,7 +1196,12 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                 tableSettings: {
                                   ...box.tableSettings,
                                   filters: tableFilters, // Global filters override individual filters
-                                  currentPage: 1 // Reset to page 1 when filters change
+                                  currentPage: 1, // Reset to page 1 when filters change
+                                  // CRITICAL: Preserve tableId and tableData to ensure table can reload
+                                  tableId: box.tableSettings.tableId,
+                                  tableData: box.tableSettings.tableData,
+                                  mode: box.tableSettings.mode,
+                                  sourceFile: box.tableSettings.sourceFile
                                 }
                               };
                             }
@@ -1283,70 +1249,13 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                 // Parse current identifiers from variable key
                                 const parts = variableKey.split('_');
                                 const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
-                                const currentIdentifiers: Record<string, string> = {};
                                 
-                                let i = 2; // Skip first 2 parts (measure and aggregation)
-                                while (i < parts.length) {
-                                  const key = parts[i]?.toLowerCase();
-                                  if (identifierTypes.includes(key) && i + 1 < parts.length) {
-                                    let val = parts[i + 1];
-                                    let nextIndex = i + 2;
-                                    
-                                    while (nextIndex < parts.length) {
-                                      const nextPart = parts[nextIndex]?.toLowerCase();
-                                      if (!identifierTypes.includes(nextPart)) {
-                                        val += '_' + parts[nextIndex];
-                                        nextIndex++;
-                                      } else {
-                                        break;
-                                      }
-                                    }
-                                    
-                                    currentIdentifiers[key] = val;
-                                    i = nextIndex;
-                                  } else {
-                                    i++;
-                                  }
-                                }
-                                
-                                // First, remove any identifiers that are no longer in the enabled list
-                                if (enabledIdentifiers.length > 0) {
-                                  Object.keys(currentIdentifiers).forEach(id => {
-                                    if (!validGlobalFilterIdentifiers.has(id.toLowerCase())) {
-                                      // This identifier is no longer enabled - remove it
-                                      delete currentIdentifiers[id];
-                                    }
-                                  });
-                                }
-                                
-                                // Apply all global filters to current identifiers (override or add)
-                                Object.entries(newGlobalFilters).forEach(([globalId, filterConfig]) => {
-                                  const config = filterConfig as { values: string[] };
-                                  // Only apply if identifier is in enabled list (or if no enabled list, apply all active filters)
-                                  const isEnabled = enabledIdentifiers.length === 0 || validGlobalFilterIdentifiers.has(globalId.toLowerCase());
-                                  
-                                  if (isEnabled && config.values && config.values.length > 0 && !config.values.includes('__all__')) {
-                                    // Override or add the global filter identifier
-                                    currentIdentifiers[globalId] = config.values[0];
-                                  } else {
-                                    // Remove identifier if global filter is set to "__all__" or not enabled
-                                    delete currentIdentifiers[globalId];
-                                  }
-                                });
-                                
-                                // Find base pattern (first 2 parts: measure and aggregation)
-                                const basePattern = parts.slice(0, 2).join('_');
-                                
-                                // Find matching variable - either exact match or expanded version
-                                // First try to find exact match with all identifiers
-                                let matchingVar = variablesToUse.find((v: any) => {
-                                  const vKey = v.variableNameKey || v.variableName;
-                                  if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
-                                  
+                                // Helper function to parse identifiers from a variable key
+                                const parseIdentifiersFromKey = (vKey: string): Record<string, string> => {
                                   const vParts = vKey.split('_');
                                   const vIdentifiers: Record<string, string> = {};
                                   
-                                  let j = 2;
+                                  let j = 2; // Skip first 2 parts (measure and aggregation)
                                   while (j < vParts.length) {
                                     const key = vParts[j]?.toLowerCase();
                                     if (identifierTypes.includes(key) && j + 1 < vParts.length) {
@@ -1370,51 +1279,197 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                     }
                                   }
                                   
-                                  // Check if all current identifiers match (including global filters)
-                                  return Object.entries(currentIdentifiers).every(([key, val]) => 
-                                    vIdentifiers[key] === val
-                                  );
+                                  return vIdentifiers;
+                                };
+                                
+                                // Parse identifiers from current variable
+                                // IMPORTANT: We assume all identifiers in the current variable are "original"
+                                // unless we can definitively prove they were added by a previous expansion
+                                const currentIdentifiers = parseIdentifiersFromKey(variableKey);
+                                
+                                // Get previous global filters to detect if current variable was already expanded
+                                const previousGlobalFilters = settings.globalFilters || {};
+                                
+                                // Determine original identifiers by checking if they were added by previous global filters
+                                // An identifier is "original" if:
+                                // 1. It's in the current variable AND
+                                // 2. Either: (a) it doesn't match any previous global filter, OR
+                                //            (b) it matches a previous global filter but the value differs (meaning it was original)
+                                const originalIdentifiers: Record<string, string> = {};
+                                Object.entries(currentIdentifiers).forEach(([key, val]) => {
+                                  // Check if this identifier was in previous global filters
+                                  const prevFilter = previousGlobalFilters[key.toLowerCase()];
+                                  const wasInPreviousFilter = prevFilter && 
+                                                              prevFilter.values && 
+                                                              prevFilter.values.length > 0 && 
+                                                              !prevFilter.values.includes('__all__') &&
+                                                              prevFilter.values.includes(val);
+                                  
+                                  // If it matches a previous global filter exactly, it might have been added
+                                  // But if the value differs from the previous filter, it's definitely original
+                                  if (wasInPreviousFilter && prevFilter.values[0] === val) {
+                                    // This identifier matches a previous global filter - might have been added
+                                    // But we'll be conservative and include it as original if it's the only match
+                                    // The key insight: if ALL identifiers match previous filters, they're likely all original
+                                    // because a variable wouldn't have been created with all filters applied
+                                  }
+                                  
+                                  // For now, assume all identifiers in current variable are original
+                                  // This is the safest assumption - we'll detect additions by comparing with new filters
+                                  originalIdentifiers[key] = val;
                                 });
                                 
-                                // If no exact match found and we have global filters, try to find expanded variable
-                                // (variable that includes the global filter identifier even if original didn't)
-                                if (!matchingVar && Object.keys(currentIdentifiers).length > 0) {
+                                // Start with original identifiers as base
+                                const targetIdentifiers: Record<string, string> = { ...originalIdentifiers };
+                                
+                                // Track which global filter identifiers are being added (not in original variable)
+                                const addedGlobalFilterIdentifiers = new Set<string>();
+                                
+                                // Apply all global filters to target identifiers (override or add)
+                                Object.entries(newGlobalFilters).forEach(([globalId, filterConfig]) => {
+                                  const config = filterConfig as { values: string[] };
+                                  // Only apply if identifier is in enabled list (or if no enabled list, apply all active filters)
+                                  const isEnabled = enabledIdentifiers.length === 0 || validGlobalFilterIdentifiers.has(globalId.toLowerCase());
+                                  
+                                  if (isEnabled && config.values && config.values.length > 0 && !config.values.includes('__all__')) {
+                                    const globalIdLower = globalId.toLowerCase();
+                                    const filterValue = config.values[0];
+                                    
+                                    // Check if this identifier was in the original variable
+                                    const wasInOriginal = originalIdentifiers.hasOwnProperty(globalIdLower);
+                                    const originalValue = originalIdentifiers[globalIdLower];
+                                    
+                                    // If identifier was in original with same value, keep it (no change needed)
+                                    // If identifier was in original with different value, override it (filter change)
+                                    // If identifier was NOT in original, add it (expansion)
+                                    if (!wasInOriginal) {
+                                      // This is a new identifier - expansion case
+                                      targetIdentifiers[globalIdLower] = filterValue;
+                                      addedGlobalFilterIdentifiers.add(globalIdLower);
+                                    } else if (originalValue !== filterValue) {
+                                      // Identifier exists but value changed - override
+                                      targetIdentifiers[globalIdLower] = filterValue;
+                                      // Not added, just overridden
+                                    } else {
+                                      // Identifier exists with same value - no change
+                                      // Keep original value
+                                    }
+                                  } else {
+                                    // Global filter is set to "__all__" or not enabled - revert to original
+                                    const globalIdLower = globalId.toLowerCase();
+                                    if (originalIdentifiers.hasOwnProperty(globalIdLower)) {
+                                      // Revert to original value
+                                      targetIdentifiers[globalIdLower] = originalIdentifiers[globalIdLower];
+                                    } else {
+                                      // Remove identifier that was added by global filter
+                                      delete targetIdentifiers[globalIdLower];
+                                      addedGlobalFilterIdentifiers.delete(globalIdLower);
+                                    }
+                                  }
+                                });
+                                
+                                // Find base pattern (first 2 parts: measure and aggregation)
+                                const basePattern = parts.slice(0, 2).join('_');
+                                
+                                // Find matching variable - try multiple strategies
+                                let matchingVar: any = null;
+                                
+                                // Strategy 1: Try exact match with all target identifiers (same identifiers, same values)
+                                if (Object.keys(targetIdentifiers).length > 0) {
                                   matchingVar = variablesToUse.find((v: any) => {
                                     const vKey = v.variableNameKey || v.variableName;
                                     if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
                                     
-                                    const vParts = vKey.split('_');
-                                    const vIdentifiers: Record<string, string> = {};
+                                    const vIdentifiers = parseIdentifiersFromKey(vKey);
                                     
-                                    let j = 2;
-                                    while (j < vParts.length) {
-                                      const key = vParts[j]?.toLowerCase();
-                                      if (identifierTypes.includes(key) && j + 1 < vParts.length) {
-                                        let val = vParts[j + 1];
-                                        let nextIndex = j + 2;
-                                        
-                                        while (nextIndex < vParts.length) {
-                                          const nextPart = vParts[nextIndex]?.toLowerCase();
-                                          if (!identifierTypes.includes(nextPart)) {
-                                            val += '_' + vParts[nextIndex];
-                                            nextIndex++;
-                                          } else {
-                                            break;
-                                          }
-                                        }
-                                        
-                                        vIdentifiers[key] = val;
-                                        j = nextIndex;
-                                      } else {
-                                        j++;
-                                      }
-                                    }
+                                    // Exact match: same identifiers, same values
+                                    const targetKeys = Object.keys(targetIdentifiers).sort();
+                                    const vKeys = Object.keys(vIdentifiers).sort();
                                     
-                                    // Check if variable includes all current identifiers (expanded version)
-                                    // This allows finding variables that have been expanded to include new identifiers
-                                    return Object.entries(currentIdentifiers).every(([key, val]) => 
+                                    if (targetKeys.length !== vKeys.length) return false;
+                                    
+                                    return targetKeys.every(key => 
+                                      vIdentifiers[key] === targetIdentifiers[key]
+                                    );
+                                  });
+                                }
+                                
+                                // Strategy 2: If no exact match and we added identifiers, find expanded variable
+                                // (variable that has all required identifiers plus potentially more)
+                                if (!matchingVar && addedGlobalFilterIdentifiers.size > 0 && Object.keys(targetIdentifiers).length > 0) {
+                                  console.log(`[Variable Extension] Looking for expanded variable:`, {
+                                    originalVariable: variableKey,
+                                    basePattern,
+                                    originalIdentifiers,
+                                    targetIdentifiers,
+                                    addedIdentifiers: Array.from(addedGlobalFilterIdentifiers),
+                                    totalVariables: variablesToUse.length
+                                  });
+                                  
+                                  // Find all variables that match the base pattern and have all required identifiers
+                                  const candidateVars = variablesToUse.filter((v: any) => {
+                                    const vKey = v.variableNameKey || v.variableName;
+                                    if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                    
+                                    const vIdentifiers = parseIdentifiersFromKey(vKey);
+                                    
+                                    // Check if variable has all required identifiers with matching values
+                                    const hasAllRequired = Object.entries(targetIdentifiers).every(([key, val]) => 
                                       vIdentifiers[key] === val
-                                    ) && Object.keys(vIdentifiers).length >= Object.keys(currentIdentifiers).length;
+                                    );
+                                    
+                                    return hasAllRequired;
+                                  });
+                                  
+                                  console.log(`[Variable Extension] Found ${candidateVars.length} candidate variables with required identifiers`);
+                                  
+                                  // Prefer variables with the same number of identifiers, then those with more
+                                  if (candidateVars.length > 0) {
+                                    // Sort by number of identifiers (closest match first)
+                                    candidateVars.sort((a, b) => {
+                                      const aKey = a.variableNameKey || a.variableName;
+                                      const bKey = b.variableNameKey || b.variableName;
+                                      const aIds = parseIdentifiersFromKey(aKey);
+                                      const bIds = parseIdentifiersFromKey(bKey);
+                                      const aCount = Object.keys(aIds).length;
+                                      const bCount = Object.keys(bIds).length;
+                                      const targetCount = Object.keys(targetIdentifiers).length;
+                                      
+                                      // Prefer exact count, then closest
+                                      if (aCount === targetCount && bCount !== targetCount) return -1;
+                                      if (bCount === targetCount && aCount !== targetCount) return 1;
+                                      return Math.abs(aCount - targetCount) - Math.abs(bCount - targetCount);
+                                    });
+                                    
+                                    matchingVar = candidateVars[0];
+                                    console.log(`[Variable Extension] Selected expanded variable:`, matchingVar.variableNameKey || matchingVar.variableName);
+                                  } else {
+                                    console.warn(`[Variable Extension] No expanded variable found for:`, {
+                                      basePattern,
+                                      targetIdentifiers,
+                                      sampleVariables: variablesToUse.slice(0, 5).map((v: any) => v.variableNameKey || v.variableName)
+                                    });
+                                  }
+                                }
+                                
+                                // Strategy 3: If still no match, try to find variable with original identifiers only
+                                // (fallback when global filter is removed)
+                                if (!matchingVar && Object.keys(originalIdentifiers).length > 0 && addedGlobalFilterIdentifiers.size === 0) {
+                                  matchingVar = variablesToUse.find((v: any) => {
+                                    const vKey = v.variableNameKey || v.variableName;
+                                    if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                    
+                                    const vIdentifiers = parseIdentifiersFromKey(vKey);
+                                    
+                                    // Match original identifiers exactly
+                                    const originalKeys = Object.keys(originalIdentifiers).sort();
+                                    const vKeys = Object.keys(vIdentifiers).sort();
+                                    
+                                    if (originalKeys.length !== vKeys.length) return false;
+                                    
+                                    return originalKeys.every(key => 
+                                      vIdentifiers[key] === originalIdentifiers[key]
+                                    );
                                   });
                                 }
                                   
@@ -1434,40 +1489,15 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                         const vKey = v.variableNameKey || v.variableName;
                                         if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
                                         
-                                        const vParts = vKey.split('_');
-                                        const vIdentifiers: Record<string, string> = {};
-                                        
-                                        let j = 2;
-                                        while (j < vParts.length) {
-                                          const key = vParts[j]?.toLowerCase();
-                                          if (identifierTypes.includes(key) && j + 1 < vParts.length) {
-                                            let val = vParts[j + 1];
-                                            let nextIndex = j + 2;
-                                            
-                                            while (nextIndex < vParts.length) {
-                                              const nextPart = vParts[nextIndex]?.toLowerCase();
-                                              if (!identifierTypes.includes(nextPart)) {
-                                                val += '_' + vParts[nextIndex];
-                                                nextIndex++;
-                                              } else {
-                                                break;
-                                              }
-                                            }
-                                            
-                                            vIdentifiers[key] = val;
-                                            j = nextIndex;
-                                          } else {
-                                            j++;
-                                          }
-                                        }
+                                        const vIdentifiers = parseIdentifiersFromKey(vKey);
                                         
                                         // Check if comparison identifier matches and all other identifiers match
-                                        const vIdentifierValue = vIdentifiers[box.comparisonIdentifier];
+                                        const vIdentifierValue = vIdentifiers[box.comparisonIdentifier.toLowerCase()];
                                         if (vIdentifierValue !== box.comparisonIdentifierValue) return false;
                                         
-                                        // Check all other identifiers match
-                                        for (const [key, val] of Object.entries(currentIdentifiers)) {
-                                          if (key !== box.comparisonIdentifier && vIdentifiers[key] !== val) {
+                                        // Check all other target identifiers match (use targetIdentifiers, not currentIdentifiers)
+                                        for (const [key, val] of Object.entries(targetIdentifiers)) {
+                                          if (key !== box.comparisonIdentifier.toLowerCase() && vIdentifiers[key] !== val) {
                                             return false;
                                           }
                                         }
@@ -1534,51 +1564,13 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                     // Parse current identifiers from variable key
                                     const parts = variableKey.split('_');
                                     const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
-                                    const currentIdentifiers: Record<string, string> = {};
                                     
-                                    let i = 2; // Skip first 2 parts (measure and aggregation)
-                                    while (i < parts.length) {
-                                      const key = parts[i]?.toLowerCase();
-                                      if (identifierTypes.includes(key) && i + 1 < parts.length) {
-                                        let val = parts[i + 1];
-                                        let nextIndex = i + 2;
-                                        
-                                        while (nextIndex < parts.length) {
-                                          const nextPart = parts[nextIndex]?.toLowerCase();
-                                          if (!identifierTypes.includes(nextPart)) {
-                                            val += '_' + parts[nextIndex];
-                                            nextIndex++;
-                                          } else {
-                                            break;
-                                          }
-                                        }
-                                        
-                                        currentIdentifiers[key] = val;
-                                        i = nextIndex;
-                                      } else {
-                                        i++;
-                                      }
-                                    }
-                                    
-                                    // Update with global filter (replace the identifier value)
-                                    if (value !== '__all__') {
-                                      currentIdentifiers[identifier] = value;
-                                    } else {
-                                      delete currentIdentifiers[identifier];
-                                    }
-                                    
-                                    // Find base pattern (first 2 parts: measure and aggregation)
-                                    const basePattern = parts.slice(0, 2).join('_');
-                                    
-                                    // Find matching variable with same structure but new identifier value
-                                    const matchingVar = variablesToUse.find((v: any) => {
-                                      const vKey = v.variableNameKey || v.variableName;
-                                      if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
-                                      
+                                    // Helper function to parse identifiers from a variable key
+                                    const parseIdentifiersFromKey = (vKey: string): Record<string, string> => {
                                       const vParts = vKey.split('_');
                                       const vIdentifiers: Record<string, string> = {};
                                       
-                                      let j = 2;
+                                      let j = 2; // Skip first 2 parts (measure and aggregation)
                                       while (j < vParts.length) {
                                         const key = vParts[j]?.toLowerCase();
                                         if (identifierTypes.includes(key) && j + 1 < vParts.length) {
@@ -1602,11 +1594,127 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                         }
                                       }
                                       
-                                      // Check if all current identifiers match (including the updated one)
-                                      return Object.entries(currentIdentifiers).every(([key, val]) => 
-                                        vIdentifiers[key] === val
-                                      );
-                                    });
+                                      return vIdentifiers;
+                                    };
+                                    
+                                    // Parse identifiers from current variable
+                                    // IMPORTANT: Assume all identifiers in current variable are "original"
+                                    const currentIdentifiers = parseIdentifiersFromKey(variableKey);
+                                    
+                                    // All identifiers in current variable are considered original
+                                    // We'll detect if the identifier being changed was added by checking if it's new
+                                    const originalIdentifiers: Record<string, string> = { ...currentIdentifiers };
+                                    
+                                    // Build target identifiers starting from original
+                                    const targetIdentifiers: Record<string, string> = { ...originalIdentifiers };
+                                    const identifierLower = identifier.toLowerCase();
+                                    const identifierWasInOriginal = originalIdentifiers.hasOwnProperty(identifierLower);
+                                    
+                                    // Update with global filter (replace the identifier value or add if not in original)
+                                    if (value !== '__all__') {
+                                      if (!identifierWasInOriginal) {
+                                        // This is a new identifier - expansion case
+                                        targetIdentifiers[identifierLower] = value;
+                                      } else {
+                                        // Identifier exists - update value (might be same or different)
+                                        targetIdentifiers[identifierLower] = value;
+                                      }
+                                    } else {
+                                      // Global filter is set to "__all__" - revert to original
+                                      // If identifier was in original, revert to original value
+                                      // If identifier was added by global filter, remove it entirely
+                                      if (identifierWasInOriginal) {
+                                        // Revert to original value
+                                        targetIdentifiers[identifierLower] = originalIdentifiers[identifierLower];
+                                      } else {
+                                        // Remove identifier that was added by global filter
+                                        delete targetIdentifiers[identifierLower];
+                                      }
+                                    }
+                                    
+                                    // Find base pattern (first 2 parts: measure and aggregation)
+                                    const basePattern = parts.slice(0, 2).join('_');
+                                    
+                                    // Find matching variable - try multiple strategies
+                                    let matchingVar: any = null;
+                                    
+                                    // Strategy 1: Try exact match with all target identifiers
+                                    if (Object.keys(targetIdentifiers).length > 0) {
+                                      matchingVar = variablesToUse.find((v: any) => {
+                                        const vKey = v.variableNameKey || v.variableName;
+                                        if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                        
+                                        const vIdentifiers = parseIdentifiersFromKey(vKey);
+                                        
+                                        // Exact match: same identifiers, same values
+                                        const targetKeys = Object.keys(targetIdentifiers).sort();
+                                        const vKeys = Object.keys(vIdentifiers).sort();
+                                        
+                                        if (targetKeys.length !== vKeys.length) return false;
+                                        
+                                        return targetKeys.every(key => 
+                                          vIdentifiers[key] === targetIdentifiers[key]
+                                        );
+                                      });
+                                    }
+                                    
+                                    // Strategy 2: If no exact match and identifier was not in original (expansion case),
+                                    // try to find expanded variable that includes this identifier
+                                    if (!matchingVar && !identifierWasInOriginal && value !== '__all__' && Object.keys(targetIdentifiers).length > 0) {
+                                      // Find all variables that match the base pattern and have all required identifiers
+                                      const candidateVars = variablesToUse.filter((v: any) => {
+                                        const vKey = v.variableNameKey || v.variableName;
+                                        if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                        
+                                        const vIdentifiers = parseIdentifiersFromKey(vKey);
+                                        
+                                        // Check if variable has all required identifiers with matching values
+                                        return Object.entries(targetIdentifiers).every(([key, val]) => 
+                                          vIdentifiers[key] === val
+                                        );
+                                      });
+                                      
+                                      // Prefer variables with the same number of identifiers, then those with more
+                                      if (candidateVars.length > 0) {
+                                        // Sort by number of identifiers (closest match first)
+                                        candidateVars.sort((a, b) => {
+                                          const aKey = a.variableNameKey || a.variableName;
+                                          const bKey = b.variableNameKey || b.variableName;
+                                          const aIds = parseIdentifiersFromKey(aKey);
+                                          const bIds = parseIdentifiersFromKey(bKey);
+                                          const aCount = Object.keys(aIds).length;
+                                          const bCount = Object.keys(bIds).length;
+                                          const targetCount = Object.keys(targetIdentifiers).length;
+                                          
+                                          // Prefer exact count, then closest
+                                          if (aCount === targetCount && bCount !== targetCount) return -1;
+                                          if (bCount === targetCount && aCount !== targetCount) return 1;
+                                          return Math.abs(aCount - targetCount) - Math.abs(bCount - targetCount);
+                                        });
+                                        
+                                        matchingVar = candidateVars[0];
+                                      }
+                                    }
+                                    
+                                    // Strategy 3: If still no match and filter removed, try original identifiers
+                                    if (!matchingVar && value === '__all__' && Object.keys(originalIdentifiers).length > 0) {
+                                      matchingVar = variablesToUse.find((v: any) => {
+                                        const vKey = v.variableNameKey || v.variableName;
+                                        if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                        
+                                        const vIdentifiers = parseIdentifiersFromKey(vKey);
+                                        
+                                        // Match original identifiers exactly
+                                        const originalKeys = Object.keys(originalIdentifiers).sort();
+                                        const vKeys = Object.keys(vIdentifiers).sort();
+                                        
+                                        if (originalKeys.length !== vKeys.length) return false;
+                                        
+                                        return originalKeys.every(key => 
+                                          vIdentifiers[key] === originalIdentifiers[key]
+                                        );
+                                      });
+                                    }
                                     
                                     if (matchingVar) {
                                       let updatedBox = {
@@ -1624,40 +1732,15 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                           const vKey = v.variableNameKey || v.variableName;
                                           if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
                                           
-                                          const vParts = vKey.split('_');
-                                          const vIdentifiers: Record<string, string> = {};
-                                          
-                                          let j = 2;
-                                          while (j < vParts.length) {
-                                            const key = vParts[j]?.toLowerCase();
-                                            if (identifierTypes.includes(key) && j + 1 < vParts.length) {
-                                              let val = vParts[j + 1];
-                                              let nextIndex = j + 2;
-                                              
-                                              while (nextIndex < vParts.length) {
-                                                const nextPart = vParts[nextIndex]?.toLowerCase();
-                                                if (!identifierTypes.includes(nextPart)) {
-                                                  val += '_' + vParts[nextIndex];
-                                                  nextIndex++;
-                                                } else {
-                                                  break;
-                                                }
-                                              }
-                                              
-                                              vIdentifiers[key] = val;
-                                              j = nextIndex;
-                                            } else {
-                                              j++;
-                                            }
-                                          }
+                                          const vIdentifiers = parseIdentifiersFromKey(vKey);
                                           
                                           // Check if comparison identifier matches and all other identifiers match
-                                          const vIdentifierValue = vIdentifiers[box.comparisonIdentifier];
+                                          const vIdentifierValue = vIdentifiers[box.comparisonIdentifier.toLowerCase()];
                                           if (vIdentifierValue !== box.comparisonIdentifierValue) return false;
                                           
-                                          // Check all other identifiers match
-                                          for (const [key, val] of Object.entries(currentIdentifiers)) {
-                                            if (key !== box.comparisonIdentifier && vIdentifiers[key] !== val) {
+                                          // Check all other target identifiers match (use targetIdentifiers, not currentIdentifiers)
+                                          for (const [key, val] of Object.entries(targetIdentifiers)) {
+                                            if (key !== box.comparisonIdentifier.toLowerCase() && vIdentifiers[key] !== val) {
                                               return false;
                                             }
                                           }

@@ -225,7 +225,14 @@ const TableElement: React.FC<TableElementProps> = ({
   useEffect(() => {
     const reloadTableWithFilters = async () => {
       // Only reload if we have a tableId and it's a loaded table (not blank)
-      if (!settings.tableId || !tableSettings?.mode || tableSettings.mode !== 'load') {
+      // CRITICAL: Also check that tableData exists to ensure table is fully loaded
+      if (!settings.tableId || !tableSettings?.mode || tableSettings.mode !== 'load' || !tableSettings?.tableData) {
+        return;
+      }
+
+      // Validate tableId is a valid string/number (not empty or invalid)
+      if (typeof settings.tableId !== 'string' && typeof settings.tableId !== 'number') {
+        console.warn('Invalid tableId format, skipping table reload:', settings.tableId);
         return;
       }
 
@@ -277,6 +284,8 @@ const TableElement: React.FC<TableElementProps> = ({
         }
       } catch (error: any) {
         console.error('Failed to reload table with filters:', error);
+        // Don't reset isReloadingRef on error to prevent rapid retries
+        // The error will be logged and user can manually refresh if needed
       } finally {
         isReloadingRef.current = false;
       }
@@ -386,36 +395,73 @@ const TableElement: React.FC<TableElementProps> = ({
     }
 
     try {
-      // Fetch new page data from backend using previewTable
-      // The table state should already have filters applied from updateTable
+      // Use updateTable to ensure filters are applied when fetching page data
+      // This ensures pagination works correctly with filtered data
       const pageSize = tableSettings.pageSize || 50;
       const tableId = tableSettings.tableId;
       
-      // Fetch the page data
-      const newData = await previewTable(tableId, page, pageSize);
+      // Get pipeline tracking parameters
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === (tableSettings as any).atomId));
+      const atomId = (tableSettings as any).atomId || '';
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
+      // Use updateTable with current filters and page to ensure filtered pagination works
+      const response = await updateTable(
+        tableId,
+        {
+          ...settings,
+          filters: settings.filters || {},
+          sort_config: settings.sortConfig,
+          current_page: page,
+          page_size: pageSize,
+        },
+        atomId,
+        cardId,
+        canvasPosition
+      );
       
       // Update settings with new page and data
-      // Ensure we preserve the existing table structure and update with new page data
-      if (onSettingsChange && newData) {
+      if (onSettingsChange && response) {
         onSettingsChange({ 
           currentPage: page,
           tableData: {
-            ...tableSettings.tableData!,
-            rows: newData.rows || [],
-            row_count: newData.row_count || tableSettings.tableData?.row_count || 0,
-            // Preserve other table data properties
-            table_id: newData.table_id || tableSettings.tableData?.table_id,
-            columns: newData.columns || tableSettings.tableData?.columns,
-            column_types: newData.column_types || tableSettings.tableData?.column_types,
-            object_name: newData.object_name || tableSettings.tableData?.object_name,
+            table_id: response.table_id,
+            columns: response.columns,
+            rows: response.rows || [],
+            row_count: response.row_count || 0,
+            column_types: response.column_types,
+            object_name: response.object_name || tableSettings.tableData?.object_name,
           }
         });
       }
     } catch (error: any) {
       console.error('Failed to fetch page data:', error);
-      // Still update currentPage even if fetch fails (for UI consistency)
-      if (onSettingsChange) {
-        onSettingsChange({ currentPage: page });
+      // Fallback to previewTable if updateTable fails
+      try {
+        const pageSize = tableSettings.pageSize || 50;
+        const newData = await previewTable(tableSettings.tableId, page, pageSize);
+        if (onSettingsChange && newData) {
+          onSettingsChange({ 
+            currentPage: page,
+            tableData: {
+              ...tableSettings.tableData!,
+              rows: newData.rows || [],
+              row_count: newData.row_count || tableSettings.tableData?.row_count || 0,
+              table_id: newData.table_id || tableSettings.tableData?.table_id,
+              columns: newData.columns || tableSettings.tableData?.columns,
+              column_types: newData.column_types || tableSettings.tableData?.column_types,
+              object_name: newData.object_name || tableSettings.tableData?.object_name,
+            }
+          });
+        }
+      } catch (previewError: any) {
+        console.error('Failed to fetch page data with previewTable:', previewError);
+        // Still update currentPage even if fetch fails (for UI consistency)
+        if (onSettingsChange) {
+          onSettingsChange({ currentPage: page });
+        }
       }
     }
   };
