@@ -24,7 +24,7 @@
  */
 
 
-import React, { useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import React, { useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle , useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -42,7 +42,7 @@ import { AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import MultiSelectDropdown from '@/templates/dropdown/multiselect/MultiSelectDropdown';
-import type { CreatedVariable, CreatedColumn, CreatedTable } from '../useMetricGuidedFlow';
+import type { CreatedVariable, CreatedColumn, CreatedTable, OperationsState } from '../useMetricGuidedFlow';
 import MetricsColOps, { MetricsColOpsRef } from './MetricsColOps';
 
 // Type Definitions
@@ -135,6 +135,8 @@ interface OperationsTabProps {
   onColumnCreated?: (column: CreatedColumn) => void;
   onTableCreated?: (table: CreatedTable) => void;
   readOnly?: boolean;
+  operationsState?: OperationsState | null;
+  onOperationsStateChange?: (state: OperationsState) => void;
 }
 
 export interface OperationsTabRef {
@@ -688,6 +690,8 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   onColumnCreated,
   onTableCreated,
   readOnly = false,
+  operationsState,
+  onOperationsStateChange,
 }, ref) => {
   // Mode: compute | assign (only for variable type)
   const [variableMode, setVariableMode] = useState<'compute' | 'assign' | null>(null);
@@ -704,6 +708,8 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   const newVarRef = useRef<HTMLInputElement | null>(null);
   const openedBySearchRef = useRef(false);
   const metricsColOpsRef = useRef<MetricsColOpsRef>(null);
+  const restoredOperationsStateKeyRef = useRef<string | null>(null);
+  const hasRestoredStateRef = useRef(false);
 
   // Compute state
   const [computeWithinGroup, setComputeWithinGroup] = useState(false);
@@ -1217,6 +1223,76 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
       setSavedVars(importedVariables);
     }
   }, [importedVariables, savedVars.length]);
+
+  // Restore operations state from snapshot when provided
+  useEffect(() => {
+    // Only restore if we have operationsState, it's for variable type, and we haven't restored this specific state yet
+    if (operationsState && selectedType === 'variable') {
+      // Create a key to identify this operationsState (based on its content)
+      const stateKey = JSON.stringify({
+        activeVariableTab: operationsState.activeVariableTab,
+        assignedVarsCount: operationsState.assignedVars.length,
+        operationsCount: operationsState.operations.length,
+        computeWithinGroup: operationsState.computeWithinGroup,
+        selectedIdentifiersCount: operationsState.selectedIdentifiers.length,
+      });
+      
+      // Only restore if this is a different state than what we've already restored
+      if (restoredOperationsStateKeyRef.current !== stateKey) {
+        // Restore active tab AND variableMode (important for canSaveVariable)
+        if (operationsState.activeVariableTab === 'create') {
+          setActiveVariableTab('create');
+          setVariableMode('compute');
+        } else if (operationsState.activeVariableTab === 'assign') {
+          setActiveVariableTab('assign');
+          setVariableMode('assign');
+        }
+        
+        // Restore assigned vars if in assign tab
+        if (operationsState.activeVariableTab === 'assign' && operationsState.assignedVars.length > 0) {
+          setAssignedVars(operationsState.assignedVars.map(v => ({
+            ...v,
+            nameError: null,
+            valueError: null,
+          })));
+        }
+        
+        // Restore operations if in create tab
+        if (operationsState.activeVariableTab === 'create' && operationsState.operations.length > 0) {
+          setOperations(operationsState.operations);
+        }
+        
+        // Restore compute settings
+        setComputeWithinGroup(operationsState.computeWithinGroup);
+        setSelectedIdentifiers(operationsState.selectedIdentifiers);
+        
+        // Mark this state as restored
+        restoredOperationsStateKeyRef.current = stateKey;
+      }
+    }
+    
+    // Reset restoration tracking when operationsState becomes null (user cleared state)
+    if (!operationsState) {
+      restoredOperationsStateKeyRef.current = null;
+    }
+  }, [operationsState, selectedType]);
+
+  // Function to save current operations state
+  const saveOperationsState = useCallback(() => {
+    if (onOperationsStateChange && selectedType === 'variable') {
+      onOperationsStateChange({
+        activeVariableTab: activeVariableTab || null,
+        assignedVars: assignedVars.map(v => ({
+          id: v.id,
+          variableName: v.variableName,
+          value: v.value,
+        })),
+        operations: operations,
+        computeWithinGroup,
+        selectedIdentifiers,
+      });
+    }
+  }, [activeVariableTab, assignedVars, operations, computeWithinGroup, selectedIdentifiers, onOperationsStateChange, selectedType]);
 
   // Fetch identifiers when dataSource is available and Create tab is active
   useEffect(() => {
@@ -1863,6 +1939,9 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
       description: `Prepared ${assignedVars.length} variable(s) for review. Continue to Preview.`,
     });
     
+    // Save operations state before navigating
+    saveOperationsState();
+    
     // Notify parent component with assigned variables (not saved yet)
     if (onVariableCreated) {
       onVariableCreated(
@@ -1956,6 +2035,9 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
             title: 'Computed',
             description: `Successfully computed ${result.computedValues.length} variable(s). Review in Preview.`,
           });
+          
+          // Save operations state before navigating
+          saveOperationsState();
           
           // Notify parent component with computed values (including actual values)
           if (onVariableCreated) {

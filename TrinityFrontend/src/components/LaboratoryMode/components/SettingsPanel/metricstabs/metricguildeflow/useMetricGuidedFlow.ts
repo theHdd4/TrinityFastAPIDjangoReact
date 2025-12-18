@@ -45,6 +45,30 @@ export interface CreatedTable {
 }
 
 /**
+ * Operations state for restoring OperationsTab UI state
+ */
+export interface OperationsState {
+  /** Active tab: 'create' | 'assign' | null */
+  activeVariableTab: 'create' | 'assign' | null;
+  /** Assigned variables (for assign tab) */
+  assignedVars: Array<{ id: string; variableName: string; value: string }>;
+  /** Operations (for compute tab) */
+  operations: Array<{
+    id: string;
+    numericalColumn: string;
+    method: string;
+    secondInputType?: 'column' | 'number';
+    secondColumn?: string;
+    secondValue?: string;
+    customName?: string;
+  }>;
+  /** Compute within group flag */
+  computeWithinGroup: boolean;
+  /** Selected identifiers for group by */
+  selectedIdentifiers: string[];
+}
+
+/**
  * Core metric flow payload shared across all steps.
  */
 export interface MetricFlowState {
@@ -53,6 +77,8 @@ export interface MetricFlowState {
   createdVariables: CreatedVariable[];
   createdColumns: CreatedColumn[];
   createdTables: CreatedTable[];
+  /** Operations tab state for restoration */
+  operationsState: OperationsState | null;
 }
 
 /**
@@ -120,6 +146,7 @@ export function useMetricGuidedFlow(
           ? initialState.selectedType
           : INITIAL_FLOW_STATE.selectedType,
       dataSource: initialState.dataSource ?? INITIAL_FLOW_STATE.dataSource,
+      operationsState: initialState.operationsState ?? INITIAL_FLOW_STATE.operationsState,
       currentStage: initialState.currentStage ?? INITIAL_METRIC_GUIDED_STATE.currentStage,
       navigatedBackFrom: null, // Always start with no back navigation flag
     };
@@ -138,6 +165,7 @@ export function useMetricGuidedFlow(
           createdVariables: [...prev.createdVariables],
           createdColumns: [...prev.createdColumns],
           createdTables: [...prev.createdTables],
+          operationsState: prev.operationsState ? { ...prev.operationsState } : null,
         };
         stageSnapshotsRef.current.set(prev.currentStage, snapshot);
       }
@@ -163,6 +191,7 @@ export function useMetricGuidedFlow(
         createdVariables: [...prev.createdVariables],
         createdColumns: [...prev.createdColumns],
         createdTables: [...prev.createdTables],
+        operationsState: prev.operationsState ? { ...prev.operationsState } : null,
       };
       stageSnapshotsRef.current.set(prev.currentStage, snapshot);
       
@@ -200,6 +229,7 @@ export function useMetricGuidedFlow(
       createdVariables: [...stateToUse.createdVariables],
       createdColumns: [...stateToUse.createdColumns],
       createdTables: [...stateToUse.createdTables],
+      operationsState: stateToUse.operationsState ? { ...stateToUse.operationsState } : null,
     };
     stageSnapshotsRef.current.set(stage, snapshot);
   }, [state]);

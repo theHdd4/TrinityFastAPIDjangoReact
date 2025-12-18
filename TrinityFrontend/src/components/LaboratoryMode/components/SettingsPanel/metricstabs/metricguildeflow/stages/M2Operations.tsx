@@ -128,6 +128,13 @@ export const M2Operations = forwardRef<M2OperationsRef, M2OperationsProps>(({ fl
         selectedType={state.selectedType}
         dataSource={state.dataSource}
         readOnly={readOnly}
+        operationsState={state.operationsState}
+        onOperationsStateChange={(opsState) => {
+          setState(prev => ({
+            ...prev,
+            operationsState: opsState,
+          }));
+        }}
         onVariableCreated={(vars) => {
           setState(prev => ({ 
             ...prev, 

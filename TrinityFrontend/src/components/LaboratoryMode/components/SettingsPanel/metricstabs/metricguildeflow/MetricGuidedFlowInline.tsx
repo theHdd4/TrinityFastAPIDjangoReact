@@ -474,13 +474,23 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             };
             break;
           case 'preview':
-            // Preview is read-only, no reset needed
-            resetFields = {};
+            // When going back from preview, clear createdVariables
+            // The operationsState will restore the form state, and when user
+            // clicks Continue again, all current variables will be sent fresh
+            resetFields = {
+              createdVariables: [],
+              createdColumns: [],
+              createdTables: [],
+            };
             break;
         }
         
         // If snapshot exists, restore it; otherwise use reset values
         if (restoredSnapshot) {
+          // When coming back from preview, DON'T restore createdVariables from snapshot
+          // (they'll be re-created when user clicks Continue again)
+          const shouldClearCreatedItems = currentStageBeforeNavigation === 'preview';
+          
           return {
             ...prev,
             ...resetFields,
@@ -488,9 +498,11 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             navigatedBackFrom: currentStageBeforeNavigation, // Set flag indicating where we came from
             selectedType: restoredSnapshot.selectedType,
             dataSource: restoredSnapshot.dataSource,
-            createdVariables: [...restoredSnapshot.createdVariables],
-            createdColumns: [...restoredSnapshot.createdColumns],
-            createdTables: [...restoredSnapshot.createdTables],
+            // Only restore created items from snapshot if NOT coming from preview
+            createdVariables: shouldClearCreatedItems ? [] : [...restoredSnapshot.createdVariables],
+            createdColumns: shouldClearCreatedItems ? [] : [...restoredSnapshot.createdColumns],
+            createdTables: shouldClearCreatedItems ? [] : [...restoredSnapshot.createdTables],
+            operationsState: restoredSnapshot.operationsState ? { ...restoredSnapshot.operationsState } : null,
           };
         } else {
           // No snapshot exists, reset current stage and navigate back
@@ -499,6 +511,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             ...resetFields,
             currentStage: previousStage,
             navigatedBackFrom: currentStageBeforeNavigation, // Set flag indicating where we came from
+            operationsState: null, // Clear operations state if no snapshot
           };
         }
       });
