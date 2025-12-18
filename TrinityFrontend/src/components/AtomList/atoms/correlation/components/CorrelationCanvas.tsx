@@ -58,6 +58,8 @@ import correlation from "../index";
 
 interface CorrelationCanvasProps {
   atomId: string;
+  cardId: string;
+  canvasPosition: number;
   data: CorrelationSettings;
   onDataChange: (newData: Partial<CorrelationSettings>) => void;
 }
@@ -231,6 +233,8 @@ const FilterDimensionButton: React.FC<{
 
 const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   atomId,
+  cardId,
+  canvasPosition,
   data,
   onDataChange,
 }) => {
@@ -398,7 +402,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         ).toLowerCase() as any,
         include_preview: true,
         preview_limit: 10,
-        save_filtered: true,
+        save_filtered: data.settings?.saveFiltered ?? false, // Default to false - don't auto-save filtered files
         include_date_analysis: true,
       };
 
@@ -439,6 +443,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           };
         }
       }
+
+      // Add pipeline tracking parameters
+      request.validator_atom_id = atomId;
+      request.card_id = cardId;
+      request.canvas_position = canvasPosition;
 
       const result = await correlationAPI.filterAndCorrelate(request);
 

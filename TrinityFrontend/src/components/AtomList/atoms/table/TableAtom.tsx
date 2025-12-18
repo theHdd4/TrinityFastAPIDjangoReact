@@ -34,6 +34,7 @@ export interface TableSettings {
   tableId?: string;
   tableData?: TableData;  // ✅ Store data in settings like dataframe-operations
   reloadTrigger?: number;  // Timestamp to force reload when same file is overwritten
+  pipelineExecutionTimestamp?: number;  // Timestamp from pipeline execution to force reload
   visibleColumns: string[];
   columnOrder: string[];
   columnWidths: Record<string, number>;
@@ -350,6 +351,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
   const prevSourceFileRef = useRef<string | undefined>(settings.sourceFile);
   const prevReloadTriggerRef = useRef<number | undefined>(settings.reloadTrigger);
   const prevTableDataRef = useRef<TableData | null | undefined>(settings.tableData);
+  const prevPipelineExecutionTimestampRef = useRef<number | undefined>(settings.pipelineExecutionTimestamp);
 
   // Auto-load data ONLY if sourceFile exists but tableData doesn't (like dataframe-operations)
   useEffect(() => {
@@ -361,16 +363,34 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
       const reloadTriggerChanged = settings.reloadTrigger !== undefined && settings.reloadTrigger !== prevReloadTriggerRef.current;
       const tableDataCleared = prevTableDataRef.current !== null && prevTableDataRef.current !== undefined && !hasTableData;
       
+      // CRITICAL: Also check if tableData was explicitly set to null (from pipeline)
+      // This handles the case where pipeline clears tableData to force reload
+      const tableDataExplicitlyCleared = settings.tableData === null && prevTableDataRef.current !== null && prevTableDataRef.current !== undefined;
+      
+      // CRITICAL: Check if pipelineExecutionTimestamp changed (pipeline re-execution)
+      // This is the PRIMARY way pipeline updates trigger reloads (like feature-overview)
+      const pipelineExecutionChanged = settings.pipelineExecutionTimestamp !== undefined && 
+                                       settings.pipelineExecutionTimestamp !== prevPipelineExecutionTimestampRef.current;
+      
+      // CRITICAL: Pipeline execution triggers reload ONLY if we don't have executor tableData
+      // If executor provided tableData (with all operations applied), we should use it instead of reloading
+      // This prevents unnecessary reloads when pipeline executor has already done all the work
+      const shouldLoadFromPipeline = pipelineExecutionChanged && hasSourceFile && !loading && !hasTableData;
+      
       // Should load if:
-      // 1. Normal case: mode is 'load', sourceFile exists, no tableData, not loading
-      // 2. Force reload: reloadTrigger changed (for overwrite case) - CRITICAL FIX
-      // 3. File changed: sourceFile changed and we have tableData (need to reload new file)
-      // 4. Table data was cleared: tableData was present but is now null/undefined (for overwrite case)
-      const shouldLoad = settings.mode === 'load' && hasSourceFile && !loading && (
-        !hasTableData ||  // No data yet - normal load
-        reloadTriggerChanged ||  // Force reload triggered (overwrite case) - PRIMARY FIX
-        (sourceFileChanged && hasTableData) ||  // File changed - reload new file
-        tableDataCleared  // Table data was cleared (overwrite case) - SECONDARY FIX
+      // 1. Pipeline execution changed AND no executor tableData (executor didn't provide data, so reload)
+      // 2. Normal case: mode is 'load', sourceFile exists, no tableData, not loading
+      // 3. Force reload: reloadTrigger changed (for overwrite case) - CRITICAL FIX
+      // 4. File changed: sourceFile changed and we have tableData (need to reload new file)
+      // 5. Table data was cleared: tableData was present but is now null/undefined (for overwrite case)
+      const shouldLoad = shouldLoadFromPipeline || (
+        settings.mode === 'load' && hasSourceFile && !loading && (
+          !hasTableData ||  // No data yet - normal load
+          reloadTriggerChanged ||  // Force reload triggered (overwrite case) - PRIMARY FIX
+          (sourceFileChanged && hasTableData) ||  // File changed - reload new file
+          tableDataCleared ||  // Table data was cleared (overwrite case) - SECONDARY FIX
+          tableDataExplicitlyCleared  // Table data explicitly set to null (pipeline case) - PIPELINE FIX
+        )
       );
       
       console.log('📊 [TABLE-ATOM] Auto-load check:', {
@@ -382,14 +402,22 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         sourceFileChanged,
         reloadTriggerChanged,
         tableDataCleared,
+        tableDataExplicitlyCleared,
+        pipelineExecutionChanged,
         currentReloadTrigger: settings.reloadTrigger,
         prevReloadTrigger: prevReloadTriggerRef.current,
+        currentPipelineTimestamp: settings.pipelineExecutionTimestamp,
+        prevPipelineTimestamp: prevPipelineExecutionTimestampRef.current,
+        currentTableData: settings.tableData === null ? 'null' : settings.tableData ? 'exists' : 'undefined',
+        prevTableData: prevTableDataRef.current === null ? 'null' : prevTableDataRef.current ? 'exists' : 'undefined',
         shouldLoad
       });
       
       if (shouldLoad) {
         console.log('🔄 [TABLE-ATOM] Auto-loading data from source:', settings.sourceFile, {
-          reason: reloadTriggerChanged ? 'reloadTrigger changed' : 
+          reason: pipelineExecutionChanged ? 'pipelineExecutionTimestamp changed (pipeline re-execution)' :
+                  reloadTriggerChanged ? 'reloadTrigger changed' : 
+                  tableDataExplicitlyCleared ? 'tableData explicitly cleared (pipeline)' :
                   tableDataCleared ? 'tableData cleared' : 
                   sourceFileChanged ? 'sourceFile changed' : 
                   'no tableData'
@@ -397,7 +425,13 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         setLoading(true);
         setError(null);
         try {
-          const data = await loadTable(settings.sourceFile);
+          // Get card_id and canvas_position for pipeline tracking (like feature-overview and groupby)
+          const cards = useLaboratoryStore.getState().cards;
+          const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+          const cardId = card?.id || '';
+          const canvasPosition = card?.canvas_position ?? 0;
+          
+          const data = await loadTable(settings.sourceFile, atomId, cardId, canvasPosition);
           console.log('✅ [TABLE-ATOM] Data loaded successfully:', {
             tableId: data.table_id,
             columns: data.columns?.length,
@@ -440,6 +474,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           prevSourceFileRef.current = settings.sourceFile;
           prevReloadTriggerRef.current = undefined;
           prevTableDataRef.current = data;
+          prevPipelineExecutionTimestampRef.current = settings.pipelineExecutionTimestamp;
           
           console.log('✅ [TABLE-ATOM] Refs updated after successful load');
         } catch (err: any) {
@@ -450,21 +485,30 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         }
       } else {
         // Update refs even if not loading (to track state for next check)
+        // CRITICAL: Only update refs AFTER we've checked for changes
+        // This ensures the next useEffect run can detect the changes
         // Only update if values actually changed to avoid unnecessary updates
         if (prevSourceFileRef.current !== settings.sourceFile) {
           prevSourceFileRef.current = settings.sourceFile;
+          console.log('📝 [TABLE-ATOM] Updated prevSourceFileRef to:', settings.sourceFile);
         }
         if (prevReloadTriggerRef.current !== settings.reloadTrigger) {
           prevReloadTriggerRef.current = settings.reloadTrigger;
+          console.log('📝 [TABLE-ATOM] Updated prevReloadTriggerRef to:', settings.reloadTrigger);
         }
         if (prevTableDataRef.current !== settings.tableData) {
           prevTableDataRef.current = settings.tableData || null;
+          console.log('📝 [TABLE-ATOM] Updated prevTableDataRef to:', settings.tableData === null ? 'null' : settings.tableData ? 'exists' : 'undefined');
+        }
+        if (prevPipelineExecutionTimestampRef.current !== settings.pipelineExecutionTimestamp) {
+          prevPipelineExecutionTimestampRef.current = settings.pipelineExecutionTimestamp;
+          console.log('📝 [TABLE-ATOM] Updated prevPipelineExecutionTimestampRef to:', settings.pipelineExecutionTimestamp);
         }
       }
     };
     
     autoLoadData();
-  }, [settings.mode, settings.sourceFile, settings.tableData, settings.reloadTrigger, loading, atomId, updateSettings]);
+  }, [settings.mode, settings.sourceFile, settings.tableData, settings.reloadTrigger, settings.pipelineExecutionTimestamp, loading, atomId, updateSettings]);
 
   // Restore session from MongoDB/MinIO on mount (for loaded tables)
   useEffect(() => {
@@ -516,7 +560,13 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
             } else {
               // Fallback: reload from source file
               if (settings.sourceFile) {
-                const data = await loadTable(settings.sourceFile);
+                // Get card_id and canvas_position for pipeline tracking
+                const cards = useLaboratoryStore.getState().cards;
+                const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+                const cardId = card?.id || '';
+                const canvasPosition = card?.canvas_position ?? 0;
+                
+                const data = await loadTable(settings.sourceFile, atomId, cardId, canvasPosition);
                 console.log('📋 [TABLE-RESTORE] Fallback load with metadata:', data.metadata);
                 
                 const settingsUpdate: Partial<TableSettings> = {
@@ -543,7 +593,13 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
             // Try fallback to source file
             if (settings.sourceFile) {
               try {
-                const data = await loadTable(settings.sourceFile);
+                // Get card_id and canvas_position for pipeline tracking
+                const cards = useLaboratoryStore.getState().cards;
+                const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+                const cardId = card?.id || '';
+                const canvasPosition = card?.canvas_position ?? 0;
+                
+                const data = await loadTable(settings.sourceFile, atomId, cardId, canvasPosition);
                 console.log('📋 [TABLE-RESTORE] Error fallback load with metadata:', data.metadata);
                 
                 const settingsUpdate: Partial<TableSettings> = {
@@ -611,7 +667,13 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
                   for (const [colKey, value] of Object.entries(row)) {
                     if (value !== null && value !== undefined && value !== '') {
                       try {
-                        await editTableCell(restoredData.table_id, rowIdx, colKey, value);
+                        // Get card_id and canvas_position for pipeline tracking
+                        const cards = useLaboratoryStore.getState().cards;
+                        const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+                        const cardId = card?.id || '';
+                        const canvasPosition = card?.canvas_position ?? 0;
+                        
+                        await editTableCell(restoredData.table_id, rowIdx, colKey, value, atomId, cardId, canvasPosition);
                       } catch (err) {
                         // Silently continue if cell restore fails
                       }
@@ -681,7 +743,13 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
     setError(null);
 
     try {
-      const data = await loadTable(settings.sourceFile);
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
+      const data = await loadTable(settings.sourceFile, atomId, cardId, canvasPosition);
       
       console.log('📋 [TABLE-LOAD] Manual load with metadata:', data.metadata);
       
@@ -772,13 +840,22 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         rowHeightsCount: Object.keys(metadata.rowHeights || {}).length,
       });
       
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
       const response = await saveTable(
         settings.tableId, 
         settings.sourceFile, 
         true, 
         useHeaderRow,
         settings.conditionalFormats || [],
-        metadata
+        metadata,
+        atomId,
+        cardId,
+        canvasPosition
       );
       
       // Update savedFile to sourceFile so filename display updates
@@ -852,13 +929,22 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         rowHeightsCount: Object.keys(metadata.rowHeights || {}).length,
       });
       
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
       const response = await saveTable(
         settings.tableId, 
         filename, 
         false, 
         useHeaderRow,
         settings.conditionalFormats || [],
-        metadata
+        metadata,
+        atomId,
+        cardId,
+        canvasPosition
       );
       
       toast({
@@ -900,7 +986,15 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
     // This prevents overwriting the updated tableData with stale data from updateTable
     if (settings.tableId && settings.tableData && !newSettings.tableData) {
       try {
-        const updatedData = await updateTable(settings.tableId, {
+        // Get card_id and canvas_position for pipeline tracking
+        const cards = useLaboratoryStore.getState().cards;
+        const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+        const cardId = card?.id || '';
+        const canvasPosition = card?.canvas_position ?? 0;
+        
+        const updatedData = await updateTable(
+          settings.tableId, 
+          {
           visible_columns: newSettings.visibleColumns || settings.visibleColumns,
           column_order: newSettings.columnOrder || settings.columnOrder,
           filters: newSettings.filters || settings.filters,
@@ -909,7 +1003,11 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           show_summary_row: newSettings.showSummaryRow ?? settings.showSummaryRow,
           frozen_columns: newSettings.frozenColumns ?? settings.frozenColumns,
           row_height: newSettings.rowHeight || settings.rowHeight
-        });
+        },
+        atomId,
+        cardId,
+        canvasPosition
+        );
         
         // ✅ Update tableData in settings (only if we didn't already update it above)
         updateSettings(atomId, { tableData: updatedData });

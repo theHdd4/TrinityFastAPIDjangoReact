@@ -455,10 +455,24 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
     setSaveSuccess(false);
     try {
       const filename = saveFileName.trim() || `merge_${file1?.split('/').pop() || 'file1'}_${file2?.split('/').pop() || 'file2'}_${Date.now()}`;
+      
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
       const response = await fetch(`${MERGE_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv_data: rawCSV, filename }),
+        body: JSON.stringify({ 
+          csv_data: rawCSV, 
+          filename,
+          // Pipeline tracking parameters
+          validator_atom_id: atomId,
+          card_id: cardId,
+          canvas_position: canvasPosition,
+        }),
       });
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);
@@ -537,7 +551,6 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
       {file1 && file2 && settings?.showDataSummary && (
         <div className="mb-6">
           <DataSummaryView
-            key={`${activeCardinalityTab}-${activeCardinalityTab === 'primary' ? file1 : file2}`}
             objectName={activeCardinalityTab === 'primary' ? file1 : file2}
             atomId={atomId || ''}
             subtitleClickable={true}

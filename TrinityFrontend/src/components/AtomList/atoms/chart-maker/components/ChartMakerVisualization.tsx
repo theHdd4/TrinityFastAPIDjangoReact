@@ -12,7 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Plus, Minus, BarChart3, Filter, X, Layers, LineChart, ChevronDown, ChevronUp } from 'lucide-react';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { Plus, Minus, BarChart3, Filter, X, Layers, LineChart, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { ChartMakerSettings, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import TraceManager from './TraceManager';
 import { migrateLegacyChart, toggleChartMode, validateChart } from '../utils/traceUtils';
@@ -105,6 +106,14 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   const updateChart = (index: number, updates: Partial<ChartMakerConfig>) => {
     const newCharts = [...settings.charts];
     const prevChart = newCharts[index];
+    
+    // 🔧 CRITICAL FIX: Preserve the original chart ID - it must NEVER change
+    const originalChartId = prevChart.id;
+    if (!originalChartId) {
+      console.error('❌ [UPDATE-CHART] Chart without ID detected!', { index, chart: prevChart });
+      return;
+    }
+    
     // Migrate legacy chart format before applying updates
     const migratedChart = migrateLegacyChart(prevChart);
 
@@ -115,6 +124,9 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
     // Merge updates into migrated chart first
     let updatedChart: ChartMakerConfig = { ...migratedChart, ...updates } as ChartMakerConfig;
+    
+    // 🔧 CRITICAL: Force preserve original chart ID - NEVER allow it to change
+    updatedChart.id = originalChartId;
     
     // 🔧 CRITICAL FIX: Ensure filters persists through updates
     if (!updatedChart.filters) {
@@ -168,10 +180,23 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     const resetKeys: (keyof ChartMakerConfig)[] = ['xAxis', 'yAxis', 'filters', 'traces', 'type'];
     const needsReset = resetKeys.some(key => key in updates);
 
-    newCharts[index] = {
+    // 🔧 CRITICAL: Final check - ensure ID is preserved
+    const finalChart = {
       ...updatedChart,
-      ...(needsReset ? { chartRendered: false, chartConfig: undefined, filteredData: undefined } : {})
+      ...(needsReset ? { chartRendered: false, chartConfig: undefined, filteredData: undefined } : {}),
+      id: originalChartId // Force preserve original ID
     };
+    
+    // Verify ID hasn't changed
+    if (finalChart.id !== originalChartId) {
+      console.error('❌ [UPDATE-CHART] Chart ID changed during update! Forcing restore.', {
+        originalId: originalChartId,
+        newId: finalChart.id
+      });
+      finalChart.id = originalChartId;
+    }
+    
+    newCharts[index] = finalChart;
 
     onSettingsChange({ charts: newCharts });
 
@@ -203,6 +228,40 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     }
     onSettingsChange({ charts: newCharts });
     setChartToDelete(null);
+  };
+
+  const handleDuplicateChart = (index: number) => {
+    const chartToDuplicate = settings.charts[index];
+    if (!chartToDuplicate) return;
+    
+    // Generate a new unique ID for the duplicate
+    const existingIds = settings.charts.map(c => {
+      const idNum = parseInt(c.id);
+      return isNaN(idNum) ? 0 : idNum;
+    });
+    const maxId = existingIds.length > 0 ? Math.max(...existingIds) : 0;
+    const newId = (maxId + 1).toString();
+    
+    // Create a deep copy of the chart with a new ID and updated title
+    const duplicatedChart: ChartMakerConfig = {
+      ...chartToDuplicate,
+      id: newId,
+      title: `${chartToDuplicate.title} (Copy)`,
+      chartRendered: false,
+      chartConfig: undefined,
+      filteredData: undefined,
+      chartLoading: false,
+      // Deep copy traces if they exist
+      traces: chartToDuplicate.traces ? JSON.parse(JSON.stringify(chartToDuplicate.traces)) : undefined,
+      // Deep copy filters
+      filters: chartToDuplicate.filters ? { ...chartToDuplicate.filters } : {}
+    };
+    
+    // Insert the duplicate right after the original chart
+    const newCharts = [...settings.charts];
+    newCharts.splice(index + 1, 0, duplicatedChart);
+    
+    onSettingsChange({ charts: newCharts });
   };
 
   const getUniqueValues = (column: string) => {
@@ -400,11 +459,13 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   React.useEffect(() => {
     settings.charts.forEach((chart, chartIndex) => {
       const available = getAvailableFilterColumns();
-      Object.keys(chart.filters).forEach(col => {
-        if (!available.includes(col)) {
-          removeFilter(chartIndex, col);
-        }
-      });
+      if (chart.filters && typeof chart.filters === 'object') {
+        Object.keys(chart.filters).forEach(col => {
+          if (!available.includes(col)) {
+            removeFilter(chartIndex, col);
+          }
+        });
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.charts.map(c => c.xAxis), settings.charts.map(c => c.yAxis)]);
@@ -465,10 +526,12 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
               const migratedChart = migrateLegacyChart(chart);
 
               return (
-                <Card key={chart.id} className="w-full" data-chart-settings={index}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm">{chart.title}</CardTitle>
+                <ContextMenu key={chart.id}>
+                  <ContextMenuTrigger asChild>
+                    <Card className="w-full" data-chart-settings={index}>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm">{chart.title}</CardTitle>
                       <div className="flex items-center gap-2">
                         {/* <TooltipProvider>
                           <Tooltip>
@@ -883,7 +946,15 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                     )}
                   </CardContent>
                   )}
-                </Card>
+                    </Card>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem onClick={() => handleDuplicateChart(index)}>
+                      <Copy className="w-4 h-4 mr-2" />
+                      Create Duplicate
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               );
             })}
           </div>

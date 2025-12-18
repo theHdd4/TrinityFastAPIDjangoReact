@@ -556,6 +556,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const lastFetchedSource = useRef<string | null>(null);
   // Ref to track the last dimension mapping string
   const lastDimensionMapString = useRef<string | null>(null);
+  // Ref to track the last pipeline execution timestamp to force re-fetch on re-execution
+  const lastExecutionTimestamp = useRef<number>(0);
   
   // Legacy cardinality sorting/filtering state removed - now using DataSummaryView
 
@@ -813,20 +815,28 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
      if (hasMappedIdentifiers) {
        // Check if we need to regenerate SKU analysis
        const dimensionMapString = JSON.stringify(dimensionMap);
+       const executionTimestamp = settings.pipelineExecutionTimestamp || 0;
        
-       if (
-         lastFetchedSource.current === settings.dataSource &&
-         skuRows.length > 0 &&
-         dimensionMapString === lastDimensionMapString.current
-       ) {
-         return;
-       }
+       // Force re-fetch if:
+       // 1. dataSource changed
+       // 2. pipelineExecutionTimestamp changed (indicates re-execution)
+       // 3. dimensionMap changed
+       // 4. no SKU rows exist yet
+       const shouldRefetch = 
+         lastFetchedSource.current !== settings.dataSource ||
+         executionTimestamp !== lastExecutionTimestamp.current ||
+         dimensionMapString !== lastDimensionMapString.current ||
+         skuRows.length === 0;
+       
+       if (shouldRefetch) {
        lastFetchedSource.current = settings.dataSource;
        lastDimensionMapString.current = dimensionMapString;
+         lastExecutionTimestamp.current = executionTimestamp;
        displaySkus();
+       }
      }
      // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, [settings.dataSource, hasMappedIdentifiers, skuRows.length, dimensionMap]);
+   }, [settings.dataSource, settings.pipelineExecutionTimestamp, hasMappedIdentifiers, skuRows.length, dimensionMap]);
 
   useEffect(() => {
     if (!Array.isArray(settings.skuTable)) {
@@ -1606,6 +1616,49 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         .map((col) => (typeof col === "string" ? col.toLowerCase() : ""))
         .filter((col) => col);
       
+      // Call uniquecount endpoint for pipeline tracking
+      if (atomId && settings.dataSource) {
+        try {
+          // Get card_id and canvas_position for pipeline tracking
+          const cards = useLaboratoryStore.getState().cards;
+          const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+          const cardId = card?.id || '';
+          const canvasPosition = card?.canvas_position ?? 0;
+          
+          // Extract client/app/project from file path
+          const pathParts = settings.dataSource.split('/');
+          const clientName = pathParts[0] ?? '';
+          const appName = pathParts[1] ?? '';
+          const projectName = pathParts[2] ?? '';
+          
+          const formData = new FormData();
+          formData.append('bucket_name', 'trinity');
+          // object_names should be a list - append multiple times for FormData
+          formData.append('object_names', settings.dataSource);
+          formData.append('validator_atom_id', atomId);
+          formData.append('file_key', settings.dataSource);
+          formData.append('card_id', cardId);
+          formData.append('canvas_position', canvasPosition.toString());
+          
+          // Include dimensionMap (selected identifiers) and yAxes (selected numeric columns) in configuration
+          if (dimensionMap && Object.keys(dimensionMap).length > 0) {
+            formData.append('dimensionMap', JSON.stringify(dimensionMap));
+          }
+          if (settings.yAxes && Array.isArray(settings.yAxes) && settings.yAxes.length > 0) {
+            formData.append('yAxes', JSON.stringify(settings.yAxes));
+          }
+          
+          // Call uniquecount endpoint (don't wait for it, fire and forget for pipeline tracking)
+          fetch(`${FEATURE_OVERVIEW_API}/uniquecount`, {
+            method: 'POST',
+            body: formData,
+          }).catch(() => {
+            // Ignore errors, this is just for pipeline tracking
+          });
+        } catch (e) {
+          // Ignore errors, this is just for pipeline tracking
+        }
+      }
 
       const loaded = await loadSkuDataset(dimensionColumns);
       const rows = Array.isArray(loaded.rows) ? loaded.rows : [];
@@ -1705,6 +1758,39 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
      }
     setError(null);
     try {
+      // Call summary endpoint for pipeline tracking
+      if (atomId && settings.dataSource) {
+        try {
+          // Get card_id and canvas_position for pipeline tracking
+          const cards = useLaboratoryStore.getState().cards;
+          const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+          const cardId = card?.id || '';
+          const canvasPosition = card?.canvas_position ?? 0;
+          
+          const formData = new FormData();
+          formData.append('bucket_name', 'trinity');
+          // object_names should be a list - append multiple times for FormData
+          formData.append('object_names', settings.dataSource);
+          formData.append('validator_atom_id', atomId);
+          formData.append('file_key', settings.dataSource);
+          formData.append('create_hierarchy', 'false');
+          formData.append('create_summary', 'true');
+          formData.append('combination', JSON.stringify(combo));
+          formData.append('card_id', cardId);
+          formData.append('canvas_position', canvasPosition.toString());
+          
+          // Call summary endpoint (don't wait for it, fire and forget for pipeline tracking)
+          fetch(`${FEATURE_OVERVIEW_API}/summary`, {
+            method: 'POST',
+            body: formData,
+          }).catch(() => {
+            // Ignore errors, this is just for pipeline tracking
+          });
+        } catch (e) {
+          // Ignore errors, this is just for pipeline tracking
+        }
+      }
+      
       const result: Record<
         string,
         {

@@ -129,6 +129,12 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
       const projectName = pathParts[2] ?? ''
 
       // Always request identifiers/measures using client/app/project context
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
       const formData = new FormData();
       formData.append('bucket_name', 'trinity');
       formData.append('object_names', file_key);
@@ -136,6 +142,9 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
       formData.append('app_name', appName);
       formData.append('project_name', projectName);
       formData.append('file_key', file_key);
+      formData.append('validator_atom_id', atomId); // Add atom ID for pipeline tracking
+      formData.append('card_id', cardId); // Add card ID for pipeline tracking
+      formData.append('canvas_position', canvasPosition.toString()); // Add canvas position for pipeline tracking
       try {
         const resp = await fetch(`${GROUPBY_API}/init`, { method: 'POST', body: formData });
         console.log('[GroupBy] /init status', resp.status);

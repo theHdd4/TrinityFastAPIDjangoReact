@@ -43,10 +43,20 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
       return;
     }
     try {
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
       const requestBody = {
         file1: settings.file1,
         file2: settings.file2,
         concat_direction: settings.direction,
+        // Pipeline tracking parameters
+        validator_atom_id: atomId,
+        card_id: cardId,
+        canvas_position: canvasPosition,
       };
       const response = await fetch(`${CONCAT_API}/perform`, {
         method: 'POST',

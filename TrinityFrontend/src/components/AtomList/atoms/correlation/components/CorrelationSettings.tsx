@@ -12,9 +12,13 @@ import { Switch } from '@/components/ui/switch';
 import { Card } from '@/components/ui/card';
 import { VALIDATE_API } from '@/lib/api';
 import type { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { correlationAPI, handleAPIError, type FilterAndCorrelateRequest, type DateAnalysisResponse } from '../helpers/correlationAPI';
 
 interface CorrelationSettingsProps {
+  atomId?: string;
+  cardId?: string;
+  canvasPosition?: number;
   data: CorrelationSettings;
   onDataChange: (newData: Partial<CorrelationSettings>) => void;
 }
@@ -164,7 +168,7 @@ interface Frame {
   arrow_name?: string;
 }
 
-const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataChange }) => {
+const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ atomId, cardId, canvasPosition, data, onDataChange }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [frames, setFrames] = useState<Frame[]>([]);
@@ -398,7 +402,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         method: (data.settings?.correlationMethod || 'pearson').toLowerCase() as any,
         include_preview: true,
         preview_limit: 10,
-        save_filtered: true,
+        save_filtered: data.settings?.saveFiltered ?? false, // Default to false - don't auto-save filtered files
         include_date_analysis: true // Always include date analysis
       };
 
@@ -443,6 +447,13 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         }
         if (data.settings?.aggregationLevel && data.settings.aggregationLevel !== 'None' && primaryDateColumn) {
           request.aggregation_level = data.settings.aggregationLevel.toLowerCase();
+        }
+
+        // Add pipeline tracking parameters
+        if (atomId) {
+          request.validator_atom_id = atomId;
+          request.card_id = cardId || '';
+          request.canvas_position = canvasPosition || 0;
         }
 
         const result = await correlationAPI.filterAndCorrelate(request);

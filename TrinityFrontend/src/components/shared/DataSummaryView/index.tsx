@@ -8,6 +8,7 @@ import { useDataSummary } from './useDataSummary';
 import { DataSummaryTable } from './DataSummaryTable';
 import { DataSummaryViewProps } from './types';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { Loader2 } from 'lucide-react';
 
 export const DataSummaryView: React.FC<DataSummaryViewProps> = ({
   objectName,
@@ -24,6 +25,17 @@ export const DataSummaryView: React.FC<DataSummaryViewProps> = ({
   const { data, loading, error, metadataAvailable } = useDataSummary(objectName, {
     includeMetadata,
   });
+
+  // Option C (UX): keep previous table content mounted while refreshing
+  const [stickyData, setStickyData] = React.useState(data);
+
+  React.useEffect(() => {
+    // Only update the displayed dataset once a request has settled.
+    // While loading, keep prior data to avoid a "loading screen" flash.
+    if (!loading) {
+      setStickyData(data);
+    }
+  }, [data, loading]);
 
   // Auto-detect atom theme color if atomId is provided and borderColor is not explicitly set
   const atom = atomId ? useLaboratoryStore(state => state.getAtom(atomId)) : undefined;
@@ -42,18 +54,43 @@ export const DataSummaryView: React.FC<DataSummaryViewProps> = ({
     return "border-gray-500";
   }, [borderColor, atom?.color]);
 
+  const hasStickyData = Array.isArray(stickyData) && stickyData.length > 0;
+
+  // Keep the table visible when refreshing or when a refresh errors out.
+  const effectiveData = loading && hasStickyData ? stickyData : data;
+  const effectiveLoading = loading && !hasStickyData;
+  const effectiveError = hasStickyData ? null : error;
+
+  const mergedControls = React.useMemo(() => {
+    if (!controls && !loading && !(error && hasStickyData)) return controls;
+    return (
+      <div className="flex items-center gap-2">
+        {controls}
+        {loading && (
+          <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Refreshing
+          </span>
+        )}
+        {!loading && error && hasStickyData && (
+          <span className="text-xs text-red-600">Refresh failed</span>
+        )}
+      </div>
+    );
+  }, [controls, error, hasStickyData, loading]);
+
   return (
     <DataSummaryTable
-      data={data}
-      loading={loading}
-      error={error}
+      data={effectiveData}
+      loading={effectiveLoading}
+      error={effectiveError}
       metadataAvailable={metadataAvailable}
       borderColor={resolvedBorderColor}
       title={title}
       subtitle={subtitle}
       subtitleClickable={subtitleClickable}
       onSubtitleClick={onSubtitleClick}
-      controls={controls}
+      controls={mergedControls}
       defaultMinimized={defaultMinimized}
     />
   );

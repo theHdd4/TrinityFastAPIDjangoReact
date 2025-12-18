@@ -142,6 +142,9 @@ class CSVUploadResponse(BaseModel):
 
 class LoadSavedDataframeRequest(BaseModel):
     object_name: str
+    validator_atom_id: Optional[str] = None
+    card_id: Optional[str] = None
+    canvas_position: Optional[int] = None
 
 # Recharts-specific schemas for chart generation
 class RechartsStyleConfig(BaseModel):
@@ -204,6 +207,15 @@ class ChartRequest(BaseModel):
     responsive: Optional[RechartsResponsiveConfig] = None
     filters: Optional[dict] = None
     filtered_data: Optional[List[dict]] = None  # Priority data if provided
+    # Pipeline tracking fields
+    validator_atom_id: Optional[str] = None
+    card_id: Optional[str] = None
+    canvas_position: Optional[int] = None
+    # Dual axis configuration
+    dual_axis_mode: Optional[Literal["dual", "single"]] = None
+    second_y_axis: Optional[str] = None
+    # All charts configuration (for saving all charts together in MongoDB)
+    all_charts: Optional[List[dict]] = None  # Array of all charts in the atom
 
 class RechartsConfig(BaseModel):
     chart_type: str

@@ -117,10 +117,23 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     try {
       const csv_data = resultsToCSV(dataToSave);
       const filename = saveFileName.trim() || `groupby_${settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+      
+      // Get card info for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
       const response = await fetch(`${GROUPBY_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv_data, filename }),
+        body: JSON.stringify({ 
+          csv_data, 
+          filename,
+          validator_atom_id: atomId,
+          card_id: cardId,
+          canvas_position: canvasPosition,
+        }),
       });
       let payload: any = {};
       try {

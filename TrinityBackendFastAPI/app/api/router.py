@@ -35,6 +35,7 @@ from app.features.task_queue.endpoint import router as task_queue_router
 from app.features.kpi_dashboard.endpoint import router as kpi_dashboard_router
 from app.features.table.endpoint import router as table_router
 from app.features.cardinality_view.routes import router as cardinality_view_router
+from app.features.pipeline.endpoint import router as pipeline_router
 
 api_router = APIRouter()
 text_router = APIRouter()
@@ -107,3 +108,13 @@ api_router.include_router(
 
 # Text router for text-based features
 text_router.include_router(textbox_router)
+
+# Pipeline execution router
+api_router.include_router(
+    pipeline_router,
+    prefix="/pipeline",
+    tags=["Pipeline Execution"]
+)
+
+
+
