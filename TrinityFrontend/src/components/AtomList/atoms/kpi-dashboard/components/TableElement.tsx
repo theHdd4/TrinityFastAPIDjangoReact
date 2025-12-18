@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Table2, Loader2, Save, FileText, AlertCircle } from 'lucide-react';
 import TableCanvas from '@/components/AtomList/atoms/table/components/TableCanvas';
 import TablePagination from '@/components/AtomList/atoms/table/components/TablePagination';
@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import type { TableSettings, TableData } from '@/components/AtomList/atoms/table/TableAtom';
 import { evaluateConditionalFormats, saveTable, updateTable, previewTable, type TableMetadata } from '@/components/AtomList/atoms/table/services/tableApi';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 export interface KPITableSettings {
   mode?: 'load' | 'blank';
@@ -216,6 +217,79 @@ const TableElement: React.FC<TableElementProps> = ({
     fetchFormattingStyles();
   }, [settings.conditionalFormats, settings.tableId, tableSettings?.tableData?.conditional_format_styles]);
 
+  // Track previous filters to detect changes
+  const previousFiltersRef = useRef<string>('');
+  const isReloadingRef = useRef(false);
+  
+  // Reload table when filters change (e.g., from global filters)
+  useEffect(() => {
+    const reloadTableWithFilters = async () => {
+      // Only reload if we have a tableId and it's a loaded table (not blank)
+      if (!settings.tableId || !tableSettings?.mode || tableSettings.mode !== 'load') {
+        return;
+      }
+
+      // Serialize current filters for comparison
+      const currentFiltersStr = JSON.stringify(settings.filters || {});
+      
+      // Skip if filters haven't actually changed
+      if (currentFiltersStr === previousFiltersRef.current) {
+        return;
+      }
+      
+      // Skip if already reloading
+      if (isReloadingRef.current) {
+        return;
+      }
+      
+      // Update ref to current filters
+      previousFiltersRef.current = currentFiltersStr;
+      isReloadingRef.current = true;
+
+      try {
+        // Call updateTable to apply filters and get filtered data (page 1)
+        // This works even if filters are empty (clears filters)
+        const pageSize = tableSettings.pageSize || 50;
+        const response = await updateTable(
+          settings.tableId,
+          {
+            ...settings,
+            filters: settings.filters || {},
+            sort_config: settings.sortConfig,
+            current_page: 1, // Always fetch page 1 when filters change
+            page_size: pageSize,
+          }
+        );
+
+        // Update tableData with filtered results and reset pagination to page 1
+        if (onSettingsChange && response) {
+          onSettingsChange({
+            tableData: {
+              table_id: response.table_id,
+              columns: response.columns,
+              rows: response.rows || [],
+              row_count: response.row_count || 0,
+              column_types: response.column_types,
+              object_name: response.object_name || tableSettings.tableData?.object_name,
+            },
+            currentPage: 1 // Reset to page 1 when filters change
+          });
+        }
+      } catch (error: any) {
+        console.error('Failed to reload table with filters:', error);
+      } finally {
+        isReloadingRef.current = false;
+      }
+    };
+
+    // Use a small delay to debounce rapid filter changes
+    const timeoutId = setTimeout(() => {
+      reloadTableWithFilters();
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [JSON.stringify(settings.filters), settings.tableId, tableSettings?.mode]);
+
   // Handle settings change from TableCanvas
   const handleSettingsChange = (newSettings: Partial<TableSettings>) => {
     if (!onSettingsChange) return;
@@ -312,23 +386,37 @@ const TableElement: React.FC<TableElementProps> = ({
     }
 
     try {
-      // Fetch new page data from backend
+      // Fetch new page data from backend using previewTable
+      // The table state should already have filters applied from updateTable
       const pageSize = tableSettings.pageSize || 50;
-      const newData = await previewTable(tableSettings.tableId, page, pageSize);
+      const tableId = tableSettings.tableId;
+      
+      // Fetch the page data
+      const newData = await previewTable(tableId, page, pageSize);
       
       // Update settings with new page and data
-      onSettingsChange({ 
-        currentPage: page,
-        tableData: {
-          ...tableSettings.tableData!,
-          rows: newData.rows,
-          row_count: newData.row_count,
-        }
-      });
+      // Ensure we preserve the existing table structure and update with new page data
+      if (onSettingsChange && newData) {
+        onSettingsChange({ 
+          currentPage: page,
+          tableData: {
+            ...tableSettings.tableData!,
+            rows: newData.rows || [],
+            row_count: newData.row_count || tableSettings.tableData?.row_count || 0,
+            // Preserve other table data properties
+            table_id: newData.table_id || tableSettings.tableData?.table_id,
+            columns: newData.columns || tableSettings.tableData?.columns,
+            column_types: newData.column_types || tableSettings.tableData?.column_types,
+            object_name: newData.object_name || tableSettings.tableData?.object_name,
+          }
+        });
+      }
     } catch (error: any) {
       console.error('Failed to fetch page data:', error);
       // Still update currentPage even if fetch fails (for UI consistency)
-      onSettingsChange({ currentPage: page });
+      if (onSettingsChange) {
+        onSettingsChange({ currentPage: page });
+      }
     }
   };
 

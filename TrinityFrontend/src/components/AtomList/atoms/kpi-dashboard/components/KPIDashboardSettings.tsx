@@ -6,8 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
-import { Plus, X, Upload, ImageIcon, BarChart3, Filter } from 'lucide-react';
-import { VALIDATE_API, LABORATORY_API, IMAGES_API } from '@/lib/api';
+import { Plus, X, Upload, ImageIcon, BarChart3, Filter, Settings2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { VALIDATE_API, LABORATORY_API, IMAGES_API, SCOPE_SELECTOR_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import type { KPIDashboardData, KPIDashboardSettings as KPISettings } from '../KPIDashboardAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -51,6 +52,11 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
   const [allVariablesForGlobalFilters, setAllVariablesForGlobalFilters] = useState<any[]>([]);
   const [loadingGlobalFilterOptions, setLoadingGlobalFilterOptions] = useState(false);
   const [renderingCharts, setRenderingCharts] = useState(false);
+  // State for identifier selection dialog
+  const [showIdentifierDialog, setShowIdentifierDialog] = useState(false);
+  const [tempSelectedIdentifiers, setTempSelectedIdentifiers] = useState<string[]>([]);
+  // State for storing global filter options per identifier
+  const [globalFilterOptionsCache, setGlobalFilterOptionsCache] = useState<Record<string, string[]>>({});
 
   // Fetch available dataframes from database
   useEffect(() => {
@@ -361,7 +367,7 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
     fetchVariableOptions();
   }, [selectedBox?.variableNameKey, selectedBox?.variableName]);
 
-  // Fetch all variables for global filters when layouts change
+  // Fetch all variables for global filters when layouts change or when identifiers are enabled
   useEffect(() => {
     const fetchAllVariables = async () => {
       setLoadingGlobalFilterOptions(true);
@@ -392,7 +398,8 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
       }
     };
 
-    // Only fetch if we have metric cards or charts
+    // Fetch if we have enabled identifiers, metric cards, or charts
+    const hasEnabledIdentifiers = settings.enabledGlobalFilterIdentifiers && settings.enabledGlobalFilterIdentifiers.length > 0;
     const hasMetricCards = settings.layouts?.some(layout => 
       layout.boxes.some(box => box.elementType === 'metric-card' && (box.variableNameKey || box.variableName))
     );
@@ -400,10 +407,181 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
       layout.boxes.some(box => box.elementType === 'chart' && box.chartConfig?.filters)
     );
     
-    if (hasMetricCards || hasCharts) {
+    // Always fetch if identifiers are manually enabled, or if we have elements
+    if (hasEnabledIdentifiers || hasMetricCards || hasCharts) {
       fetchAllVariables();
     }
-  }, [settings.layouts]);
+  }, [settings.layouts, settings.enabledGlobalFilterIdentifiers]);
+
+  // Clean up stale filters when enabled identifiers change
+  useEffect(() => {
+    const enabledIdentifiers = settings.enabledGlobalFilterIdentifiers || [];
+    if (enabledIdentifiers.length === 0) return; // Skip if no enabled identifiers (auto-detect mode)
+    
+    const enabledIdentifiersSet = new Set(enabledIdentifiers.map(id => id.toLowerCase()));
+    const globalFilters = settings.globalFilters || {};
+    
+    // Clean up layouts by removing filters for identifiers that are no longer enabled
+    let updatedLayouts = settings.layouts;
+    let hasChanges = false;
+    
+    updatedLayouts = updatedLayouts?.map(layout => ({
+      ...layout,
+      boxes: layout.boxes.map(box => {
+        let boxChanged = false;
+        
+        // Clean up chart filters
+        if (box.elementType === 'chart' && box.chartConfig?.filters) {
+          const originalChartConfig = box.chartConfig;
+          const chartConfig = migrateLegacyChart(originalChartConfig);
+          const chartFilters = chartConfig.filters || {};
+          const cleanedFilters: Record<string, string[]> = {};
+          
+          Object.entries(chartFilters).forEach(([key, val]) => {
+            const normalizedKey = key.toLowerCase();
+            // Check if it's a global filter by seeing if it's in the globalFilters
+            const isGlobalFilter = Object.keys(globalFilters).some(gf => gf.toLowerCase() === normalizedKey);
+            
+            if (isGlobalFilter && !enabledIdentifiersSet.has(normalizedKey)) {
+              // This is a global filter for a disabled identifier - remove it
+              boxChanged = true;
+            } else {
+              // Keep the filter (either it's enabled or it's a user-created local filter)
+              cleanedFilters[key] = val as string[];
+            }
+          });
+          
+          if (boxChanged) {
+            hasChanges = true;
+            return {
+              ...box,
+              chartConfig: {
+                ...originalChartConfig,
+                ...chartConfig,
+                filters: cleanedFilters,
+                chartRendered: false
+              }
+            };
+          }
+        }
+        
+        // Clean up table filters
+        if (box.elementType === 'table' && box.tableSettings?.filters) {
+          const tableFilters = box.tableSettings.filters || {};
+          const cleanedFilters: Record<string, any> = {};
+          
+          Object.entries(tableFilters).forEach(([key, val]) => {
+            const normalizedKey = key.toLowerCase();
+            // Check if it's a global filter
+            const isGlobalFilter = Object.keys(globalFilters).some(gf => gf.toLowerCase() === normalizedKey);
+            
+            if (isGlobalFilter && !enabledIdentifiersSet.has(normalizedKey)) {
+              // This is a global filter for a disabled identifier - remove it
+              boxChanged = true;
+            } else {
+              // Keep the filter
+              cleanedFilters[key] = val;
+            }
+          });
+          
+          if (boxChanged) {
+            hasChanges = true;
+            return {
+              ...box,
+              tableSettings: {
+                ...box.tableSettings,
+                filters: cleanedFilters
+              }
+            };
+          }
+        }
+        
+        return box;
+      })
+    }));
+    
+    // Apply changes if any were made
+    if (hasChanges && updatedLayouts) {
+      onSettingsChange({ layouts: updatedLayouts });
+    }
+  }, [settings.enabledGlobalFilterIdentifiers?.join(',')]);
+
+  // Fetch unique values from data source for global filter identifiers that have no options
+  useEffect(() => {
+    const fetchMissingOptions = async () => {
+      const enabledIdentifiers = settings.enabledGlobalFilterIdentifiers;
+      if (!enabledIdentifiers || enabledIdentifiers.length === 0) return;
+      
+      const dataSource = (settings as any).selectedFile || (settings as any).dataSource;
+      if (!dataSource) return;
+      
+      const updates: Record<string, string[]> = {};
+      let hasUpdates = false;
+      let isLoading = false;
+      
+      for (const identifier of enabledIdentifiers) {
+        // Skip if already in cache
+        if (globalFilterOptionsCache[identifier] && globalFilterOptionsCache[identifier].length > 0) continue;
+        
+        // Check if we have options from variables
+        const hasVariableOptions = allVariablesForGlobalFilters.some((v: any) => {
+          const vKey = v.variableNameKey || v.variableName;
+          if (!vKey) return false;
+          const parts = vKey.split('_');
+          let i = 2;
+          while (i < parts.length) {
+            if (parts[i]?.toLowerCase() === identifier.toLowerCase() && i + 1 < parts.length) {
+              return true;
+            }
+            i++;
+          }
+          return false;
+        });
+        
+        // Only fetch from data source if no variable options
+        if (!hasVariableOptions) {
+          try {
+            if (!isLoading) {
+              setLoadingGlobalFilterOptions(true);
+              isLoading = true;
+            }
+            const objectName = dataSource.endsWith('.arrow') ? dataSource : `${dataSource}.arrow`;
+            // Try scope-selector API first, then fallback to clustering API
+            let response = await fetch(
+              `${SCOPE_SELECTOR_API}/unique_values?object_name=${encodeURIComponent(objectName)}&column_name=${encodeURIComponent(identifier)}`,
+              { credentials: 'include' }
+            );
+            // If scope-selector doesn't work, try clustering API
+            if (!response.ok) {
+              response = await fetch(
+                `${VALIDATE_API}/clustering/unique_values?object_name=${encodeURIComponent(objectName)}&column_name=${encodeURIComponent(identifier)}`,
+                { credentials: 'include' }
+              );
+            }
+            if (response.ok) {
+              const result = await response.json();
+              if (result.unique_values && Array.isArray(result.unique_values) && result.unique_values.length > 0) {
+                updates[identifier] = result.unique_values.map((v: any) => String(v)).sort();
+                hasUpdates = true;
+              }
+            }
+          } catch (error) {
+            console.error(`Failed to fetch unique values for ${identifier}:`, error);
+          }
+        }
+      }
+      
+      if (isLoading) {
+        setLoadingGlobalFilterOptions(false);
+      }
+      
+      if (hasUpdates) {
+        setGlobalFilterOptionsCache(prev => ({ ...prev, ...updates }));
+      }
+    };
+    
+    fetchMissingOptions();
+  }, [settings.enabledGlobalFilterIdentifiers?.join(','), allVariablesForGlobalFilters.length, (settings as any).selectedFile, (settings as any).dataSource]);
 
   // Find matching variable based on selected filters
   const findMatchingVariable = (filters: Record<string, string>) => {
@@ -513,77 +691,106 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
 
       {/* Global Filters */}
       {(() => {
-        const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+        // Get all identifiers from availableColumns (data source columns)
+        // Convert to lowercase for consistency and remove duplicates
+        const allAvailableIdentifiers = Array.from(new Set(
+          (availableColumns || []).map(col => col.toLowerCase())
+        )).sort();
         
-        // Extract ALL identifiers from metric cards
-        const allMetricCards = settings.layouts?.flatMap(layout => layout.boxes)
-          .filter(box => box.elementType === 'metric-card' && (box.variableNameKey || box.variableName)) || [];
+        // Keep the original hardcoded list as fallback/known identifiers
+        const knownIdentifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
         
-        const metricCardIdentifiers = new Set<string>();
-        allMetricCards.forEach(box => {
-          const variableKey = box.variableNameKey || box.variableName || '';
-          if (variableKey) {
-            const parts = variableKey.split('_');
-            let i = 2; // Skip first 2 parts (measure and aggregation)
-            while (i < parts.length) {
-              const key = parts[i]?.toLowerCase();
-              if (identifierTypes.includes(key)) {
-                metricCardIdentifiers.add(key);
-                // Skip the value and move to next identifier
-                let nextIndex = i + 2;
-                while (nextIndex < parts.length) {
-                  const nextPart = parts[nextIndex]?.toLowerCase();
-                  if (!identifierTypes.includes(nextPart)) {
-                    nextIndex++;
-                  } else {
-                    break;
-                  }
-                }
-                i = nextIndex;
-              } else {
-                i++;
-              }
-            }
-          }
-        });
-
-        // Extract ALL identifiers from charts
-        // Also check chart data columns if available (for charts without filters yet)
+        // Merge available columns with known identifiers (union)
+        const identifierTypes = Array.from(new Set([
+          ...allAvailableIdentifiers,
+          ...knownIdentifierTypes
+        ])).sort();
+        
+        // Extract charts for use in getGlobalFilterOptions (needed regardless of selection mode)
         const allCharts = settings.layouts?.flatMap(layout => layout.boxes)
           .filter(box => box.elementType === 'chart' && box.chartConfig) || [];
         
-        const chartIdentifiers = new Set<string>();
-        allCharts.forEach(box => {
-          if (box.chartConfig?.filters) {
-            Object.keys(box.chartConfig.filters).forEach(column => {
-              const normalizedColumn = column.toLowerCase();
-              if (identifierTypes.includes(normalizedColumn)) {
-                chartIdentifiers.add(normalizedColumn);
+        // Get user-selected identifiers, or auto-detect from existing elements
+        const enabledIdentifiers = settings.enabledGlobalFilterIdentifiers;
+        
+        let allIdentifiers: string[] = [];
+        
+        if (enabledIdentifiers && enabledIdentifiers.length > 0) {
+          // Use user-selected identifiers
+          allIdentifiers = enabledIdentifiers;
+        } else {
+          // Auto-detect: Extract ALL identifiers from metric cards
+          const allMetricCards = settings.layouts?.flatMap(layout => layout.boxes)
+            .filter(box => box.elementType === 'metric-card' && (box.variableNameKey || box.variableName)) || [];
+          
+          const metricCardIdentifiers = new Set<string>();
+          allMetricCards.forEach(box => {
+            const variableKey = box.variableNameKey || box.variableName || '';
+            if (variableKey) {
+              const parts = variableKey.split('_');
+              let i = 2; // Skip first 2 parts (measure and aggregation)
+              while (i < parts.length) {
+                const key = parts[i]?.toLowerCase();
+                if (identifierTypes.includes(key)) {
+                  metricCardIdentifiers.add(key);
+                  // Skip the value and move to next identifier
+                  let nextIndex = i + 2;
+                  while (nextIndex < parts.length) {
+                    const nextPart = parts[nextIndex]?.toLowerCase();
+                    if (!identifierTypes.includes(nextPart)) {
+                      nextIndex++;
+                    } else {
+                      break;
+                    }
+                  }
+                  i = nextIndex;
+                } else {
+                  i++;
+                }
               }
-            });
-          }
-          // Also check if chart has data with columns that match identifier types
-          // This helps identify identifiers even if no filters are set yet
-          if ((box.chartConfig as any)?.filteredData?.columns) {
-            const columns = (box.chartConfig as any).filteredData.columns;
-            columns.forEach((column: string) => {
-              const normalizedColumn = column.toLowerCase();
-              if (identifierTypes.includes(normalizedColumn)) {
-                chartIdentifiers.add(normalizedColumn);
-              }
-            });
-          }
-        });
+            }
+          });
 
-        // Combine all identifiers (union - all identifiers from both metric cards and charts)
-        const allIdentifiers = Array.from(new Set([...metricCardIdentifiers, ...chartIdentifiers]));
+          // Extract ALL identifiers from charts
+          // Also check chart data columns if available (for charts without filters yet)
+          const chartIdentifiers = new Set<string>();
+          allCharts.forEach(box => {
+            if (box.chartConfig?.filters) {
+              Object.keys(box.chartConfig.filters).forEach(column => {
+                const normalizedColumn = column.toLowerCase();
+                if (identifierTypes.includes(normalizedColumn)) {
+                  chartIdentifiers.add(normalizedColumn);
+                }
+              });
+            }
+            // Also check if chart has data with columns that match identifier types
+            // This helps identify identifiers even if no filters are set yet
+            if ((box.chartConfig as any)?.filteredData?.columns) {
+              const columns = (box.chartConfig as any).filteredData.columns;
+              columns.forEach((column: string) => {
+                const normalizedColumn = column.toLowerCase();
+                if (identifierTypes.includes(normalizedColumn)) {
+                  chartIdentifiers.add(normalizedColumn);
+                }
+              });
+            }
+          });
+
+          // Combine all identifiers (union - all identifiers from both metric cards and charts)
+          allIdentifiers = Array.from(new Set([...metricCardIdentifiers, ...chartIdentifiers]));
+        }
         
         // Note: State for global filters is declared at component level above
 
         // Get unique values for each identifier from all available variables
         const getGlobalFilterOptions = (identifier: string): string[] => {
+          // Return cached options if available
+          if (globalFilterOptionsCache[identifier]) {
+            return globalFilterOptionsCache[identifier];
+          }
+          
           const options = new Set<string>();
-          const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+          const identifierTypesLocal = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
           
           // Get from all available variables (like individual filters do)
           allVariablesForGlobalFilters.forEach((v: any) => {
@@ -600,7 +807,7 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                   
                   while (nextIndex < parts.length) {
                     const nextPart = parts[nextIndex]?.toLowerCase();
-                    if (!identifierTypes.includes(nextPart)) {
+                    if (!identifierTypesLocal.includes(nextPart)) {
                       value += '_' + parts[nextIndex];
                       nextIndex++;
                     } else {
@@ -630,25 +837,118 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
           return Array.from(options).sort();
         };
 
-        if (allIdentifiers.length === 0) {
-          return null;
-        }
-
         return (
           <div className="space-y-3">
-            <Label className="text-sm font-medium">Global Filters</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Global Filters</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const currentEnabled = settings.enabledGlobalFilterIdentifiers || [];
+                  setTempSelectedIdentifiers(currentEnabled);
+                  setShowIdentifierDialog(true);
+                }}
+                className="h-7 text-xs"
+              >
+                <Settings2 className="w-3 h-3 mr-1" />
+                Select Identifiers
+              </Button>
+            </div>
+            
+            {/* Identifier Selection Dialog */}
+            <Dialog open={showIdentifierDialog} onOpenChange={setShowIdentifierDialog}>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader>
+                  <DialogTitle>Select Identifiers for Global Filters</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 py-4">
+                  <p className="text-sm text-muted-foreground">
+                    Choose which identifiers should be available for global filtering. You can select identifiers even if they're not currently used in any elements.
+                  </p>
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {identifierTypes.map((identifier) => (
+                      <div key={identifier} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`select-identifier-${identifier}`}
+                          checked={tempSelectedIdentifiers.includes(identifier)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setTempSelectedIdentifiers([...tempSelectedIdentifiers, identifier]);
+                            } else {
+                              setTempSelectedIdentifiers(tempSelectedIdentifiers.filter(id => id !== identifier));
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor={`select-identifier-${identifier}`}
+                          className="text-sm font-medium capitalize cursor-pointer"
+                        >
+                          {identifier}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowIdentifierDialog(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      onSettingsChange({ enabledGlobalFilterIdentifiers: tempSelectedIdentifiers });
+                      setShowIdentifierDialog(false);
+                    }}
+                  >
+                    Apply
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      // Clear selection to use auto-detect
+                      onSettingsChange({ enabledGlobalFilterIdentifiers: [] });
+                      setShowIdentifierDialog(false);
+                    }}
+                  >
+                    Use Auto-detect
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
             <Card className="p-4 space-y-4 bg-blue-50 border-blue-200">
               <p className="text-xs text-blue-800 mb-2">
-                Select identifiers and choose which element types to apply filters to.
+                Global filters automatically apply to all Metric Cards, Charts, and Tables. They override individual element filters.
+                {settings.enabledGlobalFilterIdentifiers && settings.enabledGlobalFilterIdentifiers.length > 0 && (
+                  <span className="block mt-1 font-semibold">
+                    Enabled identifiers: {settings.enabledGlobalFilterIdentifiers.join(', ')}
+                  </span>
+                )}
               </p>
-              {allIdentifiers.map((identifier) => {
-                const options = getGlobalFilterOptions(identifier);
+              {allIdentifiers.length === 0 ? (
+                <div className="p-3 bg-white rounded-lg border border-blue-200">
+                  <p className="text-xs text-muted-foreground mb-2">
+                    No identifiers found. Click "Select Identifiers" to manually enable identifiers for global filtering.
+                  </p>
+                  <p className="text-xs text-blue-600">
+                    Available identifiers: {identifierTypes.join(', ')}
+                  </p>
+                </div>
+              ) : (
+                allIdentifiers.map((identifier) => {
+                // Get options from cache or variables
+                const optionsFromVariables = getGlobalFilterOptions(identifier);
+                const optionsFromCache = globalFilterOptionsCache[identifier] || [];
+                const options = optionsFromCache.length > 0 ? optionsFromCache : optionsFromVariables;
                 const currentFilter = settings.globalFilters?.[identifier];
                 const currentValues = currentFilter?.values || [];
-                const applyToMetricCards = currentFilter?.applyToMetricCards ?? metricCardIdentifiers.has(identifier);
-                const applyToCharts = currentFilter?.applyToCharts ?? chartIdentifiers.has(identifier);
                 
-                if (loadingGlobalFilterOptions && options.length === 0) {
+                if (loadingGlobalFilterOptions && options.length === 0 && !globalFilterOptionsCache[identifier]) {
                   return (
                     <div key={identifier} className="p-3 bg-white rounded-lg border border-blue-200">
                       <p className="text-xs text-muted-foreground">Loading options for {identifier}...</p>
@@ -662,245 +962,424 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                       <Label htmlFor={`global-filter-${identifier}`} className="text-xs font-semibold capitalize">
                         {identifier} ({options.length} options)
                       </Label>
-                      <div className="flex items-center gap-4 text-xs">
-                        <div className="flex items-center gap-1">
-                          <Checkbox
-                            id={`apply-metric-${identifier}`}
-                            checked={applyToMetricCards}
-                            disabled={!metricCardIdentifiers.has(identifier)}
-                            onCheckedChange={(checked) => {
-                              const newGlobalFilters = { ...(settings.globalFilters || {}) };
-                              if (!newGlobalFilters[identifier]) {
-                                newGlobalFilters[identifier] = { values: [], applyToMetricCards: false, applyToCharts: false };
-                              }
-                              newGlobalFilters[identifier].applyToMetricCards = checked as boolean;
-                              onSettingsChange({ globalFilters: newGlobalFilters });
-                            }}
-                          />
-                          <label htmlFor={`apply-metric-${identifier}`} className={metricCardIdentifiers.has(identifier) ? 'cursor-pointer' : 'text-gray-400 cursor-not-allowed'}>
-                            Metric Cards
-                          </label>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Checkbox
-                            id={`apply-chart-${identifier}`}
-                            checked={applyToCharts}
-                            disabled={!chartIdentifiers.has(identifier)}
-                            onCheckedChange={(checked) => {
-                              const newGlobalFilters = { ...(settings.globalFilters || {}) };
-                              if (!newGlobalFilters[identifier]) {
-                                newGlobalFilters[identifier] = { values: [], applyToMetricCards: false, applyToCharts: false };
-                              }
-                              newGlobalFilters[identifier].applyToCharts = checked as boolean;
-                              onSettingsChange({ globalFilters: newGlobalFilters });
-                            }}
-                          />
-                          <label htmlFor={`apply-chart-${identifier}`} className={chartIdentifiers.has(identifier) ? 'cursor-pointer' : 'text-gray-400 cursor-not-allowed'}>
-                            Charts
-                          </label>
-                        </div>
-                      </div>
                     </div>
                     <Select
                       value={currentValues.length > 0 ? currentValues[0] : '__all__'}
                       onValueChange={(value) => {
                         const newGlobalFilters = { ...(settings.globalFilters || {}) };
-                        const currentFilter = newGlobalFilters[identifier] || { values: [], applyToMetricCards: applyToMetricCards, applyToCharts: applyToCharts };
+                        const currentFilter = newGlobalFilters[identifier] || { values: [] };
+                        
+                        // Store previous local filter state before applying global filter
+                        const previousLocalFilters = settings.previousLocalFilters || {};
                         
                         if (value === '__all__') {
                           currentFilter.values = [];
-                        } else {
-                          currentFilter.values = [value];
-                        }
-                        
-                        newGlobalFilters[identifier] = currentFilter;
-                        
-                        // Apply filters automatically to charts when selected
-                        let updatedLayouts = settings.layouts;
-                        
-                        // Apply to charts if enabled - sync global filters to chart's individual filters
-                        if (currentFilter.applyToCharts) {
-                          updatedLayouts = settings.layouts?.map(layout => ({
+                          // Restore previous local filters when global filter is removed
+                          let restoredLayouts = settings.layouts;
+                          
+                          // Restore chart filters
+                          restoredLayouts = restoredLayouts?.map(layout => ({
                             ...layout,
                             boxes: layout.boxes.map(box => {
                               if (box.elementType === 'chart' && box.chartConfig) {
-                                // Preserve the original chart config structure - don't migrate here as it might lose properties
-                                // Only migrate when we need to access filters, but keep original structure
                                 const originalChartConfig = box.chartConfig;
                                 const chartConfig = migrateLegacyChart(originalChartConfig);
+                                const previousFilters = previousLocalFilters[`chart_${box.id}`] || {};
                                 
-                                // Start with existing chart-specific filters (non-global ones)
-                                const chartSpecificFilters: Record<string, string[]> = {};
-                                const globalFilterIdentifiers = new Set(
-                                  Object.entries(newGlobalFilters)
-                                    .filter(([_, config]: [string, any]) => config.applyToCharts)
-                                    .map(([id]) => id.toLowerCase())
-                                );
-                                
-                                // Map to track original column names (case-preserved) for each identifier
-                                const identifierToColumnName = new Map<string, string>();
-                                
-                                // First pass: identify which existing filters are global filters and preserve their original case
-                                Object.entries(chartConfig.filters || {}).forEach(([key, val]) => {
-                                  const normalizedKey = key.toLowerCase();
-                                  if (globalFilterIdentifiers.has(normalizedKey)) {
-                                    // This is a global filter - preserve the original column name
-                                    identifierToColumnName.set(normalizedKey, key);
-                                  } else {
-                                    // This is a chart-specific filter - keep it
-                                    chartSpecificFilters[key] = val as string[];
-                                  }
-                                });
-                                
-                                // Add all active global filters for charts, using original column name if available
-                                Object.entries(newGlobalFilters).forEach(([id, filterConfig]) => {
-                                  const config = filterConfig as { values: string[]; applyToCharts?: boolean };
-                                  if (config.applyToCharts) {
-                                    // If values exist and not "__all__", add to chart filters
-                                    // This syncs global filters to chart's individual filters UI
-                                    if (config.values && config.values.length > 0 && !config.values.includes('__all__')) {
-                                      // Use original column name if we found one
-                                      let columnName = identifierToColumnName.get(id.toLowerCase());
-                                      
-                                      // If no existing filter found, try to find matching column name from chart data
-                                      if (!columnName && (chartConfig as any)?.filteredData?.columns) {
-                                        const columns = (chartConfig as any).filteredData.columns;
-                                        const matchingColumn = columns.find((col: string) => 
-                                          col.toLowerCase() === id.toLowerCase()
-                                        );
-                                        if (matchingColumn) {
-                                          columnName = matchingColumn;
-                                          identifierToColumnName.set(id.toLowerCase(), matchingColumn);
-                                        }
-                                      }
-                                      
-                                      // Fallback to lowercase identifier (backend handles case-insensitive matching)
-                                      if (!columnName) {
-                                        columnName = id;
-                                      }
-                                      
-                                      // Only add if we don't already have this filter (case-insensitive check)
-                                      const existingKey = Object.keys(chartSpecificFilters).find(key => 
-                                        key.toLowerCase() === columnName.toLowerCase()
-                                      );
-                                      
-                                      if (existingKey) {
-                                        // Update existing filter with same case
-                                        chartSpecificFilters[existingKey] = config.values;
-                                      } else {
-                                        // Add new filter with preserved or found column name
-                                        chartSpecificFilters[columnName] = config.values;
-                                      }
-                                    }
-                                    // If "__all__" or empty, the filter is removed (not added to chartSpecificFilters)
-                                  }
-                                });
-                                
-                                // Debug: Log the filter sync
-                                console.log(`[Global Filter] Syncing filters to chart ${box.id}:`, {
-                                  identifier,
-                                  value,
-                                  globalFilters: newGlobalFilters,
-                                  chartSpecificFilters,
-                                  originalFilters: chartConfig.filters,
-                                  preservingOriginalConfig: true
-                                });
-                                
-                                // Preserve ALL original chart config properties, only update filters
                                 return {
                                   ...box,
                                   chartConfig: {
-                                    ...originalChartConfig, // Preserve original structure first
-                                    ...chartConfig, // Then apply migrated structure
-                                    filters: chartSpecificFilters, // Sync global filters to individual filters
-                                    chartRendered: false // Mark as needing re-render
+                                    ...originalChartConfig,
+                                    ...chartConfig,
+                                    filters: previousFilters,
+                                    chartRendered: false
                                   }
                                 };
                               }
                               return box;
                             })
                           }));
-                        }
-                        
-                        // Apply to metric cards if enabled (async)
-                        if (currentFilter.applyToMetricCards) {
-                          (async () => {
-                            // Use the already fetched variables or fetch if needed
-                            const variablesToUse = allVariablesForGlobalFilters.length > 0 
-                              ? allVariablesForGlobalFilters 
-                              : await (async () => {
-                                  try {
-                                    const projectContext = getActiveProjectContext();
-                                    if (!projectContext) return [];
-                                    
-                                    const params = new URLSearchParams({
-                                      clientId: projectContext.client_name,
-                                      appId: projectContext.app_name,
-                                      projectId: projectContext.project_name,
-                                    });
-
-                                    const response = await fetch(`${LABORATORY_API}/variables?${params.toString()}`, {
-                                      credentials: 'include',
-                                    });
-
-                                    if (response.ok) {
-                                      const result = await response.json();
-                                      return result.variables && Array.isArray(result.variables) ? result.variables : [];
-                                    }
-                                  } catch (error) {
-                                    console.error('Error fetching variables:', error);
-                                  }
-                                  return [];
-                                })();
-                            
-                            // Use updatedLayouts (which already has chart filter updates) as base for metric updates
-                            const metricUpdatedLayouts = updatedLayouts?.map(layout => ({
+                          
+                          // Restore table filters
+                          restoredLayouts = restoredLayouts?.map(layout => ({
                             ...layout,
                             boxes: layout.boxes.map(box => {
-                              if (box.elementType === 'metric-card' && (box.variableNameKey || box.variableName)) {
-                                const variableKey = box.variableNameKey || box.variableName || '';
-                                if (variableKey) {
-                                  // Parse current identifiers from variable key
-                                  const parts = variableKey.split('_');
-                                  const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
-                                  const currentIdentifiers: Record<string, string> = {};
+                              if (box.elementType === 'table' && box.tableSettings) {
+                                const previousFilters = previousLocalFilters[`table_${box.id}`] || {};
+                                
+                                return {
+                                  ...box,
+                                  tableSettings: {
+                                    ...box.tableSettings,
+                                    filters: previousFilters
+                                  }
+                                };
+                              }
+                              return box;
+                            })
+                          }));
+                          
+                          onSettingsChange({ 
+                            globalFilters: newGlobalFilters,
+                            layouts: restoredLayouts,
+                            previousLocalFilters: {} // Clear stored previous filters
+                          });
+                          return;
+                        } else {
+                          currentFilter.values = [value];
+                        }
+                        
+                        newGlobalFilters[identifier] = currentFilter;
+                        
+                        // Get currently enabled global filter identifiers
+                        const enabledIdentifiers = settings.enabledGlobalFilterIdentifiers || [];
+                        const enabledIdentifiersSet = new Set(enabledIdentifiers.map(id => id.toLowerCase()));
+                        
+                        // If no enabled identifiers specified, use all identifiers that have active filters
+                        const activeGlobalFilterIdentifiers = new Set(
+                          Object.entries(newGlobalFilters)
+                            .filter(([_, config]: [string, any]) => config.values && config.values.length > 0 && !config.values.includes('__all__'))
+                            .map(([id]) => id.toLowerCase())
+                        );
+                        
+                        // Use enabled identifiers if available, otherwise use active filter identifiers
+                        const validGlobalFilterIdentifiers = enabledIdentifiers.length > 0 
+                          ? enabledIdentifiersSet 
+                          : activeGlobalFilterIdentifiers;
+                        
+                        // Apply filters automatically to all element types
+                        let updatedLayouts = settings.layouts;
+                        
+                        // Always apply to charts - sync global filters to chart's individual filters
+                        updatedLayouts = settings.layouts?.map(layout => ({
+                          ...layout,
+                          boxes: layout.boxes.map(box => {
+                            if (box.elementType === 'chart' && box.chartConfig) {
+                              // Store previous local filters before applying global filter
+                              const originalChartConfig = box.chartConfig;
+                              const chartConfig = migrateLegacyChart(originalChartConfig);
+                              
+                              // Store previous filters if not already stored
+                              if (!previousLocalFilters[`chart_${box.id}`]) {
+                                previousLocalFilters[`chart_${box.id}`] = { ...(chartConfig.filters || {}) };
+                              }
+                              
+                              // Start with existing chart-specific filters (non-global ones)
+                              const chartSpecificFilters: Record<string, string[]> = {};
+                              const globalFilterIdentifiers = new Set(
+                                Object.entries(newGlobalFilters)
+                                  .filter(([_, config]: [string, any]) => config.values && config.values.length > 0)
+                                  .map(([id]) => id.toLowerCase())
+                              );
+                              
+                              // Map to track original column names (case-preserved) for each identifier
+                              const identifierToColumnName = new Map<string, string>();
+                              
+                              // First pass: identify which existing filters are global filters and preserve their original case
+                              // Also REMOVE any filters for identifiers that are no longer in the enabled list
+                              Object.entries(chartConfig.filters || {}).forEach(([key, val]) => {
+                                const normalizedKey = key.toLowerCase();
+                                
+                                // Remove filter if it's for an identifier that's no longer enabled
+                                if (enabledIdentifiers.length > 0 && !validGlobalFilterIdentifiers.has(normalizedKey)) {
+                                  // This identifier is no longer enabled - skip it (remove it)
+                                  return;
+                                }
+                                
+                                if (globalFilterIdentifiers.has(normalizedKey)) {
+                                  // This is a global filter - preserve the original column name
+                                  identifierToColumnName.set(normalizedKey, key);
+                                } else {
+                                  // This is a chart-specific filter - keep it only if not overridden by global filter
+                                  if (!globalFilterIdentifiers.has(normalizedKey)) {
+                                    chartSpecificFilters[key] = val as string[];
+                                  }
+                                }
+                              });
+                              
+                              // Add all active global filters for charts, using original column name if available
+                              Object.entries(newGlobalFilters).forEach(([id, filterConfig]) => {
+                                const config = filterConfig as { values: string[] };
+                                // Only apply if identifier is in enabled list (or if no enabled list, apply all active filters)
+                                const isEnabled = enabledIdentifiers.length === 0 || validGlobalFilterIdentifiers.has(id.toLowerCase());
+                                
+                                // If values exist and not "__all__", add to chart filters
+                                if (isEnabled && config.values && config.values.length > 0 && !config.values.includes('__all__')) {
+                                  // Use original column name if we found one
+                                  let columnName = identifierToColumnName.get(id.toLowerCase());
                                   
-                                  let i = 2; // Skip first 2 parts (measure and aggregation)
-                                  while (i < parts.length) {
-                                    const key = parts[i]?.toLowerCase();
-                                    if (identifierTypes.includes(key) && i + 1 < parts.length) {
-                                      let val = parts[i + 1];
-                                      let nextIndex = i + 2;
+                                  // If no existing filter found, try to find matching column name from chart data
+                                  if (!columnName && (chartConfig as any)?.filteredData?.columns) {
+                                    const columns = (chartConfig as any).filteredData.columns;
+                                    const matchingColumn = columns.find((col: string) => 
+                                      col.toLowerCase() === id.toLowerCase()
+                                    );
+                                    if (matchingColumn) {
+                                      columnName = matchingColumn;
+                                      identifierToColumnName.set(id.toLowerCase(), matchingColumn);
+                                    }
+                                  }
+                                  
+                                  // Fallback to lowercase identifier (backend handles case-insensitive matching)
+                                  if (!columnName) {
+                                    columnName = id;
+                                  }
+                                  
+                                  // Override existing filter with global filter value
+                                  chartSpecificFilters[columnName] = config.values;
+                                }
+                              });
+                              
+                              // Preserve ALL original chart config properties, only update filters
+                              return {
+                                ...box,
+                                chartConfig: {
+                                  ...originalChartConfig,
+                                  ...chartConfig,
+                                  filters: chartSpecificFilters, // Global filters override individual filters
+                                  chartRendered: false // Mark as needing re-render
+                                }
+                              };
+                            }
+                            return box;
+                          })
+                        }));
+                        
+                        // Always apply to tables - sync global filters to table's column filters
+                        updatedLayouts = updatedLayouts?.map(layout => ({
+                          ...layout,
+                          boxes: layout.boxes.map(box => {
+                            if (box.elementType === 'table' && box.tableSettings) {
+                              // Store previous local filters before applying global filter
+                              if (!previousLocalFilters[`table_${box.id}`]) {
+                                previousLocalFilters[`table_${box.id}`] = { ...(box.tableSettings.filters || {}) };
+                              }
+                              
+                              // Get actual column names from table data to match case
+                              const tableColumns: string[] = [];
+                              if (box.tableSettings.tableData?.columns && Array.isArray(box.tableSettings.tableData.columns)) {
+                                tableColumns.push(...box.tableSettings.tableData.columns);
+                              } else if (box.tableSettings.visibleColumns && Array.isArray(box.tableSettings.visibleColumns)) {
+                                tableColumns.push(...box.tableSettings.visibleColumns);
+                              } else if (availableColumns && Array.isArray(availableColumns)) {
+                                // Fallback to availableColumns from data upload
+                                tableColumns.push(...availableColumns);
+                              }
+                              
+                              // Create a case-insensitive mapping
+                              const columnMap = new Map<string, string>();
+                              tableColumns.forEach(col => {
+                                columnMap.set(col.toLowerCase(), col);
+                              });
+                              
+                              // Start with existing table-specific filters (but remove any that are global filters or no longer enabled)
+                              const tableFilters: Record<string, any> = {};
+                              const globalFilterKeys = new Set(Object.keys(newGlobalFilters).map(k => k.toLowerCase()));
+                              
+                              // Keep only non-global filters AND filters that are not for disabled identifiers
+                              Object.entries(box.tableSettings.filters || {}).forEach(([key, value]) => {
+                                const normalizedKey = key.toLowerCase();
+                                
+                                // Remove filter if it's for an identifier that's no longer enabled
+                                if (enabledIdentifiers.length > 0 && !validGlobalFilterIdentifiers.has(normalizedKey)) {
+                                  // This identifier is no longer enabled - skip it (remove it)
+                                  return;
+                                }
+                                
+                                // Keep only non-global filters (user-created local filters)
+                                if (!globalFilterKeys.has(normalizedKey)) {
+                                  tableFilters[key] = value;
+                                }
+                              });
+                              
+                              // Apply all active global filters to table filters with correct column name
+                              Object.entries(newGlobalFilters).forEach(([id, filterConfig]) => {
+                                const config = filterConfig as { values: string[] };
+                                // Only apply if identifier is in enabled list (or if no enabled list, apply all active filters)
+                                const isEnabled = enabledIdentifiers.length === 0 || validGlobalFilterIdentifiers.has(id.toLowerCase());
+                                
+                                if (isEnabled && config.values && config.values.length > 0 && !config.values.includes('__all__')) {
+                                  // Find the actual column name (case-insensitive match)
+                                  // Try exact match first, then try with different cases
+                                  let actualColumnName = columnMap.get(id.toLowerCase());
+                                  
+                                  // If not found, try to find a column that contains the identifier (for variations like "Brand" vs "brand")
+                                  if (!actualColumnName && tableColumns.length > 0) {
+                                    const matchingCol = tableColumns.find(col => 
+                                      col.toLowerCase() === id.toLowerCase() || 
+                                      col.toLowerCase().includes(id.toLowerCase()) ||
+                                      id.toLowerCase().includes(col.toLowerCase())
+                                    );
+                                    if (matchingCol) {
+                                      actualColumnName = matchingCol;
+                                      columnMap.set(id.toLowerCase(), matchingCol);
+                                    }
+                                  }
+                                  
+                                  // Fallback to identifier name if no match found
+                                  if (!actualColumnName) {
+                                    actualColumnName = id;
+                                  }
+                                  
+                                  // Override table filter with global filter value
+                                  tableFilters[actualColumnName] = config.values;
+                                } else {
+                                  // Remove global filter from table filters if set to "__all__" or not enabled
+                                  const actualColumnName = columnMap.get(id.toLowerCase()) || id;
+                                  delete tableFilters[actualColumnName];
+                                }
+                              });
+                              
+                              return {
+                                ...box,
+                                tableSettings: {
+                                  ...box.tableSettings,
+                                  filters: tableFilters, // Global filters override individual filters
+                                  currentPage: 1 // Reset to page 1 when filters change
+                                }
+                              };
+                            }
+                            return box;
+                          })
+                        }));
+                        
+                        // Always apply to metric cards (async)
+                        (async () => {
+                          // Use the already fetched variables or fetch if needed
+                          const variablesToUse = allVariablesForGlobalFilters.length > 0 
+                            ? allVariablesForGlobalFilters 
+                            : await (async () => {
+                                try {
+                                  const projectContext = getActiveProjectContext();
+                                  if (!projectContext) return [];
+                                  
+                                  const params = new URLSearchParams({
+                                    clientId: projectContext.client_name,
+                                    appId: projectContext.app_name,
+                                    projectId: projectContext.project_name,
+                                  });
+
+                                  const response = await fetch(`${LABORATORY_API}/variables?${params.toString()}`, {
+                                    credentials: 'include',
+                                  });
+
+                                  if (response.ok) {
+                                    const result = await response.json();
+                                    return result.variables && Array.isArray(result.variables) ? result.variables : [];
+                                  }
+                                } catch (error) {
+                                  console.error('Error fetching variables:', error);
+                                }
+                                return [];
+                              })();
+                          
+                          // Use updatedLayouts (which already has chart and table filter updates) as base for metric updates
+                          const metricUpdatedLayouts = updatedLayouts?.map(layout => ({
+                          ...layout,
+                          boxes: layout.boxes.map(box => {
+                            if (box.elementType === 'metric-card' && (box.variableNameKey || box.variableName)) {
+                              const variableKey = box.variableNameKey || box.variableName || '';
+                              if (variableKey) {
+                                // Parse current identifiers from variable key
+                                const parts = variableKey.split('_');
+                                const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+                                const currentIdentifiers: Record<string, string> = {};
+                                
+                                let i = 2; // Skip first 2 parts (measure and aggregation)
+                                while (i < parts.length) {
+                                  const key = parts[i]?.toLowerCase();
+                                  if (identifierTypes.includes(key) && i + 1 < parts.length) {
+                                    let val = parts[i + 1];
+                                    let nextIndex = i + 2;
+                                    
+                                    while (nextIndex < parts.length) {
+                                      const nextPart = parts[nextIndex]?.toLowerCase();
+                                      if (!identifierTypes.includes(nextPart)) {
+                                        val += '_' + parts[nextIndex];
+                                        nextIndex++;
+                                      } else {
+                                        break;
+                                      }
+                                    }
+                                    
+                                    currentIdentifiers[key] = val;
+                                    i = nextIndex;
+                                  } else {
+                                    i++;
+                                  }
+                                }
+                                
+                                // First, remove any identifiers that are no longer in the enabled list
+                                if (enabledIdentifiers.length > 0) {
+                                  Object.keys(currentIdentifiers).forEach(id => {
+                                    if (!validGlobalFilterIdentifiers.has(id.toLowerCase())) {
+                                      // This identifier is no longer enabled - remove it
+                                      delete currentIdentifiers[id];
+                                    }
+                                  });
+                                }
+                                
+                                // Apply all global filters to current identifiers (override or add)
+                                Object.entries(newGlobalFilters).forEach(([globalId, filterConfig]) => {
+                                  const config = filterConfig as { values: string[] };
+                                  // Only apply if identifier is in enabled list (or if no enabled list, apply all active filters)
+                                  const isEnabled = enabledIdentifiers.length === 0 || validGlobalFilterIdentifiers.has(globalId.toLowerCase());
+                                  
+                                  if (isEnabled && config.values && config.values.length > 0 && !config.values.includes('__all__')) {
+                                    // Override or add the global filter identifier
+                                    currentIdentifiers[globalId] = config.values[0];
+                                  } else {
+                                    // Remove identifier if global filter is set to "__all__" or not enabled
+                                    delete currentIdentifiers[globalId];
+                                  }
+                                });
+                                
+                                // Find base pattern (first 2 parts: measure and aggregation)
+                                const basePattern = parts.slice(0, 2).join('_');
+                                
+                                // Find matching variable - either exact match or expanded version
+                                // First try to find exact match with all identifiers
+                                let matchingVar = variablesToUse.find((v: any) => {
+                                  const vKey = v.variableNameKey || v.variableName;
+                                  if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
+                                  
+                                  const vParts = vKey.split('_');
+                                  const vIdentifiers: Record<string, string> = {};
+                                  
+                                  let j = 2;
+                                  while (j < vParts.length) {
+                                    const key = vParts[j]?.toLowerCase();
+                                    if (identifierTypes.includes(key) && j + 1 < vParts.length) {
+                                      let val = vParts[j + 1];
+                                      let nextIndex = j + 2;
                                       
-                                      while (nextIndex < parts.length) {
-                                        const nextPart = parts[nextIndex]?.toLowerCase();
+                                      while (nextIndex < vParts.length) {
+                                        const nextPart = vParts[nextIndex]?.toLowerCase();
                                         if (!identifierTypes.includes(nextPart)) {
-                                          val += '_' + parts[nextIndex];
+                                          val += '_' + vParts[nextIndex];
                                           nextIndex++;
                                         } else {
                                           break;
                                         }
                                       }
                                       
-                                      currentIdentifiers[key] = val;
-                                      i = nextIndex;
+                                      vIdentifiers[key] = val;
+                                      j = nextIndex;
                                     } else {
-                                      i++;
+                                      j++;
                                     }
                                   }
                                   
-                                  // Update with global filter (replace the identifier value)
-                                  if (value !== '__all__') {
-                                    currentIdentifiers[identifier] = value;
-                                  } else {
-                                    delete currentIdentifiers[identifier];
-                                  }
-                                  
-                                  // Find base pattern (first 2 parts: measure and aggregation)
-                                  const basePattern = parts.slice(0, 2).join('_');
-                                  
-                                  // Find matching variable with same structure but new identifier value
-                                  const matchingVar = variablesToUse.find((v: any) => {
+                                  // Check if all current identifiers match (including global filters)
+                                  return Object.entries(currentIdentifiers).every(([key, val]) => 
+                                    vIdentifiers[key] === val
+                                  );
+                                });
+                                
+                                // If no exact match found and we have global filters, try to find expanded variable
+                                // (variable that includes the global filter identifier even if original didn't)
+                                if (!matchingVar && Object.keys(currentIdentifiers).length > 0) {
+                                  matchingVar = variablesToUse.find((v: any) => {
                                     const vKey = v.variableNameKey || v.variableName;
                                     if (!vKey || !vKey.startsWith(basePattern + '_')) return false;
                                     
@@ -931,11 +1410,13 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                                       }
                                     }
                                     
-                                    // Check if all current identifiers match (including the updated one)
+                                    // Check if variable includes all current identifiers (expanded version)
+                                    // This allows finding variables that have been expanded to include new identifiers
                                     return Object.entries(currentIdentifiers).every(([key, val]) => 
                                       vIdentifiers[key] === val
-                                    );
+                                    ) && Object.keys(vIdentifiers).length >= Object.keys(currentIdentifiers).length;
                                   });
+                                }
                                   
                                   if (matchingVar) {
                                     let updatedBox = {
@@ -1236,16 +1717,10 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                             
                             onSettingsChange({ 
                               globalFilters: newGlobalFilters,
-                              layouts: metricUpdatedLayouts 
+                              layouts: metricUpdatedLayouts,
+                              previousLocalFilters: previousLocalFilters
                             });
                           })();
-                        } else {
-                          // Just update global filters and chart layouts if not applying to metric cards
-                          onSettingsChange({ 
-                            globalFilters: newGlobalFilters,
-                            layouts: updatedLayouts 
-                          });
-                        }
                       }}
                     >
                       <SelectTrigger className="w-full bg-white border-gray-300">
@@ -1262,13 +1737,13 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                     </Select>
                   </div>
                 );
-              })}
+              }))}
               
               {/* Apply Filters and Render Charts Buttons */}
               {(() => {
-                // Check if any global filters are set to apply to charts
+                // Check if any global filters are set (they always apply to charts)
                 const hasChartFilters = Object.values(settings.globalFilters || {}).some(
-                  (filter: any) => filter.applyToCharts && filter.values && filter.values.length > 0
+                  (filter: any) => filter.values && filter.values.length > 0
                 );
                 const hasCharts = settings.layouts?.some(layout => 
                   layout.boxes.some(box => box.elementType === 'chart' && box.chartConfig)

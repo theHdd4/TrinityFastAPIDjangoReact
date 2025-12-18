@@ -43,9 +43,9 @@ export interface KPIDashboardSettings {
   selectedBoxId?: string; // ID of the currently selected box for per-element settings
   globalFilters?: Record<string, {
     values: string[];
-    applyToMetricCards?: boolean;
-    applyToCharts?: boolean;
-  }>; // Global filters with element type selection
+  }>; // Global filters automatically apply to all elements
+  previousLocalFilters?: Record<string, Record<string, any>>; // Store previous local filters for restoration
+  enabledGlobalFilterIdentifiers?: string[]; // User-selected identifiers to show in Global Filters section
 }
 
 interface KPIDashboardAtomProps {
@@ -64,7 +64,8 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
       changeColumns: [],
       insights: '',
       layouts: [],
-      globalFilters: {} as Record<string, { values: string[]; applyToMetricCards?: boolean; applyToCharts?: boolean }>
+      globalFilters: {} as Record<string, { values: string[] }>,
+      previousLocalFilters: {} as Record<string, Record<string, any>>
     };
   }, [atom?.settings]);
   
