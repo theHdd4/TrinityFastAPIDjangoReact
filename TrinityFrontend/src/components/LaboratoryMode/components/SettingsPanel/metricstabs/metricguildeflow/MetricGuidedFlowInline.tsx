@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { useMetricGuidedFlow, type MetricStage, type MetricGuidedFlowState } from './useMetricGuidedFlow';
+import { useMetricGuidedFlow, type MetricStage, type MetricGuidedFlowState, STEP_ORDER } from './useMetricGuidedFlow';
 import { M0Type } from './stages/M0Type';
 import { M1Dataset } from './stages/M1Dataset';
 import { M2Operations, type M2OperationsRef } from './stages/M2Operations';
@@ -38,10 +38,24 @@ const STAGE_TITLES: Record<MetricStage, string> = {
   type: 'Select The Type Of Metric You Want To Create',
   dataset: 'Confirm Your Data Source',
   operations: 'Select Operation',
-  preview: 'Preview & Save',
+  preview: 'Preview Your Created Metrics',
 };
 
 const STAGE_ORDER: MetricStage[] = ['type', 'dataset', 'operations', 'preview'];
+
+// Helper function to get the title for a stage, with conditional logic for operations stage
+const getStageTitle = (stage: MetricStage, selectedType: string | null | undefined): string => {
+  if (stage === 'operations') {
+    if (!selectedType) {
+      return 'Select Operation';
+    } else if (selectedType === 'variable') {
+      return 'Create new variable';
+    } else if (selectedType === 'column') {
+      return 'Create new columns by applying transformations on your dataset';
+    }
+  }
+  return STAGE_TITLES[stage];
+};
 
 const getStageIndex = (stage: MetricStage): number => STAGE_ORDER.indexOf(stage);
 const isStageCompleted = (stage: MetricStage, currentStage: MetricStage): boolean =>
@@ -62,13 +76,14 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
   });
   
   const flow = useMetricGuidedFlow(savedState);
-  const { state, goToNextStage, goToPreviousStage, restartFlow, goToStage, setState } = flow;
+  const { state, goToNextStage, goToPreviousStage, restartFlow, goToStage, setState, restoreStageSnapshot } = flow;
   const { setActiveMetricGuidedFlow, closeMetricGuidedFlow } = useLaboratoryStore();
 
   // Refs to avoid excessive localStorage writes and keep last saved snapshot
   const prevStateStringRef = useRef<string>('');
   const isInitialMountRef = useRef(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hasInitializedStageRef = useRef(false);
 
   const effectiveInitialStage = initialStage || 'type';
 
@@ -93,14 +108,16 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     ],
   );
 
-  // Initialize currentStage from props once
+  // Initialize currentStage from props once on mount only
   useEffect(() => {
-    if (state.currentStage === 'type' && effectiveInitialStage !== 'type') {
+    // Only initialize once on mount, not when navigating back to 'type'
+    if (!hasInitializedStageRef.current && state.currentStage === 'type' && effectiveInitialStage !== 'type') {
+      hasInitializedStageRef.current = true;
       goToStage(effectiveInitialStage);
     }
-    // We intentionally exclude goToStage from deps to avoid re-running
+    // Only depend on effectiveInitialStage, not state.currentStage to prevent re-running on back navigation
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveInitialStage, state.currentStage]);
+  }, [effectiveInitialStage]);
 
   // Sync state into laboratory store and localStorage for trackers & persistence
   useEffect(() => {
@@ -261,9 +278,70 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     if (state.currentStage === 'type') {
       onClose?.();
     } else {
-      goToPreviousStage();
+      const currentIndex = STEP_ORDER.indexOf(state.currentStage);
+      if (currentIndex <= 0) {
+        return;
+      }
+      
+      const previousStage = STEP_ORDER[currentIndex - 1];
+      
+      // Restore snapshot for previous stage if it exists
+      const restoredSnapshot = flow.restoreStageSnapshot(previousStage);
+      
+      // Reset changes made in current stage and restore previous stage state
+      setState(prev => {
+        // Determine what to reset based on current stage
+        let resetFields: Partial<MetricGuidedFlowState> = {};
+        switch (prev.currentStage) {
+          case 'type':
+            resetFields = {
+              selectedType: null,
+              createdVariables: [],
+              createdColumns: [],
+              createdTables: [],
+            };
+            break;
+          case 'dataset':
+            resetFields = {
+              dataSource: '',
+            };
+            break;
+          case 'operations':
+            resetFields = {
+              createdVariables: [],
+              createdColumns: [],
+              createdTables: [],
+            };
+            break;
+          case 'preview':
+            // Preview is read-only, no reset needed
+            resetFields = {};
+            break;
+        }
+        
+        // If snapshot exists, restore it; otherwise use reset values
+        if (restoredSnapshot) {
+          return {
+            ...prev,
+            ...resetFields,
+            currentStage: previousStage,
+            selectedType: restoredSnapshot.selectedType,
+            dataSource: restoredSnapshot.dataSource,
+            createdVariables: [...restoredSnapshot.createdVariables],
+            createdColumns: [...restoredSnapshot.createdColumns],
+            createdTables: [...restoredSnapshot.createdTables],
+          };
+        } else {
+          // No snapshot exists, reset current stage and navigate back
+          return {
+            ...prev,
+            ...resetFields,
+            currentStage: previousStage,
+          };
+        }
+      });
     }
-  }, [state.currentStage, goToPreviousStage, onClose]);
+  }, [state.currentStage, onClose, flow, setState]);
 
   const handleRestart = useCallback(() => {
     console.log('[MetricGuidedFlowInline] Restart button clicked - resetting to initial state');
@@ -273,6 +351,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     localStorage.removeItem(storageKey);
     
     // Restart flow to clear all state and go back to type stage
+    // restartFlow already clears snapshots internally
     restartFlow();
     
     // Ensure we're on the type stage (restartFlow already sets currentStage to 'type', but being explicit)
@@ -449,7 +528,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             >
               <div className="flex items-center gap-3">
                 {statusIcon}
-                <h3 className={`text-base font-semibold ${headerTextColor}`}>{STAGE_TITLES[stage]}</h3>
+                <h3 className={`text-sm font-medium ${headerTextColor}`}>{getStageTitle(stage, state.selectedType)}</h3>
                 <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded-full">
                   Completed
                 </span>
@@ -468,7 +547,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             >
               <div className="flex items-center gap-3">
                 {statusIcon}
-                <h2 className={`text-lg font-semibold ${headerTextColor}`}>{STAGE_TITLES[stage]}</h2>
+                <h2 className={`text-sm font-medium ${headerTextColor}`}>{getStageTitle(stage, state.selectedType)}</h2>
                 <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
                   Current
                 </span>
@@ -486,7 +565,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             >
               <div className="flex items-center gap-3">
                 {statusIcon}
-                <h2 className={`text-lg font-semibold ${headerTextColor}`}>{STAGE_TITLES[stage]}</h2>
+                <h2 className={`text-sm font-medium ${headerTextColor}`}>{getStageTitle(stage, state.selectedType)}</h2>
                 {isUpcoming && (
                   <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">
                     Upcoming
@@ -501,7 +580,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">
               {isCurrent ? (
                 <>
-                  <div className={`p-6 ${stage === 'type' ? 'min-h-[120px]' : 'min-h-[320px]'}`}>
+                  <div className="p-6">
                     {stage === 'preview' ? (
                       <StageComponent 
                         flow={flow} 
@@ -529,14 +608,14 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
                           Back
                         </Button>
                       )}
-                      <Button
+                      {stage !== 'type' && <Button
                         variant="ghost"
                         onClick={handleRestart}
                         className="flex items-center gap-2 text-gray-600"
                       >
                         <RotateCcw className="w-4 h-4" />
                         Restart
-                      </Button>
+                      </Button>}
                     </div>
                     <div className="flex gap-2">
                       {stage === 'preview' && <Button variant="outline" onClick={handleClose}>
@@ -596,15 +675,20 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
                   </div>
                 </>
               ) : isCompleted && isExpanded ? (
-                <div className="p-6 bg-gray-50">
+                <div className="p-6 bg-gray-50 opacity-70">
                   {stage === 'preview' ? (
                     <StageComponent 
                       flow={flow} 
                       onSave={() => {}} 
                       onClose={handleClose}
+                      readOnly={true}
                     />
+                  ) : stage === 'operations' ? (
+                    <StageComponent ref={m2OperationsRef} flow={flow} readOnly={true} />
+                  ) : stage === 'dataset' ? (
+                    <StageComponent flow={flow} contextAtomId={contextAtomId} readOnly={true} />
                   ) : (
-                    <StageComponent flow={flow} />
+                    <StageComponent flow={flow} readOnly={true} />
                   )}
                 </div>
               ) : null}
@@ -641,7 +725,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
         {/* Header describing the inline metric workflow */}
         <div className="mb-4 px-1 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">
-          Follow these steps to build and review your metric
+          Follow these steps to build and review your Metrics
           </h2>
           <button onClick={handleClose} className="text-sm text-gray-600">
             <XIcon className="w-4 h-4" />

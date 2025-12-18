@@ -10,6 +10,7 @@ interface M3PreviewProps {
   flow: ReturnTypeFromUseMetricGuidedFlow;
   onSave: () => void;
   onClose?: () => void;
+  readOnly?: boolean;
 }
 
 const LABORATORY_API = import.meta.env.VITE_LABORATORY_API || '/api/laboratory';
@@ -94,7 +95,7 @@ const buildColumnDescription = (column: CreatedColumn): string => {
   return column.operationDetails.map(op => buildColumnOperationDescription(op)).join('; ');
 };
 
-export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) => {
+export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, readOnly = false }) => {
   const { state } = flow;
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [loadingValues, setLoadingValues] = useState(false);
@@ -197,28 +198,42 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) =
     state.createdColumns.length > 0 ||
     state.createdTables.length > 0;
 
+  // Group variables by method for dynamic header
+  const variablesByMethod = useMemo(() => {
+    const grouped = {
+      compute: state.createdVariables.filter(v => v.method === 'compute'),
+      assign: state.createdVariables.filter(v => v.method === 'assign'),
+      other: state.createdVariables.filter(v => v.method !== 'compute' && v.method !== 'assign')
+    };
+    return grouped;
+  }, [state.createdVariables]);
+
   return (
     <StageLayout
-      title="Preview & Save"
-      explanation="Review your created metrics before finalizing"
+      title=""
+      explanation=""
     >
       <div className="space-y-6 w-full min-w-0">
-        {/* Success Message */}
-        <div className="text-sm text-gray-600">
-          {hasCreatedItems && (() => {
-            const varCount = state.createdVariables.length;
-            const colCount = state.createdColumns.length;
-            const tableCount = state.createdTables.length;
-            const uniqueTableCount = Object.keys(columnsByTable).length;
-            
-            const parts: string[] = [];
-            if (varCount > 0) parts.push(`${varCount} variable${varCount !== 1 ? 's' : ''}`);
-            if (colCount > 0) parts.push(`${colCount} column${colCount !== 1 ? 's' : ''} in ${uniqueTableCount} table${uniqueTableCount !== 1 ? 's' : ''}`);
-            if (tableCount > 0) parts.push(`${tableCount} new table${tableCount !== 1 ? 's' : ''}`);
-            
-            return <span>Successfully created {parts.join(', ')}</span>;
-          })()}
-        </div>
+        {/* Dynamic Success Message for Variables */}
+        {state.createdVariables.length > 0 && (
+          <div className="text-lg font-semibold text-gray-900">
+            {(() => {
+              const computeCount = variablesByMethod.compute.length;
+              const assignCount = variablesByMethod.assign.length;
+              const otherCount = variablesByMethod.other.length;
+              
+              if (computeCount > 0 && assignCount === 0 && otherCount === 0) {
+                return `Successfully computed ${computeCount} variable${computeCount !== 1 ? 's' : ''}`;
+              } else if (assignCount > 0 && computeCount === 0 && otherCount === 0) {
+                return `Successfully assigned ${assignCount} variable${assignCount !== 1 ? 's' : ''}`;
+              } else if (computeCount > 0 || assignCount > 0 || otherCount > 0) {
+                const total = state.createdVariables.length;
+                return `Successfully created ${total} variable${total !== 1 ? 's' : ''}`;
+              }
+              return null;
+            })()}
+          </div>
+        )}
           {!hasCreatedItems ? (
             <div className="text-center py-8 text-gray-500">
               <p>No metrics created yet. Go back to Operations to create variables or columns.</p>
@@ -227,47 +242,38 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose }) =
             <>
               {/* Variables Section */}
               {state.createdVariables.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-blue-600" />
-                    <h4 className="text-lg font-semibold">Variables</h4>
-                    <Badge variant="secondary">{state.createdVariables.length}</Badge>
-                  </div>
-                  <div className="space-y-2">
-                    {state.createdVariables.map((variable, idx) => (
+                <div className="space-y-2">
+                  {state.createdVariables.map((variable, idx) => {
+                    const value = getVariableValue(variable);
+                    return (
                       <div
                         key={idx}
                         className="p-4 border rounded-lg bg-blue-50/50 border-blue-200"
                       >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900">{variable.name}</div>
-                            <div className="text-sm text-gray-600 mt-1">
-                              {buildVariableDescription(variable)}
-                            </div>
-                            {(() => {
-                              const value = getVariableValue(variable);
-                              return value !== null ? (
-                                <div className="text-sm font-semibold text-blue-700 mt-2">
-                                  Value: {value}
-                                </div>
-                              ) : loadingValues && variable.method === 'compute' ? (
-                                <div className="text-xs text-gray-400 mt-2">Loading value...</div>
-                              ) : null;
-                            })()}
-                            {variable.description && (
-                              <div className="text-xs text-gray-500 mt-1">
-                                {variable.description}
-                              </div>
+                        <div className="flex-1">
+                          {/* Variable name = value on top */}
+                          <div className="font-medium text-gray-900">
+                            {variable.name}
+                            {value !== null && (
+                              <span className="text-gray-600 font-normal"> = {value}</span>
+                            )}
+                            {loadingValues && variable.method === 'compute' && value === null && (
+                              <span className="text-gray-400 font-normal text-sm ml-2">(Loading value...)</span>
                             )}
                           </div>
-                          <Badge className="bg-blue-100 text-blue-700">
-                            {variable.method === 'assign' ? 'Assigned' : 'Computed'}
-                          </Badge>
+                          {/* Computation description below */}
+                          <div className="text-sm text-gray-600 mt-1">
+                            {buildVariableDescription(variable)}
+                          </div>
+                          {variable.description && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              {variable.description}
+                            </div>
+                          )}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
               )}
 

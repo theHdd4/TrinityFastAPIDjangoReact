@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useRef } from 'react';
 
 /**
  * Metric guided flow stages.
@@ -75,7 +75,7 @@ const INITIAL_METRIC_GUIDED_STATE: MetricGuidedFlowState = {
   ...INITIAL_FLOW_STATE,
 };
 
-const STEP_ORDER: MetricStage[] = ['type', 'dataset', 'operations', 'preview'];
+export const STEP_ORDER: MetricStage[] = ['type', 'dataset', 'operations', 'preview'];
 
 export interface UseMetricGuidedFlowResult {
   state: MetricGuidedFlowState;
@@ -84,6 +84,10 @@ export interface UseMetricGuidedFlowResult {
   goToNextStage: () => void;
   goToPreviousStage: () => void;
   restartFlow: () => void;
+  saveStageSnapshot: (stage: MetricStage) => void;
+  restoreStageSnapshot: (stage: MetricStage) => MetricFlowState | null;
+  clearStageSnapshot: (stage: MetricStage) => void;
+  clearAllSnapshots: () => void;
 }
 
 /**
@@ -93,6 +97,9 @@ export interface UseMetricGuidedFlowResult {
 export function useMetricGuidedFlow(
   initialState?: Partial<MetricGuidedFlowState>,
 ): UseMetricGuidedFlowResult {
+  // Store snapshots of state at each stage when Continue is clicked
+  const stageSnapshotsRef = useRef<Map<MetricStage, MetricFlowState>>(new Map());
+
   const [state, setState] = useState<MetricGuidedFlowState>(() => {
     if (!initialState) {
       return INITIAL_METRIC_GUIDED_STATE;
@@ -115,10 +122,27 @@ export function useMetricGuidedFlow(
   });
 
   const goToStage = useCallback((stage: MetricStage) => {
-    setState(prev => ({
-      ...prev,
-      currentStage: stage,
-    }));
+    setState(prev => {
+      const currentIndex = STEP_ORDER.indexOf(prev.currentStage);
+      const targetIndex = STEP_ORDER.indexOf(stage);
+      
+      // If moving forward to a later stage, save snapshot of current stage
+      if (currentIndex !== -1 && targetIndex !== -1 && targetIndex > currentIndex) {
+        const snapshot: MetricFlowState = {
+          selectedType: prev.selectedType,
+          dataSource: prev.dataSource,
+          createdVariables: [...prev.createdVariables],
+          createdColumns: [...prev.createdColumns],
+          createdTables: [...prev.createdTables],
+        };
+        stageSnapshotsRef.current.set(prev.currentStage, snapshot);
+      }
+      
+      return {
+        ...prev,
+        currentStage: stage,
+      };
+    });
   }, []);
 
   const goToNextStage = useCallback(() => {
@@ -127,6 +151,17 @@ export function useMetricGuidedFlow(
       if (currentIndex === -1 || currentIndex >= STEP_ORDER.length - 1) {
         return prev;
       }
+      
+      // Save snapshot of current stage before moving forward
+      const snapshot: MetricFlowState = {
+        selectedType: prev.selectedType,
+        dataSource: prev.dataSource,
+        createdVariables: [...prev.createdVariables],
+        createdColumns: [...prev.createdColumns],
+        createdTables: [...prev.createdTables],
+      };
+      stageSnapshotsRef.current.set(prev.currentStage, snapshot);
+      
       return {
         ...prev,
         currentStage: STEP_ORDER[currentIndex + 1],
@@ -149,6 +184,35 @@ export function useMetricGuidedFlow(
 
   const restartFlow = useCallback(() => {
     setState(INITIAL_METRIC_GUIDED_STATE);
+    stageSnapshotsRef.current.clear();
+  }, []);
+
+  // Save snapshot of current state for a specific stage
+  const saveStageSnapshot = useCallback((stage: MetricStage, stateToSnapshot?: MetricGuidedFlowState) => {
+    const stateToUse = stateToSnapshot || state;
+    const snapshot: MetricFlowState = {
+      selectedType: stateToUse.selectedType,
+      dataSource: stateToUse.dataSource,
+      createdVariables: [...stateToUse.createdVariables],
+      createdColumns: [...stateToUse.createdColumns],
+      createdTables: [...stateToUse.createdTables],
+    };
+    stageSnapshotsRef.current.set(stage, snapshot);
+  }, [state]);
+
+  // Restore snapshot for a specific stage
+  const restoreStageSnapshot = useCallback((stage: MetricStage): MetricFlowState | null => {
+    return stageSnapshotsRef.current.get(stage) || null;
+  }, []);
+
+  // Clear snapshot for a specific stage
+  const clearStageSnapshot = useCallback((stage: MetricStage) => {
+    stageSnapshotsRef.current.delete(stage);
+  }, []);
+
+  // Clear all snapshots
+  const clearAllSnapshots = useCallback(() => {
+    stageSnapshotsRef.current.clear();
   }, []);
 
   return {
@@ -158,6 +222,10 @@ export function useMetricGuidedFlow(
     goToNextStage,
     goToPreviousStage,
     restartFlow,
+    saveStageSnapshot,
+    restoreStageSnapshot,
+    clearStageSnapshot,
+    clearAllSnapshots,
   };
 }
 

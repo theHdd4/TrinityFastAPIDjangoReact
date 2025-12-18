@@ -9,16 +9,19 @@ import {
 } from '@/components/ui/tooltip';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseMetricGuidedFlow } from '../useMetricGuidedFlow';
+import { VariableIcon } from '../components/VariableIcon';
 
 interface M0TypeProps {
   flow: ReturnTypeFromUseMetricGuidedFlow;
+  readOnly?: boolean;
 }
 
-export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
+export const M0Type: React.FC<M0TypeProps> = ({ flow, readOnly = false }) => {
   const { state, setState } = flow;
   const selected = state.selectedType;
 
   const handleSelection = (type: 'variable' | 'column') => {
+    if (readOnly) return;
     setState(prev => {
       if (prev.selectedType !== type) {
         return {
@@ -41,11 +44,13 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
           {/* ================= Variable ================= */}
           <button
             onClick={() => handleSelection('variable')}
+            disabled={readOnly}
             className={cn(
               'w-full max-w-sm relative rounded-xl border p-6 transition-all flex items-center justify-center',
               selected === 'variable'
                 ? 'border-primary bg-primary/5'
-                : 'border-border hover:border-primary/50'
+                : 'border-border hover:border-primary/50',
+              readOnly && 'opacity-60 cursor-not-allowed'
             )}
           >
             {/* Radio */}
@@ -66,15 +71,14 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
 
             {/* Content */}
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-muted p-2">
-              <Sparkles
-                  className={cn(
-                    'h-6 w-6 transition-colors',
-                    selected === 'variable' ? 'text-blue-600' : 'text-muted-foreground'
-                  )}
-                />
-
-              </div>
+              <VariableIcon
+                className={cn(
+                  'w-8 h-8 transition-colors',
+                  selected === 'variable'
+                    ? 'text-blue-600'
+                    : 'text-muted-foreground'
+                )}
+              />
 
               <div className="flex items-center gap-1">
                 <h4 className="font-medium text-base">Variable</h4>
@@ -105,11 +109,13 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
           {/* ================= Column ================= */}
           <button
             onClick={() => handleSelection('column')}
+            disabled={readOnly}
             className={cn(
               'w-full max-w-sm relative rounded-xl border p-6 transition-all flex items-center justify-center',
               selected === 'column'
                 ? 'border-primary bg-primary/5'
-                : 'border-border hover:border-primary/50'
+                : 'border-border hover:border-primary/50',
+              readOnly && 'opacity-60 cursor-not-allowed'
             )}
           >
             {/* Radio */}
@@ -130,14 +136,12 @@ export const M0Type: React.FC<M0TypeProps> = ({ flow }) => {
 
             {/* Content */}
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-muted p-2">
               <Table
                 className={cn(
-                  'h-6 w-6 transition-colors',
+                  'w-6 h-6 transition-colors',
                   selected === 'column' ? 'text-blue-600' : 'text-muted-foreground'
                 )}
               />
-              </div>
 
               <div className="flex items-center gap-1">
                 <h4 className="font-medium text-base">Column</h4>

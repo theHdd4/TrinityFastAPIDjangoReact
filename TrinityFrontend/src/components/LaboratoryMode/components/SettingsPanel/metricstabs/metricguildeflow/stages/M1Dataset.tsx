@@ -43,6 +43,7 @@ interface M1DatasetProps {
   flow: ReturnTypeFromUseMetricGuidedFlow;
   /** Current metrics context atom, if any (for initial dataset sync) */
   contextAtomId?: string;
+  readOnly?: boolean;
 }
 
 interface ColumnMetadata {
@@ -57,13 +58,12 @@ interface PreviewRow {
   [column: string]: string | number | null;
 }
 
-export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId }) => {
+export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId, readOnly = false }) => {
   const { state, setState } = flow;
   const { frames, loading: framesLoading, error: framesError } = useSavedDataframes();
   
   const [cardinalityData, setCardinalityData] = useState<ColumnMetadata[]>([]);
   const [loadingCardinality, setLoadingCardinality] = useState(false);
-  const [isSelectionConfirmed, setIsSelectionConfirmed] = useState(false);
   const [tempSelectedDataSource, setTempSelectedDataSource] = useState('');
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -168,28 +168,25 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId }) => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Initialize tempSelectedDataSource from state.dataSource or first frame
   useEffect(() => {
-    if (!tempSelectedDataSource && frames.length) {
-      setTempSelectedDataSource(frames[0].object_name);
-    }
-  }, [frames, tempSelectedDataSource]);
-
-  // Initialize confirmation state if dataSource is already set
-  useEffect(() => {
-    if (state.dataSource && !isSelectionConfirmed && frames.length > 0) {
+    if (state.dataSource && frames.length > 0) {
+      // Try to find matching frame
       const matchingFrame = frames.find(f => {
         const resolved = resolveObjectName(f.object_name);
         return resolved === state.dataSource || f.object_name === state.dataSource;
       });
-      if (matchingFrame) {
+      if (matchingFrame && !tempSelectedDataSource) {
         setTempSelectedDataSource(matchingFrame.object_name);
-        setIsSelectionConfirmed(true);
       }
+    } else if (!tempSelectedDataSource && frames.length > 0) {
+      setTempSelectedDataSource(frames[0].object_name);
     }
-  }, [state.dataSource, frames.length, isSelectionConfirmed, resolveObjectName]);
+  }, [frames, state.dataSource, tempSelectedDataSource, resolveObjectName]);
 
+  // Auto-fetch cardinality data when tempSelectedDataSource changes
   useEffect(() => {
-    if (!isSelectionConfirmed || !tempSelectedDataSource) {
+    if (!tempSelectedDataSource) {
       return;
     }
 
@@ -202,7 +199,7 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId }) => 
     return () => {
       cardinalityRequestId.current += 1;
     };
-  }, [isSelectionConfirmed, tempSelectedDataSource, fetchCardinalityData, resolveObjectName, setState]);
+  }, [tempSelectedDataSource, fetchCardinalityData, resolveObjectName, setState]);
 
   // Classification logic
   const classifyColumn = useCallback((dataType: string): 'numerical' | 'identifiers' => {
@@ -349,10 +346,6 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId }) => 
     });
   }, []);
 
-  const handleConfirmSelection = () => {
-    setIsSelectionConfirmed(true);
-  };
-
   const handleViewDataClick = useCallback(() => {
     if (!state.dataSource) return;
     try {
@@ -364,16 +357,10 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId }) => 
   }, [state.dataSource]);
 
   const handleDatasetChange = (newValue: string) => {
+    if (readOnly) return;
     setTempSelectedDataSource(newValue);
-    // If already confirmed, automatically update without requiring confirmation again
-    if (isSelectionConfirmed) {
-      setCardinalityData([]);
-      // Keep confirmed state but update the data source
-      // The useEffect will handle fetching new cardinality data
-    } else {
-      // If not confirmed yet, just update the temp selection
-      setCardinalityData([]);
-    }
+    setCardinalityData([]);
+    // The useEffect will handle fetching new cardinality data
   };
 
   return (
@@ -390,8 +377,11 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId }) => 
           <select
             value={tempSelectedDataSource}
             onChange={(e) => handleDatasetChange(e.target.value)}
-            disabled={framesLoading}
-            className="flex-1 bg-transparent text-sm outline-none cursor-pointer"
+            disabled={framesLoading || readOnly}
+            className={cn(
+              "flex-1 bg-transparent text-sm outline-none",
+              readOnly ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+            )}
           >
             {frames.map((f) => (
               <option key={f.object_name} value={f.object_name}>
@@ -401,16 +391,8 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId }) => 
           </select>
         </div>
 
-        {!isSelectionConfirmed && (
-          <div className="flex justify-end">
-            <Button onClick={handleConfirmSelection}>
-              Confirm Selection
-            </Button>
-          </div>
-        )}
-
-        {/* Data Summary & Preview (only after dataset is confirmed) */}
-        {isSelectionConfirmed && (
+        {/* Data Summary & Preview */}
+        {tempSelectedDataSource && (
           <div className="space-y-4 w-full min-w-0 overflow-hidden">
             {/* Data Summary tab */}
             {!loadingCardinality &&

@@ -27,6 +27,7 @@
 import React, { useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { Card } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -133,6 +134,7 @@ interface OperationsTabProps {
   onVariableCreated?: (vars: CreatedVariable[]) => void;
   onColumnCreated?: (column: CreatedColumn) => void;
   onTableCreated?: (table: CreatedTable) => void;
+  readOnly?: boolean;
 }
 
 export interface OperationsTabRef {
@@ -685,6 +687,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   onVariableCreated,
   onColumnCreated,
   onTableCreated,
+  readOnly = false,
 }, ref) => {
   // Mode: compute | assign (only for variable type)
   const [variableMode, setVariableMode] = useState<'compute' | 'assign' | null>(null);
@@ -693,8 +696,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   const [savedVars, setSavedVars] = useState<SavedVar[]>(importedVariables || []);
   const [loadingVariables, setLoadingVariables] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
-  const [computeOpen, setComputeOpen] = useState(false);
-  const [assignOpen, setAssignOpen] = useState(false);
+  const [activeVariableTab, setActiveVariableTab] = useState<'create' | 'assign' | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Assign UI state
@@ -1217,12 +1219,12 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
     }
   }, [importedVariables, savedVars.length]);
 
-  // Fetch identifiers when dataSource and computeWithinGroup are available
+  // Fetch identifiers when dataSource is available and Create tab is active
   useEffect(() => {
     async function fetchIdentifiers() {
-      if (!dataSource || !computeWithinGroup) {
+      if (!dataSource || selectedType !== 'variable' || activeVariableTab !== 'create') {
         setIdentifiers([]);
-        setSelectedIdentifiers([]);
+        // Don't clear selectedIdentifiers here - let user keep their selection
         return;
       }
 
@@ -1252,7 +1254,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
             if (Array.isArray(data.identifiers) && data.identifiers.length > 0) {
               const allIds = (data.identifiers || []).map((id: string) => id.toLowerCase());
               setIdentifiers(allIds);
-              setSelectedIdentifiers(allIds); // Select all by default
+              // Default state: no checkbox selected
               setLoadingIdentifiers(false);
               return;
             }
@@ -1282,7 +1284,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
             .map((c: any) => (c.column || '').trim().toLowerCase());
 
           setIdentifiers(cats);
-          setSelectedIdentifiers(cats); // Select all by default
+          // Default state: no checkbox selected
         }
       } catch (err) {
         console.warn('Failed to fetch identifiers from column_summary', err);
@@ -1292,7 +1294,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
     }
 
     fetchIdentifiers();
-  }, [dataSource, computeWithinGroup, apiBase]);
+  }, [dataSource, selectedType, activeVariableTab, apiBase]);
 
   // Fetch numerical columns when dataSource is available
   useEffect(() => {
@@ -1339,6 +1341,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
 
   // Helpers for Assign rows
   const addAssignRow = () => {
+    if (readOnly) return;
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     setAssignedVars((prev) => [
       ...prev,
@@ -1348,34 +1351,30 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   };
 
   const removeAssignRow = (id: string) => {
+    if (readOnly) return;
     setAssignedVars((prev) => prev.filter((r) => r.id !== id));
   };
 
   const updateAssignRow = (id: string, fields: Partial<AssignedVar>) => {
+    if (readOnly) return;
     setAssignedVars((prev) => prev.map((r) => (r.id === id ? { ...r, ...fields } : r)));
   };
 
-  // Mutual exclusivity handlers for compute and assign dropdowns
-  const handleComputeOpen = (open: boolean) => {
-    setComputeOpen(open);
-    if (open) {
-      setAssignOpen(false);
+  // Handler for tab changes
+  const handleTabChange = (value: string) => {
+    if (readOnly) return;
+    if (value === 'create') {
+      setActiveVariableTab('create');
       setVariableMode('compute');
-    } else {
-      setVariableMode(null);
-    }
-  };
-
-  const handleAssignOpen = (open: boolean) => {
-    setAssignOpen(open);
-    if (open) {
-      setComputeOpen(false);
+    } else if (value === 'assign') {
+      setActiveVariableTab('assign');
       setVariableMode('assign');
       // Initialize assign rows if user opens assign and there are none
       if (assignedVars.length === 0) {
         setTimeout(addAssignRow, 0);
       }
     } else {
+      setActiveVariableTab(null);
       setVariableMode(null);
     }
   };
@@ -1663,6 +1662,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   };
 
   const handleSaveColumnOperations = async (overwrite: boolean = false) => {
+    if (readOnly) return;
     if (!dataSource) {
       toast({ title: 'Error', description: 'No data source selected', variant: 'destructive' });
       return;
@@ -1844,6 +1844,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   };
 
   const handleSaveAssign = async () => {
+    if (readOnly) return;
     if (assignedVars.length === 0) {
       addAssignRow();
       return;
@@ -1945,6 +1946,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   };
 
   const removeOperation = (id: string) => {
+    if (readOnly) return;
     if (operations.length > 1) {
       setOperations((prev) => prev.filter((o) => o.id !== id));
       setOperationErrors((prev) => {
@@ -1956,6 +1958,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   };
 
   const updateOperation = (id: string, update: Partial<Omit<Operation, 'id'>>) => {
+    if (readOnly) return;
     setOperations((prev) => prev.map((o) => (o.id === id ? { ...o, ...update } : o)));
     // Clear error for this operation when updated
     setOperationErrors((prev) => {
@@ -1966,6 +1969,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   };
 
   const handleSaveCompute = async () => {
+    if (readOnly) return;
     const computeMode = computeWithinGroup ? 'within-group' : 'whole-dataframe';
     const validation = validateCompute(operations, computeMode, selectedIdentifiers);
 
@@ -2083,6 +2087,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   };
 
   const deselectAllIdentifiers = () => {
+    if (readOnly) return;
     setSelectedIdentifiers([]);
   };
 
@@ -2148,11 +2153,527 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
         {/* If variable chosen: show saved/import and create panels */}
         {selectedType === 'variable' && (
           <>
+            {/* Create and Assign Tabs */}
+            <Tabs 
+              value={activeVariableTab || ''} 
+              onValueChange={handleTabChange}
+              className={cn("w-full", readOnly && "opacity-60")}
+            >
+              <TabsList className="grid w-full grid-cols-2 mb-0 border-b border-slate-200 rounded-t-lg rounded-b-none bg-white">
+                <TabsTrigger 
+                  value="create" 
+                  className="flex items-center gap-2 data-[state=active]:border-b-2 data-[state=active]:border-blue-600"
+                >
+                  <Calculator className="w-4 h-4" />
+                  <span>Compute</span>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <div className="space-y-2 text-xs">
+                          <p className="text-muted-foreground">
+                            Compute variables from dataframe columns using operations like sum, mean, arithmetic, etc.
+                          </p>
+                          <p className="italic text-muted-foreground">
+                            Examples:
+                            <br />• total_sales = sum(sales_column)
+                            <br />• avg_price = mean(price_column)
+                            <br />• revenue = multiply(quantity, price)
+                          </p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="assign" 
+                  disabled={readOnly}
+                  className={cn(
+                    "flex items-center gap-2 data-[state=active]:border-b-2 data-[state=active]:border-green-600",
+                    readOnly && "opacity-60 cursor-not-allowed"
+                  )}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Assign</span>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <div className="space-y-2 text-xs">
+                          <p className="font-medium">Assign a Variable</p>
+                          <p className="text-muted-foreground">
+                            Assign constant values or labels to variables manually.
+                          </p>
+                          <p className="italic text-muted-foreground">
+                            Examples:
+                            <br />• growth_target = 1.12
+                            <br />• discount_rate = 0.15
+                            <br />• status = "active"
+                          </p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="create" className="mt-4 bg-white p-3 space-y-3">
+                        {/* Compute within group - Multi-select dropdown */}
+                        <div className="flex items-center gap-2">
+                          <Label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                            Compute within Group
+                          </Label>
+                          <div className="flex-1">
+                            {loadingIdentifiers ? (
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="w-4 h-4 animate-spin text-[#458EE2]" />
+                                <p className="text-xs text-gray-500">Loading identifiers...</p>
+                              </div>
+                            ) : identifiers.length > 0 ? (
+                              <MultiSelectDropdown
+                                placeholder="Select identifiers for grouping"
+                                selectedValues={selectedIdentifiers}
+                                onSelectionChange={(values) => {
+                                  if (readOnly) return;
+                                  setSelectedIdentifiers(values);
+                                  setComputeWithinGroup(values.length > 0);
+                                  // Clear identifier errors when selection changes
+                                  if (values.length > 0 && operationErrors['identifiers']) {
+                                    setOperationErrors(prev => {
+                                      const newErrors = { ...prev };
+                                      delete newErrors['identifiers'];
+                                      return newErrors;
+                                    });
+                                  }
+                                }}
+                                options={identifiers.map(id => ({
+                                  value: id,
+                                  label: id
+                                }))}
+                                showSelectAll={true}
+                                showDeselectAll={true}
+                                showTrigger={true}
+                                triggerClassName="h-9 text-sm"
+                                disabled={!dataSource || readOnly}
+                              />
+                            ) : dataSource ? (
+                              <p className="text-xs text-gray-500">
+                                No identifiers found for the selected file.
+                              </p>
+                            ) : (
+                              <p className="text-xs text-gray-500">
+                                Please select a data source in the Dataset tab first.
+                              </p>
+                            )}
+                          </div>
+                          <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="h-4 w-4 text-gray-500 cursor-help flex-shrink-0" />
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-sm text-xs">
+                                <div className="space-y-2">
+                                  <p className="text-muted-foreground">
+                                    Group By splits your data into groups based on selected identifiers (like brand, market, or year) and then performs the calculation separately for each group.
+                                  </p>
+                                  <p className="text-muted-foreground italic">
+                                    For example, Max Price by Brand calculates the maximum price within each brand, creating one result per brand instead of a single overall value.
+                                  </p>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+
+                        {/* Operations list */}
+                        <div className="space-y-2">
+                          {operations.length === 0 && (
+                            <div className="text-xs text-slate-500">
+                              No operations yet. Click Add to create a new operation.
+                            </div>
+                          )}
+
+                          {operations.map((operation) => (
+                            <div key={operation.id} className="space-y-2">
+                              {/* Main row: Aggregation type, Numerical column, Variable name */}
+                              <div className="flex items-start gap-2">
+                                {/* Aggregation type */}
+                                <div className="flex-1">
+                                  <select
+                                    value={operation.method}
+                                    onChange={(e) => {
+                                      if (readOnly) return;
+                                      const value = e.target.value;
+                                      updateOperation(operation.id, {
+                                        method: value,
+                                        secondColumn: requiresSecondColumn(value) ? operation.secondColumn : '',
+                                        secondInputType: requiresSecondColumn(value)
+                                          ? operation.secondInputType || 'column'
+                                          : undefined,
+                                        secondValue: requiresSecondColumn(value) ? operation.secondValue || '' : '',
+                                      });
+                                    }}
+                                    disabled={readOnly}
+                                    className={cn(
+                                      "w-full h-9 text-sm px-2 py-1 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
+                                      readOnly ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                                    )}
+                                    aria-label="Operation method"
+                                  >
+                                    <option value="sum">Sum</option>
+                                    <option value="mean">Mean</option>
+                                    <option value="median">Median</option>
+                                    <option value="max">Max</option>
+                                    <option value="min">Min</option>
+                                    <option value="count">Count</option>
+                                    <option value="nunique">Nunique</option>
+                                    <option value="rank_pct">Rank Percentile</option>
+                                    <option value="add">Addition</option>
+                                    <option value="subtract">Subtraction</option>
+                                    <option value="multiply">Multiplication</option>
+                                    <option value="divide">Division</option>
+                                  </select>
+                                  {operationErrors[operation.id] && (
+                                    <div className="text-xs text-red-500 mt-1">{operationErrors[operation.id]}</div>
+                                  )}
+                                </div>
+
+                                {/* Numerical column selector */}
+                                <div className="flex-1">
+                                  <select
+                                    value={operation.numericalColumn || ''}
+                                    onChange={(e) => updateOperation(operation.id, { numericalColumn: e.target.value })}
+                                    className="w-full h-9 text-sm px-2 py-1 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer"
+                                    title={operation.numericalColumn || 'Select numerical column'}
+                                    aria-label="Numerical column"
+                                    disabled={loadingNumericalColumns}
+                                  >
+                                    <option value="" disabled>
+                                      {loadingNumericalColumns
+                                        ? 'Loading...'
+                                        : dataSource
+                                          ? 'Select numerical column'
+                                          : 'No numerical columns found. Select a data source first.'}
+                                    </option>
+                                    {numericalColumns.length > 0 &&
+                                      numericalColumns.map((col) => (
+                                        <option key={col} value={col} title={col}>
+                                          {col}
+                                        </option>
+                                      ))}
+                                  </select>
+                                </div>
+
+                                {/* Variable name input */}
+                                <div className="flex-1">
+                                  <Input
+                                    type="text"
+                                    placeholder={computeWithinGroup 
+                                      ? "Variable name"
+                                      : `${operation.numericalColumn}_${operation.method}${
+                                          operation.secondColumn
+                                            ? `_${operation.secondColumn}`
+                                            : operation.secondValue
+                                              ? `_${operation.secondValue}`
+                                              : ''
+                                        }`}
+                                    value={operation.customName || ''}
+                                    onChange={(e) => {
+                                      if (readOnly) return;
+                                      updateOperation(operation.id, { customName: e.target.value });
+                                    }}
+                                    disabled={readOnly}
+                                    className={cn(
+                                      "h-9 text-sm",
+                                      readOnly && "opacity-60 cursor-not-allowed"
+                                    )}
+                                    title="Variable name"
+                                    aria-label="Variable name"
+                                  />
+                                </div>
+
+                                {/* Delete button */}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    if (readOnly) return;
+                                    removeOperation(operation.id);
+                                  }}
+                                  disabled={readOnly}
+                                  className={cn(
+                                    "h-9 w-9 p-0 text-gray-500 hover:text-red-600",
+                                    readOnly && "opacity-60 cursor-not-allowed"
+                                  )}
+                                  title="Delete operation"
+                                  aria-label="Delete operation"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+
+                              {/* Second column/number input for arithmetic operations - shown as additional row when needed */}
+                              {requiresSecondColumn(operation.method) && (
+                                <div className="flex items-start gap-2">
+                                  <div className="flex-1">
+                                    <select
+                                      value={operation.secondInputType || 'column'}
+                                      onChange={(e) => {
+                                        if (readOnly) return;
+                                        const value = e.target.value as 'column' | 'number';
+                                        updateOperation(operation.id, {
+                                          secondInputType: value,
+                                          secondColumn: value === 'column' ? operation.secondColumn : '',
+                                          secondValue: value === 'number' ? operation.secondValue : '',
+                                        });
+                                      }}
+                                      disabled={readOnly}
+                                      className={cn(
+                                        "w-full h-9 text-sm px-2 py-1 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
+                                        readOnly ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                                      )}
+                                      aria-label="Second input type"
+                                    >
+                                      <option value="column">Column</option>
+                                      <option value="number">Number</option>
+                                    </select>
+                                  </div>
+                                  {operation.secondInputType === 'number' ? (
+                                    <div className="flex-1">
+                                      <Input
+                                        type="number"
+                                        step="any"
+                                        placeholder="Enter number"
+                                        value={operation.secondValue || ''}
+                                        onChange={(e) => {
+                                          if (readOnly) return;
+                                          updateOperation(operation.id, { secondValue: e.target.value });
+                                        }}
+                                        disabled={readOnly}
+                                        className={cn(
+                                          "h-9 text-sm",
+                                          readOnly && "opacity-60 cursor-not-allowed"
+                                        )}
+                                        aria-label="Second number value"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="flex-1">
+                                      <select
+                                        value={operation.secondColumn || ''}
+                                        onChange={(e) => {
+                                          if (readOnly) return;
+                                          updateOperation(operation.id, { secondColumn: e.target.value });
+                                        }}
+                                        className={cn(
+                                          "w-full h-9 text-sm px-2 py-1 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
+                                          readOnly ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                                        )}
+                                        title={operation.secondColumn || 'Select second column'}
+                                        aria-label="Second column"
+                                        disabled={loadingNumericalColumns || readOnly}
+                                      >
+                                        <option value="" disabled>
+                                          {loadingNumericalColumns ? 'Loading...' : 'Select second column'}
+                                        </option>
+                                        {numericalColumns.length > 0 &&
+                                          numericalColumns
+                                            .filter((col) => col !== operation.numericalColumn)
+                                            .map((col) => (
+                                              <option key={col} value={col} title={col}>
+                                                {col}
+                                              </option>
+                                            ))}
+                                        {!loadingNumericalColumns && numericalColumns.length === 0 && (
+                                          <option value="" disabled>
+                                            No numerical columns found
+                                          </option>
+                                        )}
+                                      </select>
+                                    </div>
+                                  )}
+                                  <div className="w-9"></div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+
+                          {/* Add button - moved to left */}
+                          <div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                if (readOnly) return;
+                                addOperation();
+                              }}
+                              disabled={readOnly}
+                              className={cn(
+                                "inline-flex items-center gap-2",
+                                readOnly && "opacity-60 cursor-not-allowed"
+                              )}
+                              aria-label="Add new operation"
+                            >
+                              <Plus className="w-4 h-4" /> Add
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Error message for identifiers */}
+                        {operationErrors['identifiers'] && (
+                          <div className="text-xs text-red-500">{operationErrors['identifiers']}</div>
+                        )}
+
+                        {/* Error message for operations */}
+                        {operationErrors['operations'] && (
+                          <div className="text-xs text-red-500">{operationErrors['operations']}</div>
+                        )}
+              </TabsContent>
+
+              <TabsContent value="assign" className="mt-4 bg-white p-3 space-y-3">
+                  <div className="space-y-2">
+                    {assignedVars.length === 0 && (
+                      <div className="text-xs text-slate-500">
+                        No variables yet. Click Add to create a new assignment.
+                      </div>
+                    )}
+
+                    {assignedVars.map((row, idx) => (
+                      <div key={row.id} className="flex items-start gap-2">
+                        <div className="flex-1">
+                          <Input
+                            ref={idx === assignedVars.length - 1 ? newVarRef : undefined}
+                            value={row.variableName}
+                            onChange={(e) => {
+                              if (readOnly) return;
+                              updateAssignRow(row.id, { variableName: e.target.value, nameError: null });
+                            }}
+                            placeholder="Variable name"
+                            disabled={readOnly}
+                            className={cn(
+                              "h-9 text-sm",
+                              row.nameError && "border-red-400",
+                              readOnly && "opacity-60 cursor-not-allowed"
+                            )}
+                            aria-label="Variable name"
+                          />
+                          {row.nameError && (
+                            <div className="text-xs text-red-500 mt-1">{row.nameError}</div>
+                          )}
+                        </div>
+
+                        <div className="flex-1">
+                          <Input
+                            value={row.value}
+                            onChange={(e) => {
+                              if (readOnly) return;
+                              updateAssignRow(row.id, { value: e.target.value, valueError: null });
+                            }}
+                            placeholder="Constant value"
+                            disabled={readOnly}
+                            className={cn(
+                              "h-9 text-sm",
+                              row.valueError && "border-red-400",
+                              readOnly && "opacity-60 cursor-not-allowed"
+                            )}
+                            aria-label="Constant value"
+                          />
+                          {row.valueError && (
+                            <div className="text-xs text-red-500 mt-1">{row.valueError}</div>
+                          )}
+                        </div>
+
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            if (readOnly) return;
+                            removeAssignRow(row.id);
+                          }}
+                          disabled={readOnly}
+                          className={cn(
+                            "h-9 w-9 p-0 text-gray-500 hover:text-red-600",
+                            readOnly && "opacity-60 cursor-not-allowed"
+                          )}
+                          title="Delete assignment"
+                          aria-label="Delete assignment"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (readOnly) return;
+                          addAssignRow();
+                        }}
+                        disabled={readOnly}
+                        className={cn(
+                          "inline-flex items-center gap-2",
+                          readOnly && "opacity-60 cursor-not-allowed"
+                        )}
+                        aria-label="Add new assignment row"
+                      >
+                        <Plus className="w-4 h-4" /> Add
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* <div className="flex items-center justify-between mt-2">
+                    <div className="text-xs text-slate-500">
+                      Assigned variables are stored in the lab and can be reused in computations.
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        className="text-slate-700 border-slate-200"
+                        onClick={() => {
+                          setAssignedVars([]);
+                          setCreatedVarsPreview(null);
+                          setVariableMode(null);
+                          setActiveVariableTab(null);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div> */}
+
+                  {/* Created Variables preview */}
+                  {createdVarsPreview && createdVarsPreview.length > 0 && (
+                    <div className="mt-3 border-t pt-3">
+                      <div className="text-sm font-medium text-slate-800">Created Variables</div>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {createdVarsPreview.map((v) => (
+                          <div
+                            key={v.id}
+                            className="rounded-full border px-3 py-1 text-sm bg-slate-50"
+                          >
+                            <strong>{v.variableName}</strong>: {v.value}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+            </Tabs>
             {/* Saved Variables */}
-            <Card className="p-3">
+            <Card className={cn("p-3", readOnly && "opacity-60")}>
               <Collapsible
                 open={savedOpen}
-                onOpenChange={setSavedOpen}
+                onOpenChange={(open) => {
+                  if (readOnly) return;
+                  setSavedOpen(open);
+                }}
+                disabled={readOnly}
               >
                 <CollapsibleTrigger asChild>
                   <div className="flex items-center justify-between cursor-pointer">
@@ -2187,9 +2708,16 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
                       <>
                         <Input
                           value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
+                          onChange={(e) => {
+                            if (readOnly) return;
+                            setSearchQuery(e.target.value);
+                          }}
                           placeholder="Search variables..."
-                          className="h-8 text-xs"
+                          disabled={readOnly}
+                          className={cn(
+                            "h-8 text-xs",
+                            readOnly && "opacity-60 cursor-not-allowed"
+                          )}
                           aria-label="Search saved variables"
                         />
                         <div className="max-h-44 overflow-y-auto mt-2 space-y-1">
@@ -2290,546 +2818,6 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
                 </CollapsibleContent>
               </Collapsible>
             </Card>
-
-            {/* Compute a Variable */}
-            <div>
-              <div
-                className={cn(
-                  "flex items-center justify-between cursor-pointer p-3 border transition-all",
-                  computeOpen 
-                    ? "bg-slate-50 border-slate-300 shadow-sm rounded-t-lg border-b-0" 
-                    : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm rounded-lg"
-                )}
-                onClick={() => handleComputeOpen(!computeOpen)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                    <Calculator className="w-4 h-4" />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold">Compute a Variable</span>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-                        </TooltipTrigger>
-                        <TooltipContent side="right" className="max-w-xs">
-                          <div className="space-y-2 text-xs">
-                            <p className="font-medium">Compute a Variable</p>
-                            <p className="text-muted-foreground">
-                              Compute variables from dataframe columns using operations like sum, mean, arithmetic, etc.
-                            </p>
-                            <p className="italic text-muted-foreground">
-                              Examples:
-                              <br />• total_sales = sum(sales_column)
-                              <br />• avg_price = mean(price_column)
-                              <br />• revenue = multiply(quantity, price)
-                            </p>
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                </div>
-                <ChevronDown
-                  className={cn(
-                    'w-4 h-4 transition-transform text-slate-500',
-                    computeOpen && 'rotate-180'
-                  )}
-                />
-              </div>
-
-              {computeOpen && (
-                <div className="rounded-b-lg border border-t-0 border-slate-200 bg-white p-3 space-y-3 animate-in slide-in-from-top-2 fade-in duration-300">
-                        {/* Compute within group checkbox - Enhanced UI */}
-                        <div className={cn(
-                          "rounded-lg border transition-all",
-                          computeWithinGroup 
-                            ? "bg-blue-50 border-blue-300 shadow-sm" 
-                            : "bg-white border-gray-200 hover:border-gray-300"
-                        )}>
-                          <div className="flex items-center space-x-3 p-3">
-                            <input
-                              type="checkbox"
-                              id="compute-within-group"
-                              checked={computeWithinGroup}
-                              onChange={(e) => setComputeWithinGroup(e.target.checked)}
-                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 flex-shrink-0 cursor-pointer"
-                              aria-label="Compute within group"
-                            />
-                            <div className="flex-1 flex items-center gap-2">
-                              <Users className={cn(
-                                "w-4 h-4 flex-shrink-0",
-                                computeWithinGroup ? "text-blue-600" : "text-gray-500"
-                              )} />
-                              <Label
-                                htmlFor="compute-within-group"
-                                className={cn(
-                                  "text-sm font-medium cursor-pointer",
-                                  computeWithinGroup ? "text-blue-900" : "text-gray-700"
-                                )}
-                              >
-                                Compute within Group
-                              </Label>
-                              <TooltipProvider delayDuration={300}>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Info className={cn(
-                                      "h-4 w-4 cursor-help flex-shrink-0",
-                                      computeWithinGroup ? "text-blue-600" : "text-gray-500"
-                                    )} />
-                                  </TooltipTrigger>
-                                  <TooltipContent side="top" className="max-w-sm text-xs">
-                                    <div className="space-y-2">
-                                      <p className="font-medium">Group By</p>
-                                      <p className="text-muted-foreground">
-                                        Group By splits your data into groups based on selected identifiers (like brand, market, or year) and then performs the calculation separately for each group.
-                                      </p>
-                                      <p className="text-muted-foreground italic">
-                                        For example, Max Price by Brand calculates the maximum price within each brand, creating one result per brand instead of a single overall value.
-                                      </p>
-                                    </div>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            </div>
-                          </div>
-
-                          {/* Identifiers directly under compute within group (no gaps, same color) */}
-                          {computeWithinGroup && (
-                            <div className={cn(
-                              "px-3 pb-3 pt-0",
-                              computeWithinGroup ? "bg-blue-50" : ""
-                            )}>
-                              {loadingIdentifiers ? (
-                                <div className="flex items-center gap-2">
-                                  <Loader2 className="w-4 h-4 animate-spin text-[#458EE2]" />
-                                  <p className="text-xs text-gray-500">Loading identifiers...</p>
-                                </div>
-                              ) : identifiers.length > 0 ? (
-                                <div className="max-h-32 overflow-y-auto border border-blue-200 rounded-md p-2 bg-white">
-                                  <div className="grid grid-cols-2 gap-1">
-                                    {identifiers.map((identifier) => {
-                                      const isSelected = selectedIdentifiers.includes(identifier);
-                                      return (
-                                        <div
-                                          key={identifier}
-                                          className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded cursor-pointer"
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            checked={isSelected}
-                                            onChange={() => toggleIdentifier(identifier)}
-                                            className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500 flex-shrink-0 cursor-pointer"
-                                            aria-label={`Select identifier ${identifier}`}
-                                          />
-                                          <label
-                                            className="text-xs text-gray-700 cursor-pointer flex-1 truncate"
-                                            title={identifier}
-                                            onClick={() => toggleIdentifier(identifier)}
-                                          >
-                                            {identifier}
-                                          </label>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              ) : dataSource ? (
-                                <p className="text-xs text-gray-500">
-                                  No identifiers found for the selected file. You can still enter column names
-                                  manually.
-                                </p>
-                              ) : (
-                                <p className="text-xs text-gray-500">
-                                  {dataSource
-                                    ? 'Couldn\'t fetch dataset columns. You can still enter column names manually or pass `featureOverviewApi` prop.'
-                                    : 'Please select a data source in the Dataset tab first.'}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Operations list */}
-                        <div className="space-y-2">
-                          {operations.map((operation, index) => (
-                            <div key={operation.id} className="space-y-1.5 border border-slate-200 rounded p-2">
-                              {/* First row: Method, First Column, Delete Icon */}
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1">
-                                  <select
-                                    value={operation.method}
-                                    onChange={(e) => {
-                                      const value = e.target.value;
-                                      updateOperation(operation.id, {
-                                        method: value,
-                                        secondColumn: requiresSecondColumn(value) ? operation.secondColumn : '',
-                                        secondInputType: requiresSecondColumn(value)
-                                          ? operation.secondInputType || 'column'
-                                          : undefined,
-                                        secondValue: requiresSecondColumn(value) ? operation.secondValue || '' : '',
-                                      });
-                                    }}
-                                    className="w-full h-7 text-xs px-2 py-1 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer"
-                                    aria-label="Operation method"
-                                  >
-                                    <option value="sum">Sum</option>
-                                    <option value="mean">Mean</option>
-                                    <option value="median">Median</option>
-                                    <option value="max">Max</option>
-                                    <option value="min">Min</option>
-                                    <option value="count">Count</option>
-                                    <option value="nunique">Nunique</option>
-                                    <option value="rank_pct">Rank Percentile</option>
-                                    <option value="add">Addition</option>
-                                    <option value="subtract">Subtraction</option>
-                                    <option value="multiply">Multiplication</option>
-                                    <option value="divide">Division</option>
-                                  </select>
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <select
-                                    value={operation.numericalColumn || ''}
-                                    onChange={(e) => updateOperation(operation.id, { numericalColumn: e.target.value })}
-                                    className="w-full h-7 text-xs px-2 py-1 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer truncate"
-                                    title={operation.numericalColumn || 'Select numerical column'}
-                                    aria-label="Numerical column"
-                                    disabled={loadingNumericalColumns}
-                                  >
-                                    <option value="" disabled>
-                                      {loadingNumericalColumns
-                                        ? 'Loading...'
-                                        : dataSource
-                                          ? 'Select numerical column'
-                                          : 'No numerical columns found. Select a data source first.'}
-                                    </option>
-                                    {numericalColumns.length > 0 &&
-                                      numericalColumns.map((col) => (
-                                        <option key={col} value={col} title={col}>
-                                          {col}
-                                        </option>
-                                      ))}
-                                  </select>
-                                </div>
-                                {operations.length > 1 && (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => removeOperation(operation.id)}
-                                    className="h-5 w-5 p-0 flex-shrink-0 text-gray-500 hover:text-red-600"
-                                    title="Delete operation"
-                                    aria-label="Delete operation"
-                                  >
-                                    <Trash2 className="w-2.5 h-2.5" />
-                                  </Button>
-                                )}
-                              </div>
-
-                              {/* Second row: Column/Number selection for arithmetic operations */}
-                              {requiresSecondColumn(operation.method) && (
-                                <div className="flex items-center gap-2">
-                                  <div className="flex-1 min-w-0">
-                                    <select
-                                      value={operation.secondInputType || 'column'}
-                                      onChange={(e) => {
-                                        const value = e.target.value as 'column' | 'number';
-                                        updateOperation(operation.id, {
-                                          secondInputType: value,
-                                          secondColumn: value === 'column' ? operation.secondColumn : '',
-                                          secondValue: value === 'number' ? operation.secondValue : '',
-                                        });
-                                      }}
-                                      className="w-full h-7 text-xs px-2 py-1 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer"
-                                      aria-label="Second input type"
-                                    >
-                                      <option value="column">Column</option>
-                                      <option value="number">Number</option>
-                                    </select>
-                                  </div>
-                                  {operation.secondInputType === 'number' ? (
-                                    <div className="flex-1 min-w-0">
-                                      <Input
-                                        type="number"
-                                        step="any"
-                                        placeholder="Enter number"
-                                        value={operation.secondValue || ''}
-                                        onChange={(e) =>
-                                          updateOperation(operation.id, { secondValue: e.target.value })
-                                        }
-                                        className="h-7 text-xs"
-                                        aria-label="Second number value"
-                                      />
-                                    </div>
-                                  ) : (
-                                    <div className="flex-1 min-w-0">
-                                      <select
-                                        value={operation.secondColumn || ''}
-                                        onChange={(e) =>
-                                          updateOperation(operation.id, { secondColumn: e.target.value })
-                                        }
-                                        className="w-full h-7 text-xs px-2 py-1 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer truncate"
-                                        title={operation.secondColumn || 'Select second column'}
-                                        aria-label="Second column"
-                                        disabled={loadingNumericalColumns}
-                                      >
-                                        <option value="" disabled>
-                                          {loadingNumericalColumns ? 'Loading...' : 'Select second column'}
-                                        </option>
-                                        {numericalColumns.length > 0 &&
-                                          numericalColumns
-                                            .filter((col) => col !== operation.numericalColumn)
-                                            .map((col) => (
-                                              <option key={col} value={col} title={col}>
-                                                {col}
-                                              </option>
-                                            ))}
-                                        {!loadingNumericalColumns && numericalColumns.length === 0 && (
-                                          <option value="" disabled>
-                                            No numerical columns found
-                                          </option>
-                                        )}
-                                      </select>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Third row: Custom name input (shown when not within-group) */}
-                              {!computeWithinGroup && (
-                                <div>
-                                  <Input
-                                    type="text"
-                                    placeholder={`${operation.numericalColumn}_${operation.method}${
-                                      operation.secondColumn
-                                        ? `_${operation.secondColumn}`
-                                        : operation.secondValue
-                                          ? `_${operation.secondValue}`
-                                          : ''
-                                    }`}
-                                    value={operation.customName || ''}
-                                    onChange={(e) => updateOperation(operation.id, { customName: e.target.value })}
-                                    className="h-6 text-[10px] placeholder:text-[10px]"
-                                    title="Custom variable name (optional)"
-                                    aria-label="Custom variable name (optional)"
-                                  />
-                                </div>
-                              )}
-
-                              {/* Error message for this operation */}
-                              {operationErrors[operation.id] && (
-                                <div className="text-xs text-red-500">{operationErrors[operation.id]}</div>
-                              )}
-
-                              {/* Add button below the last operation */}
-                              {index === operations.length - 1 && (
-                                <div className="flex justify-center pt-1">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={addOperation}
-                                    className="h-6 text-xs px-2"
-                                    aria-label="Add new operation"
-                                  >
-                                    <Plus className="w-3 h-3 mr-1" /> Add
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Error message for identifiers */}
-                        {operationErrors['identifiers'] && (
-                          <div className="text-xs text-red-500">{operationErrors['identifiers']}</div>
-                        )}
-
-                        {/* Error message for operations */}
-                        {operationErrors['operations'] && (
-                          <div className="text-xs text-red-500">{operationErrors['operations']}</div>
-                        )}
-
-                        <div className="flex items-center justify-end mt-2 gap-2">
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              setOperations([
-                                {
-                                  id: String(Date.now()),
-                                  numericalColumn: '',
-                                  method: 'sum',
-                                  secondInputType: 'column',
-                                  secondColumn: '',
-                                  secondValue: '',
-                                  customName: '',
-                                },
-                              ]);
-                              setOperationErrors({});
-                            }}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-              )}
-            </div>
-
-            {/* Assign a Variable */}
-            <div>
-              <div
-                className={cn(
-                  "flex items-center justify-between cursor-pointer p-3 border transition-all",
-                  assignOpen 
-                    ? "bg-slate-50 border-slate-300 shadow-sm rounded-t-lg border-b-0" 
-                    : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm rounded-lg"
-                )}
-                onClick={() => handleAssignOpen(!assignOpen)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-md bg-green-50 text-green-600 flex items-center justify-center flex-shrink-0">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold">Assign a Variable</span>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-                        </TooltipTrigger>
-                        <TooltipContent side="right" className="max-w-xs">
-                          <div className="space-y-2 text-xs">
-                            <p className="font-medium">Assign a Variable</p>
-                            <p className="text-muted-foreground">
-                              Assign constant values or labels to variables manually.
-                            </p>
-                            <p className="italic text-muted-foreground">
-                              Examples:
-                              <br />• growth_target = 1.12
-                              <br />• discount_rate = 0.15
-                              <br />• status = "active"
-                            </p>
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                </div>
-                <ChevronDown
-                  className={cn(
-                    'w-4 h-4 transition-transform text-slate-500',
-                    assignOpen && 'rotate-180'
-                  )}
-                />
-              </div>
-
-              {assignOpen && (
-                <div className="rounded-b-lg border border-t-0 border-slate-200 bg-white p-3 space-y-3 animate-in slide-in-from-top-2 fade-in duration-300">
-                  <div className="space-y-2">
-                    {assignedVars.length === 0 && (
-                      <div className="text-xs text-slate-500">
-                        No variables yet. Click Add to create a new assignment.
-                      </div>
-                    )}
-
-                    {assignedVars.map((row, idx) => (
-                      <div key={row.id} className="flex items-start gap-2">
-                        <div className="flex-1">
-                          <Input
-                            ref={idx === assignedVars.length - 1 ? newVarRef : undefined}
-                            value={row.variableName}
-                            onChange={(e) =>
-                              updateAssignRow(row.id, { variableName: e.target.value, nameError: null })
-                            }
-                            placeholder="Variable name"
-                            className={`h-9 text-sm ${row.nameError ? 'border-red-400' : ''}`}
-                            aria-label="Variable name"
-                          />
-                          {row.nameError && (
-                            <div className="text-xs text-red-500 mt-1">{row.nameError}</div>
-                          )}
-                        </div>
-
-                        <div className="flex-1">
-                          <Input
-                            value={row.value}
-                            onChange={(e) =>
-                              updateAssignRow(row.id, { value: e.target.value, valueError: null })
-                            }
-                            placeholder="Constant value"
-                            className={`h-9 text-sm ${row.valueError ? 'border-red-400' : ''}`}
-                            aria-label="Constant value"
-                          />
-                          {row.valueError && (
-                            <div className="text-xs text-red-500 mt-1">{row.valueError}</div>
-                          )}
-                        </div>
-
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeAssignRow(row.id)}
-                          className="h-9 w-9 p-0 text-gray-500 hover:text-red-600"
-                          title="Delete assignment"
-                          aria-label="Delete assignment"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ))}
-
-                    <div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={addAssignRow}
-                        className="inline-flex items-center gap-2"
-                        aria-label="Add new assignment row"
-                      >
-                        <Plus className="w-4 h-4" /> Add
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between mt-2">
-                    <div className="text-xs text-slate-500">
-                      Assigned variables are stored in the lab and can be reused in computations.
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        className="text-slate-700 border-slate-200"
-                        onClick={() => {
-                          setAssignedVars([]);
-                          setCreatedVarsPreview(null);
-                          setVariableMode(null);
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Created Variables preview */}
-                  {createdVarsPreview && createdVarsPreview.length > 0 && (
-                    <div className="mt-3 border-t pt-3">
-                      <div className="text-sm font-medium text-slate-800">Created Variables</div>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {createdVarsPreview.map((v) => (
-                          <div
-                            key={v.id}
-                            className="rounded-full border px-3 py-1 text-sm bg-slate-50"
-                          >
-                            <strong>{v.variableName}</strong>: {v.value}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
           </>
         )}
 
