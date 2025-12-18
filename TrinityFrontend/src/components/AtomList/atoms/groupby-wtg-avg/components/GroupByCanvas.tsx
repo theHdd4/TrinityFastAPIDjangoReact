@@ -14,6 +14,18 @@ import { DataSummaryView } from '@/components/shared/DataSummaryView';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import Table from '@/templates/tables/table';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { ArrowUp, ArrowDown, Filter as FilterIcon } from 'lucide-react';
 import {
   Pagination,
   PaginationContent,
@@ -942,7 +954,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
             ))}
             colClasses={resultsHeaders.map(() => "w-auto")}
             bodyClassName="max-h-[300px] overflow-y-auto"
-            borderColor={`border-${groupbyWtgAvg.color.replace('bg-', '')}`}
+            borderColor={atom?.color ? atom.color.replace('bg-', 'border-') : 'border-green-500'}
             customHeader={{
               title: "Results",
               controls: (
