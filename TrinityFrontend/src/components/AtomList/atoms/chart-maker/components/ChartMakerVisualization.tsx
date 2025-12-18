@@ -451,6 +451,8 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
               </div>
               <p className="text-xs text-muted-foreground mt-1">Use the + button in canvas to add more charts</p>
             </div>
+            
+            {/* Data Summary toggle moved to Input tab */}
           </div>
         </CardContent>
       </Card>

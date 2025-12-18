@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { VALIDATE_API } from '@/lib/api';
 
 interface ConcatInputFilesProps {
@@ -86,6 +89,19 @@ const ConcatInputFiles: React.FC<ConcatInputFilesProps> = ({ settings, onSetting
             </SelectContent>
           </Select>
         </div>
+        
+        {/* Data Summary Toggle */}
+        <Card className="p-4 space-y-3">
+          <div className="flex items-center justify-between pt-4 border-t mt-4">
+            <Label className="text-xs">Show Data Summary</Label>
+            <Switch
+              checked={settings.showDataSummary || false}
+              onCheckedChange={(checked) => {
+                onSettingsChange({ ...settings, showDataSummary: !!checked });
+              }}
+            />
+          </div>
+        </Card>
         
         {/* Perform Concat Button */}
         <div className="pt-6">

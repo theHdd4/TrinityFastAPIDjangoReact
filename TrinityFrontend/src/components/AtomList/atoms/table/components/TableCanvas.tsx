@@ -22,15 +22,11 @@ import {
 import { toast } from '@/components/ui/use-toast';
 import { ArrowUp, ArrowDown, Info, X, Filter, Plus } from 'lucide-react';
 import CellRenderer from './CellRenderer';
-import { GROUPBY_API, CREATECOLUMN_API } from '@/lib/api';
-import { resolveTaskResponse } from '@/lib/taskQueue';
-import { getProjectContext } from '@/utils/projectContext';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import TableTemplate from '@/templates/tables/table';
 import { TextBoxToolbar } from '@/components/LaboratoryMode/components/CanvasArea/text-box/TextBoxToolbar';
 import type { TextAlignOption, TextStylePreset } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
 import { htmlMatchesValue, getPlainTextFromHtml } from './rich-text/utils/formattingUtils';
@@ -38,19 +34,22 @@ import type { TableCellFormatting } from './rich-text/types';
 import NumberFilterComponent from './filters/NumberFilterComponent';
 import TextFilterComponent from './filters/TextFilterComponent';
 import { ColumnInfoIcon } from './ColumnInfoIcon';
+import { DataSummaryView } from '@/components/shared/DataSummaryView';
 
 interface TableCanvasProps {
   data: TableData;
   settings: TableSettings;
   cellStyles?: Record<string, Record<string, Record<string, string>>>;
   onSettingsChange: (settings: Partial<TableSettings>) => void;
+  atomId?: string;
 }
 
 const TableCanvas: React.FC<TableCanvasProps> = ({
   data,
   settings,
   cellStyles = {},
-  onSettingsChange
+  onSettingsChange,
+  atomId
 }) => {
   // Cell editing state
   const [editingCell, setEditingCell] = useState<{row: number, col: string} | null>(null);
@@ -155,16 +154,8 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     startHeight: number;
   } | null>(null);
 
-  // Cardinality View state
-  const [cardinalityData, setCardinalityData] = useState<any[]>([]);
-  const [cardinalityLoading, setCardinalityLoading] = useState(false);
-  const [cardinalityError, setCardinalityError] = useState<string | null>(null);
-  
   // Get cardinality view state from settings
   const showCardinalityView = settings.showCardinalityView || false;
-  const sortColumn = settings.cardinalitySortColumn || 'unique_count';
-  const sortDirection = settings.cardinalitySortDirection || 'desc';
-  const columnFilters = settings.cardinalityColumnFilters || {};
 
   // Get layout and design settings with defaults
   const layout = settings.layout || {
@@ -1252,202 +1243,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     }
   };
 
-  // Fetch cardinality data
-  const fetchCardinalityData = useCallback(async () => {
-    if (!settings.sourceFile) return;
-    
-    setCardinalityLoading(true);
-    setCardinalityError(null);
-    
-    try {
-      // Get project context for metadata retrieval
-      const projectContext = getProjectContext();
-      
-      // Construct full path if needed
-      let fullDataSource = settings.sourceFile;
-      
-      // If we have project context and sourceFile is just a filename, construct full path
-      if (projectContext && settings.sourceFile && !settings.sourceFile.includes('/')) {
-        const { client_name, app_name, project_name } = projectContext;
-        if (client_name && app_name && project_name) {
-          fullDataSource = `${client_name}/${app_name}/${project_name}/${settings.sourceFile}`;
-        }
-      }
-      
-      // Build URL parameters
-      const params = new URLSearchParams({
-        object_name: fullDataSource
-      });
-      
-      // Add project context parameters for metadata retrieval
-      if (projectContext) {
-        const { client_name, app_name, project_name } = projectContext;
-        if (client_name) params.append('client_name', client_name);
-        if (app_name) params.append('app_name', app_name);
-        if (project_name) params.append('project_name', project_name);
-      }
-      
-      // Use CREATECOLUMN_API instead of GROUPBY_API for metadata support
-      const url = `${CREATECOLUMN_API}/cardinality?${params.toString()}`;
-      console.log('🔍 [CARDINALITY] Fetching from:', url);
-      
-      const res = await fetch(url);
-      let payload: any = {};
-      try {
-        payload = await res.json();
-      } catch {}
-      
-      if (!res.ok) {
-        const detail = typeof payload?.detail === 'string' ? payload.detail : res.statusText;
-        throw new Error(detail || 'Failed to fetch cardinality data');
-      }
-      
-      const data = (await resolveTaskResponse(payload)) || {};
-      
-      if (data.status === 'SUCCESS' && data.cardinality) {
-        console.log('✅ [CARDINALITY] Received data with metadata:', data.cardinality.length, 'columns');
-        setCardinalityData(data.cardinality);
-      } else {
-        setCardinalityError(data.error || 'Failed to fetch cardinality data');
-      }
-    } catch (e: any) {
-      console.error('❌ [CARDINALITY] Error:', e);
-      setCardinalityError(e.message || 'Error fetching cardinality data');
-    } finally {
-      setCardinalityLoading(false);
-    }
-  }, [settings.sourceFile]);
-
-  // Fetch cardinality data when sourceFile changes or showCardinalityView is enabled
-  useEffect(() => {
-    if (showCardinalityView && settings.sourceFile) {
-      fetchCardinalityData();
-    }
-  }, [settings.sourceFile, showCardinalityView, fetchCardinalityData]);
-
-  // Cardinality filtering and sorting logic
-  const displayedCardinality = useMemo(() => {
-    let filtered = Array.isArray(cardinalityData) ? cardinalityData : [];
-    
-    // Filter out columns with unique_count = 0
-    filtered = filtered.filter(c => c.unique_count > 0);
-    
-    // Apply column filters
-    Object.entries(columnFilters).forEach(([column, filterValues]) => {
-      if (filterValues && filterValues.length > 0) {
-        filtered = filtered.filter(row => {
-          const cellValue = String(row[column.toLowerCase()] || '');
-          return filterValues.includes(cellValue);
-        });
-      }
-    });
-    
-    // Apply sorting
-    if (sortColumn) {
-      filtered = [...filtered].sort((a, b) => {
-        const aVal = a[sortColumn.toLowerCase()];
-        const bVal = b[sortColumn.toLowerCase()];
-        if (aVal === bVal) return 0;
-        let comparison = 0;
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
-          comparison = aVal - bVal;
-        } else {
-          comparison = String(aVal).localeCompare(String(bVal));
-        }
-        return sortDirection === 'desc' ? -comparison : comparison;
-      });
-    }
-    
-    return filtered;
-  }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
-
-  const getUniqueColumnValues = (column: string): string[] => {
-    if (!Array.isArray(cardinalityData) || cardinalityData.length === 0) return [];
-    
-    let filteredData = Array.isArray(cardinalityData) ? cardinalityData : [];
-    filteredData = filteredData.filter(c => c.unique_count > 0);
-    
-    // Apply all other column filters except the current one
-    Object.entries(columnFilters).forEach(([col, filterValues]) => {
-      if (col !== column && filterValues && filterValues.length > 0) {
-        filteredData = filteredData.filter(row => {
-          const cellValue = String(row[col.toLowerCase()] || '');
-          return filterValues.includes(cellValue);
-        });
-      }
-    });
-    
-    const values = filteredData.map(row => String(row[column.toLowerCase()] || '')).filter(Boolean);
-    return Array.from(new Set(values)).sort();
-  };
-
-  const handleCardinalitySort = (column: string, direction?: 'asc' | 'desc') => {
-    if (sortColumn === column) {
-      if (sortDirection === 'asc') {
-        onSettingsChange({ cardinalitySortDirection: 'desc' });
-      } else if (sortDirection === 'desc') {
-        onSettingsChange({ cardinalitySortColumn: '', cardinalitySortDirection: 'asc' });
-      }
-    } else {
-      onSettingsChange({ cardinalitySortColumn: column, cardinalitySortDirection: direction || 'asc' });
-    }
-  };
-
-  const handleCardinalityColumnFilter = (column: string, values: string[]) => {
-    onSettingsChange({
-      cardinalityColumnFilters: {
-        ...columnFilters,
-        [column]: values
-      }
-    });
-  };
-
-  const clearCardinalityColumnFilter = (column: string) => {
-    const newFilters = { ...columnFilters };
-    delete newFilters[column];
-    onSettingsChange({ cardinalityColumnFilters: newFilters });
-  };
-
-  const FilterMenu = ({ column }: { column: string }) => {
-    const uniqueValues = getUniqueColumnValues(column);
-    const current = columnFilters[column] || [];
-    const [temp, setTemp] = useState<string[]>(current);
-    
-    const toggleVal = (val: string) => {
-      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
-    };
-    
-    const selectAll = () => {
-      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
-    };
-    
-    const apply = () => handleCardinalityColumnFilter(column, temp);
-    
-    return (
-      <div className="w-64 max-h-80 overflow-y-auto">
-        <div className="p-2 border-b">
-          <div className="flex items-center space-x-2 mb-2">
-            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
-            <span className="text-sm font-medium">Select All</span>
-          </div>
-        </div>
-        <div className="p-2 space-y-1">
-          {uniqueValues.map((v, i) => (
-            <div key={i} className="flex items-center space-x-2">
-              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
-              <span className="text-sm">{v}</span>
-            </div>
-          ))}
-        </div>
-        <div className="p-2 border-t flex space-x-2">
-          <Button size="sm" onClick={apply}>Apply</Button>
-          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-    );
-  };
+  // Legacy cardinality functions removed - now using DataSummaryView
 
   // Handle opening the source file in a new tab
   const handleViewDataClick = () => {
@@ -2023,224 +1819,18 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
   return (
     <div className="h-full overflow-auto">
-      {/* Cardinality View */}
-      {showCardinalityView && settings.mode === 'load' && (cardinalityLoading ? (
-        <div className="p-4 text-blue-600">Loading cardinality data...</div>
-      ) : cardinalityError ? (
-        <div className="p-4 text-red-600">{cardinalityError}</div>
-      ) : cardinalityData && cardinalityData.length > 0 ? (
-        <div className="p-2">
-          <TableTemplate
-            key={`cardinality-view-${showCardinalityView}`}
-            headers={[
-              <ContextMenu key="Column">
-                <ContextMenuTrigger asChild>
-                  <div className="flex items-center gap-1 cursor-pointer">
-                    Column
-                    {sortColumn === 'column' && (
-                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                    )}
-                  </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger className="flex items-center">
-                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                      <ContextMenuItem onClick={() => handleCardinalitySort('column', 'asc')}>
-                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                      </ContextMenuItem>
-                      <ContextMenuItem onClick={() => handleCardinalitySort('column', 'desc')}>
-                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                      </ContextMenuItem>
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                  <ContextMenuSeparator />
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger className="flex items-center">
-                      <Filter className="w-4 h-4 mr-2" /> Filter
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                      <FilterMenu column="column" />
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                  {columnFilters['column']?.length > 0 && (
-                    <>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem onClick={() => clearCardinalityColumnFilter('column')}>
-                        Clear Filter
-                      </ContextMenuItem>
-                    </>
-                  )}
-                </ContextMenuContent>
-              </ContextMenu>,
-              <ContextMenu key="Data type">
-                <ContextMenuTrigger asChild>
-                  <div className="flex items-center gap-1 cursor-pointer">
-                    Data type
-                    {sortColumn === 'data_type' && (
-                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                    )}
-                  </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger className="flex items-center">
-                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                      <ContextMenuItem onClick={() => handleCardinalitySort('data_type', 'asc')}>
-                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                      </ContextMenuItem>
-                      <ContextMenuItem onClick={() => handleCardinalitySort('data_type', 'desc')}>
-                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                      </ContextMenuItem>
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                  <ContextMenuSeparator />
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger className="flex items-center">
-                      <Filter className="w-4 h-4 mr-2" /> Filter
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                      <FilterMenu column="data_type" />
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                  {columnFilters['data_type']?.length > 0 && (
-                    <>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem onClick={() => clearCardinalityColumnFilter('data_type')}>
-                        Clear Filter
-                      </ContextMenuItem>
-                    </>
-                  )}
-                </ContextMenuContent>
-              </ContextMenu>,
-              <ContextMenu key="Unique count">
-                <ContextMenuTrigger asChild>
-                  <div className="flex items-center gap-1 cursor-pointer">
-                    Unique count
-                    {sortColumn === 'unique_count' && (
-                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                    )}
-                  </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger className="flex items-center">
-                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                      <ContextMenuItem onClick={() => handleCardinalitySort('unique_count', 'asc')}>
-                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                      </ContextMenuItem>
-                      <ContextMenuItem onClick={() => handleCardinalitySort('unique_count', 'desc')}>
-                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                      </ContextMenuItem>
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                  <ContextMenuSeparator />
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger className="flex items-center">
-                      <Filter className="w-4 h-4 mr-2" /> Filter
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                      <FilterMenu column="unique_count" />
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                  {columnFilters['unique_count']?.length > 0 && (
-                    <>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem onClick={() => clearCardinalityColumnFilter('unique_count')}>
-                        Clear Filter
-                      </ContextMenuItem>
-                    </>
-                  )}
-                </ContextMenuContent>
-              </ContextMenu>,
-              "Sample values"
-            ]}
-            colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
-            bodyClassName="max-h-[350px] overflow-y-auto"
-            defaultMinimized={!showCardinalityView}
-            borderColor="border-teal-500"
-            customHeader={{
-              title: (
-                <span className="flex items-center gap-1">
-                  <span>Data Summary</span>
-                  <span className="text-slate-400">|</span>
-                  <span
-                    className="text-blue-500 cursor-pointer hover:text-blue-700 hover:underline"
-                    onClick={handleViewDataClick}
-                  >
-                    Data in detail
-                  </span>
-                </span>
-              ),
-              subtitle: undefined,
-              subtitleClickable: false,
-              onSubtitleClick: handleViewDataClick,
-              compactHeader: true
-            }}
-          >
-            {displayedCardinality.map((col, index) => (
-              <tr key={index} className="table-row">
-                <td className="table-cell">
-                  <div className="flex items-center gap-2">
-                    <span>{col.column || col.Column || ''}</span>
-                    {col.metadata?.is_created && (
-                      <ColumnInfoIcon metadata={col.metadata} />
-                    )}
-                  </div>
-                </td>
-                <td className="table-cell">{col.data_type || col['Data type'] || ''}</td>
-                <td className="table-cell">{col.unique_count || col['Unique count'] || 0}</td>
-                <td className="table-cell">
-                  {col.unique_values ? (
-                    <div className="flex flex-wrap items-center gap-1">
-                      {Array.isArray(col.unique_values) ? (
-                        <>
-                          {col.unique_values.slice(0, 2).map((val: any, i: number) => (
-                            <Badge
-                              key={i}
-                              className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
-                            >
-                              {String(val)}
-                            </Badge>
-                          ))}
-                          {col.unique_values.length > 2 && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
-                                  <Plus className="w-3 h-3" />
-                                  {col.unique_values.length - 2}
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
-                                {col.unique_values
-                                  .slice(2)
-                                  .map(val => String(val))
-                                  .join(', ')}
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                        </>
-                      ) : (
-                        <Badge className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50">
-                          {String(col.unique_values)}
-                        </Badge>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-gray-500 italic">No samples</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </TableTemplate>
+      {/* Data Summary - Using global DataSummaryView component */}
+      {showCardinalityView && settings.mode === 'load' && settings.sourceFile && (
+        <div className="mb-4">
+          <DataSummaryView
+            objectName={settings.sourceFile}
+            atomId={atomId || ''}
+            subtitleClickable={true}
+            onSubtitleClick={handleViewDataClick}
+            defaultMinimized={false}
+          />
         </div>
-      ) : null)}
+      )}
       
       <div className="table-wrapper">
         <div className="table-overflow">

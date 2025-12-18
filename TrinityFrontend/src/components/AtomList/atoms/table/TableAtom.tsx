@@ -1056,9 +1056,10 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           <div className="flex-1 overflow-hidden">
             <TableCanvas
               data={tableData}
-              settings={{...settings, atomId}}
+              settings={settings}
               cellStyles={cellStyles}
               onSettingsChange={handleSettingsChange}
+              atomId={atomId}
             />
           </div>
 

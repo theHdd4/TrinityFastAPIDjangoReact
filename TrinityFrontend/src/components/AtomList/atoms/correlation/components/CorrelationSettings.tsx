@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, AlertCircle, CheckCircle, Loader2, Clock } from 'lucide-react';
+import { FileText, AlertCircle, CheckCircle, Loader2, Clock, Settings } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Card } from '@/components/ui/card';
 import { VALIDATE_API } from '@/lib/api';
 import type { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { correlationAPI, handleAPIError, type FilterAndCorrelateRequest, type DateAnalysisResponse } from '../helpers/correlationAPI';
@@ -641,15 +642,37 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             )}
           </div>
 
-          {/* Show Note Box Toggle */}
-          <div className="flex items-center justify-between pt-4 border-t">
-            <Label className="text-xs">Show Note Box</Label>
-            <Switch
-              checked={data.showNote || false}
-              onCheckedChange={(checked) => onDataChange({ showNote: checked })}
-            />
-          </div>
+          {/* Data Summary Toggle - Only when data source is selected (chartmaker pattern) */}
+          {data.selectedFile && (
+            <div className="flex items-center justify-between pt-4 border-t mt-4">
+              <Label className="text-xs">Show Data Summary</Label>
+              <Switch
+                checked={data.showDataSummary || false}
+                onCheckedChange={(checked) => onDataChange({ showDataSummary: checked })}
+              />
+            </div>
+          )}
         </div>
+
+        {/* Display Settings */}
+        <Card className="border border-border shadow-sm">
+          <div className="p-4">
+            <h4 className="font-medium text-foreground mb-4 flex items-center">
+              <Settings className="w-4 h-4 text-muted-foreground mr-2" />
+              Display Settings
+            </h4>
+            <div className="space-y-4">
+              {/* Show Note Box Toggle - Moved to settings panel */}
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Show Note Box</Label>
+                <Switch
+                  checked={data.showNote || false}
+                  onCheckedChange={(checked) => onDataChange({ showNote: checked })}
+                />
+              </div>
+            </div>
+          </div>
+        </Card>
       </div>
     </div>
   );

@@ -425,6 +425,8 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
             error={settings.error}
             dataSource={settings.dataSource}
             hasExistingUpdates={hasExistingUpdates}
+            settings={settings}
+            onSettingsChange={handleSettingsChange}
           />
         </TabsContent>
         

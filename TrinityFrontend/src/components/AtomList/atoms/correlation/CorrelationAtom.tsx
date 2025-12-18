@@ -13,6 +13,7 @@ const CorrelationAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
       <CorrelationCanvas
+        atomId={atomId}
         data={settings}
         onDataChange={(newData) => {
           const updateSettings = useLaboratoryStore.getState().updateAtomSettings;

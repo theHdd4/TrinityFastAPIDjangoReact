@@ -324,6 +324,7 @@ export interface FeatureOverviewSettings {
   filterUnique?: boolean;
   isLoading?: boolean;
   loadingMessage?: string;
+  showDataSummary?: boolean;
   loadingStatus?: string;
   exhibitionSelections?: FeatureOverviewExhibitionSelection[];
 }
@@ -360,6 +361,7 @@ export interface ConcatSettings {
   performConcat: boolean;
   concatResults?: any;
   concatId?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
@@ -452,6 +454,8 @@ export interface CorrelationSettings {
   // Note functionality (matching ChartMaker pattern)
   note?: string;
   showNote?: boolean;
+  // Data Summary functionality
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
@@ -497,7 +501,8 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   columnValuesLoading: false,
   columnValuesError: undefined,
   note: '',
-  showNote: false
+  showNote: false,
+  showDataSummary: false
 };
 
 export interface ColumnClassifierColumn {
@@ -529,6 +534,7 @@ export interface ColumnClassifierSettings {
   isLoading?: boolean;
   loadingMessage?: string;
   loadingStatus?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -560,6 +566,7 @@ export interface DataFrameOperationsSettings {
   selectedFile?: string;
   tableData?: any;
   data?: any;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings = {
@@ -573,6 +580,7 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   selectedFile: '',
   tableData: undefined,
   data: undefined,
+  showDataSummary: false,
 };
 
 export interface ChartData {
@@ -681,6 +689,7 @@ export interface ChartMakerSettings {
   };
   error?: string;
   exhibitionSelections?: ChartMakerExhibitionSelection[];
+  showDataSummary?: boolean;
 }
 
 export interface SelectModelsFeatureSettings {
@@ -841,6 +850,7 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   },
   error: undefined,
   exhibitionSelections: [],
+  showDataSummary: false,
 };
 
 export interface ClusteringData {
@@ -1571,6 +1581,7 @@ export interface ScopeSelectorSettings {
   }>;
   dataSource?: string;
   previewRows?: ScopeSelectorPreviewRow[];
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_SCOPE_SELECTOR_SETTINGS: ScopeSelectorSettings = {
@@ -1738,7 +1749,8 @@ export interface GroupByAtomSettings {
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
-  showCardinalityView?: boolean;
+  showCardinalityView?: boolean; // Deprecated - use showDataSummary instead
+  showDataSummary?: boolean;
   
   // GroupBy results
   groupbyResults?: {
@@ -1770,7 +1782,8 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   sortColumn: 'unique_count',
   sortDirection: 'desc',
   columnFilters: {},
-  showCardinalityView: false,
+  showCardinalityView: false, // Deprecated - use showDataSummary instead
+  showDataSummary: false,
   groupbyResults: {
     result_file: '',
     result_shape: [0, 0],

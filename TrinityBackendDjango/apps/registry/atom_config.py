@@ -51,12 +51,12 @@ def save_atom_list_configuration(
             getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
         )
         db = mc["trinity_db"]
-        coll = db["django_atom_list_configuration"]
+        coll = db["atom_list_configuration"]
 
         # Drop legacy collection from previous `trinity_prod` database if it exists
         try:
             legacy_db = mc["trinity_prod"]
-            legacy_db.drop_collection("django_atom_list_configuration")
+            legacy_db.drop_collection("atom_list_configuration")
         except Exception:  # pragma: no cover - best effort cleanup
             pass
 
@@ -86,6 +86,11 @@ def save_atom_list_configuration(
                 atom_title = atom.get("title") or atom_id
                 atom_settings = atom.get("settings", {})
                 if atom.get("atomId") == "dataframe-operations":
+                    atom_settings = {
+                        k: v for k, v in atom_settings.items() if k not in {"tableData", "data"}
+                    }
+                if atom.get("atomId") == "table":
+                    # Strip tableData (rows) - data should be in MinIO, not MongoDB
                     atom_settings = {
                         k: v for k, v in atom_settings.items() if k not in {"tableData", "data"}
                     }
@@ -143,7 +148,7 @@ def load_atom_list_configuration(
         mc = MongoClient(
             getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
         )
-        coll = mc["trinity_db"]["django_atom_list_configuration"]
+        coll = mc["trinity_db"]["atom_list_configuration"]
         cursor = coll.find(
             {
                 "client_id": client_id,

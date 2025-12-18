@@ -31,6 +31,7 @@ export interface DataFrameOperationsSettings {
   uploadedFile?: string;
   selectedFile?: string;
   pivotSettings?: PivotSettings;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings = {
@@ -43,6 +44,7 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   enableEditing: true,
   selectedFile: '',
   pivotSettings: { ...DEFAULT_PIVOT_TABLE_SETTINGS },
+  showDataSummary: false,
 };
 
 // Extend DataFrameOperationsSettings type to include tableData
@@ -239,6 +241,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
             settings={settings}
             selectedFile={selectedFile}
             onFileSelect={handleFileSelect}
+            onSettingsChange={(newSettings) => updateSettings(atomId, newSettings)}
           />
           {loading && <div className="text-slate-700 text-xs p-2">Loading data...</div>}
           {error && <div className="text-red-600 text-xs p-2">{error}</div>}

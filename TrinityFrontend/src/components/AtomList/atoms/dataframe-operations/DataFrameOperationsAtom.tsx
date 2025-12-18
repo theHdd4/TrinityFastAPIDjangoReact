@@ -47,6 +47,7 @@ export interface DataFrameSettings {
   rowHeights: { [key: number]: number };
   columnFormulas: Record<string, string>;
   pivotSettings: PivotSettings;
+  showDataSummary?: boolean;
 }
 
 interface Props {
