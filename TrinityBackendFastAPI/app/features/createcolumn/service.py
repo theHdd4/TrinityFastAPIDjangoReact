@@ -2430,7 +2430,17 @@ def generate_column_formula(
     if not input_columns:
         return f"{operation_type}()"
     
-    params = parameters or {}
+    # Defensive: historically we store `param` in Mongo and it may be:
+    # - a dict (preferred)
+    # - a JSON-like string / scalar (legacy or UI-provided)
+    # If it's not a dict, treat it as an unstructured value so formula generation
+    # never crashes and wipes metadata for an entire file.
+    if parameters is None:
+        params: Dict[str, Any] = {}
+    elif isinstance(parameters, dict):
+        params = parameters
+    else:
+        params = {"value": parameters}
     
     # Map operation types to formula templates
     if operation_type == "add":
@@ -2477,7 +2487,11 @@ def generate_column_formula(
     elif operation_type == "cumprod":
         return f"cumprod({input_columns[0]})"
     elif operation_type == "pct_change":
-        period = params.get("period", 1)
+        # pct_change in this codebase is a 2-column operation; keep a stable display.
+        if len(input_columns) >= 2:
+            return f"pct_change({input_columns[0]}, {input_columns[1]})"
+        # Legacy/edge: fall back to a 1-col representation, optionally using param.
+        period = params.get("period", params.get("value", 1))
         return f"pct_change({input_columns[0]}, {period})"
     else:
         # Generic fallback
@@ -2522,81 +2536,169 @@ def get_column_metadata_for_file(
         # Find configuration where saved_file matches object_name
         # Note: object_name might be a full path, saved_file might be relative or vice versa
         files = config.get("files", [])
-        matching_file_config = None
+        matching_file_configs: List[Dict[str, Any]] = []
+
+        # ---------------------------------------------------------------------
+        # Helpers
+        #
+        # We support three matching strategies (existing behavior):
+        # - normalized full path match
+        # - filename match (path differs)
+        # - "cleaned" match (remove create-data/ prefix differences)
+        #
+        # For Save (overwrite): multiple entries can exist for the same saved_file,
+        # so we merge all matching entries.
+        #
+        # For Save As: we treat `input_file` as a parent pointer and walk lineage,
+        # unioning created columns from ancestors so created columns persist across
+        # Save As hops (File1 -> File2 -> File3).
+        # ---------------------------------------------------------------------
+
+        def _normalize_path(path: str) -> str:
+            return (path or "").strip().lower().strip("/")
+
+        def _filename(path: str) -> str:
+            p = (path or "").strip()
+            if "/" in p:
+                return p.split("/")[-1].lower().strip()
+            return p.lower().strip()
+
+        def _clean_prefix(path: str) -> str:
+            return _normalize_path(path).replace("create-data/", "").replace("create_data/", "")
+
+        def _logical_match(saved_file: str, target_object_name: str) -> bool:
+            a_norm = _normalize_path(saved_file)
+            b_norm = _normalize_path(target_object_name)
+            if a_norm and a_norm == b_norm:
+                return True
+            a_file = _filename(saved_file)
+            b_file = _filename(target_object_name)
+            if a_file and a_file == b_file:
+                return True
+            a_clean = _clean_prefix(saved_file)
+            b_clean = _clean_prefix(target_object_name)
+            return bool(a_clean and a_clean == b_clean)
+
+        def _find_matching_file_configs(target_object_name: str) -> List[Tuple[int, Dict[str, Any]]]:
+            matches: List[Tuple[int, Dict[str, Any]]] = []
+            for idx, file_config in enumerate(files):
+                saved_file = file_config.get("saved_file", "")
+                if _logical_match(saved_file, target_object_name):
+                    matches.append((idx, file_config))
+            return matches
         
         logger.info(f"🔍 [COLUMN-METADATA] Looking for file: {object_name}")
         logger.info(f"🔍 [COLUMN-METADATA] Total files in config: {len(files)}")
         logger.info(f"🔍 [COLUMN-METADATA] Available saved_file paths: {[f.get('saved_file', '') for f in files[:5]]}")
         
-        for idx, file_config in enumerate(files):
-            saved_file = file_config.get("saved_file", "")
-            # Normalize paths for comparison (remove leading/trailing slashes, lowercase)
-            saved_file_normalized = saved_file.strip().lower().strip('/')
-            object_name_normalized = object_name.strip().lower().strip('/')
-            
-            logger.debug(f"🔍 [COLUMN-METADATA] Comparing file {idx}: saved_file='{saved_file}' (normalized: '{saved_file_normalized}') vs object_name='{object_name}' (normalized: '{object_name_normalized}')")
-            
-            # Try exact match first (normalized)
-            if saved_file_normalized == object_name_normalized:
-                matching_file_config = file_config
-                logger.info(f"✅ [COLUMN-METADATA] Exact match found (normalized): {saved_file} == {object_name}")
-                break
-            
-            # Try matching by filename (in case paths differ)
-            saved_filename = saved_file.split('/')[-1].lower().strip() if '/' in saved_file else saved_file.lower().strip()
-            object_filename = object_name.split('/')[-1].lower().strip() if '/' in object_name else object_name.lower().strip()
-            if saved_filename == object_filename and saved_filename:
-                matching_file_config = file_config
-                logger.info(f"✅ [COLUMN-METADATA] Filename match found: {saved_file} == {object_name}")
-                break
-            
-            # Try matching by removing common prefixes (create-data/, etc.)
-            saved_file_clean = saved_file_normalized.replace('create-data/', '').replace('create_data/', '')
-            object_name_clean = object_name_normalized.replace('create-data/', '').replace('create_data/', '')
-            if saved_file_clean == object_name_clean and saved_file_clean:
-                matching_file_config = file_config
-                logger.info(f"✅ [COLUMN-METADATA] Clean path match found: {saved_file} == {object_name}")
-                break
+        # Resolve all matching entries for this object_name (overwrite support).
+        initial_matches = _find_matching_file_configs(object_name)
+        matching_file_configs = [fc for _, fc in initial_matches]
         
-        if not matching_file_config:
+        if not matching_file_configs:
             logger.warning(f"⚠️ [COLUMN-METADATA] No matching file config found for: {object_name}")
             logger.warning(f"⚠️ [COLUMN-METADATA] Available files: {[f.get('saved_file', '') for f in files]}")
         
-        if not matching_file_config:
+        if not matching_file_configs:
             return {}
         
-        # Extract operations array
-        operations = matching_file_config.get("operations", [])
-        if not operations:
+        # ---------------------------------------------------------------------
+        # Build lineage-aware created-column map
+        #
+        # - Overwrite: merge all matching entries for the same saved_file/object_name.
+        # - Save As: walk up `input_file` chain and union created columns from ancestors.
+        #   Closest descendant wins if a column name appears multiple times.
+        # ---------------------------------------------------------------------
+        created_operation_by_col: Dict[str, Dict[str, Any]] = {}
+
+        visited: set[str] = set()
+        current_object = object_name
+
+        while True:
+            current_key = _clean_prefix(current_object)
+            if not current_key:
+                break
+            if current_key in visited:
+                logger.warning(f"⚠️ [COLUMN-METADATA] Lineage cycle detected at '{current_object}' (key='{current_key}'); stopping traversal")
+                break
+            visited.add(current_key)
+
+            matches = _find_matching_file_configs(current_object)
+            if not matches:
+                break
+
+            # Merge operations for this hop (overwrite support).
+            hop_ops: List[Dict[str, Any]] = []
+            for _, fc in matches:
+                ops = fc.get("operations", [])
+                if isinstance(ops, list) and ops:
+                    hop_ops.extend([op for op in ops if isinstance(op, dict)])
+
+            # Build a hop-local created map where later saves win (files[] is append-only).
+            hop_created: Dict[str, Dict[str, Any]] = {}
+            for op_idx, operation in enumerate(hop_ops):
+                created_column_name = operation.get("created_column_name")
+                if not created_column_name:
+                    logger.warning(f"⚠️ [COLUMN-METADATA] Operation {op_idx} missing 'created_column_name': {operation}")
+                    continue
+                col_key = str(created_column_name).lower().strip()
+                if not col_key:
+                    continue
+                hop_created[col_key] = operation
+
+            # Merge into global map with descendant precedence:
+            # if a descendant already defined a column, do not override it with ancestor data.
+            for col_key, operation in hop_created.items():
+                if col_key not in created_operation_by_col:
+                    created_operation_by_col[col_key] = operation
+
+            # Determine parent pointer (Save As lineage):
+            # choose the latest matching entry for current_object, then follow its input_file.
+            latest_idx, latest_fc = max(matches, key=lambda x: x[0])
+            parent = latest_fc.get("input_file") or ""
+
+            if not parent:
+                break
+
+            # Stop if input_file points back to the same logical file (overwrite/self).
+            if _logical_match(parent, current_object):
+                break
+
+            current_object = str(parent)
+
+        if not created_operation_by_col:
             return {}
         
         # Get original columns from input_file
+        # Prefer original columns from the earliest matching entry for the requested file,
+        # but keep behavior backward compatible if not present.
         original_columns = set()
-        original_columns_list = matching_file_config.get("original_columns", [])
-        if original_columns_list:
-            original_columns = set(col.lower().strip() for col in original_columns_list)
+        try:
+            earliest = matching_file_configs[0]
+            original_columns_list = earliest.get("original_columns", [])
+            if original_columns_list:
+                original_columns = set(col.lower().strip() for col in original_columns_list)
+        except Exception:
+            original_columns = set()
         
         # Build column metadata map
         column_metadata: Dict[str, Dict[str, Any]] = {}
         
-        logger.info(f"🔍 [COLUMN-METADATA] Processing {len(operations)} operations")
-        
-        for idx, operation in enumerate(operations):
-            created_column_name = operation.get("created_column_name")
-            if not created_column_name:
-                logger.warning(f"⚠️ [COLUMN-METADATA] Operation {idx} missing 'created_column_name': {operation}")
-                continue
-            
-            # Normalize column name (lowercase, strip)
-            normalized_name = created_column_name.lower().strip()
-            
+        logger.info(
+            f"🔍 [COLUMN-METADATA] Lineage resolved: {len(created_operation_by_col)} created columns "
+            f"from {len(visited)} file(s) in chain"
+        )
+
+        for col_key, operation in created_operation_by_col.items():
+            created_column_name = operation.get("created_column_name") or col_key
+            normalized_name = str(created_column_name).lower().strip()
+
             operation_type = operation.get("operation_type", "")
             input_columns = operation.get("columns", [])
             parameters = operation.get("param")
-            
-            # Generate formula
+
             formula = generate_column_formula(operation_type, input_columns, parameters)
-            
+
             column_metadata[normalized_name] = {
                 "is_created": True,
                 "operation_type": operation_type,
@@ -2605,8 +2707,6 @@ def get_column_metadata_for_file(
                 "formula": formula,
                 "created_column_name": created_column_name,
             }
-            
-            logger.info(f"✅ [COLUMN-METADATA] Operation {idx}: Added metadata for column '{created_column_name}' (normalized: '{normalized_name}') -> {formula}")
         
         # Debug: Log all created column names
         logger.info(f"📋 [COLUMN-METADATA] All created columns (normalized): {list(column_metadata.keys())}")
