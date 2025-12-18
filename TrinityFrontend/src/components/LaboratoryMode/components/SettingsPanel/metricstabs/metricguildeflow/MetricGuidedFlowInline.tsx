@@ -9,6 +9,8 @@ import { M2Operations, type M2OperationsRef } from './stages/M2Operations';
 import { M3Preview } from './stages/M3Preview';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import { LABORATORY_API } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 
 interface MetricGuidedFlowInlineProps {
   /** Optional callback when the full flow completes on preview save */
@@ -78,6 +80,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
   const flow = useMetricGuidedFlow(savedState);
   const { state, goToNextStage, goToPreviousStage, restartFlow, goToStage, setState, restoreStageSnapshot } = flow;
   const { setActiveMetricGuidedFlow, closeMetricGuidedFlow } = useLaboratoryStore();
+  const { toast } = useToast();
 
   // Refs to avoid excessive localStorage writes and keep last saved snapshot
   const prevStateStringRef = useRef<string>('');
@@ -200,8 +203,173 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     }
   };
 
+  // Handler to save variables from preview stage
+  const handleSaveFromPreview = useCallback(async () => {
+    if (state.currentStage !== 'preview') return;
+    
+    const projectContext = getActiveProjectContext();
+    if (!projectContext) {
+      toast({
+        title: 'Error',
+        description: 'Project context not available. Please ensure you\'re in a valid project.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const computeVars = state.createdVariables.filter(v => v.method === 'compute');
+    const assignVars = state.createdVariables.filter(v => v.method === 'assign');
+
+    try {
+      // Save computed variables
+      if (computeVars.length > 0) {
+        // Reconstruct operations from operationDetails
+        const operations = computeVars
+          .map((v, idx) => {
+            const details = v.operationDetails || {};
+            const numericalColumn = (details as any).column || '';
+            const method = (details as any).operationMethod || 'sum';
+
+            // Validate required fields
+            if (!numericalColumn || !method) {
+              console.warn(`[handleSaveFromPreview] Skipping variable ${v.name}: missing numericalColumn or method`, {
+                numericalColumn,
+                method,
+                details,
+              });
+              return null;
+            }
+
+            const operation: any = {
+              id: `op_${Date.now()}_${idx}`, // Generate unique ID
+              numericalColumn: numericalColumn.trim(),
+              method: method.trim(),
+            };
+
+            // Only include customName if it exists
+            if ((details as any).customName && String((details as any).customName).trim()) {
+              operation.customName = String((details as any).customName).trim();
+            }
+
+            // Handle secondColumn vs secondValue - only include one, and only if it exists
+            // If secondColumn exists and is not empty, use it
+            if ((details as any).secondColumn && String((details as any).secondColumn).trim()) {
+              operation.secondColumn = String((details as any).secondColumn).trim();
+              // Don't include secondValue if secondColumn is present
+            } else if ((details as any).secondValue !== undefined && (details as any).secondValue !== null) {
+              const secondVal = (details as any).secondValue;
+              // Convert to number - handle both string and number types
+              const numVal = typeof secondVal === 'number' ? secondVal : parseFloat(String(secondVal));
+              if (!isNaN(numVal)) {
+                operation.secondValue = numVal;
+              }
+              // Don't include secondColumn if secondValue is present
+            }
+
+            return operation;
+          })
+          .filter((op): op is any => op !== null); // Remove any null entries
+
+        // Validate we have at least one valid operation
+        if (operations.length === 0) {
+          throw new Error('No valid operations found to save. Please check variable configurations.');
+        }
+
+        // Determine compute mode from first variable's operationDetails
+        const firstVar = computeVars[0];
+        const computeMode = (firstVar.operationDetails as any)?.groupBy && (firstVar.operationDetails as any).groupBy.length > 0 
+          ? 'within-group' 
+          : 'whole-dataframe';
+        const identifiers = (firstVar.operationDetails as any)?.groupBy || [];
+
+        const computePayload = {
+          dataSource: state.dataSource,
+          computeMode,
+          identifiers: computeMode === 'within-group' ? identifiers : undefined,
+          operations,
+          clientName: projectContext.client_name,
+          appName: projectContext.app_name,
+          projectName: projectContext.project_name,
+          preview: false, // Actually save this time
+        };
+
+        const computeResponse = await fetch(`${LABORATORY_API}/variables/compute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(computePayload),
+        });
+
+        if (!computeResponse.ok) {
+          const errorData = await computeResponse.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(errorData.error || `Failed to save computed variables: ${computeResponse.status}`);
+        }
+
+        const computeResult = await computeResponse.json();
+        if (!computeResult.success) {
+          throw new Error(computeResult.error || 'Failed to save computed variables');
+        }
+      }
+
+      // Save assigned variables
+      if (assignVars.length > 0) {
+        const assignPayload = {
+          assignments: assignVars.map(v => ({
+            variableName: v.name,
+            value: v.value || '',
+          })),
+          dataSource: state.dataSource,
+          clientName: projectContext.client_name,
+          appName: projectContext.app_name,
+          projectName: projectContext.project_name,
+        };
+
+        const assignResponse = await fetch(`${LABORATORY_API}/variables/assign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(assignPayload),
+        });
+
+        if (!assignResponse.ok) {
+          const errorData = await assignResponse.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(errorData.error || `Failed to save assigned variables: ${assignResponse.status}`);
+        }
+
+        const assignResult = await assignResponse.json();
+        if (!assignResult.success) {
+          throw new Error(assignResult.error || 'Failed to save assigned variables');
+        }
+      }
+
+      // Success - call onComplete
+      toast({
+        title: 'Success',
+        description: `Successfully saved ${state.createdVariables.length} variable(s).`,
+      });
+
+      onComplete?.({
+        createdVariables: state.createdVariables,
+        createdColumns: state.createdColumns,
+        createdTables: state.createdTables,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save variables. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  }, [state, toast, onComplete]);
+
   const handleNext = useCallback(async () => {
-    // Operations stage is handled separately with Save/Save As buttons
+    // Preview stage: Save variables to backend
+    if (state.currentStage === 'preview') {
+      await handleSaveFromPreview();
+      return;
+    }
+
+    // Operations stage is handled separately with Continue button
     if (state.currentStage === 'operations') {
       // This should not be called for operations stage anymore
       // But keep as fallback for variable type
@@ -213,13 +381,13 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
           state.createdTables.length > 0;
         
         if (canSave && !hasCreatedItems && m2OperationsRef.current) {
-          console.log('[MetricGuidedFlowInline] Auto-saving variable before proceeding');
+          console.log('[MetricGuidedFlowInline] Auto-computing variable before proceeding');
           try {
             await m2OperationsRef.current.saveVariable();
             // Navigation will happen via useEffect in M2Operations after onVariableCreated
             return;
           } catch (error) {
-            console.error('[MetricGuidedFlowInline] Error auto-saving variable:', error);
+            console.error('[MetricGuidedFlowInline] Error computing variable:', error);
             return;
           }
         }
@@ -236,17 +404,8 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
       }
     }
 
-    if (state.currentStage === 'preview') {
-      onComplete?.({
-        createdVariables: state.createdVariables,
-        createdColumns: state.createdColumns,
-        createdTables: state.createdTables,
-      });
-      return;
-    }
-
     goToNextStage();
-  }, [state, goToNextStage, onComplete, canProceedFromStep]);
+  }, [state, goToNextStage, handleSaveFromPreview, canProceedFromStep]);
 
   // Handlers for Save/Save As buttons in operations stage
   const handleSaveVariable = useCallback(async () => {
@@ -284,6 +443,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
       }
       
       const previousStage = STEP_ORDER[currentIndex - 1];
+      const currentStageBeforeNavigation = state.currentStage; // Capture the stage we're leaving
       
       // Restore snapshot for previous stage if it exists
       const restoredSnapshot = flow.restoreStageSnapshot(previousStage);
@@ -325,6 +485,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             ...prev,
             ...resetFields,
             currentStage: previousStage,
+            navigatedBackFrom: currentStageBeforeNavigation, // Set flag indicating where we came from
             selectedType: restoredSnapshot.selectedType,
             dataSource: restoredSnapshot.dataSource,
             createdVariables: [...restoredSnapshot.createdVariables],
@@ -337,6 +498,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             ...prev,
             ...resetFields,
             currentStage: previousStage,
+            navigatedBackFrom: currentStageBeforeNavigation, // Set flag indicating where we came from
           };
         }
       });
@@ -618,22 +780,34 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
                       </Button>}
                     </div>
                     <div className="flex gap-2">
-                      {stage === 'preview' && <Button variant="outline" onClick={handleClose}>
-                        Exit
-                      </Button>}
-                      {!isLastStage && stage === 'operations' ? (
-                        // Operations stage: Show Save/Save As buttons based on selectedType
-                        state.selectedType === 'variable' ? (
-                          // Variable type: Show Save button
+                      {stage === 'preview' && (
+                        <>
+                          <Button variant="outline" onClick={handleClose}>
+                            Exit
+                          </Button>
+                          {/* Save button for preview stage - saves computed/assigned variables to backend */}
                           <Button
-                            onClick={handleSaveVariable}
+                            onClick={handleNext}
+                            disabled={state.createdVariables.length === 0 && state.createdColumns.length === 0 && state.createdTables.length === 0}
+                            className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Save
+                          </Button>
+                        </>
+                      )}
+                      {!isLastStage && stage === 'operations' ? (
+                        // Operations stage: Show Continue button (computes with preview=true and navigates to preview)
+                        state.selectedType === 'variable' ? (
+                          // Variable type: Show Continue button (computes/assigns with preview)
+                          <Button
+                            onClick={handleNext}
                             disabled={!canSaveOperations || isSavingOperations}
                             className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {isSavingOperations ? 'Saving...' : 'Save'}
+                            {isSavingOperations ? 'Computing...' : 'Continue'}
                           </Button>
                         ) : state.selectedType === 'column' ? (
-                          // Column type: Show Save and Save As buttons
+                          // Column type: Show Save and Save As buttons (columns still save immediately)
                           <>
                             <Button
                               onClick={handleSaveColumnAs}

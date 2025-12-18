@@ -21,7 +21,6 @@ export const M2Operations = forwardRef<M2OperationsRef, M2OperationsProps>(({ fl
   const { state, setState, goToStage } = flow;
   const operationsTabRef = useRef<OperationsTabRef>(null);
   const hasNavigatedRef = useRef(false);
-  const previousStageRef = useRef<string>(state.currentStage);
 
   // Expose save methods to parent component
   useImperativeHandle(ref, () => ({
@@ -60,28 +59,26 @@ export const M2Operations = forwardRef<M2OperationsRef, M2OperationsProps>(({ fl
     },
   }), []);
 
-  // Track previous stage to detect manual navigation back from preview
-  // This effect MUST run before the auto-navigation effect to prevent race conditions
+  // Check if we navigated back from preview - if so, disable auto-navigation
+  // This uses the explicit navigatedBackFrom flag set by handleBack
   useEffect(() => {
-    const previousStage = previousStageRef.current;
-    const currentStage = state.currentStage;
-    
-    // If we're coming from preview to operations, disable auto-navigation immediately
-    if (previousStage === 'preview' && currentStage === 'operations') {
+    // If we navigated back from preview, disable auto-navigation
+    if (state.navigatedBackFrom === 'preview' && state.currentStage === 'operations') {
       console.log('[M2Operations] User navigated back from preview, disabling auto-navigation');
-      hasNavigatedRef.current = true; // Set to true to prevent auto-navigation
+      hasNavigatedRef.current = true;
+      
+      // Clear the navigatedBackFrom flag after processing
+      setState(prev => ({
+        ...prev,
+        navigatedBackFrom: null,
+      }));
     }
     
     // Reset navigation flag when stage changes away from operations
-    if (currentStage !== 'operations') {
+    if (state.currentStage !== 'operations') {
       hasNavigatedRef.current = false;
     }
-    
-    // Update previousStageRef for next comparison
-    if (previousStage !== currentStage) {
-      previousStageRef.current = currentStage;
-    }
-  }, [state.currentStage]);
+  }, [state.currentStage, state.navigatedBackFrom, setState]);
 
   // Auto-navigate to preview after column/table/variable is created
   // Only auto-navigate if we haven't already navigated AND we're not coming back from preview
@@ -99,16 +96,13 @@ export const M2Operations = forwardRef<M2OperationsRef, M2OperationsProps>(({ fl
     // Only auto-navigate if:
     // 1. We have created items
     // 2. We're on operations stage (already checked above)
-    // 3. We haven't already auto-navigated
-    // 4. We're not coming back from preview (check previousStageRef and hasNavigatedRef)
-    // If hasNavigatedRef is true, it means we came back from preview, so don't auto-navigate
+    // 3. We haven't already auto-navigated (hasNavigatedRef is set to true when coming back from preview)
     if (hasCreatedItems && !hasNavigatedRef.current) {
       console.log('[M2Operations] Created items detected, auto-navigating to preview', {
         variables: state.createdVariables.length,
         columns: state.createdColumns.length,
         tables: state.createdTables.length,
         currentStage: state.currentStage,
-        previousStage: previousStageRef.current,
         hasNavigated: hasNavigatedRef.current,
       });
       hasNavigatedRef.current = true;

@@ -701,7 +701,6 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
 
   // Assign UI state
   const [assignedVars, setAssignedVars] = useState<AssignedVar[]>([]);
-  const [createdVarsPreview, setCreatedVarsPreview] = useState<SavedVar[] | null>(null);
   const newVarRef = useRef<HTMLInputElement | null>(null);
   const openedBySearchRef = useRef(false);
   const metricsColOpsRef = useRef<MetricsColOpsRef>(null);
@@ -1418,15 +1417,9 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
         });
         // Refresh saved variables after successful save
         await fetchSavedVariables();
-        // Show preview as created variables
+        // Notify parent component
         if ('assignments' in payloadWithConfirm) {
-          const createdVars = (payloadWithConfirm.assignments || []).map((a, idx) => ({
-            id: String(idx),
-            variableName: a.variableName,
-            value: a.value,
-          }));
-          setCreatedVarsPreview(createdVars);
-          // Notify parent component
+          // Assign variables
           if (onVariableCreated) {
             onVariableCreated(
               (payloadWithConfirm.assignments || []).map((a) => ({
@@ -1863,68 +1856,22 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
       return;
     }
 
-    const payload = buildAssignPayload(assignedVars, dataSource);
-    setSaving(true);
-
-    try {
-      const response = await fetch(`${LABORATORY_API}/variables/assign`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
-        toast({
-          title: 'Success',
-          description: `Successfully saved ${result.newVariables?.length || assignedVars.length} constant variable(s).`,
-        });
-        // Refresh saved variables after successful save
-        await fetchSavedVariables();
-        // Show preview as created variables
-        const createdVars = assignedVars.map((p) => ({
-          id: p.id,
-          variableName: p.variableName.trim(),
+    // In preview mode: just store values in state without saving to backend
+    // The actual save will happen from the Preview tab
+    toast({
+      title: 'Prepared',
+      description: `Prepared ${assignedVars.length} variable(s) for review. Continue to Preview.`,
+    });
+    
+    // Notify parent component with assigned variables (not saved yet)
+    if (onVariableCreated) {
+      onVariableCreated(
+        assignedVars.map((p) => ({
+          name: p.variableName.trim(),
           value: p.value.trim(),
-        }));
-        setCreatedVarsPreview(createdVars);
-        // Notify parent component
-        if (onVariableCreated) {
-          onVariableCreated(
-            assignedVars.map((p) => ({
-              name: p.variableName.trim(),
-              value: p.value.trim(),
-              method: 'assign' as const,
-            }))
-          );
-        }
-      } else if (result.existingVariables && result.existingVariables.length > 0) {
-        // Show confirmation dialog for overwriting
-        setExistingVariables(result.existingVariables);
-        setPendingPayload(payload);
-        setShowOverwriteConfirm(true);
-        setSaving(false);
-        return;
-      } else {
-        throw new Error(result.error || 'Failed to save variables');
-      }
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to save constant variables. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setSaving(false);
+          method: 'assign' as const,
+        }))
+      );
     }
   };
 
@@ -1978,7 +1925,11 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
       return;
     }
 
-    const payload = buildComputePayload(operations, computeMode, selectedIdentifiers, dataSource);
+    // Build payload with preview flag set to true
+    const payload = {
+      ...buildComputePayload(operations, computeMode, selectedIdentifiers, dataSource),
+      preview: true, // Enable preview mode - compute but don't save
+    };
     setSaving(true);
 
     try {
@@ -1999,62 +1950,61 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
       const result = await response.json();
 
       if (result.success) {
-        toast({
-          title: 'Success',
-          description: `Successfully created ${result.newColumns?.length || 0} variable(s).`,
-        });
-        // Refresh saved variables after successful save
-        await fetchSavedVariables();
-        // Notify parent component
-        if (onVariableCreated && result.newColumns) {
-          // Map result.newColumns to operations to get details
-          const variableDetails = result.newColumns.map((colName: string, idx: number) => {
-            const op = operations[idx] || operations[0]; // Match operation to column
-            return {
-              name: colName,
-              method: 'compute' as const,
-              operationDetails: {
-                operationMethod: op.method,
-                column: op.numericalColumn,
-                groupBy: computeWithinGroup ? selectedIdentifiers : undefined,
-                secondColumn: op.secondColumn,
-                customName: op.customName,
-              },
-            };
+        // In preview mode, result.computedValues contains the computed variables with their values
+        if (result.computedValues && result.computedValues.length > 0) {
+          toast({
+            title: 'Computed',
+            description: `Successfully computed ${result.computedValues.length} variable(s). Review in Preview.`,
           });
-          onVariableCreated(variableDetails);
-        } else if (onVariableCreated && operations.length > 0) {
-          // Fallback: use custom names from operations
-          onVariableCreated(
-            operations
-              .filter(op => op.customName)
-              .map(op => ({
-                name: op.customName || '',
-                method: 'compute' as const,
-                operationDetails: {
-                  operationMethod: op.method,
-                  column: op.numericalColumn,
-                  groupBy: computeWithinGroup ? selectedIdentifiers : undefined,
-                  secondColumn: op.secondColumn,
-                  customName: op.customName,
-                },
-              }))
-          );
+          
+          // Notify parent component with computed values (including actual values)
+          if (onVariableCreated) {
+            const variableDetails = result.computedValues.map((computedVar: any) => ({
+              name: computedVar.name,
+              value: computedVar.value, // Include the computed value
+              method: 'compute' as const,
+              operationDetails: computedVar.operationDetails || {
+                operationMethod: computedVar.operationDetails?.operationMethod,
+                column: computedVar.operationDetails?.column,
+                groupBy: computedVar.operationDetails?.groupBy,
+                secondColumn: computedVar.operationDetails?.secondColumn,
+                customName: computedVar.operationDetails?.customName,
+              },
+            }));
+            onVariableCreated(variableDetails);
+          }
+        } else {
+          // Fallback: if no computedValues, try to construct from operations
+          if (onVariableCreated && operations.length > 0) {
+            toast({
+              title: 'Computed',
+              description: `Computed ${operations.length} variable(s). Review in Preview.`,
+            });
+            onVariableCreated(
+              operations
+                .filter(op => op.customName || op.numericalColumn)
+                .map(op => ({
+                  name: op.customName || `${op.numericalColumn}_${op.method}`,
+                  method: 'compute' as const,
+                  operationDetails: {
+                    operationMethod: op.method,
+                    column: op.numericalColumn,
+                    groupBy: computeWithinGroup ? selectedIdentifiers : undefined,
+                    secondColumn: op.secondInputType === 'column' ? op.secondColumn : undefined,
+                    secondValue: op.secondInputType === 'number' && op.secondValue ? parseFloat(op.secondValue) : undefined,
+                    customName: op.customName,
+                  },
+                }))
+            );
+          }
         }
-      } else if (result.existingVariables && result.existingVariables.length > 0) {
-        // Show confirmation dialog for overwriting
-        setExistingVariables(result.existingVariables);
-        setPendingPayload(payload);
-        setShowOverwriteConfirm(true);
-        setSaving(false);
-        return;
       } else {
-        throw new Error(result.error || 'Failed to save variables');
+        throw new Error(result.error || 'Failed to compute variables');
       }
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to save variables. Please try again.',
+        description: error.message || 'Failed to compute variables. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -2067,8 +2017,6 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
     if (onImport) {
       onImport(v);
     }
-    // Small UX: also add to created preview
-    setCreatedVarsPreview((prev) => (prev || []).concat(v));
   };
 
   // Toggle identifier selection
@@ -2637,7 +2585,6 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
                         className="text-slate-700 border-slate-200"
                         onClick={() => {
                           setAssignedVars([]);
-                          setCreatedVarsPreview(null);
                           setVariableMode(null);
                           setActiveVariableTab(null);
                         }}
@@ -2647,22 +2594,6 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
                     </div>
                   </div> */}
 
-                  {/* Created Variables preview */}
-                  {createdVarsPreview && createdVarsPreview.length > 0 && (
-                    <div className="mt-3 border-t pt-3">
-                      <div className="text-sm font-medium text-slate-800">Created Variables</div>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {createdVarsPreview.map((v) => (
-                          <div
-                            key={v.id}
-                            className="rounded-full border px-3 py-1 text-sm bg-slate-50"
-                          >
-                            <strong>{v.variableName}</strong>: {v.value}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </TabsContent>
             </Tabs>
             {/* Saved Variables */}

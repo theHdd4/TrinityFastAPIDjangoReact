@@ -100,9 +100,11 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, rea
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [loadingValues, setLoadingValues] = useState(false);
 
-  // Fetch variable values for computed variables
+  // Fetch variable values for computed variables (only if values are not already in state)
+  // This is a fallback for cases where variables were created outside the preview flow
   useEffect(() => {
     const fetchVariableValues = async () => {
+      // Only fetch if we have computed variables without values in state
       const computedVars = state.createdVariables.filter(v => v.method === 'compute' && !v.value);
       if (computedVars.length === 0) return;
 
@@ -152,9 +154,11 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, rea
   };
 
   const getVariableValue = (variable: CreatedVariable): string | null => {
-    if (variable.method === 'assign' && variable.value) {
+    // For both assign and compute, use value from state first (set during preview computation)
+    if (variable.value) {
       return variable.value;
     }
+    // Fallback: for compute variables, try fetching from backend (for legacy cases)
     if (variable.method === 'compute') {
       return variableValues[variable.name] || null;
     }

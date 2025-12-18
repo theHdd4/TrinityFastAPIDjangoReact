@@ -60,6 +60,8 @@ export interface MetricFlowState {
  */
 export interface MetricGuidedFlowState extends MetricFlowState {
   currentStage: MetricStage;
+  /** Tracks which stage we navigated back from (set by handleBack, cleared after processing) */
+  navigatedBackFrom: MetricStage | null;
 }
 
 const INITIAL_FLOW_STATE: MetricFlowState = {
@@ -72,6 +74,7 @@ const INITIAL_FLOW_STATE: MetricFlowState = {
 
 const INITIAL_METRIC_GUIDED_STATE: MetricGuidedFlowState = {
   currentStage: 'type',
+  navigatedBackFrom: null,
   ...INITIAL_FLOW_STATE,
 };
 
@@ -118,6 +121,7 @@ export function useMetricGuidedFlow(
           : INITIAL_FLOW_STATE.selectedType,
       dataSource: initialState.dataSource ?? INITIAL_FLOW_STATE.dataSource,
       currentStage: initialState.currentStage ?? INITIAL_METRIC_GUIDED_STATE.currentStage,
+      navigatedBackFrom: null, // Always start with no back navigation flag
     };
   });
 
