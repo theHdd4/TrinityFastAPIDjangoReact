@@ -503,6 +503,24 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
     fiscalStartMonth?: string;
   }>>([]);
   
+  // Active tab state for tab-based UI when multiple operations exist
+  const [activeOperationId, setActiveOperationId] = React.useState<string | null>(null);
+  
+  // Ensure active tab is set when operations exist
+  React.useEffect(() => {
+    if (selectedOperations.length > 0 && !activeOperationId) {
+      setActiveOperationId(selectedOperations[0].id);
+    } else if (selectedOperations.length === 0) {
+      setActiveOperationId(null);
+    } else if (selectedOperations.length > 0 && activeOperationId) {
+      // Ensure active tab still exists in operations
+      const activeOpExists = selectedOperations.some(op => op.id === activeOperationId);
+      if (!activeOpExists) {
+        setActiveOperationId(selectedOperations[0].id);
+      }
+    }
+  }, [selectedOperations.length, activeOperationId]);
+  
   // Convert selectedIdentifiersForBackend array to Set for easier manipulation
   const selectedIdentifiersForBackendSet = React.useMemo(
     () => new Set(selectedIdentifiersForBackend),
@@ -835,6 +853,11 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
       param: opType.type === 'replace' ? { oldValue: '', newValue: '' } : (opType.type === 'fill_na' ? { strategy: '', customValue: '' } : (opType.type === 'date_builder' ? 'from_year_month_day' : (opType.type === 'power' || opType.type === 'lag' || opType.type === 'lead' || opType.type === 'diff' || opType.type === 'rolling_mean' || opType.type === 'rolling_sum' || opType.type === 'rolling_min' || opType.type === 'rolling_max' ? '' : (opType.type === 'growth_rate' ? { period: '1', frequency: 'none', comparison_type: 'period' } : (opType.type === 'filter_rows_condition' ? {} : (opType.type === 'filter_top_n_per_group' ? { n: '1', metric_col: '', ascending: false } : (opType.type === 'filter_percentile' ? { percentile: '10', metric_col: '', direction: 'top' } : (opType.type === 'compute_metrics_within_group' ? { metric_cols: [{ metric_col: '', method: 'sum', rename: '' }] } : (opType.type === 'group_share_of_total' ? { metric_cols: [{ metric_col: '', rename: '' }] } : (opType.type === 'group_contribution' ? { metric_cols: [{ metric_col: '', rename: '' }] } : undefined)))))))))),
     };
     setSelectedOperations(prev => [...prev, newOperation]);
+    // Set new operation as active tab
+    setActiveOperationId(newOperation.id);
+    // Close explore operations and clear search when an operation is selected
+    setExploreOpen(false);
+    setColumnSearchQuery('');
   };
 
   const updateOperationColumns = (opId: string, newColumns: string[]) => {
@@ -936,6 +959,28 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
 
   const removeOperation = (opId: string) => {
     setSelectedOperations(prev => prev.filter(op => op.id !== opId));
+  };
+
+  const handleCloseTab = (opId: string) => {
+    const currentIndex = selectedOperations.findIndex(op => op.id === opId);
+    const isActiveTab = activeOperationId === opId;
+    
+    // Remove the operation
+    setSelectedOperations(prev => prev.filter(op => op.id !== opId));
+    
+    // Handle active tab switching
+    if (isActiveTab) {
+      const remainingOps = selectedOperations.filter(op => op.id !== opId);
+      if (remainingOps.length > 0) {
+        // Switch to next tab, or previous if closing last tab
+        const newActiveIndex = currentIndex < remainingOps.length 
+          ? currentIndex 
+          : currentIndex - 1;
+        setActiveOperationId(remainingOps[newActiveIndex].id);
+      } else {
+        setActiveOperationId(null);
+      }
+    }
   };
 
   const getAvailableColumns = (opType: string) => {
@@ -1771,9 +1816,6 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
     }
   };
 
-  // Determine if we should show centered empty state
-  const showCenteredEmptyState = selectedOperations.length === 0 && !columnSearchQuery.trim() && !exploreOpen;
-
   // Expose save functions via ref
   useImperativeHandle(ref, () => ({
     save: handleSave,
@@ -1785,143 +1827,49 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
   return (
     <div className="flex flex-col h-full relative">
       <div className="flex-1 overflow-y-auto space-y-4 px-2 pb-2">
-        {/* Search bar - always rendered in consistent location */}
-        {showCenteredEmptyState ? (
-          <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
-            <div className="w-full max-w-2xl space-y-4">
-              <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <Input
-                  key="column-search-input"
-                  ref={searchInputRef}
-                  value={columnSearchQuery}
-                  onChange={(e) => setColumnSearchQuery(e.target.value)}
-                  placeholder='Describe what you want to calculate… e.g. "max price by brand", "add two columns", "moving average"'
-                  className="h-12 pl-12 text-base"
-                  aria-label="Search column operations"
-                />
-              </div>
-              <div className="flex justify-center">
-                <Button
-                  variant="outline"
-                  onClick={() => handleExploreToggle()}
-                  className="flex items-center gap-2"
-                >
-                  {exploreOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  Explore Operations
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Search bar and Explore button */}
-            <div className="flex items-center gap-2 pt-2">
-              <div className="flex-1 relative">
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <Input
-                  key="column-search-input"
-                  ref={searchInputRef}
-                  value={columnSearchQuery}
-                  onChange={(e) => setColumnSearchQuery(e.target.value)}
-                  placeholder='Describe what you want to calculate… e.g. "max price by brand", "add two columns", "moving average"'
-                  className="h-12 pl-10 text-base"
-                  aria-label="Search column operations"
-                />
-              </div>
-              <Button
-                variant="outline"
-                onClick={handleExploreToggle}
-                className="flex items-center gap-2"
-              >
-                {exploreOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                Explore Operations
-              </Button>
-            </div>
-
-            {/* Operations Browser */}
-            {exploreOpen && (
-              <div className="p-3">
-                <Collapsible open={exploreOpen} onOpenChange={handleExploreToggle}>
-                  <CollapsibleContent>
-                    {(() => {
-                      // Determine what to show: filtered results if searching, all categories if not
-                      const categoriesToShow = columnSearchQuery.trim() 
-                        ? filteredColumnCategories 
-                        : operationCategories;
-                          
-                      if (categoriesToShow.length === 0) {
-                        return (
-                          <p className="text-xs text-gray-500 text-center py-4">
-                            {columnSearchQuery.trim() 
-                              ? "No operations match your search."
-                              : "No operations available."}
-                          </p>
-                        );
-                      }
-                          
-                      return categoriesToShow.map((category) => (
-                        <Collapsible
-                          key={category.name}
-                          open={openColumnCategories[category.name] ?? false}
-                          onOpenChange={() => toggleColumnCategory(category.name)}
-                        >
-                          <CollapsibleTrigger className="flex items-center justify-between w-full p-1.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 rounded transition-colors">
-                            <div className="flex items-center space-x-1.5 flex-1 min-w-0">
-                              <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded flex items-center justify-center flex-shrink-0">
-                                <category.icon className="w-2.5 h-2.5 text-gray-700" />
-                              </div>
-                              <span className="font-medium text-gray-900 text-xs truncate">{category.name}</span>
-                              <span className="text-[10px] text-gray-400 flex-shrink-0">({category.operations.length})</span>
-                            </div>
-                            {openColumnCategories[category.name] ? (
-                              <ChevronDown className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
-                            ) : (
-                              <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
-                            )}
-                          </CollapsibleTrigger>
-                          <CollapsibleContent className="pt-1.5 pb-1.5">
-                            <div className="ml-2 pl-2 border-l-2 border-gray-200 grid grid-cols-2 gap-1.5">
-                              {category.operations.map((op) => (
-                                <TooltipProvider key={op.type} delayDuration={0}>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <div
-                                        onClick={() => handleOperationClick(op)}
-                                        className="p-1.5 border border-gray-200 rounded-lg bg-white transition-all cursor-pointer group relative flex items-center space-x-1.5 hover:shadow-md hover:border-gray-300"
-                                      >
-                                        <Plus className="w-3 h-3 text-gray-600" />
-                                        <span className="text-[10px] font-medium text-gray-900">{op.name}</span>
-                                      </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" className="text-xs max-w-xs">
-                                      <p className="font-semibold mb-1">{op.name}</p>
-                                      <p className="mb-1">{op.description}</p>
-                                      {operationFormulas[op.type] && (
-                                        <p className="text-[10px] text-gray-400 italic">
-                                          Formula: {operationFormulas[op.type]}
-                                        </p>
-                                      )}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              ))}
-                            </div>
-                          </CollapsibleContent>
-                        </Collapsible>
-                      ));
-                    })()}
-                  </CollapsibleContent>
-                </Collapsible>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Selected Operations */}
+        {/* Selected Operations - rendered at top when operations are selected */}
         {selectedOperations.length > 0 && (
-        <div className="space-y-2">
-          {selectedOperations.map((selectedOperation) => {
+        <>
+          {/* Tabs - only show when 2+ operations */}
+          {selectedOperations.length > 1 && (
+            <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
+              {selectedOperations.map((op) => (
+                <div
+                  key={op.id}
+                  className={`
+                    flex items-center gap-1.5 px-3 py-2 text-xs font-medium cursor-pointer
+                    border-b-2 transition-colors whitespace-nowrap
+                    ${activeOperationId === op.id 
+                      ? 'border-blue-500 text-blue-600 bg-blue-50' 
+                      : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    }
+                  `}
+                  onClick={() => setActiveOperationId(op.id)}
+                >
+                  <span className="truncate max-w-[120px]">{op.name}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCloseTab(op.id);
+                    }}
+                    className="ml-1 p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Configuration Card - show active operation or single operation */}
+          {(() => {
+            const operationToShow = selectedOperations.length === 1 
+              ? selectedOperations[0]
+              : selectedOperations.find(op => op.id === activeOperationId);
+            
+            if (!operationToShow) return null;
+            
+            const selectedOperation = operationToShow;
             const opType = selectedOperation.type;
             const opColumns = selectedOperation.columns || [];
             const showPowerParam = opType === 'power';
@@ -1952,35 +1900,28 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                   : (!isStandardize || (opColumns.length === 1))));
 
             return (
-              <Card key={selectedOperation.id} className="bg-white">
-                <CardContent className="pt-2 pb-2">
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between pb-1 border-b border-gray-200">
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 border border-green-200 text-green-700">
-                        {selectedOperation.name}
-                        {operationFormulas[selectedOperation.type] && (
-                          <TooltipProvider delayDuration={0}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <HelpCircle className="w-3 h-3 text-gray-500 cursor-help" />
-                              </TooltipTrigger>
-                              <TooltipContent side="top" className="text-xs">
-                                <p className="font-semibold mb-1">Formula:</p>
-                                <p>{operationFormulas[selectedOperation.type]}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        )}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeOperation(selectedOperation.id)}
-                        className="h-4 w-4 text-red-500 hover:text-red-700 hover:bg-red-50"
-                      >
-                        <Trash2 className="w-1.5 h-1.5" />
-                      </Button>
-                    </div>
+              <div className="space-y-2">
+                <Card key={selectedOperation.id} className="bg-white">
+                      <CardContent className="pt-2 pb-2">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between pb-1 border-b border-gray-200">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 border border-green-200 text-green-700">
+                              {selectedOperation.name}
+                              {operationFormulas[selectedOperation.type] && (
+                                <TooltipProvider delayDuration={0}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <HelpCircle className="w-3 h-3 text-gray-500 cursor-help" />
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="text-xs">
+                                      <p className="font-semibold mb-1">Formula:</p>
+                                      <p>{operationFormulas[selectedOperation.type]}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              )}
+                            </span>
+                          </div>
                     
                     <div className="space-y-1.5">
                       {selectedOperation.type === 'pct_change' ? (
@@ -3571,11 +3512,113 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                     )}
                   </div>
                 </CardContent>
-              </Card>
+                </Card>
+              </div>
             );
-          })}
+          })()}
+          </>
+        )}
+
+        {/* Search bar and Explore button - rendered below selected operations */}
+        <div className="flex items-center gap-2 pt-2">
+          <div className="flex-1 relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Input
+              key="column-search-input"
+              ref={searchInputRef}
+              value={columnSearchQuery}
+              onChange={(e) => setColumnSearchQuery(e.target.value)}
+              placeholder='Describe what you want to calculate… e.g. "max price by brand", "add two columns", "moving average"'
+              className="h-12 pl-10 text-base"
+              aria-label="Search column operations"
+            />
+          </div>
+          <Button
+            variant="outline"
+            onClick={handleExploreToggle}
+            className="flex items-center gap-2"
+          >
+            {exploreOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            Explore Operations
+          </Button>
         </div>
-      )}
+
+        {/* Operations Browser - only shown when exploreOpen is true */}
+        {exploreOpen && (
+          <div className="p-3">
+            <Collapsible open={exploreOpen} onOpenChange={handleExploreToggle}>
+              <CollapsibleContent>
+                {(() => {
+                  // Determine what to show: filtered results if searching, all categories if not
+                  const categoriesToShow = columnSearchQuery.trim() 
+                    ? filteredColumnCategories 
+                    : operationCategories;
+                      
+                  if (categoriesToShow.length === 0) {
+                    return (
+                      <p className="text-xs text-gray-500 text-center py-4">
+                        {columnSearchQuery.trim() 
+                          ? "No operations match your search."
+                          : "No operations available."}
+                      </p>
+                    );
+                  }
+                      
+                  return categoriesToShow.map((category) => (
+                    <Collapsible
+                      key={category.name}
+                      open={openColumnCategories[category.name] ?? false}
+                      onOpenChange={() => toggleColumnCategory(category.name)}
+                    >
+                      <CollapsibleTrigger className="flex items-center justify-between w-full p-1.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 rounded transition-colors">
+                        <div className="flex items-center space-x-1.5 flex-1 min-w-0">
+                          <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded flex items-center justify-center flex-shrink-0">
+                            <category.icon className="w-2.5 h-2.5 text-gray-700" />
+                          </div>
+                          <span className="font-medium text-gray-900 text-xs truncate">{category.name}</span>
+                          <span className="text-[10px] text-gray-400 flex-shrink-0">({category.operations.length})</span>
+                        </div>
+                        {openColumnCategories[category.name] ? (
+                          <ChevronDown className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
+                        ) : (
+                          <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
+                        )}
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-1.5 pb-1.5">
+                        <div className="ml-2 pl-2 border-l-2 border-gray-200 grid grid-cols-2 gap-1.5">
+                          {category.operations.map((op) => (
+                            <TooltipProvider key={op.type} delayDuration={0}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div
+                                    onClick={() => handleOperationClick(op)}
+                                    className="p-1.5 border border-gray-200 rounded-lg bg-white transition-all cursor-pointer group relative flex items-center space-x-1.5 hover:shadow-md hover:border-gray-300"
+                                  >
+                                    <Plus className="w-3 h-3 text-gray-600" />
+                                    <span className="text-[10px] font-medium text-gray-900">{op.name}</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="text-xs max-w-xs">
+                                  <p className="font-semibold mb-1">{op.name}</p>
+                                  <p className="mb-1">{op.description}</p>
+                                  {operationFormulas[op.type] && (
+                                    <p className="text-[10px] text-gray-400 italic">
+                                      Formula: {operationFormulas[op.type]}
+                                    </p>
+                                  )}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  ));
+                })()}
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+        )}
 
       </div>
 

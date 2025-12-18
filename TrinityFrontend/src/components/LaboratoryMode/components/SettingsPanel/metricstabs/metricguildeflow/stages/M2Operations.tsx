@@ -80,6 +80,24 @@ export const M2Operations = forwardRef<M2OperationsRef, M2OperationsProps>(({ fl
     }
   }, [state.currentStage, state.navigatedBackFrom, setState]);
 
+  // Reset navigation flag when createdVariables is cleared (after going back from preview)
+  // This allows auto-navigation to work again when new variables are created
+  useEffect(() => {
+    if (state.currentStage === 'operations') {
+      const hasCreatedItems = 
+        state.createdVariables.length > 0 ||
+        state.createdColumns.length > 0 ||
+        state.createdTables.length > 0;
+      
+      // If we're on operations stage and have no created items, reset the navigation flag
+      // This happens when user goes back from preview (createdVariables is cleared)
+      if (!hasCreatedItems && hasNavigatedRef.current) {
+        console.log('[M2Operations] Created items cleared, resetting navigation flag to allow auto-navigation');
+        hasNavigatedRef.current = false;
+      }
+    }
+  }, [state.createdVariables.length, state.createdColumns.length, state.createdTables.length, state.currentStage]);
+
   // Auto-navigate to preview after column/table/variable is created
   // Only auto-navigate if we haven't already navigated AND we're not coming back from preview
   useEffect(() => {

@@ -40,7 +40,7 @@ const STAGE_TITLES: Record<MetricStage, string> = {
   type: 'Select The Type Of Metric You Want To Create',
   dataset: 'Confirm Your Data Source',
   operations: 'Select Operation',
-  preview: 'Preview Your Created Metrics',
+  preview: 'Preview ans Save Your Created Metrics',
 };
 
 const STAGE_ORDER: MetricStage[] = ['type', 'dataset', 'operations', 'preview'];
