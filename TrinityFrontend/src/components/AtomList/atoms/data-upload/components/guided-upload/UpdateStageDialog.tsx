@@ -19,6 +19,7 @@ interface UpdateStageDialogProps {
   hasChanges: boolean;
   onUpdate: () => void;
   onUpdateAndContinue: () => void;
+  onApprove?: () => void;
   onCancel: () => void;
 }
 
@@ -41,6 +42,7 @@ export const UpdateStageDialog: React.FC<UpdateStageDialogProps> = ({
   hasChanges,
   onUpdate,
   onUpdateAndContinue,
+  onApprove,
   onCancel,
 }) => {
   const displayLabel = stageLabel || STAGE_LABELS[stage] || stage;
@@ -66,6 +68,12 @@ export const UpdateStageDialog: React.FC<UpdateStageDialogProps> = ({
                     <span className="font-semibold">Update and Continue:</span>
                     <span>Save your changes and move to the next step.</span>
                   </li>
+                  {onApprove && (
+                    <li className="flex items-start gap-2">
+                      <span className="font-semibold">Approve:</span>
+                      <span>Accept the changes and prime the data (green color - ready for use).</span>
+                    </li>
+                  )}
                 </ul>
               </>
             ) : (
@@ -108,6 +116,18 @@ export const UpdateStageDialog: React.FC<UpdateStageDialogProps> = ({
               >
                 Update and Continue
               </Button>
+              {onApprove && (
+                <Button
+                  onClick={() => {
+                    onApprove();
+                    onOpenChange(false);
+                  }}
+                  variant="default"
+                  className="w-full sm:w-auto bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white"
+                >
+                  Approve
+                </Button>
+              )}
             </>
           )}
           {!hasChanges && (

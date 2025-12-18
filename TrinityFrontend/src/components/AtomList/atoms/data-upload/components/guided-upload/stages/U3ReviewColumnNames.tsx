@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Pencil, History, RotateCcw, Lightbulb, Trash2, AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { UPLOAD_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow, ColumnNameEdit } from '../useGuidedUploadFlow';
@@ -76,6 +77,8 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
   const [loading, setLoading] = useState(true);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [deletedColumns, setDeletedColumns] = useState<Set<number>>(new Set());
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const summaryBarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchColumnNames = async () => {
@@ -390,15 +393,27 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
   const hasHistoricalMatches = columns.some(col => col.historicalMatch);
   const keptColumns = columns.filter(col => col.keep);
 
+  // #region agent log
+  useEffect(() => {
+    if (!loading && tableContainerRef.current && summaryBarRef.current) {
+      const tableRect = tableContainerRef.current.getBoundingClientRect();
+      const summaryRect = summaryBarRef.current.getBoundingClientRect();
+      const gap = summaryRect.top - tableRect.bottom;
+      const tableStyles = window.getComputedStyle(tableContainerRef.current);
+      const summaryStyles = window.getComputedStyle(summaryBarRef.current);
+      fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'U3ReviewColumnNames.tsx:395',message:'Spacing measurement',data:{gapPx:gap,gapRem:gap/16,tableMarginBottom:tableStyles.marginBottom,tablePaddingBottom:tableStyles.paddingBottom,summaryMarginTop:summaryStyles.marginTop,summaryPaddingTop:summaryStyles.paddingTop,parentSpaceY:window.getComputedStyle(tableContainerRef.current.parentElement!).gap},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    }
+  }, [loading, columns]);
+  // #endregion
+
   return (
     <StageLayout
       title=""
-      explanation="Review your column names. You can edit any name or remove columns you don't need. Most names are automatically classified using your past uploads or AI suggestions."
-      helpText="Next, we'll review the data types for each column and ensure they've been read correctly."
+      explanation=""
     >
-      <div className="space-y-6">
+      <div className="space-y-2">
         {/* Bulk Actions */}
-        <div className="flex flex-wrap gap-2 pb-4 border-b">
+        <div className="flex flex-wrap gap-2 pb-2 border-b">
           {hasHistoricalMatches && (
             <Button
               variant="outline"
@@ -409,10 +424,10 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                 console.log('Apply Historical button clicked');
                 handleApplyHistorical();
               }}
-              className="flex items-center gap-2"
+              className="flex items-center gap-1.5 text-xs h-7"
               type="button"
             >
-              <History className="w-4 h-4" />
+              <History className="w-3.5 h-3.5" />
               Use Historical Names
             </Button>
           )}
@@ -426,10 +441,10 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                 console.log('Apply AI Suggestions button clicked');
                 handleApplyRuleBasedSuggestions();
               }}
-              className="flex items-center gap-2"
+              className="flex items-center gap-1.5 text-xs h-7"
               type="button"
             >
-              <Lightbulb className="w-4 h-4" />
+              <Lightbulb className="w-3.5 h-3.5" />
               Apply AI Suggestions
             </Button>
           )}
@@ -442,10 +457,10 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
               console.log('Remove Empty Columns button clicked');
               handleRemoveEmptyColumns();
             }}
-            className="flex items-center gap-2"
+            className="flex items-center gap-1.5 text-xs h-7"
             type="button"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-3.5 h-3.5" />
             Remove Empty Columns
           </Button>
           <Button
@@ -457,10 +472,10 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
               console.log('Remove High Missing Columns button clicked');
               handleRemoveHighMissingColumns();
             }}
-            className="flex items-center gap-2"
+            className="flex items-center gap-1.5 text-xs h-7"
             type="button"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-3.5 h-3.5" />
             Remove Columns with &gt;95% Missing
           </Button>
           <Button
@@ -472,20 +487,20 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
               console.log('Reset All button clicked');
               handleReset();
             }}
-            className="flex items-center gap-2"
+            className="flex items-center gap-1.5 text-xs h-7"
             type="button"
           >
-            <RotateCcw className="w-4 h-4" />
+            <RotateCcw className="w-3.5 h-3.5" />
             Reset All
           </Button>
         </div>
 
         {/* Warnings */}
         {duplicateNames.length > 0 && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
             <div className="flex items-start gap-2">
-              <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-yellow-800">
+              <AlertTriangle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-yellow-800">
                 Two columns now share the same name: {Array.from(new Set(duplicateNames)).join(', ')}. Please rename one.
               </p>
             </div>
@@ -493,31 +508,70 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
         )}
 
         {/* Column Table */}
-        <div className="border border-gray-200 rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Original Name</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Auto-Classified Name</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Sample Values</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Keep/Delete</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Tags</th>
+        <div ref={tableContainerRef} className="border border-gray-200 rounded-lg overflow-hidden">
+          <div 
+            className="overflow-x-auto" 
+            style={{ 
+              maxHeight: '8.75rem',
+              overflowY: 'auto',
+              scrollbarGutter: 'stable'
+            }}
+          >
+            <table className="text-[10px] table-fixed w-full">
+              <colgroup>
+                <col style={{ width: '120px' }} />
+                <col style={{ width: '150px' }} />
+                <col style={{ width: '200px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '130px' }} />
+              </colgroup>
+              <thead className="sticky top-0 z-10 bg-gray-50">
+                <tr className="bg-gray-50">
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Original Name
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Auto-Classified Name
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Sample Values
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Keep and Drop
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Tags
+                    </div>
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody>
                 {columns.map((column, index) => {
                   const isDeleted = !column.keep;
                   const selectValue = column.keep ? 'keep' : 'delete';
+                  const sampleValuesText = Array.from(new Set(column.sampleValues)).slice(0, 5).join(', ');
+                  const fullSampleValuesText = Array.from(new Set(column.sampleValues)).join(', ');
                   return (
                     <tr
                       key={`${column.originalName}-${index}`}
-                      className={isDeleted ? 'bg-gray-50 opacity-60' : 'hover:bg-gray-50'}
+                      className={isDeleted ? 'bg-gray-50 opacity-60 hover:bg-gray-50' : 'hover:bg-gray-50'}
+                      style={{ height: '1.75rem' }}
                     >
-                      <td className="px-4 py-3 text-gray-600 text-xs">
-                        {column.originalName}
+                      <td className="px-0.5 py-0 text-gray-600 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={column.originalName}>
+                        <div className="truncate">
+                          {column.originalName}
+                        </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
                         {editingIndex === index ? (
                           <Input
                             value={column.editedName}
@@ -535,33 +589,40 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                                 setEditingIndex(null);
                               }
                             }}
-                            className="w-full"
+                            className="w-full text-[10px] h-5"
                             autoFocus
                           />
                         ) : (
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-gray-900">{column.editedName}</span>
+                          <div className="flex items-center gap-1 overflow-hidden">
+                            <span className="text-gray-700 text-[10px] leading-tight truncate flex-1 whitespace-nowrap" title={column.editedName}>
+                              {column.editedName}
+                            </span>
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => setEditingIndex(index)}
-                              className="h-6 w-6 p-0"
+                              className="h-4 w-4 p-0 flex-shrink-0"
                             >
-                              <Pencil className="w-3 h-3" />
+                              <Pencil className="w-2.5 h-2.5" />
                             </Button>
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="text-xs text-gray-600 max-w-xs truncate">
-                          {Array.from(new Set(column.sampleValues)).slice(0, 5).join(', ')}
-                          {Array.from(new Set(column.sampleValues)).length > 5 && '...'}
-                          {column.sampleValues.length === 0 && <span className="text-gray-400">No samples</span>}
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={fullSampleValuesText}>
+                        <div className="truncate">
+                          {column.sampleValues.length === 0 ? (
+                            <span className="text-gray-400">No samples</span>
+                          ) : (
+                            <>
+                              {sampleValuesText}
+                              {Array.from(new Set(column.sampleValues)).length > 5 && '...'}
+                            </>
+                          )}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
                         <div 
-                          className="relative inline-block w-32" 
+                          className="relative inline-block w-full max-w-[90px]" 
                           onClick={(e) => e.stopPropagation()}
                         >
                           <select
@@ -579,37 +640,40 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                             onMouseDown={(e) => {
                               e.stopPropagation();
                             }}
-                            className="w-full h-9 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 fill=%27none%27 viewBox=%270 0 20 20%27%3E%3Cpath stroke=%27%236b7280%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27 stroke-width=%271.5%27 d=%27M6 8l4 4 4-4%27/%3E%3C/svg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.5rem_center] bg-no-repeat pr-8"
+                              className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none ${
+                              isDeleted ? 'text-red-600' : 'text-gray-900'
+                            }`}
                             style={{
                               backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              backgroundSize: '1em 1em',
+                              backgroundPosition: 'right 0.25rem center',
+                              backgroundRepeat: 'no-repeat',
+                              paddingRight: '1.5rem'
                             }}
                           >
                             <option value="keep">Keep</option>
                             <option value="delete">Drop</option>
                           </select>
                         </div>
-                        {isDeleted && (
-                          <p className="text-xs text-gray-500 mt-1">Marked for removal</p>
-                        )}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-1 flex-wrap">
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div className="flex gap-0.5 flex-wrap overflow-hidden">
                           {column.tag === 'previously_used' && (
-                            <Badge className="bg-[#41C185] text-white text-xs flex items-center">
-                              <History className="w-3 h-3 mr-1" />
-                              <span>Previously Used</span>
+                            <Badge className="bg-[#41C185] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <History className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">Previously Used</span>
                             </Badge>
                           )}
                           {column.tag === 'ai_suggestion' && (
-                            <Badge className="bg-[#FFBD59] text-white text-xs flex items-center">
-                              <Lightbulb className="w-3 h-3 mr-1" />
-                              <span>AI Suggestion</span>
+                            <Badge className="bg-[#FFBD59] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <Lightbulb className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">AI Suggestion</span>
                             </Badge>
                           )}
                           {column.tag === 'edited_by_user' && (
-                            <Badge className="bg-[#458EE2] text-white text-xs flex items-center">
-                              <Pencil className="w-3 h-3 mr-1" />
-                              <span>Edited by User</span>
+                            <Badge className="bg-[#458EE2] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <Pencil className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">Edited by User</span>
                             </Badge>
                           )}
                         </div>
@@ -623,14 +687,12 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
         </div>
 
         {/* Summary */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-gray-700">
+        <div ref={summaryBarRef} className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-0 -mt-1">
+          <p className="text-xs text-gray-700">
             <strong>{keptColumns.length}</strong> column{keptColumns.length !== 1 ? 's' : ''} will be kept,{' '}
             <strong>{columns.length - keptColumns.length}</strong> column{columns.length - keptColumns.length !== 1 ? 's' : ''} marked for removal.
           </p>
         </div>
-
-        {/* Single-file flow after U1 selection: no file navigation */}
       </div>
     </StageLayout>
   );

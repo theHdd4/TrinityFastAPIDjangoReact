@@ -50,11 +50,11 @@ const STAGE_COMPONENTS: Record<UploadStage, React.ComponentType<any>> = {
 };
 
 // Step 1 (Atom): Split panel for file selection/upload - NOT shown in inline flow
-// Panel flow shows U1-U7
+// Panel flow shows U2-U7 (U1 removed - start directly at U2)
 const STAGE_TITLES: Record<UploadStage, string> = {
   U0: 'Choose Your Data Source', // Handled by atom (not shown in inline flow)
-  U1: 'Structural Scan',
-  U2: 'Confirm Your Column Headers',
+  U1: 'Structural Scan', // Removed from flow but kept for backward compatibility
+  U2: 'Confirm Your Column Headers', // Step 1 in the guided flow
   U3: 'Review Your Column Names',
   U4: 'Review Your Column Types',
   U5: 'Review Missing Values',
@@ -62,15 +62,30 @@ const STAGE_TITLES: Record<UploadStage, string> = {
   U7: 'Your Data Is Ready',
 };
 
-// Full stage order for internal navigation
-const STAGE_ORDER: UploadStage[] = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+// Full stage order for internal navigation (U1 removed - start directly at U2)
+const STAGE_ORDER: UploadStage[] = ['U0', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
 
-// Stages visible in the inline flow accordion (U0 is handled by atom)
-const VISIBLE_STAGES: UploadStage[] = ['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+// Stages visible in the inline flow accordion (U0 is handled by atom, U1 removed)
+const VISIBLE_STAGES: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
 
 // Helper to get stage index
 const getStageIndex = (stage: UploadStage): number => {
   return STAGE_ORDER.indexOf(stage);
+};
+
+// Helper to get display step number (U2=1, U3=2, etc. since U1 is removed)
+const getDisplayStepNumber = (stage: UploadStage): number => {
+  const stageMap: Record<UploadStage, number> = {
+    'U0': 0, // Not displayed
+    'U1': 0, // Removed, not displayed
+    'U2': 1, // First visible step
+    'U3': 2,
+    'U4': 3,
+    'U5': 4,
+    'U6': 5,
+    'U7': 6,
+  };
+  return stageMap[stage] || 0;
 };
 
 // Helper to check if a stage is completed
@@ -123,8 +138,8 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     Object.keys(state.missingValueStrategies).length,
   ]);
 
-  // Determine initial stage - always start from U1 now (U0 is handled by atom)
-  const effectiveInitialStage = initialStage || 'U1';
+  // Determine initial stage - always start from U2 now (U0 is handled by atom, U1 removed)
+  const effectiveInitialStage = initialStage || 'U2';
 
   // Track if we've already initialized from savedState to prevent re-initialization
   const hasInitializedFromSavedStateRef = useRef(false);
@@ -163,12 +178,15 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
       }]);
     }
 
-    // Set initial stage - only if we're at U0 and haven't initialized from savedState
-    if (state.currentStage === 'U0' && effectiveInitialStage !== 'U0' && !hasInitializedFromSavedStateRef.current) {
+    // Set initial stage - only if we're at U0 or U1 and haven't initialized from savedState
+    // Skip U1 (removed) and go directly to U2
+    if ((state.currentStage === 'U0' || state.currentStage === 'U1') && effectiveInitialStage !== 'U0' && !hasInitializedFromSavedStateRef.current) {
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GuidedUploadFlowInline.tsx:139',message:'Resetting stage to initial',data:{from:state.currentStage,to:effectiveInitialStage,initialStage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
-      goToStage(effectiveInitialStage);
+      // If effectiveInitialStage is U1, skip to U2 instead
+      const targetStage = effectiveInitialStage === 'U1' ? 'U2' : effectiveInitialStage;
+      goToStage(targetStage);
     }
   }, [existingDataframe, initialStage, effectiveInitialStage, savedState, state.currentStage, state.uploadedFiles.length, addUploadedFiles, goToStage]);
 
@@ -605,8 +623,8 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
       headerBg = 'bg-gray-50';
       borderColor = 'border-gray-200';
     } else if (isCurrent) {
-      // Get the step number based on stage ID (U1=1, U2=2, etc.)
-      const stepNumber = parseInt(stage.replace('U', ''));
+      // Get the display step number (U2=1, U3=2, etc. since U1 is removed)
+      const stepNumber = getDisplayStepNumber(stage);
       statusIcon = (
         <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold flex-shrink-0">
           {stepNumber}

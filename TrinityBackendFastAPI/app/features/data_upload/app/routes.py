@@ -495,7 +495,7 @@ async def upload_file(
         )
 
         submission = celery_task_client.submit_callable(
-            name="data_upload_validate.upload_file",
+            name="data_upload.upload_file",
             dotted_path="app.features.data_upload_validate.service.process_temp_upload",
             kwargs={
                 "file_b64": base64.b64encode(content).decode("utf-8"),
@@ -504,7 +504,7 @@ async def upload_file(
                 "sheet_name": sheet_name or None,
             },
             metadata={
-                "feature": "data_upload_validate",
+                "feature": "data_upload",
                 "operation": "upload_file",
                 "filename": file.filename,
                 "prefix": tmp_prefix,
@@ -1779,7 +1779,7 @@ async def validate(
             )
 
     submission = celery_task_client.submit_callable(
-        name="data_upload_validate.validate",
+        name="data_upload.validate",
         dotted_path="app.features.data_upload_validate.service.run_validation",
         kwargs={
             "validator_atom_id": validator_atom_id,
@@ -1791,7 +1791,7 @@ async def validate(
             "client_id": client_id,
         },
         metadata={
-            "feature": "data_upload_validate",
+            "feature": "data_upload",
             "operation": "validate",
             "validator_atom_id": validator_atom_id,
             "file_count": len(keys),

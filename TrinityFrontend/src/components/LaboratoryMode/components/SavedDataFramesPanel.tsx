@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X, Wrench, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -25,11 +25,15 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
+import { openGuidedMode } from './equalizer_icon';
 
 interface Props {
   isOpen: boolean;
@@ -85,6 +89,41 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     .rainbow-bounce-icon {
       animation: rainbowBounce 8s ease-in-out infinite;
       filter: drop-shadow(0 0 8px currentColor);
+    }
+    
+    /* Blinking equalizer animation for unprimed files - Red, Green, Blue, Yellow */
+    @keyframes equalizerBlink {
+      0% {
+        color: #ff6b6b;
+        filter: drop-shadow(0 0 6px rgba(255, 107, 107, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+        transform: scale(1) translateZ(0);
+      }
+      25% {
+        color: #51cf66;
+        filter: drop-shadow(0 0 6px rgba(81, 207, 102, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+        transform: scale(1.1) translateZ(0);
+      }
+      50% {
+        color: #4dabf7;
+        filter: drop-shadow(0 0 6px rgba(77, 171, 247, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+        transform: scale(1.15) translateZ(0);
+      }
+      75% {
+        color: #ffd43b;
+        filter: drop-shadow(0 0 6px rgba(255, 212, 59, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+        transform: scale(1.1) translateZ(0);
+      }
+      100% {
+        color: #ff6b6b;
+        filter: drop-shadow(0 0 6px rgba(255, 107, 107, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+        transform: scale(1) translateZ(0);
+      }
+    }
+    .equalizer-blink-unprimed {
+      animation: equalizerBlink 1.5s ease-in-out infinite;
+      will-change: color, filter, transform;
+      backface-visibility: hidden;
+      perspective: 1000px;
     }
   `;
 
@@ -214,6 +253,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [sheetChangeError, setSheetChangeError] = useState('');
   const [hasMultipleSheetsByFile, setHasMultipleSheetsByFile] = useState<Record<string, boolean>>({});
   const [processingTarget, setProcessingTarget] = useState<Frame | null>(null);
+  const [modeSelectionTarget, setModeSelectionTarget] = useState<Frame | null>(null);
   const [processingColumns, setProcessingColumns] = useState<ProcessingColumnConfig[]>([]);
   const [processingLoading, setProcessingLoading] = useState(false);
   const [processingSaving, setProcessingSaving] = useState(false);
@@ -222,25 +262,42 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
 
   // Laboratory store hooks for guided flow
   const setActiveGuidedFlow = useLaboratoryStore((state) => state.setActiveGuidedFlow);
+  const setGlobalGuidedMode = useLaboratoryStore((state) => state.setGlobalGuidedMode);
   const cards = useLaboratoryStore((state) => state.cards);
-  const addAtom = useLaboratoryStore((state) => state.addAtom);
+  const updateCard = useLaboratoryStore((state) => state.updateCard);
+  const setCards = useLaboratoryStore((state) => state.setCards);
+  
+  // Hook for marking files as primed
+  const { markFileAsPrimed } = useGuidedFlowPersistence();
 
-  // Helper function to find or create a data-upload atom
-  const findOrCreateDataUploadAtom = () => {
-    // Look for existing data-upload atom
-    for (const card of cards) {
-      for (const atom of card.atoms) {
-        if (atom.atomId === 'data-upload') {
-          return atom.id;
+  // Helper function to find the landing card atom (not create a new one)
+  // Use useCallback to ensure stable function reference
+  const findOrCreateDataUploadAtom = useCallback(() => {
+    try {
+      console.log('[findOrCreateDataUploadAtom] Looking for landing card atom, cards type:', Array.isArray(cards) ? `array(${cards.length})` : typeof cards);
+      
+      // Look for landing-screen atom (the landing card)
+      if (Array.isArray(cards)) {
+        for (const card of cards) {
+          if (card?.atoms && Array.isArray(card.atoms)) {
+            for (const atom of card.atoms) {
+              // Use landing-screen atom instead of creating data-upload atom
+              if (atom?.atomId === 'landing-screen' && atom?.id) {
+                console.log('[findOrCreateDataUploadAtom] Found landing card atom:', atom.id);
+                return atom.id;
+              }
+            }
+          }
         }
       }
-    }
 
-    // If no data-upload atom exists, create one
-    const newAtomId = `atom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    addAtom('data-upload', 'Data Upload', newAtomId);
-    return newAtomId;
-  };
+      console.error('[findOrCreateDataUploadAtom] Landing card atom not found');
+      return '';
+    } catch (error) {
+      console.error('[findOrCreateDataUploadAtom] Error:', error);
+      return '';
+    }
+  }, [cards]);
   const [viewColumns, setViewColumns] = useState<ProcessingColumnConfig[]>([]);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError, setViewError] = useState('');
@@ -1072,6 +1129,70 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     return trimmed;
   };
 
+  // Wrapper function to open guided flow using the separate module
+  // Use useCallback to ensure stable function reference
+  const handleOpenGuidedFlow = useCallback(async (frame: Frame) => {
+    try {
+      console.log('[handleOpenGuidedFlow] Starting with frame:', frame);
+      console.log('[handleOpenGuidedFlow] Function types:', {
+        findOrCreateDataUploadAtom: typeof findOrCreateDataUploadAtom,
+        setActiveGuidedFlow: typeof setActiveGuidedFlow,
+        setGlobalGuidedMode: typeof setGlobalGuidedMode,
+        addAtom: typeof addAtom,
+        cards: Array.isArray(cards) ? `array(${cards.length})` : typeof cards,
+      });
+
+      // Verify all functions are available before calling
+      if (typeof findOrCreateDataUploadAtom !== 'function') {
+        console.error('[handleOpenGuidedFlow] findOrCreateDataUploadAtom is not a function, type:', typeof findOrCreateDataUploadAtom);
+        return;
+      }
+      if (typeof setActiveGuidedFlow !== 'function') {
+        console.error('[handleOpenGuidedFlow] setActiveGuidedFlow is not a function, type:', typeof setActiveGuidedFlow);
+        return;
+      }
+      if (typeof setGlobalGuidedMode !== 'function') {
+        console.error('[handleOpenGuidedFlow] setGlobalGuidedMode is not a function, type:', typeof setGlobalGuidedMode);
+        return;
+      }
+      
+      // Verify required functions are available before proceeding
+      if (typeof updateCard !== 'function' || typeof setCards !== 'function') {
+        console.error('[handleOpenGuidedFlow] updateCard or setCards is not available', {
+          updateCard: typeof updateCard,
+          setCards: typeof setCards,
+        });
+        return;
+      }
+
+      // Create a wrapper function that ensures findOrCreateDataUploadAtom is called safely
+      const safeFindOrCreateAtom = () => {
+        try {
+          console.log('[handleOpenGuidedFlow] safeFindOrCreateAtom called');
+          const result = findOrCreateDataUploadAtom();
+          console.log('[handleOpenGuidedFlow] findOrCreateDataUploadAtom returned:', result);
+          return result;
+        } catch (error) {
+          console.error('[handleOpenGuidedFlow] Error in findOrCreateDataUploadAtom:', error);
+          return '';
+        }
+      };
+      
+      await openGuidedMode({
+        frame,
+        findOrCreateDataUploadAtom: safeFindOrCreateAtom,
+        setActiveGuidedFlow,
+        setGlobalGuidedMode,
+        cards, // Pass cards as fallback
+        updateCard, // Pass updateCard for fallback
+        setCards, // Pass setCards for fallback
+      });
+    } catch (error) {
+      console.error('[handleOpenGuidedFlow] Error:', error);
+      throw error;
+    }
+  }, [findOrCreateDataUploadAtom, setActiveGuidedFlow, setGlobalGuidedMode, updateCard, setCards, cards]);
+
   const openProcessingModal = async (frame: Frame) => {
     setProcessingTarget(frame);
     setProcessingColumns([]);
@@ -1466,6 +1587,18 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               dimensions: {},
             });
             logSessionState(user.id);
+          }
+          
+          // Mark file as primed after successfully saving configuration
+          if (fileName) {
+            await markFileAsPrimed(fileName);
+            // Dispatch events to trigger UI refresh in both panels
+            window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+              detail: { filePath: processingTarget.object_name, fileName: fileName } 
+            }));
+            window.dispatchEvent(new CustomEvent('priming-status-changed', { 
+              detail: { filePath: processingTarget.object_name, fileName: fileName } 
+            }));
           }
         } else {
           toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
@@ -2138,6 +2271,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       await fetch(`${VALIDATE_API}/delete_all_dataframes`, { method: 'DELETE' });
       setFiles([]);
       setExcelFolders([]);
+      // Dispatch event to trigger scenario refresh
+      setTimeout(() => {
+        console.log('[SavedDataFramesPanel] Dispatching dataframe-deleted event (all files)');
+        window.dispatchEvent(new CustomEvent('dataframe-deleted'));
+      }, 100);
     } else if (confirmDelete.type === 'folder') {
       const folderPath = confirmDelete.target;
       // Ensure folder path ends with / for proper matching
@@ -2205,6 +2343,12 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       // Trigger immediate reload to sync with backend
       setReloadToken(prev => prev + 1);
       
+      // Dispatch event to trigger scenario refresh
+      setTimeout(() => {
+        console.log('[SavedDataFramesPanel] Dispatching dataframe-deleted event (folder)');
+        window.dispatchEvent(new CustomEvent('dataframe-deleted'));
+      }, 100);
+      
       toast({
         title: 'Folder deleted',
         description: `Folder and all its contents have been deleted.`,
@@ -2223,6 +2367,12 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       })).filter(folder => folder.sheets.length > 0)); // Remove empty folders
       // Trigger immediate reload to sync with backend
       setReloadToken(prev => prev + 1);
+      
+      // Dispatch event to trigger scenario refresh
+      setTimeout(() => {
+        console.log('[SavedDataFramesPanel] Dispatching dataframe-deleted event (single file)');
+        window.dispatchEvent(new CustomEvent('dataframe-deleted'));
+      }, 100);
     }
     setConfirmDelete(null);
   };
@@ -2609,15 +2759,19 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                         title="Rename"
                       />
                       <SlidersHorizontal
-                        className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
-                        onClick={() => openProcessingModal({
+                        className={`w-3.5 h-3.5 cursor-pointer ${
+                          !sheetStatus?.isPrimed 
+                            ? 'equalizer-blink-unprimed' 
+                            : 'text-gray-400'
+                        }`}
+                        onClick={() => setModeSelectionTarget({
                           object_name: sheet.object_name,
                           csv_name: sheet.csv_name,
                           arrow_name: sheet.arrow_name,
                           last_modified: sheet.last_modified,
                           size: sheet.size
                         })}
-                        title="Process columns"
+                        title={!sheetStatus?.isPrimed ? "Click to prime this file" : "Process columns"}
                       />
                       <Wrench
                         className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-[#458EE2]"
@@ -2820,9 +2974,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               onClick={() => startRename(f.object_name, f.arrow_name || f.csv_name)}
             />
             <SlidersHorizontal
-              className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
-              onClick={() => openProcessingModal(f)}
-              title="Process columns"
+              className={`w-3.5 h-3.5 cursor-pointer ${
+                !status?.isPrimed 
+                  ? 'equalizer-blink-unprimed' 
+                  : 'text-gray-400'
+              }`}
+              onClick={() => setModeSelectionTarget(f)}
+              title={!status?.isPrimed ? "Click to prime this file" : "Process columns"}
             />
             <Wrench
               className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-[#458EE2]"
@@ -4423,6 +4581,87 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           </div>
         </DialogContent>
       </Dialog>
+      
+      {/* Mode Selection Dialog */}
+      {modeSelectionTarget && (
+        <Dialog open={!!modeSelectionTarget} onOpenChange={(open) => !open && setModeSelectionTarget(null)}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Select Mode of Priming</DialogTitle>
+              <DialogDescription>
+                Choose how you want to prime this file: {modeSelectionTarget.arrow_name || modeSelectionTarget.csv_name || modeSelectionTarget.object_name}
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="grid gap-3 py-4">
+              <Button
+                variant="outline"
+                className="h-auto flex-col items-start p-4 hover:bg-primary/5 hover:border-primary transition-all"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const target = modeSelectionTarget;
+                  if (target) {
+                    try {
+                      // Ensure handleOpenGuidedFlow is a function before calling
+                      if (typeof handleOpenGuidedFlow === 'function') {
+                        await handleOpenGuidedFlow(target);
+                      } else {
+                        console.error('[SavedDataFramesPanel] handleOpenGuidedFlow is not a function, type:', typeof handleOpenGuidedFlow);
+                      }
+                    } catch (error) {
+                      console.error('[SavedDataFramesPanel] Error opening guided flow:', error);
+                    }
+                  }
+                  setModeSelectionTarget(null);
+                }}
+              >
+                <div className="flex items-center gap-3 mb-2 w-full">
+                  <Wrench className="w-5 h-5 text-primary" />
+                  <div className="text-left flex-1">
+                    <p className="font-semibold text-sm">1. Guided Mode</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Step-by-step guided process with rule-based checking and validation
+                    </p>
+                  </div>
+                </div>
+              </Button>
+              
+              <Button
+                variant="outline"
+                className="h-auto flex-col items-start p-4 hover:bg-primary/5 hover:border-primary transition-all"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const target = modeSelectionTarget;
+                  if (target) {
+                    openProcessingModal(target).catch((error) => {
+                      console.error('[SavedDataFramesPanel] Error opening processing modal:', error);
+                    });
+                  }
+                  setModeSelectionTarget(null);
+                }}
+              >
+                <div className="flex items-center gap-3 mb-2 w-full">
+                  <SlidersHorizontal className="w-5 h-5 text-primary" />
+                  <div className="text-left flex-1">
+                    <p className="font-semibold text-sm">2. Directly Review</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Open processing panel directly to review and configure columns
+                    </p>
+                  </div>
+                </div>
+              </Button>
+            </div>
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setModeSelectionTarget(null)}>
+                Cancel
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 };

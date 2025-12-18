@@ -130,6 +130,7 @@ export function useLaboratoryScenario(): ScenarioData {
 
           // Check guided flow completion status from Redis
           let hasCompletedFlow = false;
+          let isPrimedFromAPI = false;
           let currentStage: UploadStage | undefined;
           try {
             const flowStateQueryParams = new URLSearchParams({
@@ -148,12 +149,17 @@ export function useLaboratoryScenario(): ScenarioData {
               const flowStateData = await flowStateRes.json();
               hasCompletedFlow = flowStateData?.completed === true;
               currentStage = flowStateData?.current_stage;
+              // Check the is_primed flag from Redis (set when file is approved via processing modal)
+              // This is the authoritative source for priming status
+              isPrimedFromAPI = flowStateData?.is_primed === true || flowStateData?.completed === true;
             }
           } catch (err) {
             console.warn('Failed to check flow state for', fileName, err);
           }
 
-          const isPrimed = hasClassifierConfig && hasCompletedFlow;
+          // Prioritize is_primed flag from API, but also check classifier config for consistency
+          // If API says it's primed, trust that. Otherwise, require both classifier config and completed flow
+          const isPrimed = isPrimedFromAPI || (hasClassifierConfig && hasCompletedFlow);
 
           statusChecks.push({
             object_name: file.object_name,
@@ -224,8 +230,81 @@ export function useLaboratoryScenario(): ScenarioData {
 
     detectScenario();
 
+    // Listen for dataframe-saved events to refresh status
+    const handleDataframeSaved = () => {
+      if (!cancelled) {
+        console.log('[useLaboratoryScenario] dataframe-saved event received, refreshing scenario...');
+        // Refresh immediately, then multiple times with increasing delays to ensure backend has updated
+        detectScenario();
+        
+        // Very aggressive polling for the first few seconds after upload
+        const checkDelays = [100, 200, 300, 500, 700, 1000, 1500, 2000, 3000];
+        checkDelays.forEach((delay) => {
+          setTimeout(() => {
+            if (!cancelled) {
+              console.log(`[useLaboratoryScenario] Re-checking scenario after ${delay}ms...`);
+              detectScenario();
+            }
+          }, delay);
+        });
+      }
+    };
+
+    // Listen for priming status changes
+    const handlePrimingStatusChange = () => {
+      if (!cancelled) {
+        console.log('[useLaboratoryScenario] priming-status-changed event received, refreshing scenario...');
+        // Refresh immediately, then multiple times with increasing delays to ensure backend has updated
+        detectScenario();
+        setTimeout(() => {
+          if (!cancelled) {
+            console.log('[useLaboratoryScenario] Re-checking scenario after 150ms (priming)...');
+            detectScenario();
+          }
+        }, 150);
+        setTimeout(() => {
+          if (!cancelled) {
+            console.log('[useLaboratoryScenario] Re-checking scenario after 400ms (priming)...');
+            detectScenario();
+          }
+        }, 400);
+        setTimeout(() => {
+          if (!cancelled) {
+            console.log('[useLaboratoryScenario] Re-checking scenario after 800ms (priming)...');
+            detectScenario();
+          }
+        }, 800);
+      }
+    };
+
+    // Listen for dataframe deletion events
+    const handleDataframeDeleted = () => {
+      if (!cancelled) {
+        console.log('[useLaboratoryScenario] dataframe-deleted event received, refreshing scenario...');
+        // Refresh immediately, then multiple times with increasing delays to ensure backend has updated
+        detectScenario();
+        // Very aggressive polling after deletion to detect scenario change (A if all deleted, or B if some remain)
+        const checkDelays = [100, 200, 300, 500, 700, 1000, 1500, 2000];
+        checkDelays.forEach((delay) => {
+          setTimeout(() => {
+            if (!cancelled) {
+              console.log(`[useLaboratoryScenario] Re-checking scenario after ${delay}ms (deletion)...`);
+              detectScenario();
+            }
+          }, delay);
+        });
+      }
+    };
+
+    window.addEventListener('dataframe-saved', handleDataframeSaved);
+    window.addEventListener('priming-status-changed', handlePrimingStatusChange);
+    window.addEventListener('dataframe-deleted', handleDataframeDeleted);
+
     return () => {
       cancelled = true;
+      window.removeEventListener('dataframe-saved', handleDataframeSaved);
+      window.removeEventListener('priming-status-changed', handlePrimingStatusChange);
+      window.removeEventListener('dataframe-deleted', handleDataframeDeleted);
     };
   }, []);
 

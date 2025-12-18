@@ -59,11 +59,11 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
     setIsProgressCollapsed(prev => !prev);
   };
 
-  // Handle reset - go back to step 1 (U1 - Structural Scan)
+  // Handle reset - go back to step 1 (U2 - Confirm Headers)
   const handleReset = () => {
     if (selectedAtomId && updateGuidedFlowStage) {
-      // Reset to U1 (Structural Scan) - first step in the guided flow
-      updateGuidedFlowStage(selectedAtomId, 'U1');
+      // Reset to U2 (Confirm Headers) - first step in the guided flow (U1 removed)
+      updateGuidedFlowStage(selectedAtomId, 'U2');
     }
   };
 

@@ -55,7 +55,7 @@ const LaboratoryMode = () => {
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(false);
-  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>('frames');
+  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | 'guided' | null>('frames');
   const [isExhibitionOpen, setIsExhibitionOpen] = useState<boolean>(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isHeaderMinimized, setIsHeaderMinimized] = useState(false);
@@ -208,6 +208,19 @@ const LaboratoryMode = () => {
       setIsExhibitionOpen(false);
     }
   }, [globalGuidedModeEnabled, setAuxiliaryMenuLeftOpen]);
+
+  // Listen for event to open guided panel
+  useEffect(() => {
+    const handleOpenGuidedPanel = () => {
+      console.log('[LaboratoryMode] Opening guided panel via event');
+      setAuxActive('guided');
+    };
+
+    window.addEventListener('open-guided-panel', handleOpenGuidedPanel);
+    return () => {
+      window.removeEventListener('open-guided-panel', handleOpenGuidedPanel);
+    };
+  }, []);
 
   useEffect(() => {
     if (isShareOpen) {
