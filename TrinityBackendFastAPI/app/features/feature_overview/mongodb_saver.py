@@ -92,7 +92,9 @@ async def fetch_dimensions_dict(
             identifiers = mongo_cfg.get("identifiers", [])
             if isinstance(identifiers, list) and len(identifiers) > 0:
                 # Return in the same format as before: {"identifiers": [col1, col2, ...]}
-                return {"identifiers": identifiers}
+                # Convert identifiers to lowercase for consistency with file columns
+                identifiers_lower = [col.lower() if isinstance(col, str) else col for col in identifiers]
+                return {"identifiers": identifiers_lower}
     except Exception as exc:
         print(f"⚠️ fetch_dimensions_dict: Failed to fetch from classifier config: {exc}")
     
@@ -103,10 +105,15 @@ async def fetch_dimensions_dict(
     })
 
     if not document:
-        raise HTTPException(status_code=404, detail="Dimension document not found")
+        # Return empty mapping instead of raising exception to allow code to continue
+        print(f"⚠️ fetch_dimensions_dict: No dimension document found for validator_atom_id={validator_atom_id}, file_key={file_key}")
+        return {}
 
     result = {}
     for dim in document.get("dimensions", []):
         dim_id = dim.get("dimension_id")
-        result[dim_id] = dim.get("assigned_identifiers", [])
+        assigned_identifiers = dim.get("assigned_identifiers", [])
+        # Convert assigned_identifiers to lowercase for consistency with file columns
+        assigned_identifiers_lower = [col.lower() if isinstance(col, str) else col for col in assigned_identifiers]
+        result[dim_id] = assigned_identifiers_lower
     return result

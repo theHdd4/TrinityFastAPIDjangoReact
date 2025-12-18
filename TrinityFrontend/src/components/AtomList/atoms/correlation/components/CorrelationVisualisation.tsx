@@ -23,6 +23,9 @@ import { CorrelationSettings } from '@/components/LaboratoryMode/store/laborator
 import { correlationAPI, type DateAnalysisResponse } from '../helpers/correlationAPI';
 
 interface CorrelationVisualisationProps {
+  atomId?: string;
+  cardId?: string;
+  canvasPosition?: number;
   data: CorrelationSettings;
   onDataChange: (newData: Partial<CorrelationSettings>) => void;
 }
@@ -262,7 +265,7 @@ const ElegantDatePicker: React.FC<ElegantDatePickerProps> = ({ value, onSelect, 
   );
 };
 
-const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ data, onDataChange }) => {
+const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ atomId, cardId, canvasPosition, data, onDataChange }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [loadingColumnValues, setLoadingColumnValues] = useState<string | null>(null);
@@ -324,7 +327,7 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
         method: (data.settings?.correlationMethod || 'pearson').toLowerCase() as any,
         include_preview: true,
         preview_limit: 10,
-        save_filtered: true,
+        save_filtered: data.settings?.saveFiltered ?? false, // Default to false - don't auto-save filtered files
         include_date_analysis: true
       };
 

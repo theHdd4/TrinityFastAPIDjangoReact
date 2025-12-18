@@ -108,3 +108,9 @@ export const useTableRichTextToolbar = ({
 
 
 
+
+
+
+
+
+

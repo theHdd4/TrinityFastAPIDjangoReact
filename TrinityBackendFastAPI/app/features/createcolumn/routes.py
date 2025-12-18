@@ -24,6 +24,7 @@ from .task_service import (
     submit_perform_task,
     submit_results_task,
     submit_save_task,
+    submit_columns_with_missing_values_task,
 )
 
 router = APIRouter()
@@ -434,18 +435,9 @@ async def get_columns_with_missing_values(
     object_name: str = Query(..., description="Object name/path of the dataframe"),
 ):
     """Return list of column names that have missing values."""
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.columns_with_missing_values",
-        dotted_path="app.features.createcolumn.service.columns_with_missing_values_task",
-        kwargs={
-            "bucket_name": MINIO_BUCKET,
-            "object_name": object_name,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "columns_with_missing_values",
-            "object_name": object_name,
-        },
+    submission = submit_columns_with_missing_values_task(
+        bucket_name=MINIO_BUCKET,
+        object_name=object_name,
     )
 
     if submission.status == "failure":

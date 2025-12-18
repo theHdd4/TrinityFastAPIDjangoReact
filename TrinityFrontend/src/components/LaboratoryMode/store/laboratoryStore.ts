@@ -324,6 +324,7 @@ export interface FeatureOverviewSettings {
   filterUnique?: boolean;
   isLoading?: boolean;
   loadingMessage?: string;
+  showDataSummary?: boolean;
   loadingStatus?: string;
   exhibitionSelections?: FeatureOverviewExhibitionSelection[];
 }
@@ -360,6 +361,7 @@ export interface ConcatSettings {
   performConcat: boolean;
   concatResults?: any;
   concatId?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
@@ -400,6 +402,7 @@ export interface CorrelationSettings {
     selectFilter: string;
     uploadedFile?: string;
     filterDimensions?: Record<string, string[]>;
+    saveFiltered?: boolean; // Whether to save filtered data to MinIO (default: false)
   };
   // Enhanced visualization options
   visualizationOptions?: {
@@ -452,6 +455,8 @@ export interface CorrelationSettings {
   // Note functionality (matching ChartMaker pattern)
   note?: string;
   showNote?: boolean;
+  // Data Summary functionality
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
@@ -497,7 +502,8 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   columnValuesLoading: false,
   columnValuesError: undefined,
   note: '',
-  showNote: false
+  showNote: false,
+  showDataSummary: false
 };
 
 export interface ColumnClassifierColumn {
@@ -529,6 +535,7 @@ export interface ColumnClassifierSettings {
   isLoading?: boolean;
   loadingMessage?: string;
   loadingStatus?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -560,6 +567,7 @@ export interface DataFrameOperationsSettings {
   selectedFile?: string;
   tableData?: any;
   data?: any;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings = {
@@ -573,6 +581,7 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   selectedFile: '',
   tableData: undefined,
   data: undefined,
+  showDataSummary: false,
 };
 
 export interface ChartData {
@@ -681,6 +690,7 @@ export interface ChartMakerSettings {
   };
   error?: string;
   exhibitionSelections?: ChartMakerExhibitionSelection[];
+  showDataSummary?: boolean;
 }
 
 export interface SelectModelsFeatureSettings {
@@ -841,6 +851,7 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   },
   error: undefined,
   exhibitionSelections: [],
+  showDataSummary: false,
 };
 
 export interface ClusteringData {
@@ -1571,6 +1582,7 @@ export interface ScopeSelectorSettings {
   }>;
   dataSource?: string;
   previewRows?: ScopeSelectorPreviewRow[];
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_SCOPE_SELECTOR_SETTINGS: ScopeSelectorSettings = {
@@ -1738,7 +1750,8 @@ export interface GroupByAtomSettings {
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
-  showCardinalityView?: boolean;
+  showCardinalityView?: boolean; // Deprecated - use showDataSummary instead
+  showDataSummary?: boolean;
   
   // GroupBy results
   groupbyResults?: {
@@ -1770,7 +1783,8 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   sortColumn: 'unique_count',
   sortDirection: 'desc',
   columnFilters: {},
-  showCardinalityView: false,
+  showCardinalityView: false, // Deprecated - use showDataSummary instead
+  showDataSummary: false,
   groupbyResults: {
     result_file: '',
     result_shape: [0, 0],
@@ -2264,17 +2278,98 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       
       const updatedCards = state.cards.map((card) => ({
         ...card,
-        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) =>
-          atom.id === atomId
-            ? { 
-                ...atom, 
-                settings: { 
-                  ...(atom.settings || {}), 
-                  ...settings
-                } 
+        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) => {
+          if (atom.id !== atomId) {
+            return atom;
+          }
+          
+          // 🔧 CRITICAL FIX: Special handling for chart-maker charts array to prevent duplicates
+          const currentSettings = atom.settings || {};
+          const newSettings = { ...currentSettings, ...settings };
+          
+          // If this is a chart-maker atom and charts are being updated, merge by ID to prevent duplicates
+          if (atom.type === 'chart-maker' && settings.charts && Array.isArray(settings.charts)) {
+            const existingCharts = Array.isArray(currentSettings.charts) ? currentSettings.charts : [];
+            const newCharts = settings.charts;
+            
+            // 🔧 CRITICAL: Deduplicate and merge charts by ID
+            const chartMap = new Map<string, any>();
+            
+            // First, add all existing charts to the map
+            existingCharts.forEach((chart: any) => {
+              if (chart && chart.id) {
+                chartMap.set(chart.id, chart);
               }
-            : atom,
-        ) : [],
+            });
+            
+            // Then, update or add new charts
+            newCharts.forEach((chart: any) => {
+              if (chart && chart.id) {
+                const existingChart = chartMap.get(chart.id);
+                if (existingChart) {
+                  // Chart exists - merge the update (preserve existing properties, update with new ones)
+                  // 🔧 CRITICAL: NEVER change the chart ID - it must remain stable
+                  const mergedChart = {
+                    ...existingChart,
+                    ...chart
+                  };
+                  // Force preserve original ID in case it was accidentally changed
+                  mergedChart.id = existingChart.id;
+                  chartMap.set(chart.id, mergedChart);
+                } else {
+                  // New chart - add it (but verify ID is unique)
+                  if (chartMap.has(chart.id)) {
+                    console.warn('⚠️ [STORE] Attempted to add chart with existing ID, merging instead', {
+                      chartId: chart.id,
+                      existingChart: chartMap.get(chart.id)
+                    });
+                    // Merge with existing instead of replacing
+                    const existing = chartMap.get(chart.id)!;
+                    chartMap.set(chart.id, {
+                      ...existing,
+                      ...chart,
+                      id: existing.id // Preserve original ID
+                    });
+                  } else {
+                    chartMap.set(chart.id, chart);
+                  }
+                }
+              } else {
+                console.warn('⚠️ [STORE] Chart without ID detected, skipping', chart);
+              }
+            });
+            
+            // Convert map back to array, preserving order
+            const mergedCharts = Array.from(chartMap.values());
+            
+            // Verify no duplicates
+            const chartIds = mergedCharts.map((c: any) => c.id);
+            const uniqueIds = new Set(chartIds);
+            if (chartIds.length !== uniqueIds.size) {
+              console.error('❌ [STORE] Duplicate chart IDs detected after merge!', {
+                chartIds,
+                duplicateIds: chartIds.filter((id, index) => chartIds.indexOf(id) !== index)
+              });
+              // Remove duplicates, keeping the first occurrence
+              const seen = new Set<string>();
+              const deduplicatedCharts = mergedCharts.filter((chart: any) => {
+                if (seen.has(chart.id)) {
+                  return false;
+                }
+                seen.add(chart.id);
+                return true;
+              });
+              newSettings.charts = deduplicatedCharts;
+            } else {
+              newSettings.charts = mergedCharts;
+            }
+          }
+          
+          return {
+            ...atom,
+            settings: newSettings
+          };
+        }) : [],
       }));
       
       return { cards: updatedCards };

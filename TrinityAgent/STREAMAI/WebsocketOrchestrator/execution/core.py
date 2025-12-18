@@ -1852,6 +1852,7 @@ class WorkflowCoreMixin:
                             envelope=lab_envelope,
                             step_record=step_record,
                             project_context=project_context,
+                            atom_insights=atom_insights,
                         )
                     except Exception as meta_exc:
                         logger.warning("⚠️ Failed to append atom execution metadata: %s", meta_exc)

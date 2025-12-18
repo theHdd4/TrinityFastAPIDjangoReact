@@ -125,6 +125,8 @@ class LabMemoryStore:
         execution_inputs: Optional[Dict[str, Any]] = None,
         react_metadata: Optional[Dict[str, Any]] = None,
         validated_scope: Optional[Dict[str, Any]] = None,
+        envelope: Optional[Dict[str, Any]] = None,
+        analysis_insights: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Persist ReAct loop state so downstream atoms can consume fresh outputs.
 
@@ -155,6 +157,7 @@ class LabMemoryStore:
                 "freshness_state": existing_doc.get("freshness_state") or {},
                 "input_hash": existing_doc.get("input_hash"),
                 "analysis_insights": existing_doc.get("analysis_insights") or {},
+                "analytics_insights": existing_doc.get("analytics_insights") or {},
                 "envelope": existing_doc.get("envelope"),
                 "atom_execution_metadata": existing_doc.get("atom_execution_metadata") or [],
                 "available_files": existing_doc.get("available_files") or [],
@@ -172,6 +175,16 @@ class LabMemoryStore:
             update_doc["$set"]["react_state.metadata"] = react_metadata
         if validated_scope is not None:
             update_doc["$set"]["scope"] = validated_scope
+        if envelope is not None:
+            update_doc["$set"]["envelope"] = envelope
+        if analysis_insights:
+            merged_insights = self._merge_insights(existing_doc.get("analysis_insights"), analysis_insights)
+            update_doc["$set"].update(
+                {
+                    "analysis_insights": merged_insights,
+                    "analytics_insights": merged_insights,
+                }
+            )
 
         if latest_dataset_alias and output_path:
             dataset_entry = {
@@ -298,6 +311,24 @@ class LabMemoryStore:
         merged_list = list(merged.values())
         merged_list.sort(key=_sort_key)
         return merged_list
+
+    @staticmethod
+    def _merge_insights(
+        existing: Optional[Dict[str, Any]], incoming: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Merge analytics/analysis insights by appending new observations."""
+
+        normalized_existing = existing or {}
+        normalized_incoming = incoming or {}
+
+        merged: Dict[str, List[Any]] = {}
+        for key in set(normalized_existing.keys()) | set(normalized_incoming.keys()):
+            existing_values = normalized_existing.get(key) or []
+            incoming_values = normalized_incoming.get(key) or []
+            combined = list(existing_values) + [item for item in incoming_values if item not in existing_values]
+            merged[key] = combined
+
+        return merged
 
     def get_or_create_request_id(
         self, session_id: str, incoming_request_id: Optional[str], project_context: Optional[Dict[str, Any]] = None
@@ -609,6 +640,7 @@ class LabMemoryStore:
         envelope: LaboratoryEnvelope,
         step_record: WorkflowStepRecord,
         project_context: Optional[Dict[str, Any]] = None,
+        atom_insights: Optional[List[str]] = None,
     ) -> None:
         """Upsert atom execution metadata into the primary context document."""
 
@@ -632,6 +664,11 @@ class LabMemoryStore:
             existing_doc.get("atom_execution_metadata") or [], [incoming_entry]
         )
 
+        merged_insights = self._merge_insights(
+            existing_doc.get("analysis_insights"),
+            {"observations": atom_insights or []},
+        )
+
         base_filter = self._context_filter(envelope.session_id)
 
         try:
@@ -640,6 +677,8 @@ class LabMemoryStore:
                 {
                     "$set": {
                         "atom_execution_metadata": merged_metadata,
+                        "analysis_insights": merged_insights,
+                        "analytics_insights": merged_insights,
                         "memory_type": "Trinity AI Persistent JSON Memory",
                         "model_version": envelope.model_version,
                         "prompt_template_version": envelope.prompt_template_version,
@@ -652,6 +691,7 @@ class LabMemoryStore:
                             "retrieved_at": datetime.utcnow(),
                         },
                         "request_id": envelope.request_id,
+                        "envelope": envelope.model_dump(mode="python", exclude_none=True),
                     },
                     "$setOnInsert": {
                         "app_name": self.app_name,

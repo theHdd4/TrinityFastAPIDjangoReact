@@ -29,6 +29,12 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
       availableColumns: Array.isArray(rawSettings.availableColumns) ? rawSettings.availableColumns : [],
       ...rawSettings, // Preserve other settings
     };
+    
+    // Get card_id and canvas_position for pipeline tracking
+    const cards = useLaboratoryStore(state => state.cards);
+    const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+    const cardId = card?.id || '';
+    const canvasPosition = card?.canvas_position ?? 0;
 
     const handleChange = (newSettings: any) => {
       try {
@@ -50,6 +56,10 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
             file1: settings.file1,
             file2: settings.file2,
             bucket_name: 'trinity',
+            // Pipeline tracking parameters
+            validator_atom_id: atomId,
+            card_id: cardId,
+            canvas_position: canvasPosition.toString(),
           }),
         })
           .then(async r => {
@@ -110,6 +120,10 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
             bucket_name: 'trinity',
             join_columns: JSON.stringify(Array.isArray(settings.joinColumns) ? settings.joinColumns : []),
             join_type: settings.joinType,
+            // Pipeline tracking parameters
+            validator_atom_id: atomId,
+            card_id: cardId,
+            canvas_position: canvasPosition.toString(),
           }),
         });
         

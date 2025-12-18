@@ -319,8 +319,54 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
 
         console.log('Pivot compute payload:', JSON.stringify(payload, null, 2));
 
+        // Get card_id and canvas_position for pipeline tracking
+        const cards = useLaboratoryStore.getState().cards;
+        const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+        const cardId = card?.id || '';
+        const canvasPosition = card?.canvas_position ?? 0;
+        
+        // Extract client/app/project from dataSource path or environment
+        let clientName = '';
+        let appName = '';
+        let projectName = '';
+        
+        if (settings.dataSource) {
+          const pathParts = settings.dataSource.split('/');
+          if (pathParts.length >= 3) {
+            clientName = pathParts[0] || '';
+            appName = pathParts[1] || '';
+            projectName = pathParts[2] || '';
+          }
+        }
+        
+        // Fallback to environment if not in path
+        if (!clientName || !appName || !projectName) {
+          try {
+            const envStr = localStorage.getItem('env');
+            if (envStr) {
+              const env = JSON.parse(envStr);
+              clientName = clientName || env.CLIENT_NAME || '';
+              appName = appName || env.APP_NAME || '';
+              projectName = projectName || env.PROJECT_NAME || '';
+            }
+          } catch (e) {
+            console.warn('Failed to get environment variables:', e);
+          }
+        }
+        
+        // Build query parameters
+        const queryParams = new URLSearchParams();
+        if (clientName) queryParams.append('client_name', clientName);
+        if (appName) queryParams.append('app_name', appName);
+        if (projectName) queryParams.append('project_name', projectName);
+        if (cardId) queryParams.append('card_id', cardId);
+        queryParams.append('canvas_position', canvasPosition.toString());
+        
+        const queryString = queryParams.toString();
+        const url = `${PIVOT_API}/${encodeURIComponent(atomId)}/compute${queryString ? `?${queryString}` : ''}`;
+
         const response = await fetch(
-          `${PIVOT_API}/${encodeURIComponent(atomId)}/compute`,
+          url,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -385,9 +431,55 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     setSaveError(null);
     setSaveMessage(null);
     try {
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
+      // Extract client/app/project from dataSource path or environment
+      let clientName = '';
+      let appName = '';
+      let projectName = '';
+      
+      if (settings.dataSource) {
+        const pathParts = settings.dataSource.split('/');
+        if (pathParts.length >= 3) {
+          clientName = pathParts[0] || '';
+          appName = pathParts[1] || '';
+          projectName = pathParts[2] || '';
+        }
+      }
+      
+      // Fallback to environment if not in path
+      if (!clientName || !appName || !projectName) {
+        try {
+          const envStr = localStorage.getItem('env');
+          if (envStr) {
+            const env = JSON.parse(envStr);
+            clientName = clientName || env.CLIENT_NAME || '';
+            appName = appName || env.APP_NAME || '';
+            projectName = projectName || env.PROJECT_NAME || '';
+          }
+        } catch (e) {
+          console.warn('Failed to get environment variables:', e);
+        }
+      }
+      
+      // Build query parameters
+      const queryParams = new URLSearchParams();
+      if (clientName) queryParams.append('client_name', clientName);
+      if (appName) queryParams.append('app_name', appName);
+      if (projectName) queryParams.append('project_name', projectName);
+      if (cardId) queryParams.append('card_id', cardId);
+      queryParams.append('canvas_position', canvasPosition.toString());
+      
+      const queryString = queryParams.toString();
+      const url = `${PIVOT_API}/${encodeURIComponent(atomId)}/save${queryString ? `?${queryString}` : ''}`;
+      
       // Save without filename to overwrite existing file
       const response = await fetch(
-        `${PIVOT_API}/${encodeURIComponent(atomId)}/save`,
+        url,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -460,8 +552,54 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     setSaveError(null);
     setSaveMessage(null);
     try {
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
+      // Extract client/app/project from dataSource path or environment
+      let clientName = '';
+      let appName = '';
+      let projectName = '';
+      
+      if (settings.dataSource) {
+        const pathParts = settings.dataSource.split('/');
+        if (pathParts.length >= 3) {
+          clientName = pathParts[0] || '';
+          appName = pathParts[1] || '';
+          projectName = pathParts[2] || '';
+        }
+      }
+      
+      // Fallback to environment if not in path
+      if (!clientName || !appName || !projectName) {
+        try {
+          const envStr = localStorage.getItem('env');
+          if (envStr) {
+            const env = JSON.parse(envStr);
+            clientName = clientName || env.CLIENT_NAME || '';
+            appName = appName || env.APP_NAME || '';
+            projectName = projectName || env.PROJECT_NAME || '';
+          }
+        } catch (e) {
+          console.warn('Failed to get environment variables:', e);
+        }
+      }
+      
+      // Build query parameters
+      const queryParams = new URLSearchParams();
+      if (clientName) queryParams.append('client_name', clientName);
+      if (appName) queryParams.append('app_name', appName);
+      if (projectName) queryParams.append('project_name', projectName);
+      if (cardId) queryParams.append('card_id', cardId);
+      queryParams.append('canvas_position', canvasPosition.toString());
+      
+      const queryString = queryParams.toString();
+      const url = `${PIVOT_API}/${encodeURIComponent(atomId)}/save${queryString ? `?${queryString}` : ''}`;
+      
       const response = await fetch(
-        `${PIVOT_API}/${encodeURIComponent(atomId)}/save`,
+        url,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

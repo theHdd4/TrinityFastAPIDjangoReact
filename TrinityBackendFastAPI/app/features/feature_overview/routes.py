@@ -72,6 +72,8 @@ from app.features.column_classifier.database import (
 import asyncio
 
 from app.core.task_queue import celery_task_client, format_task_response
+from app.features.pipeline.service import record_atom_execution
+from app.features.project_state.routes import get_atom_list_configuration
 
 
 # MinIO client initialization
@@ -754,6 +756,10 @@ async def feature_overview_uniquecountendpoint(
     # id:str = Form(...),
     validator_atom_id: str = Form(...),
     file_key: str = Form(...),
+    card_id: str = Form(None),
+    canvas_position: int = Form(None),
+    dimensionMap: str = Form(None),  # Selected dimensions (identifiers) as JSON string
+    yAxes: str = Form(None),  # Selected numeric columns (measures) as JSON string
     results_collection=Depends(get_unique_dataframe_results_collection),
     validator_collection: AsyncIOMotorCollection = Depends(
         get_validator_atoms_collection
@@ -765,6 +771,112 @@ async def feature_overview_uniquecountendpoint(
 
     collection_name = results_collection.name
     database_name = results_collection.database.name
+
+    # Record atom execution for pipeline tracking
+    # Extract project context from environment
+    client_name = os.getenv("CLIENT_NAME", "")
+    app_name = os.getenv("APP_NAME", "")
+    project_name = os.getenv("PROJECT_NAME", "")
+    user_id = os.getenv("USER_ID", "unknown")
+    
+    # Get card_id and canvas_position from atom_list_configuration
+    card_id_from_config = None
+    canvas_position_from_config = None
+    
+    if client_name and app_name and project_name:
+        try:
+            atom_config_response = await get_atom_list_configuration(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                mode="laboratory"
+            )
+            
+            if atom_config_response.get("status") == "success":
+                cards = atom_config_response.get("cards", [])
+                for card in cards:
+                    atoms = card.get("atoms", [])
+                    for atom in atoms:
+                        if atom.get("id") == validator_atom_id:
+                            card_id_from_config = card.get("id")
+                            canvas_position_from_config = card.get("canvas_position", 0)
+                            break
+                    if card_id_from_config:
+                        break
+        except Exception as e:
+            logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
+    
+    # Prioritize atom_list_configuration as source of truth
+    if card_id_from_config:
+        final_card_id = card_id_from_config
+    elif card_id:
+        final_card_id = card_id
+    else:
+        final_card_id = validator_atom_id.split("-")[0] if "-" in validator_atom_id else validator_atom_id
+    
+    if canvas_position_from_config is not None:
+        final_canvas_position = canvas_position_from_config
+    elif canvas_position is not None:
+        final_canvas_position = canvas_position
+    else:
+        final_canvas_position = 0
+    
+    # Parse dimensionMap and yAxes from JSON strings if provided
+    dimension_map_dict = None
+    y_axes_list = None
+    try:
+        if dimensionMap:
+            dimension_map_dict = json.loads(dimensionMap)
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(f"Failed to parse dimensionMap: {e}")
+    
+    try:
+        if yAxes:
+            y_axes_list = json.loads(yAxes)
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(f"Failed to parse yAxes: {e}")
+    
+    # Build configuration
+    configuration = {
+        "bucket_name": bucket_name,
+        "object_names": list(object_names),
+        "validator_atom_id": validator_atom_id,
+        "file_key": file_key,
+        "button_clicked": "Uniquecount",
+        "click_timestamp": datetime.utcnow().isoformat()
+    }
+    
+    # Add dimensionMap and yAxes to configuration if provided
+    if dimension_map_dict:
+        configuration["dimensionMap"] = dimension_map_dict
+    if y_axes_list:
+        configuration["yAxes"] = y_axes_list
+    
+    # Build API calls (include dimensionMap and yAxes in params)
+    execution_started_at = datetime.utcnow()
+    api_call_params = configuration.copy()
+    # Ensure dimensionMap and yAxes are included in API call params
+    if dimension_map_dict:
+        api_call_params["dimensionMap"] = dimension_map_dict
+    if y_axes_list:
+        api_call_params["yAxes"] = y_axes_list
+    
+    api_calls = [
+        {
+            "endpoint": "/feature_overview/uniquecount",
+            "method": "POST",
+            "timestamp": execution_started_at,
+            "params": api_call_params,
+            "response_status": 0,
+            "response_data": None
+        }
+    ]
+    
+    # Build output files (feature_overview doesn't produce file outputs, results are in MongoDB)
+    output_files = []
+    execution_completed_at = None
+    execution_status = "pending"
+    execution_error = None
 
     submission = celery_task_client.submit_callable(
         name="feature_overview.uniquecount",
@@ -788,6 +900,54 @@ async def feature_overview_uniquecountendpoint(
         },
     )
 
+    # Try to get result if task completed synchronously
+    if submission.status == "success" and hasattr(submission, "result"):
+        try:
+            execution_completed_at = datetime.utcnow()
+            execution_status = "success"
+            
+            # Add completion API call
+            api_calls.append({
+                "endpoint": "atom_execution_complete",
+                "method": "EXECUTE",
+                "timestamp": execution_completed_at,
+                "params": configuration.copy(),
+                "response_status": 200,
+                "response_data": {
+                    "status": "SUCCESS",
+                    "task_id": submission.task_id if hasattr(submission, "task_id") else None
+                }
+            })
+        except Exception:
+            pass
+    
+    # Record execution (async, don't wait for it)
+    if client_name and app_name and project_name:
+        try:
+            await record_atom_execution(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                atom_instance_id=validator_atom_id,
+                card_id=final_card_id,
+                atom_type="feature-overview",
+                atom_title="Feature Overview",
+                input_files=list(object_names) if isinstance(object_names, list) else [object_names],
+                configuration=configuration,
+                api_calls=api_calls,
+                output_files=output_files,
+                execution_started_at=execution_started_at,
+                execution_completed_at=execution_completed_at,
+                execution_status=execution_status,
+                execution_error=execution_error,
+                user_id=user_id,
+                mode="laboratory",
+                canvas_position=final_canvas_position
+            )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record atom execution for pipeline: {e}")
+
     return format_task_response(submission)
 
 
@@ -802,6 +962,8 @@ async def feature_overview_summaryendpoint(
     create_hierarchy: bool = Form(False),
     create_summary: bool = Form(False),
     combination: str = Form(None),  # Optional specific combo
+    card_id: str = Form(None),
+    canvas_position: int = Form(None),
     results_collection=Depends(get_summary_results_collection),
     validator_collection: AsyncIOMotorCollection = Depends(
         get_validator_atoms_collection
@@ -825,6 +987,87 @@ async def feature_overview_summaryendpoint(
 
     collection_name = results_collection.name
     database_name = results_collection.database.name
+
+    # Record atom execution for pipeline tracking
+    # Extract project context from environment
+    client_name = os.getenv("CLIENT_NAME", "")
+    app_name = os.getenv("APP_NAME", "")
+    project_name = os.getenv("PROJECT_NAME", "")
+    user_id = os.getenv("USER_ID", "unknown")
+    
+    # Get card_id and canvas_position from atom_list_configuration
+    card_id_from_config = None
+    canvas_position_from_config = None
+    
+    if client_name and app_name and project_name:
+        try:
+            atom_config_response = await get_atom_list_configuration(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                mode="laboratory"
+            )
+            
+            if atom_config_response.get("status") == "success":
+                cards = atom_config_response.get("cards", [])
+                for card in cards:
+                    atoms = card.get("atoms", [])
+                    for atom in atoms:
+                        if atom.get("id") == validator_atom_id:
+                            card_id_from_config = card.get("id")
+                            canvas_position_from_config = card.get("canvas_position", 0)
+                            break
+                    if card_id_from_config:
+                        break
+        except Exception as e:
+            logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
+    
+    # Prioritize atom_list_configuration as source of truth
+    if card_id_from_config:
+        final_card_id = card_id_from_config
+    elif card_id:
+        final_card_id = card_id
+    else:
+        final_card_id = validator_atom_id.split("-")[0] if "-" in validator_atom_id else validator_atom_id
+    
+    if canvas_position_from_config is not None:
+        final_canvas_position = canvas_position_from_config
+    elif canvas_position is not None:
+        final_canvas_position = canvas_position
+    else:
+        final_canvas_position = 0
+    
+    # Build configuration
+    configuration = {
+        "bucket_name": bucket_name,
+        "object_names": list(object_names),
+        "validator_atom_id": validator_atom_id,
+        "file_key": file_key,
+        "create_hierarchy": _as_bool(create_hierarchy),
+        "create_summary": _as_bool(create_summary),
+        "combination": combination,
+        "button_clicked": "Summary",
+        "click_timestamp": datetime.utcnow().isoformat()
+    }
+    
+    # Build API calls
+    execution_started_at = datetime.utcnow()
+    api_calls = [
+        {
+            "endpoint": "/feature_overview/summary",
+            "method": "POST",
+            "timestamp": execution_started_at,
+            "params": configuration.copy(),
+            "response_status": 0,
+            "response_data": None
+        }
+    ]
+    
+    # Build output files (feature_overview doesn't produce file outputs, results are in MongoDB)
+    output_files = []
+    execution_completed_at = None
+    execution_status = "pending"
+    execution_error = None
 
     submission = celery_task_client.submit_callable(
         name="feature_overview.summary",
@@ -852,6 +1095,54 @@ async def feature_overview_summaryendpoint(
             "create_summary": _as_bool(create_summary),
         },
     )
+
+    # Try to get result if task completed synchronously
+    if submission.status == "success" and hasattr(submission, "result"):
+        try:
+            execution_completed_at = datetime.utcnow()
+            execution_status = "success"
+            
+            # Add completion API call
+            api_calls.append({
+                "endpoint": "atom_execution_complete",
+                "method": "EXECUTE",
+                "timestamp": execution_completed_at,
+                "params": configuration.copy(),
+                "response_status": 200,
+                "response_data": {
+                    "status": "SUCCESS",
+                    "task_id": submission.task_id if hasattr(submission, "task_id") else None
+                }
+            })
+        except Exception:
+            pass
+    
+    # Record execution (async, don't wait for it)
+    if client_name and app_name and project_name:
+        try:
+            await record_atom_execution(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                atom_instance_id=validator_atom_id,
+                card_id=final_card_id,
+                atom_type="feature-overview",
+                atom_title="Feature Overview",
+                input_files=list(object_names) if isinstance(object_names, list) else [object_names],
+                configuration=configuration,
+                api_calls=api_calls,
+                output_files=output_files,
+                execution_started_at=execution_started_at,
+                execution_completed_at=execution_completed_at,
+                execution_status=execution_status,
+                execution_error=execution_error,
+                user_id=user_id,
+                mode="laboratory",
+                canvas_position=final_canvas_position
+            )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record atom execution for pipeline: {e}")
 
     return format_task_response(submission)
 

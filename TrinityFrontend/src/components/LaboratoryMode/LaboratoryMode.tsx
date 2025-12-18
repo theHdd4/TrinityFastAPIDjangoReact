@@ -25,6 +25,8 @@ import { useLaboratoryStore, LayoutCard, DASHBOARD_ALLOWED_ATOMS } from './store
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
 import { DashboardShareDialog } from './components/DashboardShareDialog';
+// import { ShareDialog } from './components/ShareDialog';
+import PipelineModal from './components/PipelineModal';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import {
   animateLabElementsIn,
@@ -52,6 +54,7 @@ const LaboratoryMode = () => {
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>('frames');
   const [isExhibitionOpen, setIsExhibitionOpen] = useState<boolean>(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isPipelineOpen, setIsPipelineOpen] = useState(false);
   const [isHeaderMinimized, setIsHeaderMinimized] = useState(false);
   const [isTrinityAIVisible, setIsTrinityAIVisible] = useState(true); // Track if AI panel should be visible at all
   const [isHorizontalAICollapsed, setIsHorizontalAICollapsed] = useState(false); // Track collapse state for horizontal view only
@@ -412,6 +415,19 @@ const LaboratoryMode = () => {
         const sortedCards = workflowMolecules.length > 0
           ? sortCardsInWorkflowOrder(cardsToSave, workflowMolecules)
           : cardsToSave;
+
+        // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
+        // moleculeIndex preserves the original order/position in the array
+        // FIX: If there are no cards, clear workflow molecules to return to regular laboratory mode
+        const workflowMoleculesForSave = (sortedCards.length === 0)
+          ? [] // Clear workflow molecules when no cards remain
+          : workflowMolecules.map((molecule, index) => ({
+            moleculeId: molecule.moleculeId,
+            moleculeTitle: molecule.moleculeTitle,
+            atoms: molecule.atoms || [],
+            isActive: molecule.isActive !== false, // Default to true if not specified
+            moleculeIndex: index // Preserve the original index/position
+          }));
 
         // Save the current laboratory configuration with sorted cards
         const labConfig = {
@@ -1124,6 +1140,7 @@ const LaboratoryMode = () => {
           {/* Run Pipeline */}
           <button
             disabled={!canEdit}
+            onClick={() => setIsPipelineOpen(true)}
             className={`w-7 h-7 rounded-full bg-blue-600 hover:bg-blue-700 hover:shadow-md transition-all flex items-center justify-center text-white ${
               !canEdit ? 'opacity-50 cursor-not-allowed' : ''
             }`}
@@ -1297,6 +1314,12 @@ const LaboratoryMode = () => {
         onOpenChange={setIsShareOpen}
         projectName={projectContext?.project_name ?? 'Dashboard Project'}
       />
+        
+        <PipelineModal
+          open={isPipelineOpen}
+          onOpenChange={setIsPipelineOpen}
+          mode="laboratory"
+        />
     </div>
   );
 };

@@ -54,6 +54,8 @@ from app.DataStorageRetrieval.flight_registry import (
 )
 from app.DataStorageRetrieval.db import get_dataset_info
 from app.features.data_upload_validate.app.routes import get_object_prefix
+from app.features.pipeline.service import record_atom_execution
+from app.features.project_state.routes import get_atom_list_configuration
 
 router = APIRouter()
 router.include_router(matrix_settings_router, prefix="/matrix-settings")
@@ -231,6 +233,7 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
     """
     print(f"🚀 correlation filter-and-correlate started")
     print(f"📥 request received: {request.model_dump_json()}")
+    print(f"🔍 Pipeline tracking params: validator_atom_id={request.validator_atom_id}, card_id={request.card_id}, canvas_position={request.canvas_position}")
     start_time = time.time()
     
     try:
@@ -433,6 +436,119 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
                 print("📝 correlation metadata not saved - MongoDB not available")
         except Exception as mongo_error:
             print(f"⚠️ correlation MongoDB save failed (continuing anyway): {mongo_error}")
+        
+        # Record pipeline execution if validator_atom_id is provided
+        print(f"🔍 Correlation pipeline tracking check: validator_atom_id={request.validator_atom_id}, card_id={request.card_id}, canvas_position={request.canvas_position}")
+        if request.validator_atom_id:
+            try:
+                # Extract client/app/project from file_path
+                path_parts = request.file_path.split("/")
+                client_name = path_parts[0] if len(path_parts) > 0 else ""
+                app_name = path_parts[1] if len(path_parts) > 1 else ""
+                project_name = path_parts[2] if len(path_parts) > 2 else ""
+                
+                print(f"🔍 Correlation pipeline tracking: client={client_name}, app={app_name}, project={project_name}, atom_id={request.validator_atom_id}")
+                
+                # Get user_id from atom configuration
+                user_id = None
+                try:
+                    atom_config = await get_atom_list_configuration(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        mode="laboratory"
+                    )
+                    if atom_config.get("status") == "success":
+                        cards = atom_config.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            atom = next((a for a in atoms if a.get("id") == request.validator_atom_id), None)
+                            if atom:
+                                user_id = atom.get("user_id")
+                                break
+                except Exception:
+                    pass
+                
+                # Build configuration for pipeline tracking
+                configuration = {
+                    "file_path": request.file_path,
+                    "file_key": request.file_path,
+                    "bucket_name": "trinity",
+                    "identifier_columns": request.identifier_columns or [],
+                    "measure_columns": request.measure_columns or [],
+                    "identifier_filters": [f.dict() if hasattr(f, 'dict') else f for f in (request.identifier_filters or [])],
+                    "measure_filters": [f.dict() if hasattr(f, 'dict') else f for f in (request.measure_filters or [])],
+                    "method": request.method,
+                    "columns": request.columns or [],
+                    "save_filtered": request.save_filtered,
+                    "date_column": request.date_column,
+                    "date_range_filter": request.date_range_filter,
+                    "aggregation_level": request.aggregation_level,
+                }
+                
+                # Build API calls
+                execution_started_at = datetime.datetime.utcnow()
+                api_calls = [
+                    {
+                        "endpoint": "/correlation/filter-and-correlate",
+                        "method": "POST",
+                        "timestamp": execution_started_at,
+                        "params": configuration.copy(),
+                        "response_status": 200,
+                        "response_data": {
+                            "correlation_id": correlation_id,
+                            "filtered_rows": filtered_rows,
+                            "original_rows": original_rows,
+                        }
+                    }
+                ]
+                
+                # Build output files
+                output_files = []
+                if filtered_file_path:
+                    output_files.append({
+                        "file_key": filtered_file_path,
+                        "file_path": filtered_file_path,
+                        "flight_path": filtered_file_path,
+                        "save_as_name": filtered_file_path.split("/")[-1],
+                        "is_default_name": False,
+                        "columns": [],
+                        "dtypes": {},
+                        "row_count": filtered_rows
+                    })
+                
+                execution_completed_at = datetime.datetime.utcnow()
+                execution_status = "success"
+                execution_error = None
+                
+                # Record execution (async, don't wait for it)
+                try:
+                    await record_atom_execution(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        atom_instance_id=request.validator_atom_id,
+                        card_id=request.card_id or "",
+                        atom_type="correlation",
+                        atom_title="Correlation Analysis",
+                        input_files=[request.file_path],
+                        configuration=configuration,
+                        api_calls=api_calls,
+                        output_files=output_files,
+                        execution_started_at=execution_started_at,
+                        execution_completed_at=execution_completed_at,
+                        execution_status=execution_status,
+                        execution_error=execution_error,
+                        user_id=user_id or "unknown",
+                        mode="laboratory",
+                        canvas_position=request.canvas_position or 0
+                    )
+                except Exception as e:
+                    # Don't fail the request if pipeline recording fails
+                    print(f"⚠️ Failed to record correlation atom execution for pipeline: {e}")
+            except Exception as e:
+                # Don't fail the request if pipeline recording fails
+                print(f"⚠️ Error setting up pipeline tracking for correlation: {e}")
         
         # Prepare response - use numeric columns instead of all columns
         return FilterAndCorrelateResponse(

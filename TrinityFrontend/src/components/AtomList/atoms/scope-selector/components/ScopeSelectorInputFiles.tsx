@@ -4,6 +4,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { VALIDATE_API, FEATURE_OVERVIEW_API, SCOPE_SELECTOR_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 interface Props {
   atomId: string;
@@ -244,6 +246,17 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
             ))}
           </SelectContent>
         </Select>
+        
+        {/* Data Summary Toggle */}
+        <div className="flex items-center justify-between pt-4 border-t mt-4">
+          <Label className="text-xs">Show Data Summary</Label>
+          <Switch
+            checked={settings.showDataSummary || false}
+            onCheckedChange={(checked) => {
+              updateSettings(atomId, { showDataSummary: !!checked });
+            }}
+          />
+        </div>
       </Card>
 
     </div>
