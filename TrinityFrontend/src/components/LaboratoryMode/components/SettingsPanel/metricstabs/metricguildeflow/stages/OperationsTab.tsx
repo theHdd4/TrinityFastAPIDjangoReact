@@ -42,7 +42,7 @@ import { AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import MultiSelectDropdown from '@/templates/dropdown/multiselect/MultiSelectDropdown';
-import type { CreatedVariable, CreatedColumn, CreatedTable, OperationsState } from '../useMetricGuidedFlow';
+import type { CreatedVariable, CreatedColumn, CreatedTable, OperationsState, PreviewColumnData } from '../useMetricGuidedFlow';
 import MetricsColOps, { MetricsColOpsRef } from './MetricsColOps';
 
 // Type Definitions
@@ -137,6 +137,7 @@ interface OperationsTabProps {
   readOnly?: boolean;
   operationsState?: OperationsState | null;
   onOperationsStateChange?: (state: OperationsState) => void;
+  onPreviewReady?: (previewData: PreviewColumnData) => void;
 }
 
 export interface OperationsTabRef {
@@ -146,6 +147,7 @@ export interface OperationsTabRef {
   canSaveVariable: () => boolean;
   canSaveColumn: () => boolean;
   isSaving: () => boolean;
+  continueColumnOperations: () => Promise<void>;
 }
 
 // Helper function to check if a method requires a second column
@@ -692,6 +694,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
   readOnly = false,
   operationsState,
   onOperationsStateChange,
+  onPreviewReady,
 }, ref) => {
   // Mode: compute | assign (only for variable type)
   const [variableMode, setVariableMode] = useState<'compute' | 'assign' | null>(null);
@@ -1293,6 +1296,20 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
       });
     }
   }, [activeVariableTab, assignedVars, operations, computeWithinGroup, selectedIdentifiers, onOperationsStateChange, selectedType]);
+
+  // Memoized callback for column operations state changes to prevent infinite loops
+  const handleColumnOperationsStateChange = useCallback((colOpsState: any) => {
+    if (onOperationsStateChange) {
+      onOperationsStateChange({
+        activeVariableTab: operationsState?.activeVariableTab || null,
+        assignedVars: operationsState?.assignedVars || [],
+        operations: operationsState?.operations || [],
+        computeWithinGroup: operationsState?.computeWithinGroup || false,
+        selectedIdentifiers: operationsState?.selectedIdentifiers || [],
+        columnOperationsState: colOpsState,
+      });
+    }
+  }, [onOperationsStateChange, operationsState?.activeVariableTab, operationsState?.assignedVars, operationsState?.operations, operationsState?.computeWithinGroup, operationsState?.selectedIdentifiers]);
 
   // Fetch identifiers when dataSource is available and Create tab is active
   useEffect(() => {
@@ -2174,6 +2191,12 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
       // Fallback to old behavior
       return saving || columnSaveLoading;
     },
+    continueColumnOperations: async () => {
+      // Route to MetricsColOps continueToPreview
+      if (metricsColOpsRef.current) {
+        await metricsColOpsRef.current.continueToPreview();
+      }
+    },
   }), [variableMode, assignedVars, operations, computeWithinGroup, selectedIdentifiers, columnOperations, dataSource, saving, columnSaveLoading]);
 
   return (
@@ -2842,6 +2865,9 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
             featureOverviewApi={featureOverviewApi}
             onColumnCreated={onColumnCreated}
             onTableCreated={onTableCreated}
+            columnOperationsState={operationsState?.columnOperationsState || null}
+            onColumnOperationsStateChange={handleColumnOperationsStateChange}
+            onPreviewReady={onPreviewReady}
           />
           // <div className="space-y-4">
           //   {/* Conditional layout based on state */}

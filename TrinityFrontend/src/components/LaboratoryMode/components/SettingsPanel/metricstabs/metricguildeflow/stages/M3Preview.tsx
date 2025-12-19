@@ -1,10 +1,18 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, Table, ExternalLink, Database } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Sparkles, ExternalLink, Database, Table as TableIcon } from 'lucide-react';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseMetricGuidedFlow } from '../useMetricGuidedFlow';
 import type { CreatedVariable, CreatedColumn, CreatedTable } from '../useMetricGuidedFlow';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import { useToast } from '@/hooks/use-toast';
+import { CREATECOLUMN_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
+import Table from '@/templates/tables/table';
 
 interface M3PreviewProps {
   flow: ReturnTypeFromUseMetricGuidedFlow;
@@ -95,10 +103,22 @@ const buildColumnDescription = (column: CreatedColumn): string => {
   return column.operationDetails.map(op => buildColumnOperationDescription(op)).join('; ');
 };
 
+// Helper to convert preview data to CSV
+const previewToCSV = (data: any[]): string => {
+  if (!data.length) return '';
+  const headers = Object.keys(data[0]);
+  const rows = data.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(','));
+  return [headers.join(','), ...rows].join('\n');
+};
+
 export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, readOnly = false }) => {
-  const { state } = flow;
+  const { state, setState } = flow;
+  const { toast } = useToast();
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [loadingValues, setLoadingValues] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [showSaveAsModal, setShowSaveAsModal] = useState(false);
+  const [saveAsFileName, setSaveAsFileName] = useState('');
 
   // Fetch variable values for computed variables (only if values are not already in state)
   // This is a fallback for cases where variables were created outside the preview flow
@@ -212,12 +232,253 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, rea
     return grouped;
   }, [state.createdVariables]);
 
+  // Save column operations (overwrite original)
+  const handleSaveColumnOperations = async () => {
+    if (!state.previewColumnData) return;
+    
+    setSaveLoading(true);
+    try {
+      const csv_data = previewToCSV(state.previewColumnData.previewResults);
+      let filename = state.previewColumnData.operationDetails.input_file;
+      if (filename.endsWith('.arrow')) {
+        filename = filename.replace('.arrow', '');
+      }
+      
+      const projectContext = getActiveProjectContext();
+      if (!projectContext) {
+        throw new Error('Project context not available');
+      }
+      
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const stored = localStorage.getItem('current-project');
+      const project = stored ? JSON.parse(stored) : {};
+      
+      const response = await fetch(`${CREATECOLUMN_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          csv_data,
+          filename,
+          client_name: projectContext.client_name,
+          app_name: projectContext.app_name,
+          project_name: projectContext.project_name,
+          user_id: env.USER_ID || '',
+          project_id: project.id || null,
+          operation_details: JSON.stringify(state.previewColumnData.operationDetails),
+          overwrite_original: true
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Save failed: ${response.statusText}`);
+      }
+      
+      const payload = await response.json();
+      const result = await resolveTaskResponse<Record<string, any>>(payload);
+      const savedFile = typeof result?.result_file === 'string'
+        ? result.result_file
+        : filename.endsWith('.arrow')
+          ? filename
+          : `${filename}.arrow`;
+      
+      // Call onColumnCreated callback for each created column
+      if (state.previewColumnData.operationDetails.operations.length > 0) {
+        state.previewColumnData.operationDetails.operations.forEach((op) => {
+          // We don't have onColumnCreated callback here, so we'll handle it in the parent
+          // For now, just show success
+        });
+      }
+      
+      // Clear preview data
+      setState(prev => ({
+        ...prev,
+        previewColumnData: null,
+      }));
+      
+      toast({
+        title: 'Success',
+        description: 'Column operations saved successfully.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save column operations.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  // Save As column operations (new file)
+  const handleSaveAsColumnOperations = async () => {
+    if (!state.previewColumnData || !saveAsFileName.trim()) return;
+    
+    setSaveLoading(true);
+    try {
+      const csv_data = previewToCSV(state.previewColumnData.previewResults);
+      const filename = saveAsFileName.trim();
+      
+      const projectContext = getActiveProjectContext();
+      if (!projectContext) {
+        throw new Error('Project context not available');
+      }
+      
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const stored = localStorage.getItem('current-project');
+      const project = stored ? JSON.parse(stored) : {};
+      
+      const response = await fetch(`${CREATECOLUMN_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          csv_data,
+          filename,
+          client_name: projectContext.client_name,
+          app_name: projectContext.app_name,
+          project_name: projectContext.project_name,
+          user_id: env.USER_ID || '',
+          project_id: project.id || null,
+          operation_details: JSON.stringify(state.previewColumnData.operationDetails),
+          overwrite_original: false
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Save failed: ${response.statusText}`);
+      }
+      
+      const payload = await response.json();
+      const result = await resolveTaskResponse<Record<string, any>>(payload);
+      const savedFile = typeof result?.result_file === 'string'
+        ? result.result_file
+        : filename.endsWith('.arrow')
+          ? filename
+          : `${filename}.arrow`;
+      
+      // Call onTableCreated callback - we'll need to handle this in parent
+      // For now, just show success
+      
+      // Clear preview data and close modal
+      setState(prev => ({
+        ...prev,
+        previewColumnData: null,
+      }));
+      setShowSaveAsModal(false);
+      setSaveAsFileName('');
+      
+      toast({
+        title: 'Success',
+        description: 'Column operations saved to new file successfully.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save column operations.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
   return (
     <StageLayout
       title=""
       explanation=""
     >
       <div className="space-y-6 w-full min-w-0">
+        {/* Column Operations Preview Section */}
+        {state.previewColumnData && (
+          <div className="space-y-4">
+            <div className="text-lg font-semibold text-gray-900">
+              Preview ready. Review your data before saving.
+            </div>
+            
+            {/* Data Summary Card */}
+            <Card className="p-4">
+              <div className="space-y-3">
+                <div className="flex items-center gap-4">
+                  <div>
+                    <div className="text-sm text-gray-600">Rows</div>
+                    <div className="text-lg font-semibold">{state.previewColumnData.previewResults.length}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-600">Columns</div>
+                    <div className="text-lg font-semibold">
+                      {state.previewColumnData.previewResults.length > 0
+                        ? Object.keys(state.previewColumnData.previewResults[0]).length
+                        : 0}
+                    </div>
+                  </div>
+                </div>
+                {state.previewColumnData.operationDetails.operations.length > 0 && (
+                  <div>
+                    <div className="text-sm text-gray-600 mb-2">New/Transformed Columns:</div>
+                    <div className="flex flex-wrap gap-2">
+                      {state.previewColumnData.operationDetails.operations.map((op, idx) => (
+                        <Badge key={idx} variant="secondary">
+                          {op.created_column_name || `${op.operation_type}_${idx}`}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            {/* Preview Table */}
+            {state.previewColumnData.previewResults.length > 0 && (
+              <Table
+                headers={Object.keys(state.previewColumnData.previewResults[0])}
+                colClasses={Object.keys(state.previewColumnData.previewResults[0]).map(() => 'w-auto')}
+                bodyClassName="max-h-[350px] overflow-y-auto"
+                defaultMinimized={false}
+                borderColor="border-green-500"
+                customHeader={{
+                  title: (
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-semibold">Data Preview</span>
+                      <span className="text-slate-400">|</span>
+                      {state.previewColumnData.resultFile && (
+                        <span
+                          className="text-xs text-blue-500 cursor-pointer hover:text-blue-700 hover:underline"
+                          onClick={() => {
+                            const url = `/dataframe?name=${encodeURIComponent(state.previewColumnData!.resultFile!)}`;
+                            window.open(url, '_blank');
+                          }}
+                        >
+                          Data in detail
+                        </span>
+                      )}
+                    </div>
+                  ),
+                  subtitle: undefined,
+                  subtitleClickable: false,
+                  onSubtitleClick: undefined,
+                  compactHeader: true,
+                }}
+              >
+                {state.previewColumnData.previewResults.slice(0, 10).map((row, rowIdx) => (
+                  <tr key={rowIdx} className="table-row">
+                    {Object.keys(state.previewColumnData.previewResults[0]).map((col) => (
+                      <td key={col} className="table-cell">
+                        {row[col] !== null && row[col] !== undefined ? (
+                          typeof row[col] === 'number' ? row[col] : String(row[col])
+                        ) : (
+                          <span className="italic text-slate-400">null</span>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </Table>
+            )}
+          </div>
+        )}
+
         {/* Dynamic Success Message for Variables */}
         {state.createdVariables.length > 0 && (
           <div className="text-lg font-semibold text-gray-900">
@@ -285,7 +546,7 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, rea
               {state.createdColumns.length > 0 && (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <Table className="w-5 h-5 text-green-600" />
+                    <TableIcon className="w-5 h-5 text-green-600" />
                     <h4 className="text-lg font-semibold">Columns</h4>
                     <Badge variant="secondary">{state.createdColumns.length}</Badge>
                   </div>
@@ -399,6 +660,45 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, rea
             </>
           )}
         </div>
+
+        {/* Save As Dialog */}
+        <Dialog open={showSaveAsModal} onOpenChange={setShowSaveAsModal}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Save As</DialogTitle>
+            </DialogHeader>
+            <div className="py-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Table Name</label>
+                <Input
+                  value={saveAsFileName}
+                  onChange={(e) => setSaveAsFileName(e.target.value)}
+                  placeholder="Enter table name"
+                  className="w-full"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowSaveAsModal(false);
+                  setSaveAsFileName('');
+                }}
+                disabled={saveLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveAsColumnOperations}
+                disabled={saveLoading || !saveAsFileName.trim()}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {saveLoading ? 'Saving...' : 'Save'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </StageLayout>
   );
 };

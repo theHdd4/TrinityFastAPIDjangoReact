@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { FEATURE_OVERVIEW_API, CREATECOLUMN_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
-import type { CreatedColumn, CreatedTable } from '../useMetricGuidedFlow';
+import type { CreatedColumn, CreatedTable, ColumnOperationsState, PreviewColumnData } from '../useMetricGuidedFlow';
 
 // Operation type definition
 interface OperationType {
@@ -33,6 +33,7 @@ interface MetricsColOpsProps {
   featureOverviewApi?: string;
   onColumnCreated?: (column: CreatedColumn) => void;
   onTableCreated?: (table: CreatedTable) => void;
+  onPreviewReady?: (previewData: PreviewColumnData) => void;
 }
 
 // Ref interface for exposing save functions
@@ -41,6 +42,8 @@ export interface MetricsColOpsRef {
   saveAs: () => void;
   canSave: () => boolean;
   isSaving: () => boolean;
+  continueToPreview: () => Promise<void>;
+  canContinue: () => boolean;
 }
 
 // All operations - keeping existing ones exactly the same
@@ -467,9 +470,7 @@ const scoreOperation = (
   return Math.max(0, score); // Ensure non-negative score
 };
 
-const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSource, featureOverviewApi, onColumnCreated, onTableCreated }, ref) => {
-  const [columnSearchQuery, setColumnSearchQuery] = React.useState('');
-  const [exploreOpen, setExploreOpen] = React.useState(false);
+const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSource, featureOverviewApi, onColumnCreated, onTableCreated, columnOperationsState, onColumnOperationsStateChange, onPreviewReady }, ref) => {
   const [openColumnCategories, setOpenColumnCategories] = React.useState<Record<string, boolean>>({});
   const [allColumns, setAllColumns] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -490,6 +491,8 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
   const [identifiersListOpen, setIdentifiersListOpen] = React.useState(false);
   const openedBySearchRef = React.useRef(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const restoredColumnStateKeyRef = React.useRef<string | null>(null);
+  const isRestoringRef = React.useRef(false);
   const { toast } = useToast();
 
   // Local operations state for guideflow – independent of global laboratory store
@@ -506,6 +509,40 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
   // Active tab state for tab-based UI when multiple operations exist
   const [activeOperationId, setActiveOperationId] = React.useState<string | null>(null);
   
+  // Column search and explore state
+  const [columnSearchQuery, setColumnSearchQuery] = React.useState('');
+  const [exploreOpen, setExploreOpen] = React.useState(false);
+  
+  // Restore column operations state from snapshot when provided
+  React.useEffect(() => {
+    if (columnOperationsState) {
+      // Create a key to identify this state (based on its content)
+      const stateKey = JSON.stringify({
+        selectedOperationsCount: columnOperationsState.selectedOperations.length,
+        activeOperationId: columnOperationsState.activeOperationId,
+        columnSearchQuery: columnOperationsState.columnSearchQuery,
+        exploreOpen: columnOperationsState.exploreOpen,
+      });
+      
+      // Only restore if this is a different state than what we've already restored
+      if (restoredColumnStateKeyRef.current !== stateKey) {
+        isRestoringRef.current = true;
+        setSelectedOperations(columnOperationsState.selectedOperations);
+        setActiveOperationId(columnOperationsState.activeOperationId);
+        setColumnSearchQuery(columnOperationsState.columnSearchQuery);
+        setExploreOpen(columnOperationsState.exploreOpen);
+        restoredColumnStateKeyRef.current = stateKey;
+        // Reset restoration flag after state updates complete
+        requestAnimationFrame(() => {
+          isRestoringRef.current = false;
+        });
+      }
+    } else {
+      // Reset restoration tracking when state becomes null
+      restoredColumnStateKeyRef.current = null;
+    }
+  }, [columnOperationsState]);
+
   // Ensure active tab is set when operations exist
   React.useEffect(() => {
     if (selectedOperations.length > 0 && !activeOperationId) {
@@ -520,6 +557,39 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
       }
     }
   }, [selectedOperations.length, activeOperationId]);
+
+  // Track previous state to avoid unnecessary updates
+  const prevColOpsStateRef = React.useRef<string>('');
+  
+  // Save column operations state whenever it changes (but not during restoration)
+  React.useEffect(() => {
+    if (onColumnOperationsStateChange && !isRestoringRef.current) {
+      // Create a stable string representation to detect actual changes
+      const currentStateString = JSON.stringify({
+        selectedOperations: selectedOperations.map(op => ({
+          id: op.id,
+          type: op.type,
+          columns: op.columns,
+          rename: op.rename,
+        })),
+        activeOperationId,
+        columnSearchQuery,
+        exploreOpen,
+      });
+      
+      // Only call callback if state actually changed
+      if (currentStateString !== prevColOpsStateRef.current) {
+        prevColOpsStateRef.current = currentStateString;
+        onColumnOperationsStateChange({
+          selectedOperations,
+          activeOperationId,
+          columnSearchQuery,
+          exploreOpen,
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOperations, activeOperationId, columnSearchQuery, exploreOpen]);
   
   // Convert selectedIdentifiersForBackend array to Set for easier manipulation
   const selectedIdentifiersForBackendSet = React.useMemo(
@@ -1816,56 +1886,134 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
     }
   };
 
+  // Continue to preview (performs operations without saving)
+  const continueToPreview = async () => {
+    if (!dataSource) {
+      toast({ title: 'Error', description: 'No input file found', variant: 'destructive' });
+      return;
+    }
+    
+    try {
+      // Perform operations (doesn't save, just returns preview data)
+      const previewResults = await performOperations();
+      if (previewResults.length === 0) {
+        throw new Error('No data to preview');
+      }
+      
+      // Prepare operation details for saving later
+      const operationDetails = {
+        input_file: dataSource,
+        operations: selectedOperations.map(op => {
+          let created_column_name = '';
+          if (op.rename && typeof op.rename === 'string' && op.rename.trim()) {
+            created_column_name = op.rename.trim();
+          } else {
+            created_column_name = getOutputColName(op);
+          }
+          return {
+            operation_type: op.type,
+            columns: op.columns || [],
+            rename: op.rename || null,
+            param: op.param || null,
+            created_column_name: created_column_name
+          };
+        })
+      };
+      
+      // Build preview data structure
+      const previewData: PreviewColumnData = {
+        previewResults,
+        resultFile: previewFile || undefined,
+        operationDetails
+      };
+      
+      // Call callback to store preview data in flow state
+      if (onPreviewReady) {
+        onPreviewReady(previewData);
+      }
+      
+      toast({ title: 'Success', description: 'Preview ready. Review your data before saving.' });
+    } catch (err: any) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to generate preview';
+      setError(errorMsg);
+      toast({ title: 'Error', description: errorMsg, variant: 'destructive' });
+      throw err; // Re-throw so parent can handle error state
+    }
+  };
+
   // Expose save functions via ref
   useImperativeHandle(ref, () => ({
     save: handleSave,
     saveAs: handleSaveAs,
     canSave: () => selectedOperations.length > 0 && !!dataSource && !saveLoading,
     isSaving: () => saveLoading,
-  }), [selectedOperations.length, dataSource, saveLoading]);
+    continueToPreview,
+    canContinue: () => selectedOperations.length > 0 && !!dataSource && !saveLoading,
+  }), [selectedOperations, dataSource, saveLoading]);
 
   return (
     <div className="flex flex-col h-full relative">
+      <style>{`
+        @keyframes fadeInSlide {
+          from {
+            opacity: 0;
+            transform: translateY(-4px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
       <div className="flex-1 overflow-y-auto space-y-4 px-2 pb-2">
         {/* Selected Operations - rendered at top when operations are selected */}
         {selectedOperations.length > 0 && (
         <>
-          {/* Tabs - only show when 2+ operations */}
-          {selectedOperations.length > 1 && (
-            <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
-              {selectedOperations.map((op) => (
-                <div
-                  key={op.id}
-                  className={`
-                    flex items-center gap-1.5 px-3 py-2 text-xs font-medium cursor-pointer
-                    border-b-2 transition-colors whitespace-nowrap
-                    ${activeOperationId === op.id 
-                      ? 'border-blue-500 text-blue-600 bg-blue-50' 
-                      : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }
-                  `}
-                  onClick={() => setActiveOperationId(op.id)}
+          {/* Tabs - always show when operations exist */}
+          <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
+            {selectedOperations.map((op) => (
+              <div
+                key={op.id}
+                className={`
+                  flex items-center gap-1.5 px-3 py-2 text-xs font-medium cursor-pointer
+                  border-b-2 transition-all duration-200 whitespace-nowrap
+                  ${activeOperationId === op.id 
+                    ? 'border-blue-500 text-blue-600 bg-blue-50' 
+                    : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  }
+                `}
+                onClick={() => setActiveOperationId(op.id)}
+              >
+                <span className="truncate max-w-[120px]">{op.name}</span>
+                {operationFormulas[op.type] && (
+                  <TooltipProvider delayDuration={0}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-3 h-3 text-gray-500 cursor-help flex-shrink-0" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">
+                        <p className="font-semibold mb-1">Formula:</p>
+                        <p>{operationFormulas[op.type]}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCloseTab(op.id);
+                  }}
+                  className="ml-1 p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 flex-shrink-0"
                 >
-                  <span className="truncate max-w-[120px]">{op.name}</span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCloseTab(op.id);
-                    }}
-                    className="ml-1 p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 flex-shrink-0"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
 
-          {/* Configuration Card - show active operation or single operation */}
+          {/* Configuration Card - show active operation */}
           {(() => {
-            const operationToShow = selectedOperations.length === 1 
-              ? selectedOperations[0]
-              : selectedOperations.find(op => op.id === activeOperationId);
+            const operationToShow = selectedOperations.find(op => op.id === activeOperationId);
             
             if (!operationToShow) return null;
             
@@ -1900,30 +2048,14 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                   : (!isStandardize || (opColumns.length === 1))));
 
             return (
-              <div className="space-y-2">
-                <Card key={selectedOperation.id} className="bg-white">
-                      <CardContent className="pt-2 pb-2">
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between pb-1 border-b border-gray-200">
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 border border-green-200 text-green-700">
-                              {selectedOperation.name}
-                              {operationFormulas[selectedOperation.type] && (
-                                <TooltipProvider delayDuration={0}>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <HelpCircle className="w-3 h-3 text-gray-500 cursor-help" />
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" className="text-xs">
-                                      <p className="font-semibold mb-1">Formula:</p>
-                                      <p>{operationFormulas[selectedOperation.type]}</p>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              )}
-                            </span>
-                          </div>
-                    
-                    <div className="space-y-1.5">
+              <div 
+                key={activeOperationId} 
+                className="space-y-2 transition-all duration-200 ease-in-out"
+                style={{
+                  animation: 'fadeInSlide 0.2s ease-in-out'
+                }}
+              >
+                <div className="space-y-1.5">
                       {selectedOperation.type === 'pct_change' ? (
                         <>
                           <div className="space-y-1">
@@ -3510,9 +3642,6 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                         />
                       </div>
                     )}
-                  </div>
-                </CardContent>
-                </Card>
               </div>
             );
           })()}

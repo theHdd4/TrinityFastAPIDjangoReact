@@ -45,6 +45,46 @@ export interface CreatedTable {
 }
 
 /**
+ * Preview data for column operations
+ */
+export interface PreviewColumnData {
+  previewResults: any[];  // Results from performOperations
+  resultFile?: string;     // Temporary result file path (if API returns one)
+  operationDetails: {      // Operation metadata for saving later
+    input_file: string;
+    operations: Array<{
+      operation_type: string;
+      columns: string[];
+      rename?: string | Record<string, any> | null;
+      param?: string | number | Record<string, any> | null;
+      created_column_name?: string;
+    }>;
+  };
+}
+
+/**
+ * Column operation state for restoring MetricsColOps UI state
+ */
+export interface ColumnOperationsState {
+  /** Selected column operations */
+  selectedOperations: Array<{
+    id: string;
+    type: string;
+    name: string;
+    columns: string[];
+    rename?: string | Record<string, any>;
+    param?: string | number | Record<string, any>;
+    fiscalStartMonth?: string;
+  }>;
+  /** Active operation tab ID */
+  activeOperationId: string | null;
+  /** Column search query */
+  columnSearchQuery: string;
+  /** Explore operations panel open state */
+  exploreOpen: boolean;
+}
+
+/**
  * Operations state for restoring OperationsTab UI state
  */
 export interface OperationsState {
@@ -66,6 +106,8 @@ export interface OperationsState {
   computeWithinGroup: boolean;
   /** Selected identifiers for group by */
   selectedIdentifiers: string[];
+  /** Column operations state (for column type) */
+  columnOperationsState: ColumnOperationsState | null;
 }
 
 /**
@@ -79,6 +121,8 @@ export interface MetricFlowState {
   createdTables: CreatedTable[];
   /** Operations tab state for restoration */
   operationsState: OperationsState | null;
+  /** Preview data for column operations */
+  previewColumnData?: PreviewColumnData | null;
 }
 
 /**
@@ -96,6 +140,7 @@ const INITIAL_FLOW_STATE: MetricFlowState = {
   createdVariables: [],
   createdColumns: [],
   createdTables: [],
+  previewColumnData: null,
 };
 
 const INITIAL_METRIC_GUIDED_STATE: MetricGuidedFlowState = {
@@ -147,6 +192,7 @@ export function useMetricGuidedFlow(
           : INITIAL_FLOW_STATE.selectedType,
       dataSource: initialState.dataSource ?? INITIAL_FLOW_STATE.dataSource,
       operationsState: initialState.operationsState ?? INITIAL_FLOW_STATE.operationsState,
+      previewColumnData: initialState.previewColumnData ?? INITIAL_FLOW_STATE.previewColumnData,
       currentStage: initialState.currentStage ?? INITIAL_METRIC_GUIDED_STATE.currentStage,
       navigatedBackFrom: null, // Always start with no back navigation flag
     };
@@ -166,6 +212,7 @@ export function useMetricGuidedFlow(
           createdColumns: [...prev.createdColumns],
           createdTables: [...prev.createdTables],
           operationsState: prev.operationsState ? { ...prev.operationsState } : null,
+          previewColumnData: prev.previewColumnData ? { ...prev.previewColumnData } : null,
         };
         stageSnapshotsRef.current.set(prev.currentStage, snapshot);
       }
@@ -230,6 +277,7 @@ export function useMetricGuidedFlow(
       createdColumns: [...stateToUse.createdColumns],
       createdTables: [...stateToUse.createdTables],
       operationsState: stateToUse.operationsState ? { ...stateToUse.operationsState } : null,
+      previewColumnData: stateToUse.previewColumnData ? { ...stateToUse.previewColumnData } : null,
     };
     stageSnapshotsRef.current.set(stage, snapshot);
   }, [state]);

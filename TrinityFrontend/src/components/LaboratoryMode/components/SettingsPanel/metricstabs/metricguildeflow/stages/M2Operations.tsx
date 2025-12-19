@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import React, { useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseMetricGuidedFlow } from '../useMetricGuidedFlow';
 import OperationsTab, { OperationsTabRef } from './OperationsTab';
@@ -15,6 +15,7 @@ export interface M2OperationsRef {
   canSaveVariable: () => boolean;
   canSaveColumn: () => boolean;
   isSaving: () => boolean;
+  continueColumn: () => Promise<void>;
 }
 
 export const M2Operations = forwardRef<M2OperationsRef, M2OperationsProps>(({ flow, readOnly = false }, ref) => {
@@ -56,6 +57,11 @@ export const M2Operations = forwardRef<M2OperationsRef, M2OperationsProps>(({ fl
         return operationsTabRef.current.isSaving();
       }
       return false;
+    },
+    continueColumn: async () => {
+      if (operationsTabRef.current) {
+        await operationsTabRef.current.continueColumnOperations();
+      }
     },
   }), []);
 
@@ -132,6 +138,65 @@ export const M2Operations = forwardRef<M2OperationsRef, M2OperationsProps>(({ fl
     }
   }, [state.createdVariables.length, state.createdColumns.length, state.createdTables.length, state.currentStage, goToStage]);
 
+  // Memoized callbacks to prevent infinite render loops
+  const handleOperationsStateChange = useCallback((opsState: any) => {
+    setState(prev => ({
+      ...prev,
+      operationsState: opsState,
+    }));
+  }, [setState]);
+
+  const handleVariableCreated = useCallback((vars: any[]) => {
+    setState(prev => ({ 
+      ...prev, 
+      createdVariables: [...prev.createdVariables, ...vars] 
+    }));
+  }, [setState]);
+
+  const handleColumnCreated = useCallback((column: any) => {
+    console.log('[M2Operations] onColumnCreated callback called', column);
+    setState(prev => {
+      const newState = { 
+        ...prev, 
+        createdColumns: [...prev.createdColumns, column] 
+      };
+      console.log('[M2Operations] Updated state with column:', {
+        previousColumnsCount: prev.createdColumns.length,
+        newColumnsCount: newState.createdColumns.length,
+      });
+      return newState;
+    });
+  }, [setState]);
+
+  const handleTableCreated = useCallback((table: any) => {
+    console.log('[M2Operations] onTableCreated callback called', table);
+    setState(prev => {
+      const newState = { 
+        ...prev, 
+        createdTables: [...prev.createdTables, table] 
+      };
+      console.log('[M2Operations] Updated state with table:', {
+        previousTablesCount: prev.createdTables.length,
+        newTablesCount: newState.createdTables.length,
+      });
+      return newState;
+    });
+  }, [setState]);
+
+  const handlePreviewReady = useCallback((previewData: any) => {
+    console.log('[M2Operations] onPreviewReady callback called', previewData);
+    // Store preview data in flow state
+    setState(prev => ({
+      ...prev,
+      previewColumnData: previewData,
+    }));
+    // Auto-navigate to preview stage
+    setTimeout(() => {
+      console.log('[M2Operations] Navigating to preview stage after preview ready');
+      goToStage('preview');
+    }, 100);
+  }, [setState, goToStage]);
+
   return (
     <StageLayout
       title=""
@@ -147,46 +212,11 @@ export const M2Operations = forwardRef<M2OperationsRef, M2OperationsProps>(({ fl
         dataSource={state.dataSource}
         readOnly={readOnly}
         operationsState={state.operationsState}
-        onOperationsStateChange={(opsState) => {
-          setState(prev => ({
-            ...prev,
-            operationsState: opsState,
-          }));
-        }}
-        onVariableCreated={(vars) => {
-          setState(prev => ({ 
-            ...prev, 
-            createdVariables: [...prev.createdVariables, ...vars] 
-          }));
-        }}
-        onColumnCreated={(column) => {
-          console.log('[M2Operations] onColumnCreated callback called', column);
-          setState(prev => {
-            const newState = { 
-              ...prev, 
-              createdColumns: [...prev.createdColumns, column] 
-            };
-            console.log('[M2Operations] Updated state with column:', {
-              previousColumnsCount: prev.createdColumns.length,
-              newColumnsCount: newState.createdColumns.length,
-            });
-            return newState;
-          });
-        }}
-        onTableCreated={(table) => {
-          console.log('[M2Operations] onTableCreated callback called', table);
-          setState(prev => {
-            const newState = { 
-              ...prev, 
-              createdTables: [...prev.createdTables, table] 
-            };
-            console.log('[M2Operations] Updated state with table:', {
-              previousTablesCount: prev.createdTables.length,
-              newTablesCount: newState.createdTables.length,
-            });
-            return newState;
-          });
-        }}
+        onOperationsStateChange={handleOperationsStateChange}
+        onVariableCreated={handleVariableCreated}
+        onColumnCreated={handleColumnCreated}
+        onTableCreated={handleTableCreated}
+        onPreviewReady={handlePreviewReady}
       />
     </StageLayout>
   );

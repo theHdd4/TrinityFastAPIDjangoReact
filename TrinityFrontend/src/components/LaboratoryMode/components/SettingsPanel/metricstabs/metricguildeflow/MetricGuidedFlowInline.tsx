@@ -1,15 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, XIcon } from 'lucide-react';
+import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, XIcon, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { useMetricGuidedFlow, type MetricStage, type MetricGuidedFlowState, STEP_ORDER } from './useMetricGuidedFlow';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { useMetricGuidedFlow, type MetricStage, type MetricGuidedFlowState, type CreatedColumn, type CreatedTable, STEP_ORDER } from './useMetricGuidedFlow';
 import { M0Type } from './stages/M0Type';
 import { M1Dataset } from './stages/M1Dataset';
 import { M2Operations, type M2OperationsRef } from './stages/M2Operations';
 import { M3Preview } from './stages/M3Preview';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { getActiveProjectContext } from '@/utils/projectEnv';
-import { LABORATORY_API } from '@/lib/api';
+import { LABORATORY_API, CREATECOLUMN_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
 
 interface MetricGuidedFlowInlineProps {
@@ -62,6 +65,14 @@ const getStageTitle = (stage: MetricStage, selectedType: string | null | undefin
 const getStageIndex = (stage: MetricStage): number => STAGE_ORDER.indexOf(stage);
 const isStageCompleted = (stage: MetricStage, currentStage: MetricStage): boolean =>
   getStageIndex(stage) < getStageIndex(currentStage);
+
+// Helper to convert preview data to CSV
+const previewToCSV = (data: any[]): string => {
+  if (!data.length) return '';
+  const headers = Object.keys(data[0]);
+  const rows = data.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(','));
+  return [headers.join(','), ...rows].join('\n');
+};
 
 export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
   onComplete,
@@ -128,20 +139,32 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
       prevStateStringRef.current = stateString;
-    } else if (stateString === prevStateStringRef.current) {
+      return;
+    }
+    
+    if (stateString === prevStateStringRef.current) {
       // Nothing meaningful changed
       return;
     }
 
     prevStateStringRef.current = stateString;
 
+    // Capture state values at the time this effect runs
+    // (stateString changing guarantees these values have changed)
+    const currentStage = state.currentStage;
+    const selectedType = state.selectedType;
+    const dataSource = state.dataSource;
+    const createdVariables = state.createdVariables;
+    const createdColumns = state.createdColumns;
+    const createdTables = state.createdTables;
+
     // 1) Update laboratory store (drives GuidedWorkflowPanel & GuidedFlowStepTrackerPanel)
-    setActiveMetricGuidedFlow(state.currentStage, {
-      selectedType: state.selectedType,
-      dataSource: state.dataSource,
-      createdVariables: state.createdVariables,
-      createdColumns: state.createdColumns,
-      createdTables: state.createdTables,
+    setActiveMetricGuidedFlow(currentStage, {
+      selectedType,
+      dataSource,
+      createdVariables,
+      createdColumns,
+      createdTables,
     });
 
     // 2) Persist to localStorage (mirrors MetricGuidedFlow.tsx logic)
@@ -151,12 +174,12 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     }
 
     const metricFlowState = {
-      currentStage: state.currentStage,
-      selectedType: state.selectedType,
-      dataSource: state.dataSource,
-      createdVariables: state.createdVariables,
-      createdColumns: state.createdColumns,
-      createdTables: state.createdTables,
+      currentStage,
+      selectedType,
+      dataSource,
+      createdVariables,
+      createdColumns,
+      createdTables,
     };
 
     const key = `metric-guided-flow-${projectContext.client_name}-${projectContext.app_name}-${projectContext.project_name}`;
@@ -173,7 +196,10 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
       }
       saveTimeoutRef.current = null;
     }, 300);
-  }, [state, stateString, setActiveMetricGuidedFlow]);
+    // Note: state is intentionally not in dependencies to avoid infinite loops
+    // stateString already tracks meaningful changes to the state fields we care about
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stateString, setActiveMetricGuidedFlow]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -362,6 +388,265 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     }
   }, [state, toast, onComplete]);
 
+  // State declarations for save dialogs - must be before handlers that use them
+  const [showOverwriteConfirmDialog, setShowOverwriteConfirmDialog] = useState(false);
+  const [showSaveAsModal, setShowSaveAsModal] = useState(false);
+  const [saveAsFileName, setSaveAsFileName] = useState('');
+  const [isSavingColumnOperations, setIsSavingColumnOperations] = useState(false);
+
+  // Define handleClose early so it can be used in save handlers
+  const handleClose = useCallback(() => {
+    // Clear localStorage persistence
+    const projectContext = getActiveProjectContext();
+    if (projectContext) {
+      const key = `metric-guided-flow-${projectContext.client_name}-${projectContext.app_name}-${projectContext.project_name}`;
+      try {
+        localStorage.removeItem(key);
+        console.log('[MetricGuidedFlowInline] Cleared localStorage key:', key);
+      } catch (error) {
+        console.warn('[MetricGuidedFlowInline] Failed to clear localStorage:', error);
+      }
+    }
+    
+    // Restart flow to clear all state
+    restartFlow();
+    
+    // Call onClose callback to close the card and update store
+    onClose?.();
+  }, [onClose, restartFlow]);
+
+  // Handler to show overwrite confirmation dialog
+  const handleSaveColumnOperations = useCallback(() => {
+    if (!state.previewColumnData) return;
+    setShowOverwriteConfirmDialog(true);
+  }, [state.previewColumnData]);
+
+  // Confirm and save column operations (overwrite original)
+  const confirmSaveColumnOperations = useCallback(async () => {
+    if (!state.previewColumnData) return;
+    
+    setShowOverwriteConfirmDialog(false);
+    setIsSavingColumnOperations(true);
+    
+    try {
+      const csv_data = previewToCSV(state.previewColumnData.previewResults);
+      let filename = state.previewColumnData.operationDetails.input_file;
+      if (filename.endsWith('.arrow')) {
+        filename = filename.replace('.arrow', '');
+      }
+      
+      const projectContext = getActiveProjectContext();
+      if (!projectContext) {
+        toast({
+          title: 'Error',
+          description: 'Project context not available. Please ensure you\'re in a valid project.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const stored = localStorage.getItem('current-project');
+      const project = stored ? JSON.parse(stored) : {};
+      
+      const response = await fetch(`${CREATECOLUMN_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          csv_data,
+          filename,
+          client_name: projectContext.client_name,
+          app_name: projectContext.app_name,
+          project_name: projectContext.project_name,
+          user_id: env.USER_ID || '',
+          project_id: project.id || null,
+          operation_details: JSON.stringify(state.previewColumnData.operationDetails),
+          overwrite_original: true
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Save failed: ${response.statusText}`);
+      }
+      
+      const payload = await response.json();
+      const result = await resolveTaskResponse<Record<string, any>>(payload);
+      const savedFile = typeof result?.result_file === 'string'
+        ? result.result_file
+        : filename.endsWith('.arrow')
+          ? filename
+          : `${filename}.arrow`;
+      
+      // Create CreatedColumn entries for each operation
+      const newColumns: CreatedColumn[] = state.previewColumnData.operationDetails.operations.map((op) => ({
+        columnName: op.created_column_name || `${op.operation_type}_${op.columns.join('_')}`,
+        tableName: state.dataSource,
+        operations: [op.operation_type],
+        objectName: savedFile,
+        operationDetails: [{
+          type: op.operation_type,
+          columns: op.columns,
+          method: undefined,
+          identifiers: undefined,
+          parameters: typeof op.param === 'object' && op.param !== null ? op.param : undefined,
+        }],
+      }));
+      
+      // Update state with created columns
+      setState(prev => ({
+        ...prev,
+        createdColumns: [...prev.createdColumns, ...newColumns],
+        previewColumnData: null, // Clear preview data after saving
+      }));
+      
+      // Show success toast
+      toast({
+        title: 'Success',
+        description: `Successfully created or modified ${newColumns.length} column(s).`,
+      });
+      
+      // Call onComplete callback and close the flow
+      onComplete?.({
+        createdVariables: [],
+        createdColumns: newColumns,
+        createdTables: [],
+      });
+      
+      // Close the flow
+      handleClose();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save column operations.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingColumnOperations(false);
+    }
+  }, [state, toast, setState, handleClose]);
+
+  // Handler to show Save As modal
+  const handleSaveAsColumnOperations = useCallback(() => {
+    if (!state.previewColumnData) return;
+    const defaultFilename = `createcolumn_${state.previewColumnData.operationDetails.input_file?.split('/')?.pop() || 'data'}_${Date.now()}`;
+    setSaveAsFileName(defaultFilename);
+    setShowSaveAsModal(true);
+  }, [state.previewColumnData]);
+
+  // Confirm and save column operations as new file
+  const confirmSaveAsColumnOperations = useCallback(async () => {
+    if (!state.previewColumnData || !saveAsFileName.trim()) return;
+    
+    setShowSaveAsModal(false);
+    setIsSavingColumnOperations(true);
+    
+    try {
+      const csv_data = previewToCSV(state.previewColumnData.previewResults);
+      const filename = saveAsFileName.trim();
+      
+      const projectContext = getActiveProjectContext();
+      if (!projectContext) {
+        toast({
+          title: 'Error',
+          description: 'Project context not available. Please ensure you\'re in a valid project.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const stored = localStorage.getItem('current-project');
+      const project = stored ? JSON.parse(stored) : {};
+      
+      const response = await fetch(`${CREATECOLUMN_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          csv_data,
+          filename,
+          client_name: projectContext.client_name,
+          app_name: projectContext.app_name,
+          project_name: projectContext.project_name,
+          user_id: env.USER_ID || '',
+          project_id: project.id || null,
+          operation_details: JSON.stringify(state.previewColumnData.operationDetails),
+          overwrite_original: false
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Save failed: ${response.statusText}`);
+      }
+      
+      const payload = await response.json();
+      const result = await resolveTaskResponse<Record<string, any>>(payload);
+      const savedFile = typeof result?.result_file === 'string'
+        ? result.result_file
+        : filename.endsWith('.arrow')
+          ? filename
+          : `${filename}.arrow`;
+      
+      // Create CreatedTable entry
+      const newTable: CreatedTable = {
+        newTableName: filename.replace('.arrow', ''),
+        originalTableName: state.dataSource,
+        objectName: savedFile,
+      };
+      
+      // Create CreatedColumn entries for each operation
+      const newColumns: CreatedColumn[] = state.previewColumnData.operationDetails.operations.map((op) => ({
+        columnName: op.created_column_name || `${op.operation_type}_${op.columns.join('_')}`,
+        tableName: filename.replace('.arrow', ''),
+        operations: [op.operation_type],
+        objectName: savedFile,
+        operationDetails: [{
+          type: op.operation_type,
+          columns: op.columns,
+          method: undefined,
+          identifiers: undefined,
+          parameters: typeof op.param === 'object' && op.param !== null ? op.param : undefined,
+        }],
+      }));
+      
+      // Update state with created table and columns
+      setState(prev => ({
+        ...prev,
+        createdTables: [...prev.createdTables, newTable],
+        createdColumns: [...prev.createdColumns, ...newColumns],
+        previewColumnData: null, // Clear preview data after saving
+      }));
+      
+      // Show success toast
+      toast({
+        title: 'Success',
+        description: `Successfully created or modified ${newColumns.length} column(s).`,
+      });
+      
+      // Call onComplete callback and close the flow
+      onComplete?.({
+        createdVariables: [],
+        createdColumns: newColumns,
+        createdTables: [],
+      });
+      
+      // Close the flow
+      handleClose();
+      
+      // Reset modal state
+      setSaveAsFileName('');
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save column operations.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingColumnOperations(false);
+    }
+  }, [state, toast, setState, saveAsFileName, handleClose]);
+
   const handleNext = useCallback(async () => {
     // Preview stage: Save variables to backend
     if (state.currentStage === 'preview') {
@@ -433,6 +718,21 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     // Navigation will happen via useEffect in M2Operations after onTableCreated
   }, []);
 
+  const handleContinueColumn = useCallback(async () => {
+    if (!m2OperationsRef.current) return;
+    console.log('[MetricGuidedFlowInline] Continue Column button clicked');
+    setIsContinuingColumn(true);
+    try {
+      await m2OperationsRef.current.continueColumn();
+      // Navigation will happen via onPreviewReady callback in M2Operations
+    } catch (error) {
+      console.error('[MetricGuidedFlowInline] Error continuing column operations:', error);
+      // Error is already shown in MetricsColOps via toast
+    } finally {
+      setIsContinuingColumn(false);
+    }
+  }, []);
+
   const handleBack = useCallback(() => {
     if (state.currentStage === 'type') {
       onClose?.();
@@ -474,13 +774,14 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             };
             break;
           case 'preview':
-            // When going back from preview, clear createdVariables
+            // When going back from preview, clear createdVariables and previewColumnData
             // The operationsState will restore the form state, and when user
             // clicks Continue again, all current variables will be sent fresh
             resetFields = {
               createdVariables: [],
               createdColumns: [],
               createdTables: [],
+              previewColumnData: null,
             };
             break;
         }
@@ -503,6 +804,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             createdColumns: shouldClearCreatedItems ? [] : [...restoredSnapshot.createdColumns],
             createdTables: shouldClearCreatedItems ? [] : [...restoredSnapshot.createdTables],
             operationsState: restoredSnapshot.operationsState ? { ...restoredSnapshot.operationsState } : null,
+            previewColumnData: shouldClearCreatedItems ? null : (restoredSnapshot.previewColumnData ? { ...restoredSnapshot.previewColumnData } : null),
           };
         } else {
           // No snapshot exists, reset current stage and navigate back
@@ -512,6 +814,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
             currentStage: previousStage,
             navigatedBackFrom: currentStageBeforeNavigation, // Set flag indicating where we came from
             operationsState: null, // Clear operations state if no snapshot
+            previewColumnData: null, // Clear preview data if no snapshot
           };
         }
       });
@@ -543,27 +846,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     });
   }, [restartFlow, goToStage, setActiveMetricGuidedFlow]);
 
-  const handleClose = useCallback(() => {
-    //console.log('[MetricGuidedFlowInline] handleClose called - clearing all state');
-    
-    // Clear localStorage persistence
-    const projectContext = getActiveProjectContext();
-    if (projectContext) {
-      const key = `metric-guided-flow-${projectContext.client_name}-${projectContext.app_name}-${projectContext.project_name}`;
-      try {
-        localStorage.removeItem(key);
-        console.log('[MetricGuidedFlowInline] Cleared localStorage key:', key);
-      } catch (error) {
-        console.warn('[MetricGuidedFlowInline] Failed to clear localStorage:', error);
-      }
-    }
-    
-    // Restart flow to clear all state
-    restartFlow();
-    
-    // Call onClose callback to close the card and update store
-    onClose?.();
-  }, [onClose, restartFlow]);
+  // handleClose is already defined above, no need to redefine
 
   const CurrentStageComponent = STAGE_COMPONENTS[state.currentStage];
   const canGoBack = state.currentStage !== 'type';
@@ -582,6 +865,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
   const [canSaveOperations, setCanSaveOperations] = useState(false);
   const [canSaveColumn, setCanSaveColumn] = useState(false);
   const [isSavingOperations, setIsSavingOperations] = useState(false);
+  const [isContinuingColumn, setIsContinuingColumn] = useState(false);
   
   // Check if operations can be saved periodically when on operations stage
   useEffect(() => {
@@ -617,6 +901,11 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     const interval = setInterval(checkCanSave, 500);
     return () => clearInterval(interval);
   }, [state.currentStage, canSaveOperations, canSaveColumn, isSavingOperations, state.createdVariables.length, state.createdColumns.length, state.createdTables.length]);
+
+  // Helper to check if column operations can continue (same as canSaveColumn)
+  const canContinueColumn = useCallback(() => {
+    return canSaveColumn;
+  }, [canSaveColumn]);
 
   // Auto-scroll to current stage when it changes
   useEffect(() => {
@@ -704,9 +993,6 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
               <div className="flex items-center gap-3">
                 {statusIcon}
                 <h3 className={`text-sm font-medium ${headerTextColor}`}>{getStageTitle(stage, state.selectedType)}</h3>
-                <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded-full">
-                  Completed
-                </span>
               </div>
               {isExpanded ? (
                 <ChevronUp className="w-5 h-5 text-gray-500" />
@@ -723,9 +1009,6 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
               <div className="flex items-center gap-3">
                 {statusIcon}
                 <h2 className={`text-sm font-medium ${headerTextColor}`}>{getStageTitle(stage, state.selectedType)}</h2>
-                <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
-                  Current
-                </span>
               </div>
               {isExpanded ? (
                 <ChevronUp className="w-5 h-5 text-gray-500" />
@@ -741,11 +1024,6 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
               <div className="flex items-center gap-3">
                 {statusIcon}
                 <h2 className={`text-sm font-medium ${headerTextColor}`}>{getStageTitle(stage, state.selectedType)}</h2>
-                {isUpcoming && (
-                  <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">
-                    Upcoming
-                  </span>
-                )}
               </div>
             </div>
           )}
@@ -796,16 +1074,34 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
                       {stage === 'preview' && (
                         <>
                           <Button variant="outline" onClick={handleClose}>
-                            Exit
+                            Discard
                           </Button>
-                          {/* Save button for preview stage - saves computed/assigned variables to backend */}
-                          <Button
-                            onClick={handleNext}
-                            disabled={state.createdVariables.length === 0 && state.createdColumns.length === 0 && state.createdTables.length === 0}
-                            className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            Save
-                          </Button>
+                          {/* Show Save/Save As for column operations preview, otherwise show regular Save for variables */}
+                          {state.previewColumnData ? (
+                            <>
+                              <Button
+                                variant="outline"
+                                onClick={handleSaveAsColumnOperations}
+                                className="disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Save As
+                              </Button>
+                              <Button
+                                onClick={handleSaveColumnOperations}
+                                className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Save
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              onClick={handleNext}
+                              disabled={state.createdVariables.length === 0 && state.createdColumns.length === 0 && state.createdTables.length === 0}
+                              className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Save
+                            </Button>
+                          )}
                         </>
                       )}
                       {!isLastStage && stage === 'operations' ? (
@@ -820,24 +1116,14 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
                             {isSavingOperations ? 'Computing...' : 'Continue'}
                           </Button>
                         ) : state.selectedType === 'column' ? (
-                          // Column type: Show Save and Save As buttons (columns still save immediately)
-                          <>
-                            <Button
-                              onClick={handleSaveColumnAs}
-                              disabled={!canSaveColumn || isSavingOperations}
-                              variant="outline"
-                              className="disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              Save As
-                            </Button>
-                            <Button
-                              onClick={handleSaveColumn}
-                              disabled={!canSaveColumn || isSavingOperations}
-                              className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {isSavingOperations ? 'Saving...' : 'Save'}
-                            </Button>
-                          </>
+                          // Column type: Show Continue button (performs operations and navigates to preview)
+                          <Button
+                            onClick={handleContinueColumn}
+                            disabled={!canContinueColumn() || isContinuingColumn}
+                            className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isContinuingColumn ? 'Computing...' : 'Continue'}
+                          </Button>
                         ) : (
                           // Fallback: Show Continue button if type not set
                           <Button
@@ -896,12 +1182,19 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
       handleSaveVariable,
       handleSaveColumn,
       handleSaveColumnAs,
+      handleContinueColumn,
+      canContinueColumn,
+      handleSaveColumnOperations,
+      handleSaveAsColumnOperations,
+      confirmSaveColumnOperations,
+      confirmSaveAsColumnOperations,
       canGoBack,
       toggleCompletedStage,
       isLastStage,
       canSaveOperations,
       canSaveColumn,
       isSavingOperations,
+      isContinuingColumn,
       canProceedFromStep,
     ],
   );
@@ -921,6 +1214,86 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
         {/* Render all stages in sequence (Shopify-style), mirroring GuidedUploadFlowInline */}
         {STAGE_ORDER.map(stage => renderStageItem(stage))}
       </div>
+
+      {/* Overwrite Confirmation Dialog */}
+      <Dialog open={showOverwriteConfirmDialog} onOpenChange={setShowOverwriteConfirmDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Confirm Overwrite</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm text-gray-700 mb-2">
+                  Are you sure you want to save the changes to the original file?
+                </p>
+                <p className="text-sm font-medium text-gray-900 mb-1">
+                  File: {state.previewColumnData?.operationDetails.input_file || 'Unknown'}
+                </p>
+                <p className="text-xs text-gray-600">
+                  This action will overwrite the original file and cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowOverwriteConfirmDialog(false)}
+              disabled={isSavingColumnOperations}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveColumnOperations}
+              disabled={isSavingColumnOperations}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {isSavingColumnOperations ? 'Saving...' : 'Yes, Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save As Dialog */}
+      <Dialog open={showSaveAsModal} onOpenChange={setShowSaveAsModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save DataFrame</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Filename</label>
+              <Input
+                value={saveAsFileName}
+                onChange={(e) => setSaveAsFileName(e.target.value)}
+                placeholder="Enter filename"
+                className="w-full"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowSaveAsModal(false);
+                setSaveAsFileName('');
+              }}
+              disabled={isSavingColumnOperations}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveAsColumnOperations}
+              disabled={isSavingColumnOperations || !saveAsFileName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {isSavingColumnOperations ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };
