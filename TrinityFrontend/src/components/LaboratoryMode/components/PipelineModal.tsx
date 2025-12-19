@@ -835,7 +835,6 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 }
                 
                 // Update dataSource to replacement file (if it was replaced)
-                // 🔧 CRITICAL: DO NOT lowercase file paths - they are case-sensitive in MinIO and MongoDB
                 if (stepConfig.file_key && stepConfig.file_key !== currentSettings.dataSource) {
                   updateData.dataSource = String(stepConfig.file_key);
                 } else if (stepConfig.object_names) {

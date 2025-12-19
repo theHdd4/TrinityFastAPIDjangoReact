@@ -399,6 +399,10 @@ async def perform_concat(
             raise ValueError("Invalid concat direction")
 
         # Generate auto concat ID
+        # 🔧 COMMENTED OUT: Auto-generation of concat_key creates unwanted files during rerun
+        # The concat_key is only used for Redis caching and shouldn't create files
+        # During rerun, we should reuse existing concat_id if available, or generate only if needed for Redis cache
+        # For now, we'll still generate for Redis cache, but this shouldn't create files
         concat_id = str(uuid.uuid4())[:8]  # Shorten UUID for readability
         concat_key = f"{concat_id}_concat.arrow"
 
@@ -413,6 +417,7 @@ async def perform_concat(
         # NOTE: Do not persist result to MinIO during `/perform`.
         # The dataframe is cached in Redis for quick retrieval by `/results`.
         # Actual persistence is handled by the dedicated `/save` endpoint.
+        # 🔧 CRITICAL: Only cache in Redis, DO NOT save to MinIO here
         # Cache in Redis
         redis_client.setex(concat_key, 3600, arrow_bytes)
 
@@ -603,9 +608,24 @@ async def save_concat_dataframe(
                 df[col] = pd.to_datetime(df[col], errors='coerce')
         # ============================================================
         # Generate unique file key if not provided
+        # 🔧 COMMENTED OUT: Auto-generation creates unwanted files during rerun
+        # Output files are correctly created/updated, so this auto-generation is not needed
+        # if not filename:
+        #     concat_id = str(uuid.uuid4())[:8]
+        #     filename = f"{concat_id}_concat.arrow"
         if not filename:
-            concat_id = str(uuid.uuid4())[:8]
-            filename = f"{concat_id}_concat.arrow"
+            raise HTTPException(status_code=400, detail="filename is required for save operation")
+        
+        # 🔧 CRITICAL: Prevent using auto-generated concat_key as filename (e.g., "5771ec39_concat.arrow")
+        # These are temporary Redis cache keys and should not be saved as files
+        if filename.endswith('_concat.arrow') and len(filename.split('_')[0]) == 8:
+            # This looks like an auto-generated concat_key (8-char hex + "_concat.arrow")
+            # During rerun, we should use the actual save filename, not the concat_key
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid filename: '{filename}' appears to be an auto-generated concat_key. Please provide a proper save filename."
+            )
+        
         if not filename.endswith('.arrow'):
             filename += '.arrow'
             

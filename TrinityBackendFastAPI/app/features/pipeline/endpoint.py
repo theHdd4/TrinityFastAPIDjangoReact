@@ -1247,6 +1247,183 @@ async def run_pipeline(
                     task_response = execution_result.get("task_response")
                     additional_results = execution_result.get("additional_results")
                     
+                    # 🔧 CRITICAL: Update log_entry with latest input file (for groupby/merge/concat/pivot/table)
+                    # Find the replacement file for the latest original file that was in the canvas
+                    if atom_type in ["groupby-wtg-avg", "merge", "concat", "pivot-table", "table"] or atom_type.startswith("groupby"):
+                        # For merge atoms, handle file1 and file2 separately
+                        if atom_type == "merge":
+                            # 🔧 CRITICAL: Extract latest file1 and file2 from API calls (already have replacements applied)
+                            # Check perform and init endpoints (they have file1 and file2)
+                            latest_file1 = None
+                            latest_file2 = None
+                            logger.info(f"🔍 [MERGE] Searching {len(api_calls)} API calls for file1 and file2")
+                            for api_call in reversed(api_calls):
+                                endpoint = api_call.get("endpoint", "")
+                                params = api_call.get("params", {})
+                                # Check perform or init endpoints (they have file1 and file2)
+                                if "/merge/perform" in endpoint or "/merge/init" in endpoint or "merge/perform" in endpoint.lower() or "merge/init" in endpoint.lower():
+                                    file1 = params.get("file1")
+                                    file2 = params.get("file2")
+                                    if file1 or file2:
+                                        latest_file1 = file1  # Already has replacements applied
+                                        latest_file2 = file2  # Already has replacements applied
+                                        logger.info(
+                                            f"🔄 [MERGE] Found files from {endpoint}: file1={latest_file1}, file2={latest_file2}"
+                                        )
+                                        break
+                            
+                            # Fallback: if not found in perform/init, check any API call
+                            if not latest_file1 and not latest_file2:
+                                logger.info(f"🔍 [MERGE] Not found in perform/init, checking all API calls")
+                                for api_call in reversed(api_calls):
+                                    params = api_call.get("params", {})
+                                    file1 = params.get("file1")
+                                    file2 = params.get("file2")
+                                    if file1 or file2:
+                                        latest_file1 = file1
+                                        latest_file2 = file2
+                                        logger.info(
+                                            f"🔄 [MERGE] Found files from fallback: file1={latest_file1}, file2={latest_file2}"
+                                        )
+                                        break
+                            
+                            # Update log_entry input_files with latest files
+                            # Use files from API calls if found, otherwise use updated_input_files as fallback
+                            if latest_file1 or latest_file2:
+                                # Use files from API calls (already have replacements)
+                                updated_input_files_list = []
+                                if latest_file1:
+                                    updated_input_files_list.append(latest_file1)
+                                if latest_file2:
+                                    updated_input_files_list.append(latest_file2)
+                                log_entry["input_files"] = updated_input_files_list
+                                logger.info(
+                                    f"🔄 [MERGE] ✅ Updated log_entry input_files with latest files from API calls: {updated_input_files_list}"
+                                )
+                            elif updated_input_files:
+                                # Fallback: use updated_input_files (from step inputs with replacements)
+                                log_entry["input_files"] = updated_input_files
+                                logger.info(
+                                    f"🔄 [MERGE] ⚠️ Using updated_input_files as fallback: {updated_input_files}"
+                                )
+                            else:
+                                logger.warning(f"⚠️ [MERGE] No files found in API calls or updated_input_files")
+                            
+                            # Update configuration with latest files (ALWAYS update if found)
+                            if latest_file1:
+                                updated_config["file1"] = latest_file1
+                            if latest_file2:
+                                updated_config["file2"] = latest_file2
+                            
+                            # Set primary_input_file to file2 (or file1 if file2 not available)
+                            latest_file = latest_file2 or latest_file1
+                            if latest_file:
+                                log_entry["primary_input_file"] = latest_file
+                                log_entry["file_key"] = latest_file  # For backward compatibility
+                                updated_config["file_key"] = latest_file
+                                updated_config["object_names"] = latest_file
+                            
+                            # Always log the update
+                            logger.info(
+                                f"🔄 [MERGE] Updated configuration: file1={latest_file1}, file2={latest_file2}, "
+                                f"primary_input_file={latest_file}, updated_config keys: {list(updated_config.keys())}"
+                            )
+                        else:
+                            # For other atoms (groupby, etc.), use single file logic
+                            # Find the latest original file from the step (before replacements)
+                            # This is the file that was shown in the canvas before execution
+                            latest_original_file = None
+                            original_inputs = step.get("inputs", [])
+                            if original_inputs:
+                                # Get the last input file (most recently added)
+                                latest_original_file = original_inputs[-1].get("file_key") if isinstance(original_inputs[-1], dict) else original_inputs[-1]
+                            
+                            # If not found in inputs, check configuration
+                            if not latest_original_file:
+                                original_config = step.get("configuration", {})
+                                latest_original_file = original_config.get("file_key") or original_config.get("object_names")
+                            
+                            # Find the replacement for the latest original file
+                            latest_file = None
+                            if latest_original_file and latest_original_file in file_replacements:
+                                latest_file = file_replacements[latest_original_file]
+                                logger.info(
+                                    f"🔄 [{atom_type.upper()}] Found replacement for latest original file: {latest_original_file} -> {latest_file}"
+                                )
+                            elif latest_original_file:
+                                # No replacement, use original
+                                latest_file = latest_original_file
+                            
+                            # Fall back: find the latest file from API calls (reverse order to get the last one)
+                            if not latest_file:
+                                for api_call in reversed(api_calls):
+                                    endpoint = api_call.get("endpoint", "")
+                                    params = api_call.get("params", {})
+                                    
+                                    # For other atoms, check standard file params
+                                    file_from_call = (
+                                        params.get("object_names") or 
+                                        params.get("file_key") or 
+                                        params.get("object_name") or
+                                        None
+                                    )
+                                    
+                                    if file_from_call:
+                                        latest_file = file_from_call
+                                        break
+                            
+                            # Final fallback: use last input file from updated_input_files
+                            if not latest_file and updated_input_files:
+                                latest_file = updated_input_files[-1] if isinstance(updated_input_files, list) else updated_input_files[0] if updated_input_files else None
+                            
+                            if latest_file:
+                                log_entry["primary_input_file"] = latest_file
+                                log_entry["file_key"] = latest_file  # For backward compatibility
+                                # Also update configuration with latest file (replacement)
+                                updated_config["file_key"] = latest_file
+                                updated_config["object_names"] = latest_file
+                                logger.info(
+                                    f"🔄 [{atom_type.upper()}] Updated configuration with latest file (replacement): {latest_file}"
+                                )
+                        
+                        # 🔧 CRITICAL: For table atoms, update table_id in configuration from additional_results
+                        # This ensures the frontend uses the correct table_id that has the renamed columns
+                        if atom_type == "table" and additional_results:
+                            current_table_id = None
+                            table_data = additional_results.get("table_data")
+                            if table_data and isinstance(table_data, dict):
+                                current_table_id = table_data.get("table_id")
+                            
+                            # Fallback: check load_results if table_data doesn't have table_id
+                            if not current_table_id:
+                                load_results = additional_results.get("load_results", [])
+                                if load_results:
+                                    last_load = load_results[-1]
+                                    if isinstance(last_load, dict):
+                                        current_table_id = last_load.get("table_id")
+                            
+                            if current_table_id:
+                                old_table_id = updated_config.get("table_id")
+                                updated_config["table_id"] = current_table_id
+                                if old_table_id and old_table_id != current_table_id:
+                                    logger.info(
+                                        f"🔄 [TABLE] Updated configuration table_id from {old_table_id} to {current_table_id} "
+                                        f"(using table_id from rerun execution with renamed columns)"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"✅ [TABLE] Configuration table_id set to {current_table_id} "
+                                        f"(from rerun execution)"
+                                    )
+                            else:
+                                logger.warning(
+                                    f"⚠️ [TABLE] Could not extract table_id from additional_results. "
+                                    f"Configuration table_id may be outdated."
+                                )
+                        
+                        # 🔧 CRITICAL: Update log_entry configuration after all updates
+                        log_entry["configuration"] = updated_config
+                    
                     # Get all output files from the step (including saved files)
                     # Check both the execution result and the step's outputs array
                     output_files_to_check = []
@@ -1858,17 +2035,29 @@ async def run_pipeline(
                             recorded_output_files = []
                             
                             # Add result file if available
+                            # 🔧 CRITICAL: For concat, skip result_file if it's a concat_key (auto-generated Redis cache key)
+                            # concat_key pattern: 8-char hex + "_concat.arrow" (e.g., "5771ec39_concat.arrow")
+                            # These are temporary cache keys and should NOT be recorded as output files
                             if result_file:
-                                recorded_output_files.append({
-                                    "file_key": result_file,
-                                    "file_path": result_file,
-                                    "flight_path": result_file,
-                                    "save_as_name": "groupby_result" if atom_type.startswith("groupby") else None,
-                                    "is_default_name": True,
-                                    "columns": task_response.get("columns", []) if task_response else [],
-                                    "dtypes": {},
-                                    "row_count": task_response.get("row_count", 0) if task_response else 0
-                                })
+                                is_concat_key = False
+                                if atom_type == "concat":
+                                    # Check if result_file matches concat_key pattern
+                                    if result_file.endswith('_concat.arrow'):
+                                        prefix = result_file.replace('_concat.arrow', '')
+                                        if len(prefix) == 8 and all(c in '0123456789abcdef' for c in prefix.lower()):
+                                            is_concat_key = True
+                                
+                                if not is_concat_key:
+                                    recorded_output_files.append({
+                                        "file_key": result_file,
+                                        "file_path": result_file,
+                                        "flight_path": result_file,
+                                        "save_as_name": "groupby_result" if atom_type.startswith("groupby") else None,
+                                        "is_default_name": True,
+                                        "columns": task_response.get("columns", []) if task_response else [],
+                                        "dtypes": {},
+                                        "row_count": task_response.get("row_count", 0) if task_response else 0
+                                    })
                             
                             # Add saved files from API calls (preserve save_as_name)
                             for api_call in api_calls:
@@ -1892,11 +2081,91 @@ async def run_pipeline(
                                                     "row_count": 0
                                                 })
                             
+                            # Also check additional_results for saved files (from current execution)
+                            # Handle both single save_result (backward compatibility) and save_results array
+                            if additional_results:
+                                # Check for save_results array (multiple saves)
+                                save_results = additional_results.get("save_results", [])
+                                if save_results and isinstance(save_results, list):
+                                    for save_result in save_results:
+                                        if isinstance(save_result, dict):
+                                            save_status = save_result.get("task_status", save_result.get("status", "unknown"))
+                                            if save_status == "success":
+                                                saved_file = save_result.get("result", {}).get("filename") if isinstance(save_result.get("result"), dict) else save_result.get("filename")
+                                                if saved_file and not any(out.get("file_key") == saved_file for out in recorded_output_files):
+                                                    # Try to find the corresponding save API call to get filename
+                                                    save_as_name = saved_file.split("/")[-1] if "/" in saved_file else saved_file
+                                                    for api_call in api_calls:
+                                                        if api_call.get("endpoint", "").endswith("/save"):
+                                                            save_response = api_call.get("response_data", {})
+                                                            if save_response and save_response.get("filename") == saved_file:
+                                                                save_params = api_call.get("params", {})
+                                                                save_as_name = save_params.get("filename", save_as_name)
+                                                                break
+                                                    
+                                                    recorded_output_files.append({
+                                                        "file_key": saved_file,
+                                                        "file_path": saved_file,
+                                                        "flight_path": saved_file,
+                                                        "save_as_name": save_as_name,
+                                                        "is_default_name": False,
+                                                        "columns": [],
+                                                        "dtypes": {},
+                                                        "row_count": 0
+                                                    })
+                                
+                                # Also check for single save_result (backward compatibility)
+                                save_result = additional_results.get("save_result")
+                                if save_result and isinstance(save_result, dict):
+                                    save_status = save_result.get("task_status", save_result.get("status", "unknown"))
+                                    if save_status == "success":
+                                        saved_file = save_result.get("result", {}).get("filename") if isinstance(save_result.get("result"), dict) else save_result.get("filename")
+                                        if saved_file and not any(out.get("file_key") == saved_file for out in recorded_output_files):
+                                            recorded_output_files.append({
+                                                "file_key": saved_file,
+                                                "file_path": saved_file,
+                                                "flight_path": saved_file,
+                                                "save_as_name": saved_file.split("/")[-1] if "/" in saved_file else saved_file,
+                                                "is_default_name": False,
+                                                "columns": [],
+                                                "dtypes": {},
+                                                "row_count": 0
+                                            })
+                                
+                                # Also check for saved_files array
+                                saved_files = additional_results.get("saved_files", [])
+                                if saved_files and isinstance(saved_files, list):
+                                    for saved_file in saved_files:
+                                        if saved_file and not any(out.get("file_key") == saved_file for out in recorded_output_files):
+                                            # Try to find the corresponding save API call to get filename
+                                            save_as_name = saved_file.split("/")[-1] if "/" in saved_file else saved_file
+                                            for api_call in api_calls:
+                                                if api_call.get("endpoint", "").endswith("/save"):
+                                                    save_response = api_call.get("response_data", {})
+                                                    if save_response and save_response.get("filename") == saved_file:
+                                                        save_params = api_call.get("params", {})
+                                                        save_as_name = save_params.get("filename", save_as_name)
+                                                        break
+                                            
+                                            recorded_output_files.append({
+                                                "file_key": saved_file,
+                                                "file_path": saved_file,
+                                                "flight_path": saved_file,
+                                                "save_as_name": save_as_name,
+                                                "is_default_name": False,
+                                                "columns": [],
+                                                "dtypes": {},
+                                                "row_count": 0
+                                            })
+                            
                             # Also preserve existing outputs from step (for files that were saved in previous runs)
                             for existing_output in step.get("outputs", []):
                                 existing_key = existing_output.get("file_key")
                                 if existing_key and not any(out.get("file_key") == existing_key for out in recorded_output_files):
                                     recorded_output_files.append(existing_output)
+                            
+                            # 🔧 CRITICAL: Update log_entry with output files so frontend can see them
+                            log_entry["output_files"] = recorded_output_files
                             
                             # Record execution with all API calls preserved (file replacements already applied)
                             execution_started_at = datetime.utcnow()
@@ -1922,7 +2191,8 @@ async def run_pipeline(
                                 execution_error=execution_error,
                                 user_id=os.getenv("USER_ID", "unknown"),
                                 mode=request.mode,
-                                canvas_position=step.get("canvas_position", 0)
+                                canvas_position=step.get("canvas_position", 0),
+                                is_pipeline_rerun=True  # This is a pipeline rerun, so replace endpoints instead of append
                             )
                             logger.info(
                                 f"✅ Recorded full execution for {atom_type} ({atom_instance_id}) with {len(api_calls)} API calls preserved"

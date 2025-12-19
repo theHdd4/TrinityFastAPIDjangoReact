@@ -378,7 +378,8 @@ async def record_atom_execution(
     execution_error: Optional[str] = None,
     user_id: str = "unknown",
     mode: str = "laboratory",
-    canvas_position: int = 0
+    canvas_position: int = 0,
+    is_pipeline_rerun: bool = False
 ) -> Dict[str, Any]:
     """Record a single atom execution to the pipeline execution data.
     
@@ -433,7 +434,15 @@ async def record_atom_execution(
         
         # Build input files
         input_file_objects = []
+        # 🔧 CRITICAL: Deduplicate input_files before processing (especially for merge where file1 == file2)
+        seen_input_files = set()
+        deduplicated_input_files = []
         for input_file_key in input_files:
+            if input_file_key and input_file_key not in seen_input_files:
+                deduplicated_input_files.append(input_file_key)
+                seen_input_files.add(input_file_key)
+        
+        for input_file_key in deduplicated_input_files:
             # Check if this file is an output from a previous atom
             parent_atom_id = None
             if existing_doc and "pipeline" in existing_doc and "execution_graph" in existing_doc["pipeline"]:
@@ -545,99 +554,185 @@ async def record_atom_execution(
                     logger.info(
                         f"📋 [CHART-MAKER] Merged API calls: {len(preserved_api_calls)} preserved + {len(api_calls)} new"
                     )
-                elif atom_type == "table":
-                    # For table atoms, we need special handling:
-                    # - Keep only the FIRST /table/load call (initial load)
-                    # - Preserve all /table/update, /table/edit-cell, column ops, etc. (operations)
-                    # - If a new /table/load comes in, replace the old one (it's just a refresh)
-                    has_preserved_load = False
-                    load_call_to_preserve = None
+                # elif atom_type == "table":
+                #     # For table atoms, we need special handling:
+                #     # - Keep only the FIRST /table/load call (initial load)
+                #     # - Preserve all /table/update, /table/edit-cell, column ops, etc. (operations)
+                #     # - If a new /table/load comes in, replace the old one (it's just a refresh)
+                #     has_preserved_load = False
+                #     load_call_to_preserve = None
                     
-                    for existing_call in existing_api_calls:
-                        endpoint = existing_call.get("endpoint", "")
+                #     for existing_call in existing_api_calls:
+                #         endpoint = existing_call.get("endpoint", "")
                         
-                        if "/table/load" in endpoint.lower() or endpoint.endswith("/load"):
-                            # Only preserve the first /table/load call
-                            if not has_preserved_load:
-                                load_call_to_preserve = existing_call
-                                has_preserved_load = True
-                                logger.info(
-                                    f"📌 [TABLE] Preserving first /table/load call"
-                                )
-                            else:
-                                # Skip subsequent /table/load calls (they're just refreshes)
-                                logger.info(
-                                    f"🔄 [TABLE] Skipping duplicate /table/load call (refresh)"
-                                )
-                        elif endpoint not in execution_endpoints:
-                            # Preserve all other non-execution calls (update, edit-cell, column ops, etc.)
-                            preserved_api_calls.append(existing_call)
-                            logger.info(
-                                f"📌 [TABLE] Preserving API call: {endpoint}"
-                            )
+                #         if "/table/load" in endpoint.lower() or endpoint.endswith("/load"):
+                #             # Only preserve the first /table/load call
+                #             if not has_preserved_load:
+                #                 load_call_to_preserve = existing_call
+                #                 has_preserved_load = True
+                #                 logger.info(
+                #                     f"📌 [TABLE] Preserving first /table/load call"
+                #                 )
+                #             else:
+                #                 # Skip subsequent /table/load calls (they're just refreshes)
+                #                 logger.info(
+                #                     f"🔄 [TABLE] Skipping duplicate /table/load call (refresh)"
+                #                 )
+                #         elif endpoint not in execution_endpoints:
+                #             # Preserve all other non-execution calls (update, edit-cell, column ops, etc.)
+                #             preserved_api_calls.append(existing_call)
+                #             logger.info(
+                #                 f"📌 [TABLE] Preserving API call: {endpoint}"
+                #             )
                     
-                    # Add the preserved load call at the beginning if it exists
-                    if load_call_to_preserve:
-                        preserved_api_calls.insert(0, load_call_to_preserve)
+                #     # Add the preserved load call at the beginning if it exists
+                #     if load_call_to_preserve:
+                #         preserved_api_calls.insert(0, load_call_to_preserve)
                     
-                    # Check if new API calls include a /table/load
-                    new_load_calls = [call for call in api_calls if "/table/load" in call.get("endpoint", "").lower() or call.get("endpoint", "").endswith("/load")]
-                    new_operation_calls = [call for call in api_calls if call not in new_load_calls]
+                #     # Check if new API calls include a /table/load
+                #     new_load_calls = [call for call in api_calls if "/table/load" in call.get("endpoint", "").lower() or call.get("endpoint", "").endswith("/load")]
+                #     new_operation_calls = [call for call in api_calls if call not in new_load_calls]
                     
-                    # 🔧 CRITICAL: Check if the new load is loading a file that's an output from this same atom (save as scenario)
-                    new_load_file = None
-                    is_loading_own_output = False
-                    if new_load_calls:
-                        new_load_params = new_load_calls[0].get("params", {})
-                        new_load_file = new_load_params.get("object_name", "")
+                #     # 🔧 CRITICAL: Check if the new load is loading a file that's an output from this same atom (save as scenario)
+                #     new_load_file = None
+                #     is_loading_own_output = False
+                #     if new_load_calls:
+                #         new_load_params = new_load_calls[0].get("params", {})
+                #         new_load_file = new_load_params.get("object_name", "")
                         
-                        # Check if this file is in the outputs of the existing step (save as scenario)
-                        existing_outputs = existing_step.get("outputs", [])
-                        for output in existing_outputs:
-                            if output.get("file_key") == new_load_file:
-                                is_loading_own_output = True
-                                logger.info(
-                                    f"🔄 [TABLE] New /table/load is loading own output file '{new_load_file}' (save as scenario) - preserving all old operations"
-                                )
-                                break
+                #         # Check if this file is in the outputs of the existing step (save as scenario)
+                #         existing_outputs = existing_step.get("outputs", [])
+                #         for output in existing_outputs:
+                #             if output.get("file_key") == new_load_file:
+                #                 is_loading_own_output = True
+                #                 logger.info(
+                #                     f"🔄 [TABLE] New /table/load is loading own output file '{new_load_file}' (save as scenario) - preserving all old operations"
+                #                 )
+                #                 break
                     
-                    if new_load_calls:
-                        if is_loading_own_output:
-                            # Save as scenario: preserve ALL old operations (load, updates, etc.)
-                            # Add new load at the beginning, but keep all old operations
-                            merged_api_calls = new_load_calls + preserved_api_calls + new_operation_calls
-                            logger.info(
-                                f"📋 [TABLE] Save as scenario: {len(new_load_calls)} new load(s) + {len(preserved_api_calls)} preserved operations + {len(new_operation_calls)} new operations"
-                            )
-                        else:
-                            # Regular file refresh: replace old load, preserve operations
-                            if load_call_to_preserve:
-                                logger.info(
-                                    f"🔄 [TABLE] Replacing old /table/load with new one (file refresh)"
-                                )
-                                # Remove the old load call from preserved_api_calls
-                                preserved_api_calls = [call for call in preserved_api_calls if call != load_call_to_preserve]
-                            # Add the new load call at the beginning
-                            # Then preserved operations, then new operations
-                            merged_api_calls = new_load_calls + preserved_api_calls + new_operation_calls
-                            logger.info(
-                                f"📋 [TABLE] Merged API calls: {len(new_load_calls)} load(s) + {len(preserved_api_calls)} preserved + {len(new_operation_calls)} new operations"
-                            )
-                    else:
-                        # No new load call, just append new operation calls (updates, etc.) at the end
-                        merged_api_calls = preserved_api_calls + new_operation_calls
-                        logger.info(
-                            f"📋 [TABLE] Merged API calls: {len(preserved_api_calls)} preserved + {len(new_operation_calls)} new operations"
-                        )
+                #     if new_load_calls:
+                #         if is_loading_own_output:
+                #             # Save as scenario: preserve ALL old operations (load, updates, etc.)
+                #             # Add new load at the beginning, but keep all old operations
+                #             merged_api_calls = new_load_calls + preserved_api_calls + new_operation_calls
+                #             logger.info(
+                #                 f"📋 [TABLE] Save as scenario: {len(new_load_calls)} new load(s) + {len(preserved_api_calls)} preserved operations + {len(new_operation_calls)} new operations"
+                #             )
+                #         else:
+                #             # Regular file refresh: replace old load, preserve operations
+                #             if load_call_to_preserve:
+                #                 logger.info(
+                #                     f"🔄 [TABLE] Replacing old /table/load with new one (file refresh)"
+                #                 )
+                #                 # Remove the old load call from preserved_api_calls
+                #                 preserved_api_calls = [call for call in preserved_api_calls if call != load_call_to_preserve]
+                #             # Add the new load call at the beginning
+                #             # Then preserved operations, then new operations
+                #             merged_api_calls = new_load_calls + preserved_api_calls + new_operation_calls
+                #             logger.info(
+                #                 f"📋 [TABLE] Merged API calls: {len(new_load_calls)} load(s) + {len(preserved_api_calls)} preserved + {len(new_operation_calls)} new operations"
+                #             )
+                #     else:
+                #         # No new load call, just append new operation calls (updates, etc.) at the end
+                #         merged_api_calls = preserved_api_calls + new_operation_calls
+                #         logger.info(
+                #             f"📋 [TABLE] Merged API calls: {len(preserved_api_calls)} preserved + {len(new_operation_calls)} new operations"
+                        # )
                 elif atom_type == "groupby-wtg-avg":
-                    # For groupby atoms: Preserve ALL API calls (including execution markers) to maintain full sequence
-                    # This allows multiple init/run sequences for different files
-                    # Example: init(file1) -> run(file1) -> init(file2) -> run(file2) -> save
-                    merged_api_calls = existing_api_calls + api_calls
-                    logger.info(
-                        f"📋 [GROUPBY] Appended {len(api_calls)} new API call(s) to existing {len(existing_api_calls)} call(s). "
-                        f"Total: {len(merged_api_calls)} API calls preserved."
-                    )
+                    # For groupby atoms: 
+                    # - If pipeline rerun (is_pipeline_rerun=True): REPLACE all API calls (same endpoints, updated files)
+                    # - If normal operation: APPEND all API calls (preserve full sequence for new operations)
+                    # Example: init(file1) -> run(file1) -> save(test1) -> init(file2) -> run(file2) -> save(test2)
+                    if is_pipeline_rerun:
+                        # Pipeline rerun: Replace all API calls (same endpoints, files updated from replacements)
+                        merged_api_calls = api_calls
+                        logger.info(
+                            f"🔄 [GROUPBY] Pipeline rerun: Replaced {len(existing_api_calls)} existing API calls with {len(api_calls)} new calls "
+                            f"(same endpoints, updated files from replacements)"
+                        )
+                    else:
+                        # Normal operation: Append all API calls (preserve full sequence)
+                        merged_api_calls = existing_api_calls + api_calls
+                        logger.info(
+                            f"📋 [GROUPBY] Normal operation: Appended {len(api_calls)} new API call(s) to existing {len(existing_api_calls)} call(s). "
+                            f"Total: {len(merged_api_calls)} API calls preserved."
+                        )
+                elif atom_type == "merge":
+                    # For merge atoms: 
+                    # - If pipeline rerun (is_pipeline_rerun=True): REPLACE all API calls (same endpoints, updated files)
+                    # - If normal operation: APPEND all API calls (preserve full sequence for new operations)
+                    # Example: init(file1, file2) -> perform(file1, file2) -> save(test1) -> init(file3, file4) -> perform(file3, file4) -> save(test2)
+                    if is_pipeline_rerun:
+                        # Pipeline rerun: Replace all API calls (same endpoints, files updated from replacements)
+                        merged_api_calls = api_calls
+                        logger.info(
+                            f"🔄 [MERGE] Pipeline rerun: Replaced {len(existing_api_calls)} existing API calls with {len(api_calls)} new calls "
+                            f"(same endpoints, updated files from replacements)"
+                        )
+                    else:
+                        # Normal operation: Append all API calls (preserve full sequence)
+                        merged_api_calls = existing_api_calls + api_calls
+                        logger.info(
+                            f"📋 [MERGE] Normal operation: Appended {len(api_calls)} new API call(s) to existing {len(existing_api_calls)} call(s). "
+                            f"Total: {len(merged_api_calls)} API calls preserved."
+                        )
+                elif atom_type == "concat":
+                    # For concat atoms: 
+                    # - If pipeline rerun (is_pipeline_rerun=True): REPLACE all API calls (same endpoints, updated files)
+                    # - If normal operation: APPEND all API calls (preserve full sequence for new operations)
+                    # Example: init(file1, file2) -> perform(file1, file2) -> save(test1) -> init(file3, file4) -> perform(file3, file4) -> save(test2)
+                    if is_pipeline_rerun:
+                        # Pipeline rerun: Replace all API calls (same endpoints, files updated from replacements)
+                        merged_api_calls = api_calls
+                        logger.info(
+                            f"🔄 [CONCAT] Pipeline rerun: Replaced {len(existing_api_calls)} existing API calls with {len(api_calls)} new calls "
+                            f"(same endpoints, updated files from replacements)"
+                        )
+                    else:
+                        # Normal operation: Append all API calls (preserve full sequence)
+                        merged_api_calls = existing_api_calls + api_calls
+                        logger.info(
+                            f"📋 [CONCAT] Normal operation: Appended {len(api_calls)} new API call(s) to existing {len(existing_api_calls)} call(s). "
+                            f"Total: {len(merged_api_calls)} API calls preserved."
+                        )
+                elif atom_type == "pivot-table":
+                    # For pivot-table atoms: 
+                    # - If pipeline rerun (is_pipeline_rerun=True): REPLACE all API calls (same endpoints, updated files)
+                    # - If normal operation: APPEND all API calls (preserve full sequence for new operations)
+                    # Example: compute(file1) -> save(test1) -> compute(file2) -> save(test2)
+                    if is_pipeline_rerun:
+                        # Pipeline rerun: Replace all API calls (same endpoints, files updated from replacements)
+                        merged_api_calls = api_calls
+                        logger.info(
+                            f"🔄 [PIVOT-TABLE] Pipeline rerun: Replaced {len(existing_api_calls)} existing API calls with {len(api_calls)} new calls "
+                            f"(same endpoints, updated files from replacements)"
+                        )
+                    else:
+                        # Normal operation: Append all API calls (preserve full sequence)
+                        merged_api_calls = existing_api_calls + api_calls
+                        logger.info(
+                            f"📋 [PIVOT-TABLE] Normal operation: Appended {len(api_calls)} new API call(s) to existing {len(existing_api_calls)} call(s). "
+                            f"Total: {len(merged_api_calls)} API calls preserved."
+                        )
+                elif atom_type == "table":
+                    # For table atoms: 
+                    # - If pipeline rerun (is_pipeline_rerun=True): REPLACE all API calls (same endpoints, updated files)
+                    # - If normal operation: APPEND all API calls (preserve full sequence for new operations)
+                    # Example: load(file1) -> update -> edit-cell -> save(test1) -> load(file2) -> update -> save(test2)
+                    if is_pipeline_rerun:
+                        # Pipeline rerun: Replace all API calls (same endpoints, files updated from replacements)
+                        merged_api_calls = api_calls
+                        logger.info(
+                            f"🔄 [TABLE] Pipeline rerun: Replaced {len(existing_api_calls)} existing API calls with {len(api_calls)} new calls "
+                            f"(same endpoints, updated files from replacements)"
+                        )
+                    else:
+                        # Normal operation: Append all API calls (preserve full sequence)
+                        merged_api_calls = existing_api_calls + api_calls
+                        logger.info(
+                            f"📋 [TABLE] Normal operation: Appended {len(api_calls)} new API call(s) to existing {len(existing_api_calls)} call(s). "
+                            f"Total: {len(merged_api_calls)} API calls preserved."
+                        )
                 else:
                     # For other atom types, use the original logic
                     for existing_call in existing_api_calls:
@@ -645,9 +740,9 @@ async def record_atom_execution(
                         # Keep API calls that are not execution-related (like /save, /init, etc.)
                         if endpoint not in execution_endpoints:
                             preserved_api_calls.append(existing_call)
-                            logger.info(
-                                f"📌 Preserving API call: {endpoint} (not execution-related)"
-                            )
+                            # logger.info(
+                            #     f"📌 Preserving API call: {endpoint} (not execution-related)"
+                            # )
                     
                     # Add new execution API calls
                     merged_api_calls = preserved_api_calls + api_calls
@@ -658,7 +753,7 @@ async def record_atom_execution(
                 existing_step["api_calls"] = merged_api_calls
                 existing_step["execution"] = execution_info
                 
-                # Handle outputs: append for groupby, replace for others
+                # Handle outputs: append for groupby and merge, replace for others
                 if atom_type == "groupby-wtg-avg":
                     # For groupby: append new output files to existing ones (avoid duplicates)
                     existing_outputs = existing_step.get("outputs", [])
@@ -679,6 +774,102 @@ async def record_atom_execution(
                                     existing_outputs[idx] = new_output
                                     logger.info(
                                         f"🔄 [GROUPBY] Updated existing output file: {new_output_key}"
+                                    )
+                                    break
+                    
+                    existing_step["outputs"] = existing_outputs
+                elif atom_type == "merge":
+                    # For merge: append new output files to existing ones (avoid duplicates)
+                    existing_outputs = existing_step.get("outputs", [])
+                    existing_output_keys = {out.get("file_key") for out in existing_outputs if out.get("file_key")}
+                    
+                    for new_output in output_files:
+                        new_output_key = new_output.get("file_key")
+                        if new_output_key and new_output_key not in existing_output_keys:
+                            existing_outputs.append(new_output)
+                            existing_output_keys.add(new_output_key)
+                            logger.info(
+                                f"➕ [MERGE] Appended output file: {new_output_key}"
+                            )
+                        elif new_output_key in existing_output_keys:
+                            # Update existing output with new data (e.g., updated save_as_name)
+                            for idx, existing_out in enumerate(existing_outputs):
+                                if existing_out.get("file_key") == new_output_key:
+                                    existing_outputs[idx] = new_output
+                                    logger.info(
+                                        f"🔄 [MERGE] Updated existing output file: {new_output_key}"
+                                    )
+                                    break
+                    
+                    existing_step["outputs"] = existing_outputs
+                elif atom_type == "concat":
+                    # For concat: append new output files to existing ones (avoid duplicates)
+                    existing_outputs = existing_step.get("outputs", [])
+                    existing_output_keys = {out.get("file_key") for out in existing_outputs if out.get("file_key")}
+                    
+                    for new_output in output_files:
+                        new_output_key = new_output.get("file_key")
+                        if new_output_key and new_output_key not in existing_output_keys:
+                            existing_outputs.append(new_output)
+                            existing_output_keys.add(new_output_key)
+                            logger.info(
+                                f"➕ [CONCAT] Appended output file: {new_output_key}"
+                            )
+                        elif new_output_key in existing_output_keys:
+                            # Update existing output with new data (e.g., updated save_as_name)
+                            for idx, existing_out in enumerate(existing_outputs):
+                                if existing_out.get("file_key") == new_output_key:
+                                    existing_outputs[idx] = new_output
+                                    logger.info(
+                                        f"🔄 [CONCAT] Updated existing output file: {new_output_key}"
+                                    )
+                                    break
+                    
+                    existing_step["outputs"] = existing_outputs
+                elif atom_type == "pivot-table":
+                    # For pivot-table: append new output files to existing ones (avoid duplicates)
+                    existing_outputs = existing_step.get("outputs", [])
+                    existing_output_keys = {out.get("file_key") for out in existing_outputs if out.get("file_key")}
+                    
+                    for new_output in output_files:
+                        new_output_key = new_output.get("file_key")
+                        if new_output_key and new_output_key not in existing_output_keys:
+                            existing_outputs.append(new_output)
+                            existing_output_keys.add(new_output_key)
+                            logger.info(
+                                f"➕ [PIVOT-TABLE] Appended output file: {new_output_key}"
+                            )
+                        elif new_output_key in existing_output_keys:
+                            # Update existing output with new data (e.g., updated save_as_name)
+                            for idx, existing_out in enumerate(existing_outputs):
+                                if existing_out.get("file_key") == new_output_key:
+                                    existing_outputs[idx] = new_output
+                                    logger.info(
+                                        f"🔄 [PIVOT-TABLE] Updated existing output file: {new_output_key}"
+                                    )
+                                    break
+                    
+                    existing_step["outputs"] = existing_outputs
+                elif atom_type == "table":
+                    # For table: append new output files to existing ones (avoid duplicates)
+                    existing_outputs = existing_step.get("outputs", [])
+                    existing_output_keys = {out.get("file_key") for out in existing_outputs if out.get("file_key")}
+                    
+                    for new_output in output_files:
+                        new_output_key = new_output.get("file_key")
+                        if new_output_key and new_output_key not in existing_output_keys:
+                            existing_outputs.append(new_output)
+                            existing_output_keys.add(new_output_key)
+                            logger.info(
+                                f"➕ [TABLE] Appended output file: {new_output_key}"
+                            )
+                        elif new_output_key in existing_output_keys:
+                            # Update existing output with new data (e.g., updated save_as_name)
+                            for idx, existing_out in enumerate(existing_outputs):
+                                if existing_out.get("file_key") == new_output_key:
+                                    existing_outputs[idx] = new_output
+                                    logger.info(
+                                        f"🔄 [TABLE] Updated existing output file: {new_output_key}"
                                     )
                                     break
                     
@@ -756,6 +947,270 @@ async def record_atom_execution(
                             )
                     
                     existing_step["inputs"] = existing_inputs
+                elif atom_type == "merge":
+                    # For merge: append input files (avoid duplicates)
+                    # Also extract input files from API call params to ensure all files are tracked
+                    existing_inputs = existing_step.get("inputs", [])
+                    existing_input_keys = {inp.get("file_key") for inp in existing_inputs if inp.get("file_key")}
+                    
+                    # 🔧 CRITICAL: For merge, collect file1 and file2 from API calls, then deduplicate
+                    # This prevents the same file from being added twice when file1 == file2
+                    files_to_add = set()  # Use set to automatically deduplicate
+                    
+                    # Add input files from the new API calls' params
+                    for api_call in api_calls:
+                        params = api_call.get("params", {})
+                        # For merge, specifically check file1 and file2
+                        file1 = params.get("file1")
+                        file2 = params.get("file2")
+                        if file1:
+                            files_to_add.add(file1)
+                        if file2:
+                            files_to_add.add(file2)
+                        
+                        # Also check other possible param keys (for backward compatibility)
+                        file_param_keys = ["object_names", "file_key", "object_name", "source_object", "data_source", 
+                                         "input_file", "input_files", "left_file", "right_file"]
+                        for key in file_param_keys:
+                            if key in params:
+                                file_value = params[key]
+                                # Handle both string and list of strings
+                                if isinstance(file_value, str) and file_value:
+                                    files_to_add.add(file_value)
+                                elif isinstance(file_value, list):
+                                    # Handle list of files
+                                    for file_item in file_value:
+                                        if isinstance(file_item, str) and file_item:
+                                            files_to_add.add(file_item)
+                    
+                    # Now add all unique files from the set
+                    for file_value in files_to_add:
+                        if file_value not in existing_input_keys:
+                            # Check if this file is an output from a previous atom
+                            parent_atom_id = None
+                            if existing_doc and "pipeline" in existing_doc and "execution_graph" in existing_doc["pipeline"]:
+                                for prev_step in existing_doc["pipeline"]["execution_graph"]:
+                                    for output in prev_step.get("outputs", []):
+                                        if output.get("file_key") == file_value:
+                                            parent_atom_id = prev_step.get("atom_instance_id")
+                                            break
+                                    if parent_atom_id:
+                                        break
+                            
+                            new_input_obj = _build_input_file(file_value, file_value, parent_atom_id)
+                            existing_inputs.append(new_input_obj)
+                            existing_input_keys.add(file_value)
+                            logger.info(
+                                f"➕ [MERGE] Appended input file from API call params: {file_value}"
+                            )
+                    
+                    # Also add input files from input_file_objects (from the function parameter)
+                    for new_input in input_file_objects:
+                        new_input_key = new_input.get("file_key")
+                        if new_input_key and new_input_key not in existing_input_keys:
+                            existing_inputs.append(new_input)
+                            existing_input_keys.add(new_input_key)
+                            logger.info(
+                                f"➕ [MERGE] Appended input file: {new_input_key}"
+                            )
+                    
+                    existing_step["inputs"] = existing_inputs
+                elif atom_type == "concat":
+                    # For concat: append input files (avoid duplicates)
+                    # Also extract input files from API call params to ensure all files are tracked
+                    existing_inputs = existing_step.get("inputs", [])
+                    existing_input_keys = {inp.get("file_key") for inp in existing_inputs if inp.get("file_key")}
+                    
+                    # 🔧 CRITICAL: For concat, collect file1 and file2 from API calls, then deduplicate
+                    # This prevents the same file from being added twice when file1 == file2
+                    files_to_add = set()  # Use set to automatically deduplicate
+                    
+                    # Add input files from the new API calls' params
+                    for api_call in api_calls:
+                        params = api_call.get("params", {})
+                        # For concat, specifically check file1 and file2
+                        file1 = params.get("file1")
+                        file2 = params.get("file2")
+                        if file1:
+                            files_to_add.add(file1)
+                        if file2:
+                            files_to_add.add(file2)
+                        
+                        # Also check other possible param keys (for backward compatibility)
+                        file_param_keys = ["object_names", "file_key", "object_name", "source_object", "data_source", 
+                                         "input_file", "input_files", "left_file", "right_file"]
+                        for key in file_param_keys:
+                            if key in params:
+                                file_value = params[key]
+                                # Handle both string and list of strings
+                                if isinstance(file_value, str) and file_value:
+                                    files_to_add.add(file_value)
+                                elif isinstance(file_value, list):
+                                    # Handle list of files
+                                    for file_item in file_value:
+                                        if isinstance(file_item, str) and file_item:
+                                            files_to_add.add(file_item)
+                    
+                    # Now add all unique files from the set
+                    for file_value in files_to_add:
+                        if file_value not in existing_input_keys:
+                            # Check if this file is an output from a previous atom
+                            parent_atom_id = None
+                            if existing_doc and "pipeline" in existing_doc and "execution_graph" in existing_doc["pipeline"]:
+                                for prev_step in existing_doc["pipeline"]["execution_graph"]:
+                                    for output in prev_step.get("outputs", []):
+                                        if output.get("file_key") == file_value:
+                                            parent_atom_id = prev_step.get("atom_instance_id")
+                                            break
+                                    if parent_atom_id:
+                                        break
+                            
+                            new_input_obj = _build_input_file(file_value, file_value, parent_atom_id)
+                            existing_inputs.append(new_input_obj)
+                            existing_input_keys.add(file_value)
+                            logger.info(
+                                f"➕ [CONCAT] Appended input file from API call params: {file_value}"
+                            )
+                    
+                    # Also add input files from input_file_objects (from the function parameter)
+                    for new_input in input_file_objects:
+                        new_input_key = new_input.get("file_key")
+                        if new_input_key and new_input_key not in existing_input_keys:
+                            existing_inputs.append(new_input)
+                            existing_input_keys.add(new_input_key)
+                            logger.info(
+                                f"➕ [CONCAT] Appended input file: {new_input_key}"
+                            )
+                    
+                    existing_step["inputs"] = existing_inputs
+                elif atom_type == "pivot-table":
+                    # For pivot-table: append input files (avoid duplicates)
+                    # Extract input files from API call params to ensure all files are tracked
+                    existing_inputs = existing_step.get("inputs", [])
+                    existing_input_keys = {inp.get("file_key") for inp in existing_inputs if inp.get("file_key")}
+                    
+                    # 🔧 CRITICAL: For pivot-table, collect data_source from API calls, then deduplicate
+                    files_to_add = set()  # Use set to automatically deduplicate
+                    
+                    # Add input files from the new API calls' params
+                    for api_call in api_calls:
+                        params = api_call.get("params", {})
+                        # For pivot-table, specifically check data_source
+                        data_source = params.get("data_source")
+                        if data_source:
+                            files_to_add.add(data_source)
+                        
+                        # Also check other possible param keys (for backward compatibility)
+                        file_param_keys = ["object_names", "file_key", "object_name", "source_object", 
+                                         "input_file", "input_files", "file1", "file2"]
+                        for key in file_param_keys:
+                            if key in params:
+                                file_value = params[key]
+                                # Handle both string and list of strings
+                                if isinstance(file_value, str) and file_value:
+                                    files_to_add.add(file_value)
+                                elif isinstance(file_value, list):
+                                    # Handle list of files
+                                    for file_item in file_value:
+                                        if isinstance(file_item, str) and file_item:
+                                            files_to_add.add(file_item)
+                    
+                    # Now add all unique files from the set
+                    for file_value in files_to_add:
+                        if file_value not in existing_input_keys:
+                            # Check if this file is an output from a previous atom
+                            parent_atom_id = None
+                            if existing_doc and "pipeline" in existing_doc and "execution_graph" in existing_doc["pipeline"]:
+                                for prev_step in existing_doc["pipeline"]["execution_graph"]:
+                                    for output in prev_step.get("outputs", []):
+                                        if output.get("file_key") == file_value:
+                                            parent_atom_id = prev_step.get("atom_instance_id")
+                                            break
+                                    if parent_atom_id:
+                                        break
+                            
+                            new_input_obj = _build_input_file(file_value, file_value, parent_atom_id)
+                            existing_inputs.append(new_input_obj)
+                            existing_input_keys.add(file_value)
+                            logger.info(
+                                f"➕ [PIVOT-TABLE] Appended input file from API call params: {file_value}"
+                            )
+                    
+                    # Also add input files from input_file_objects (from the function parameter)
+                    for new_input in input_file_objects:
+                        new_input_key = new_input.get("file_key")
+                        if new_input_key and new_input_key not in existing_input_keys:
+                            existing_inputs.append(new_input)
+                            existing_input_keys.add(new_input_key)
+                            logger.info(
+                                f"➕ [PIVOT-TABLE] Appended input file: {new_input_key}"
+                            )
+                    
+                    existing_step["inputs"] = existing_inputs
+                elif atom_type == "table":
+                    # For table: append input files (avoid duplicates)
+                    # Extract input files from API call params to ensure all files are tracked
+                    existing_inputs = existing_step.get("inputs", [])
+                    existing_input_keys = {inp.get("file_key") for inp in existing_inputs if inp.get("file_key")}
+                    
+                    # 🔧 CRITICAL: For table, collect object_name from API calls, then deduplicate
+                    files_to_add = set()  # Use set to automatically deduplicate
+                    
+                    # Add input files from the new API calls' params
+                    for api_call in api_calls:
+                        params = api_call.get("params", {})
+                        # For table, specifically check object_name (from /load)
+                        object_name = params.get("object_name")
+                        if object_name:
+                            files_to_add.add(object_name)
+                        
+                        # Also check other possible param keys (for backward compatibility)
+                        file_param_keys = ["file_key", "file_name", "source_object", "data_source", 
+                                         "input_file", "input_files", "file1", "file2"]
+                        for key in file_param_keys:
+                            if key in params:
+                                file_value = params[key]
+                                # Handle both string and list of strings
+                                if isinstance(file_value, str) and file_value:
+                                    files_to_add.add(file_value)
+                                elif isinstance(file_value, list):
+                                    # Handle list of files
+                                    for file_item in file_value:
+                                        if isinstance(file_item, str) and file_item:
+                                            files_to_add.add(file_item)
+                    
+                    # Now add all unique files from the set
+                    for file_value in files_to_add:
+                        if file_value not in existing_input_keys:
+                            # Check if this file is an output from a previous atom
+                            parent_atom_id = None
+                            if existing_doc and "pipeline" in existing_doc and "execution_graph" in existing_doc["pipeline"]:
+                                for prev_step in existing_doc["pipeline"]["execution_graph"]:
+                                    for output in prev_step.get("outputs", []):
+                                        if output.get("file_key") == file_value:
+                                            parent_atom_id = prev_step.get("atom_instance_id")
+                                            break
+                                    if parent_atom_id:
+                                        break
+                            
+                            new_input_obj = _build_input_file(file_value, file_value, parent_atom_id)
+                            existing_inputs.append(new_input_obj)
+                            existing_input_keys.add(file_value)
+                            logger.info(
+                                f"➕ [TABLE] Appended input file from API call params: {file_value}"
+                            )
+                    
+                    # Also add input files from input_file_objects (from the function parameter)
+                    for new_input in input_file_objects:
+                        new_input_key = new_input.get("file_key")
+                        if new_input_key and new_input_key not in existing_input_keys:
+                            existing_inputs.append(new_input)
+                            existing_input_keys.add(new_input_key)
+                            logger.info(
+                                f"➕ [TABLE] Appended input file: {new_input_key}"
+                            )
+                    
+                    existing_step["inputs"] = existing_inputs
                 else:
                     # For other atom types, use the original logic
                     # 1. If new inputs are empty: preserve existing inputs (for operations like /update, /edit-cell)
@@ -803,7 +1258,17 @@ async def record_atom_execution(
             
             # Update root files - add input files that aren't outputs from previous steps
             root_files = pipeline.get("root_files", [])
-            root_file_keys = {rf.get("file_key") for rf in root_files}
+            
+            # 🔧 CRITICAL: First, deduplicate existing root_files (in case duplicates were added before)
+            seen_root_file_keys = set()
+            deduplicated_root_files = []
+            for rf in root_files:
+                file_key = rf.get("file_key")
+                if file_key and file_key not in seen_root_file_keys:
+                    deduplicated_root_files.append(rf)
+                    seen_root_file_keys.add(file_key)
+            root_files = deduplicated_root_files
+            root_file_keys = seen_root_file_keys
             
             # 🔧 CRITICAL: Remove files from root_files if they become outputs (derived files)
             # This ensures that when a file is saved (save as), it's marked as derived, not root
@@ -826,10 +1291,18 @@ async def record_atom_execution(
                     if not overwrite or (col_op_input and col_op_output != col_op_input):
                         column_op_output_files.add(col_op_output)
             
+            # 🔧 CRITICAL: Deduplicate input_files before processing root files (especially for merge where file1 == file2)
+            seen_input_files_for_root = set()
             for input_file_key in input_files:
+                # Skip if we've already processed this file
+                if input_file_key in seen_input_files_for_root:
+                    continue
+                seen_input_files_for_root.add(input_file_key)
+                
                 is_output = False
-                # Check if it's an output from a previous atom step
-                for step in execution_graph[:-1]:  # Exclude the step we just added
+                # 🔧 CRITICAL: Check if it's an output from ANY atom step (including current step)
+                # Derived files should NEVER be in root_files
+                for step in execution_graph:  # Check ALL steps including current
                     for output in step.get("outputs", []):
                         if output.get("file_key") == input_file_key:
                             is_output = True
@@ -841,6 +1314,14 @@ async def record_atom_execution(
                 if not is_output and input_file_key in column_op_output_files:
                     is_output = True
                 
+                # 🔧 CRITICAL: Also check if it's in the current step's output_files
+                if not is_output:
+                    for output_file in output_files:
+                        if output_file.get("file_key") == input_file_key:
+                            is_output = True
+                            break
+                
+                # Only add to root_files if it's NOT a derived file
                 if not is_output and input_file_key not in root_file_keys:
                     root_files.append(_get_file_metadata(input_file_key))
                     root_file_keys.add(input_file_key)
@@ -871,9 +1352,16 @@ async def record_atom_execution(
                     })
                 
                 # Add input file nodes and edges
+                # 🔧 CRITICAL: Track seen file keys per step to prevent duplicates (especially for merge where file1 == file2)
+                seen_input_file_keys = set()
                 for input_file in step.get("inputs", []):
                     file_key = input_file.get("file_key")
                     if file_key:
+                        # Skip if we've already processed this file for this step
+                        if file_key in seen_input_file_keys:
+                            continue
+                        seen_input_file_keys.add(file_key)
+                        
                         file_node_id = file_key
                         all_file_keys.add(file_key)
                         
@@ -886,7 +1374,7 @@ async def record_atom_execution(
                                 "label": file_name
                             })
                         
-                        # Add edge from file to atom
+                        # Add edge from file to atom (only once per file per atom)
                         edge_exists = any(
                             (e.get("from") == file_node_id or e.get("from_node") == file_node_id) and 
                             (e.get("to") == atom_node_id or e.get("to_node") == atom_node_id)
@@ -961,6 +1449,31 @@ async def record_atom_execution(
             else:
                 summary["status"] = "partial"
             
+            # 🔧 CRITICAL: Final deduplication and derived file removal before saving (safety check)
+            seen_root_keys_final = set()
+            final_root_files = []
+            
+            # Collect all derived file keys (outputs from all steps and column operations)
+            all_derived_file_keys = set()
+            for step in execution_graph:
+                for output in step.get("outputs", []):
+                    output_key = output.get("file_key")
+                    if output_key:
+                        all_derived_file_keys.add(output_key)
+            for output_file in output_files:
+                output_key = output_file.get("file_key")
+                if output_key:
+                    all_derived_file_keys.add(output_key)
+            all_derived_file_keys.update(column_op_output_files)
+            
+            for rf in root_files:
+                file_key = rf.get("file_key")
+                # Skip if duplicate or if it's a derived file
+                if file_key and file_key not in seen_root_keys_final and file_key not in all_derived_file_keys:
+                    final_root_files.append(rf)
+                    seen_root_keys_final.add(file_key)
+            root_files = final_root_files
+            
             # Update document
             await coll.update_one(
                 {"_id": doc_id},
@@ -977,16 +1490,39 @@ async def record_atom_execution(
             )
         else:
             # Create new document
-            root_files = []
+            # 🔧 CRITICAL: Deduplicate input_files before processing (especially for merge where file1 == file2)
+            seen_input_files = set()
+            deduplicated_input_files = []
             for input_file_key in input_files:
-                root_files.append(_get_file_metadata(input_file_key))
+                if input_file_key and input_file_key not in seen_input_files:
+                    deduplicated_input_files.append(input_file_key)
+                    seen_input_files.add(input_file_key)
+            
+            # 🔧 CRITICAL: Check for derived files (outputs from column operations or current step outputs)
+            column_operations = []
+            column_op_output_files = set()
+            # Note: For new documents, there won't be previous steps, but check column operations if any
+            
+            # Collect all derived file keys
+            all_derived_file_keys = set()
+            for output_file in output_files:
+                output_key = output_file.get("file_key")
+                if output_key:
+                    all_derived_file_keys.add(output_key)
+            all_derived_file_keys.update(column_op_output_files)
+            
+            root_files = []
+            for input_file_key in deduplicated_input_files:
+                # Only add to root_files if it's NOT a derived file
+                if input_file_key not in all_derived_file_keys:
+                    root_files.append(_get_file_metadata(input_file_key))
             
             # Build initial lineage
             nodes = []
             edges = []
             
-            # Add input file nodes
-            for input_file_key in input_files:
+            # Add input file nodes (use deduplicated list)
+            for input_file_key in deduplicated_input_files:
                 file_name = input_file_key.split("/")[-1] if "/" in input_file_key else input_file_key
                 nodes.append({
                     "id": input_file_key,
@@ -1001,8 +1537,8 @@ async def record_atom_execution(
                 "label": atom_title
             })
             
-            # Add edges from input files to atom
-            for input_file_key in input_files:
+            # Add edges from input files to atom (use deduplicated list)
+            for input_file_key in deduplicated_input_files:
                 edges.append({
                     "from": input_file_key,
                     "to": atom_instance_id

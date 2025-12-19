@@ -1626,7 +1626,14 @@ async def insert_column(
 async def rename_column(
     table_id: str = Body(...),
     old_name: str = Body(...),
-    new_name: str = Body(...)
+    new_name: str = Body(...),
+    atom_id: Optional[str] = Body(None),
+    project_id: Optional[str] = Body(None),
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
 ):
     """
     Rename a column in the table.
@@ -1639,6 +1646,7 @@ async def rename_column(
     Returns:
         Updated table data
     """
+    execution_started_at = datetime.utcnow()
     logger.info(f"✏️ [TABLE-RENAME-COLUMN] Renaming '{old_name}' to '{new_name}'")
     
     # Get DataFrame from session
@@ -1661,6 +1669,167 @@ async def rename_column(
         
         # Return updated data
         response = dataframe_to_response(df, table_id)
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        # Record execution for pipeline
+        try:
+            # Get original object_name and atom_id from session metadata
+            object_name = None
+            metadata_atom_id = None
+            metadata_project_id = None
+            try:
+                metadata = await get_session_metadata(table_id)
+                if metadata:
+                    object_name = metadata.get("object_name")
+                    metadata_atom_id = metadata.get("atom_id")
+                    metadata_project_id = metadata.get("project_id")
+            except Exception as e:
+                logger.warning(f"Failed to get session metadata: {e}")
+            
+            # 🔧 CRITICAL: Get atom_id from session metadata (stored during /table/load)
+            # This ensures rename operations are appended to the same step as the load operation
+            if not metadata_atom_id:
+                logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] No atom_id found in session metadata for table_id {table_id}")
+                # Try to get from existing pipeline step
+                try:
+                    from app.features.pipeline.service import get_pipeline_collection
+                    coll = await get_pipeline_collection()
+                    project_id_from_env, _ = _get_project_context()
+                    final_project_name_for_lookup = project_name or project_id_from_env or os.getenv("PROJECT_NAME", "")
+                    final_client_name_for_lookup = client_name or os.getenv("CLIENT_NAME", "")
+                    final_app_name_for_lookup = app_name or os.getenv("APP_NAME", "")
+                    
+                    if final_client_name_for_lookup and final_app_name_for_lookup and final_project_name_for_lookup:
+                        doc_id = f"{final_client_name_for_lookup}/{final_app_name_for_lookup}/{final_project_name_for_lookup}"
+                        doc = await coll.find_one({"_id": doc_id})
+                        if doc and "pipeline" in doc and "execution_graph" in doc["pipeline"]:
+                            # Find the step that has this table_id in its configuration
+                            for step in doc["pipeline"]["execution_graph"]:
+                                step_config = step.get("configuration", {})
+                                if step_config.get("table_id") == table_id:
+                                    metadata_atom_id = step.get("atom_instance_id")
+                                    if metadata_atom_id:
+                                        logger.info(f"✅ [TABLE-RENAME-COLUMN] Found atom_id from pipeline step: {metadata_atom_id}")
+                                        break
+                except Exception as e:
+                    logger.warning(f"Failed to get atom_id from pipeline: {e}")
+            
+            # Get project context
+            project_id_from_env, atom_id_from_env = _get_project_context()
+            # 🔧 CRITICAL: Use metadata_atom_id first (from session or pipeline), then fallback to provided atom_id, then env
+            final_atom_id = metadata_atom_id or atom_id or atom_id_from_env
+            final_project_id = project_id or metadata_project_id or project_id_from_env
+            
+            # Get client/app/project from query params or environment
+            final_client_name = client_name or os.getenv("CLIENT_NAME", "")
+            final_app_name = app_name or os.getenv("APP_NAME", "")
+            final_project_name = project_name or final_project_id or os.getenv("PROJECT_NAME", "")
+            final_card_id = card_id
+            final_canvas_position = canvas_position or 0
+            
+            # 🔧 CRITICAL: If we still don't have atom_id, try to get card_id first and then find atom_id from it
+            if not final_atom_id or final_atom_id == "unknown":
+                # Try to get card_id from session metadata or pipeline
+                try:
+                    if not final_card_id:
+                        # Try to get card_id from pipeline using table_id
+                        from app.features.pipeline.service import get_pipeline_collection
+                        coll = await get_pipeline_collection()
+                        project_id_from_env, _ = _get_project_context()
+                        final_project_name_for_lookup = project_name or project_id_from_env or os.getenv("PROJECT_NAME", "")
+                        final_client_name_for_lookup = client_name or os.getenv("CLIENT_NAME", "")
+                        final_app_name_for_lookup = app_name or os.getenv("APP_NAME", "")
+                        
+                        if final_client_name_for_lookup and final_app_name_for_lookup and final_project_name_for_lookup:
+                            doc_id = f"{final_client_name_for_lookup}/{final_app_name_for_lookup}/{final_project_name_for_lookup}"
+                            doc = await coll.find_one({"_id": doc_id})
+                            if doc and "pipeline" in doc and "execution_graph" in doc["pipeline"]:
+                                # Find the step that has this table_id in its configuration
+                                for step in doc["pipeline"]["execution_graph"]:
+                                    step_config = step.get("configuration", {})
+                                    if step_config.get("table_id") == table_id:
+                                        final_atom_id = step.get("atom_instance_id")
+                                        final_card_id = step.get("card_id")
+                                        final_canvas_position = step.get("canvas_position", 0)
+                                        if final_atom_id:
+                                            logger.info(f"✅ [TABLE-RENAME-COLUMN] Found atom_id and card_id from pipeline step: {final_atom_id}, {final_card_id}")
+                                            break
+                except Exception as e:
+                    logger.warning(f"Failed to get atom_id/card_id from pipeline: {e}")
+            
+            # Build configuration
+            configuration = {
+                "table_id": table_id,
+                "object_name": object_name
+            }
+            
+            # Build API call record
+            api_calls = [{
+                "endpoint": "/table/rename-column",
+                "method": "POST",
+                "params": {
+                    "table_id": table_id,
+                    "old_name": old_name,
+                    "new_name": new_name,
+                    "atom_id": final_atom_id,
+                    "project_id": final_project_id
+                },
+                "timestamp": execution_started_at.isoformat()
+            }]
+            
+            # Get card_id if not provided
+            if not final_card_id and final_atom_id and final_atom_id != "unknown":
+                try:
+                    from app.features.project_state.routes import get_atom_list_configuration
+                    atom_config_response = await get_atom_list_configuration(
+                        client_name=final_client_name,
+                        app_name=final_app_name,
+                        project_name=final_project_name,
+                        mode="laboratory"
+                    )
+                    
+                    if atom_config_response.get("status") == "success":
+                        cards = atom_config_response.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            for atom in atoms:
+                                if atom.get("id") == final_atom_id:
+                                    final_card_id = card.get("id")
+                                    final_canvas_position = card.get("canvas_position", 0)
+                                    break
+                            if final_card_id:
+                                break
+                except Exception as e:
+                    logger.warning(f"Failed to get atom configuration: {e}")
+            
+            # 🔧 CRITICAL: Only record if we have a valid atom_id (not "unknown")
+            if final_client_name and final_app_name and final_project_name and final_atom_id and final_atom_id != "unknown":
+                await record_atom_execution(
+                    client_name=final_client_name,
+                    app_name=final_app_name,
+                    project_name=final_project_name,
+                    atom_instance_id=final_atom_id,
+                    card_id=final_card_id or "",
+                    atom_type="table",
+                    atom_title="Table - Rename Column",
+                    input_files=[object_name] if object_name else [],
+                    configuration=configuration,
+                    api_calls=api_calls,
+                    output_files=[],
+                    execution_started_at=execution_started_at,
+                    execution_completed_at=execution_completed_at,
+                    execution_status=execution_status,
+                    execution_error=execution_error,
+                    user_id="unknown",
+                    mode="laboratory",
+                    canvas_position=final_canvas_position
+                )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record table rename-column execution for pipeline: {e}")
+        
         return TableResponse(**response)
         
     except HTTPException:
