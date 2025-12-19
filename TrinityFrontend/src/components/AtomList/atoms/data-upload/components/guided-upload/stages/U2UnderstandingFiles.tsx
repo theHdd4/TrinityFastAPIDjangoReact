@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { saveFileToSavedDataFrames } from '../utils/saveFileHelper';
 import { toast } from '@/hooks/use-toast';
+import { truncateFileName } from '@/utils/truncateFileName';
 
 interface U2UnderstandingFilesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -21,6 +22,8 @@ interface U2UnderstandingFilesProps {
   onBack: () => void;
   onRestart?: () => void;
   onCancel?: () => void;
+  onRegisterContinueHandler?: (handler: () => void) => void;
+  onRegisterContinueDisabled?: (getDisabled: () => boolean) => void;
 }
 
 interface FilePreviewRow {
@@ -49,7 +52,9 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
   onNext, 
   onBack,
   onRestart,
-  onCancel 
+  onCancel,
+  onRegisterContinueHandler,
+  onRegisterContinueDisabled
 }) => {
   const { state, setHeaderSelection, updateFileSheetSelection, updateUploadedFilePath } = flow;
   const { uploadedFiles, headerSelections, selectedFileIndex: savedSelectedIndex } = state;
@@ -305,27 +310,8 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
     }
   };
 
-  // Handle Continue - apply header selection
-  const handleContinue = async () => {
-    if (!currentFile || !previewData) return;
-    
-    if (selectedHeaderRow === 0) {
-      setError('Please select a header row.');
-      return;
-    }
-    
-    // Check if multiple rows are selected
-    if (selectedHeaderRows.length > 1) {
-      setShowMergeDialog(true);
-      return;
-    }
-    
-    // Proceed with single row selection
-    await applyHeaderSelection();
-  };
-
   // Apply header selection (used by both direct continue and merge dialog)
-  const applyHeaderSelection = async () => {
+  const applyHeaderSelection = useCallback(async () => {
     if (!currentFile || !previewData) return;
     
     setShowMergeDialog(false);
@@ -401,7 +387,42 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       setError(err.message || 'Failed to apply header selection');
       setApplyingHeader(false);
     }
-  };
+  }, [currentFile, previewData, selectedHeaderRow, selectedHeaderRows, headerRowCount, setHeaderSelection, updateUploadedFilePath, onNext]);
+
+  // Handle Continue - apply header selection
+  const handleContinue = useCallback(async () => {
+    if (!currentFile || !previewData) return;
+    
+    if (selectedHeaderRow === 0) {
+      setError('Please select a header row.');
+      return;
+    }
+    
+    // Check if multiple rows are selected
+    if (selectedHeaderRows.length > 1) {
+      setShowMergeDialog(true);
+      return;
+    }
+    
+    // Proceed with single row selection
+    await applyHeaderSelection();
+  }, [currentFile, previewData, selectedHeaderRow, selectedHeaderRows, applyHeaderSelection, setError, setShowMergeDialog]);
+
+  // Register handleContinue with parent component for external footer
+  useEffect(() => {
+    if (onRegisterContinueHandler) {
+      onRegisterContinueHandler(handleContinue);
+    }
+  }, [onRegisterContinueHandler, handleContinue]);
+
+  // Register disabled state for Continue button
+  useEffect(() => {
+    if (onRegisterContinueDisabled) {
+      onRegisterContinueDisabled(() => {
+        return loading || applyingHeader || !currentFile || !previewData || selectedHeaderRow === 0;
+      });
+    }
+  }, [onRegisterContinueDisabled, loading, applyingHeader, currentFile, previewData, selectedHeaderRow]);
 
   return (
     <StageLayout
@@ -413,7 +434,9 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2 shadow-sm -mt-2">
             <div className="flex items-center gap-2 text-xs text-gray-800">
               <span className="font-semibold text-gray-900">File:</span>
-              <span>{currentFile.name}</span>
+              <span title={currentFile.name} className="truncate max-w-[200px]">
+                {truncateFileName(currentFile.name)}
+              </span>
             </div>
             {currentFile.selectedSheet && (
               <div className="flex items-center gap-2 text-xs text-gray-700">
@@ -445,7 +468,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                   ⚠️ File Needs Processing
                 </p>
                 <p className="text-xs text-red-800 mb-2">
-                  <span className="font-semibold">{currentFile.name}</span> needs to be processed before you can continue.
+                  <span className="font-semibold" title={currentFile.name}>{truncateFileName(currentFile.name)}</span> needs to be processed before you can continue.
                 </p>
                 <p className="text-xs text-red-700 mt-2 font-medium">
                   Please select a header row and apply it to process this file.
@@ -567,10 +590,17 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
               {/* Data Rows Preview Panel */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs text-gray-900">
-                    <span className="text-[#458EE2] font-semibold">Auto-detected header row</span>
-                    <span className="font-normal"> (click to change the selection)</span>
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs text-gray-900">
+                      <span className="text-[#458EE2] font-semibold">Select header row</span>
+                      <span className="font-normal"> (Click on row to change selection)</span>
+                    </h3>
+                    {selectedHeaderRows.length > 1 && (
+                      <span className="text-xs text-red-600">
+                        {selectedHeaderRows.length} headers selected
+                      </span>
+                    )}
+                  </div>
                   <span className="text-[10px] text-gray-500">
                     {previewData.data_rows.length} rows (scroll to see all)
                   </span>
@@ -614,7 +644,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                                     title={cellValue || ''}
                                   >
                                     {isHeaderRow && isFirstCell && (
-                                      <ArrowRight className="absolute left-0.5 top-0.5 w-3.5 h-3.5 text-[#458EE2] stroke-[3]" />
+                                      <ArrowRight className="absolute left-0.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#458EE2] stroke-[3]" />
                                     )}
                                     <span className={isHeaderRow && isFirstCell ? 'ml-4' : ''}>
                                       {displayValue || <span className="text-gray-400">—</span>}
@@ -650,59 +680,6 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
             </div>
           </div>
         )}
-
-        {/* Controls */}
-        <div className="flex items-center justify-between gap-4 pt-4 border-t border-gray-200">
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={onBack}
-              className="flex items-center gap-2"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back
-            </Button>
-            {onRestart && (
-              <Button
-                variant="ghost"
-                onClick={onRestart}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
-              >
-                <RotateCcw className="w-4 h-4" />
-                Restart Upload
-              </Button>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {onCancel && (
-              <Button
-                variant="ghost"
-                onClick={onCancel}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
-              >
-                <X className="w-4 h-4" />
-                Cancel
-              </Button>
-            )}
-            <Button
-              onClick={handleContinue}
-              disabled={loading || applyingHeader || !currentFile || !previewData || selectedHeaderRow === 0}
-              className="flex items-center gap-2 bg-[#458EE2] hover:bg-[#3a7bc7]"
-            >
-              {applyingHeader ? (
-                <>
-                  <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Processing...
-                </>
-              ) : (
-                <>
-                  Continue
-                  <ChevronRight className="w-4 h-4" />
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
       </div>
 
       {/* Merge Dialog for Multiple Header Rows */}

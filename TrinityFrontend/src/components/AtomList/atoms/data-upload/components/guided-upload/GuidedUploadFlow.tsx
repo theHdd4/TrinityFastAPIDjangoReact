@@ -9,7 +9,6 @@ import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
 import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
 import { U5MissingValues } from './stages/U5MissingValues';
 import { U6FinalPreview } from './stages/U6FinalPreview';
-import { U7Success } from './stages/U7Success';
 import { ArrowLeft, RotateCcw, X, Minimize2, Maximize2 } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { getActiveProjectContext } from '@/utils/projectEnv';
@@ -46,11 +45,10 @@ const STAGE_COMPONENTS: Record<UploadStage, React.ComponentType<any>> = {
   U4: U4ReviewDataTypes,
   U5: U5MissingValues,
   U6: U6FinalPreview,
-  U7: U7Success,
 };
 
 // Step 1 (Atom): Split panel for file selection/upload - NOT shown in panel
-// Panel flow shows U1-U7
+// Panel flow shows U1-U6
 const STAGE_TITLES: Record<UploadStage, string> = {
   U0: 'Choose Your Data Source', // Handled by atom (not shown in panel)
   U1: 'Structural Scan',
@@ -59,7 +57,6 @@ const STAGE_TITLES: Record<UploadStage, string> = {
   U4: 'Review Your Column Types',
   U5: 'Review Missing Values',
   U6: 'Final Preview Before Priming',
-  U7: 'Your Data Is Ready',
 };
 
 export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
@@ -115,9 +112,9 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
     }
   }, [open, state, saveState]);
 
-  // Mark completion when reaching U7
+  // Mark completion when reaching U6
   React.useEffect(() => {
-    if (state.currentStage === 'U7' && state.uploadedFiles.length > 0) {
+    if (state.currentStage === 'U6' && state.uploadedFiles.length > 0) {
       // Mark each uploaded file as primed
       state.uploadedFiles.forEach(file => {
         markFileAsPrimed(file.path || file.name);
@@ -127,7 +124,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
 
   const handleNext = async () => {
     if (state.currentStage === 'U6') {
-      // CRITICAL: Apply all transformations before moving to U7
+      // CRITICAL: Apply all transformations before completing
       const chosenIndex = state.selectedFileIndex !== undefined && state.selectedFileIndex < state.uploadedFiles.length 
         ? state.selectedFileIndex : 0;
       const currentFile = state.uploadedFiles[chosenIndex];
@@ -194,7 +191,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
           
           // Apply transformations if there are any changes
           if (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategiesPayload).length > 0) {
-            console.log('🔄 Applying final transformations before U7:', { columnsToDrop, columnRenames, dtypeChanges, missingValueStrategiesPayload });
+            console.log('🔄 Applying final transformations before completion:', { columnsToDrop, columnRenames, dtypeChanges, missingValueStrategiesPayload });
             
             const transformRes = await fetch(`${UPLOAD_API}/apply-data-transformations`, {
               method: 'POST',
@@ -210,19 +207,77 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
             });
             
             if (transformRes.ok) {
-              console.log('✅ Transformations applied successfully before U7');
+              console.log('✅ Transformations applied successfully before completion');
             } else {
-              console.warn('⚠️ Failed to apply transformations before U7');
+              console.warn('⚠️ Failed to apply transformations before completion');
             }
           }
         } catch (error) {
-          console.error('Error applying transformations before U7:', error);
+          console.error('Error applying transformations before completion:', error);
         }
       }
       
-      // Move from U6 (Final Preview) to U7 (Success)
-      goToNextStage();
-    } else if (state.currentStage === 'U7') {
+      // Complete the flow
+      const projectContext = getActiveProjectContext();
+      if (projectContext && state.uploadedFiles.length > 0) {
+        for (const file of state.uploadedFiles) {
+          // Finalize the primed file - save transformed data to saved dataframes location
+          try {
+            console.log('🔄 Finalizing primed file:', file.path || file.name);
+            
+            // Get column classifications from dataTypeSelections (U4 stage)
+            const dataTypes = state.dataTypeSelections[file.name] || [];
+            const columnClassifications = dataTypes.map(dt => ({
+              columnName: dt.columnName,
+              columnRole: dt.columnRole || 'identifier', // Default to identifier if not set
+            }));
+            
+            console.log('📊 Sending column classifications:', columnClassifications);
+            
+            const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                file_path: file.path,
+                file_name: file.name,
+                client_name: projectContext.client_name || '',
+                app_name: projectContext.app_name || '',
+                project_name: projectContext.project_name || '',
+                validator_atom_id: 'guided-upload',
+                column_classifications: columnClassifications,
+              }),
+            });
+            
+            if (finalizeRes.ok) {
+              const result = await finalizeRes.json();
+              console.log('✅ File finalized successfully:', result);
+              // Trigger refresh of SavedDataFramesPanel
+              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+                detail: { filePath: result.saved_path, fileName: file.name } 
+              }));
+            } else {
+              console.warn('⚠️ Failed to finalize file:', await finalizeRes.text());
+              // Fallback to just marking as primed
+              await markFileAsPrimed(file.path || file.name);
+            }
+          } catch (error) {
+            console.error('Error finalizing primed file:', error);
+            // Fallback to just marking as primed
+            await markFileAsPrimed(file.path || file.name);
+          }
+        }
+      }
+      
+      onComplete?.({
+        uploadedFiles: state.uploadedFiles,
+        headerSelections: state.headerSelections,
+        columnNameEdits: state.columnNameEdits,
+        dataTypeSelections: state.dataTypeSelections,
+        missingValueStrategies: state.missingValueStrategies,
+      });
+      
+      // Don't remove flow - keep it open per user preference
       // Flow complete - finalize and save primed files
       const projectContext = getActiveProjectContext();
       if (projectContext && state.uploadedFiles.length > 0) {
@@ -364,10 +419,10 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
   const CurrentStageComponent = STAGE_COMPONENTS[state.currentStage];
   // U1 is now the first stage in the panel (U0 is handled by atom)
   const canGoBack = state.currentStage !== 'U1';
-  const isLastStage = state.currentStage === 'U7';
+  const isLastStage = state.currentStage === 'U6';
   
   // U0 is handled by atom split panel, flow starts from U1
-  const visibleStages = ['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'] as UploadStage[];
+  const visibleStages = ['U1', 'U2', 'U3', 'U4', 'U5', 'U6'] as UploadStage[];
 
   const toggleMinimize = () => {
     setIsMinimized(!isMinimized);
@@ -463,19 +518,13 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
               onBack={handleBack}
               onGoToStage={goToStage}
             />
-          ) : state.currentStage === 'U7' ? (
-            <CurrentStageComponent 
-              flow={flow}
-              onClose={handleCancel}
-              onRestart={handleRestart}
-            />
           ) : (
             <CurrentStageComponent flow={flow} onNext={handleNext} onBack={handleBack} />
           )}
         </div>
 
-        {/* Navigation Footer - Consistent across all stages (hidden for U1, U2, U6, and U7 as they have their own controls) */}
-        {!isMinimized && !['U1', 'U2', 'U6', 'U7'].includes(state.currentStage) && (
+        {/* Navigation Footer - Consistent across all stages (hidden for U1, U2, and U6 as they have their own controls) */}
+        {!isMinimized && !['U1', 'U2', 'U6'].includes(state.currentStage) && (
           <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0">
             <div className="flex gap-2">
               {canGoBack && (

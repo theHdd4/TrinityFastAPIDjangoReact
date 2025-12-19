@@ -266,6 +266,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const cards = useLaboratoryStore((state) => state.cards);
   const updateCard = useLaboratoryStore((state) => state.updateCard);
   const setCards = useLaboratoryStore((state) => state.setCards);
+  const addAtom = useLaboratoryStore((state) => (state as any).addAtom); // May not exist, used only for debugging
   
   // Hook for marking files as primed
   const { markFileAsPrimed } = useGuidedFlowPersistence();

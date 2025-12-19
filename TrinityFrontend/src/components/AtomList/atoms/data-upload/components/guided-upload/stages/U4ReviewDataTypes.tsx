@@ -463,21 +463,53 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
 
   // Bulk actions (using data type, matches routes.py logic)
   const handleConvertAllNumericToMeasures = () => {
-    setColumns(prev => prev.map(col => {
-      if ((col.dataType === 'int' || col.dataType === 'float') && col.columnRole === 'identifier') {
-        return { ...col, columnRole: 'measure' as const, tag: 'edited_by_user' as const };
+    setColumns(prev => {
+      const updated = prev.map(col => {
+        if ((col.dataType === 'int' || col.dataType === 'float') && col.columnRole === 'identifier') {
+          return { ...col, columnRole: 'measure' as const, tag: 'edited_by_user' as const };
+        }
+        return col;
+      });
+      
+      // Save immediately
+      if (currentFile) {
+        const selections: DataTypeSelection[] = updated.map(col => ({
+          columnName: col.columnName,
+          updateType: col.suggestedDataType || col.dataType,
+          format: ((col.suggestedDataType || col.dataType) === 'date' || 
+                   (col.suggestedDataType || col.dataType) === 'datetime') ? col.dtype : undefined,
+          columnRole: col.columnRole,
+        }));
+        setDataTypeSelections(currentFile.name, selections);
       }
-      return col;
-    }));
+      
+      return updated;
+    });
   };
 
   const handleConvertAllTextToIdentifiers = () => {
-    setColumns(prev => prev.map(col => {
-      if ((col.dataType === 'string' || col.dataType === 'date' || col.dataType === 'datetime' || col.dataType === 'boolean') && col.columnRole === 'measure') {
-        return { ...col, columnRole: 'identifier' as const, tag: 'edited_by_user' as const };
+    setColumns(prev => {
+      const updated = prev.map(col => {
+        if ((col.dataType === 'string' || col.dataType === 'date' || col.dataType === 'datetime' || col.dataType === 'boolean') && col.columnRole === 'measure') {
+          return { ...col, columnRole: 'identifier' as const, tag: 'edited_by_user' as const };
+        }
+        return col;
+      });
+      
+      // Save immediately
+      if (currentFile) {
+        const selections: DataTypeSelection[] = updated.map(col => ({
+          columnName: col.columnName,
+          updateType: col.suggestedDataType || col.dataType,
+          format: ((col.suggestedDataType || col.dataType) === 'date' || 
+                   (col.suggestedDataType || col.dataType) === 'datetime') ? col.dtype : undefined,
+          columnRole: col.columnRole,
+        }));
+        setDataTypeSelections(currentFile.name, selections);
       }
-      return col;
-    }));
+      
+      return updated;
+    });
   };
 
   // Apply pending AI suggestions (without overriding manual changes) before save/continue
@@ -538,11 +570,11 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
     return (
       <StageLayout
         title=""
-        explanation="Detecting data types and roles for each column..."
+        explanation=""
       >
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#458EE2]"></div>
-          <p className="mt-4 text-sm text-gray-600">Detecting data types...</p>
+          <p className="mt-4 text-sm text-gray-600">Loading data types...</p>
         </div>
       </StageLayout>
     );
@@ -552,10 +584,10 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
     return (
       <StageLayout
         title=""
-        explanation="Error loading column types"
+        explanation=""
       >
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-600">{error}</p>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+          <p className="text-xs text-red-600">{error}</p>
         </div>
       </StageLayout>
     );
@@ -573,19 +605,23 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
   return (
     <StageLayout
       title=""
-      explanation="These are the detected column types and roles. You only need to adjust anything that doesn't look right."
-      helpText="Correct types help Trinity interpret numbers, dates, and categories properly."
+      explanation=""
     >
-      <div className="space-y-6">
+      <div className="space-y-2">
         {/* Bulk Actions */}
         {(hasNumericIdentifiers || hasTextMeasures) && (
-          <div className="flex flex-wrap gap-2 pb-4 border-b">
+          <div className="flex flex-wrap gap-2 pb-2 border-b">
             {hasNumericIdentifiers && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleConvertAllNumericToMeasures}
-                className="flex items-center gap-2"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleConvertAllNumericToMeasures();
+                }}
+                className="flex items-center gap-1.5 text-xs h-7"
+                type="button"
               >
                 Convert All Numeric Columns to Measures
               </Button>
@@ -594,8 +630,13 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleConvertAllTextToIdentifiers}
-                className="flex items-center gap-2"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleConvertAllTextToIdentifiers();
+                }}
+                className="flex items-center gap-1.5 text-xs h-7"
+                type="button"
               >
                 Convert All Text Columns to Identifiers
               </Button>
@@ -605,202 +646,198 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
 
         {/* Warnings */}
         {hasWarnings && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
             <div className="flex items-start gap-2">
-              <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-yellow-900 mb-2">Some columns may need type adjustment</p>
-                <div className="space-y-2">
-                  {columns.filter(col => col.warning).map((col, idx) => (
-                    <div key={idx} className="flex items-center justify-between gap-2">
-                      <p className="text-xs text-yellow-800 flex-1">
-                        <strong>{col.columnName}:</strong> {col.warning}
-                      </p>
-                      {col.suggestedDataType && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            console.log('Apply suggestion for:', col.columnName);
-                            handleApplySuggestion(col.columnName);
-                          }}
-                          className="h-7 text-xs bg-yellow-100 hover:bg-yellow-200 border-yellow-300"
-                          type="button"
-                        >
-                          <Lightbulb className="w-3 h-3 mr-1" />
-                          Apply Suggestion
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <AlertTriangle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-yellow-800">
+                Some columns may need type adjustment. Check the table below.
+              </p>
             </div>
           </div>
         )}
 
         {/* Column Table */}
         <div className="border border-gray-200 rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Column Name</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Sample Values</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Suggested Type</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Column Role</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Tags</th>
+          <div 
+            className="overflow-x-auto" 
+            style={{ 
+              maxHeight: '8.75rem',
+              overflowY: 'auto',
+              scrollbarGutter: 'stable'
+            }}
+          >
+            <table className="text-[10px] table-fixed w-full">
+              <colgroup>
+                <col style={{ width: '180px' }} />
+                <col style={{ width: '200px' }} />
+                <col style={{ width: '150px' }} />
+                <col style={{ width: '150px' }} />
+                <col style={{ width: '130px' }} />
+              </colgroup>
+              <thead className="sticky top-0 z-10 bg-gray-50">
+                <tr className="bg-gray-50" style={{ height: '1.75rem' }}>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Column Name
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Sample Values
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Suggested Type
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Column Role
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Tags
+                    </div>
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
-                {columns.map((column, index) => (
-                  <tr key={index} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-900">{column.columnName}</span>
-                        <Badge variant="secondary" className="text-xs">
-                          {DATA_TYPES.find(t => t.value === column.dataType)?.label || column.dataType}
-                        </Badge>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-xs text-gray-600 max-w-xs truncate">
-                        {Array.from(new Set(column.sampleValues)).slice(0, 5).map((val, idx, arr) => (
-                          <span key={idx}>
-                            {String(val).length > 20 ? String(val).substring(0, 20) + '...' : String(val)}
-                            {idx < arr.length - 1 && ', '}
+              <tbody>
+                {columns.map((column, index) => {
+                  const sampleValuesText = Array.from(new Set(column.sampleValues)).slice(0, 5).join(', ');
+                  const fullSampleValuesText = Array.from(new Set(column.sampleValues)).join(', ');
+                  return (
+                    <tr
+                      key={`${column.columnName}-${index}`}
+                      className="hover:bg-gray-50"
+                      style={{ height: '1.75rem' }}
+                    >
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={column.columnName}>
+                        <div className="flex items-center gap-1 overflow-hidden">
+                          <span className="text-gray-700 text-[10px] leading-tight truncate flex-1 whitespace-nowrap">
+                            {column.columnName}
                           </span>
-                        ))}
-                        {column.sampleValues.length === 0 && <span className="text-gray-400">No samples</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div 
-                        className="relative inline-block w-40" 
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <select
-                          value={column.suggestedDataType || column.dataType}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            const value = e.target.value;
-                            handleSuggestedTypeChange(column.columnName, value);
-                          }}
+                          <span className="text-gray-500 text-[9px] leading-tight flex-shrink-0 whitespace-nowrap font-mono">
+                            ({column.dtype || 'object'})
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={fullSampleValuesText}>
+                        <div className="truncate">
+                          {column.sampleValues.length === 0 ? (
+                            <span className="text-gray-400">No samples</span>
+                          ) : (
+                            <>
+                              {sampleValuesText}
+                              {Array.from(new Set(column.sampleValues)).length > 5 && '...'}
+                            </>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div 
+                          className="relative inline-block w-full max-w-[140px]" 
                           onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          className="w-full h-9 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none bg-[right_0.5rem_center] bg-no-repeat pr-8"
-                          style={{
-                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                          }}
                         >
-                          {DATA_TYPES.map(type => (
-                            <option key={type.value} value={type.value}>
-                              {type.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div 
-                        className="relative inline-block w-48" 
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <select
-                          value={column.columnRole}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            const value = e.target.value as 'identifier' | 'measure';
-                            console.log('Role changed:', value, 'for column:', column.columnName);
-                            handleRoleChange(column.columnName, value);
-                          }}
+                          <select
+                            value={column.suggestedDataType || column.dataType}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              const value = e.target.value;
+                              handleSuggestedTypeChange(column.columnName, value);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900`}
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              backgroundSize: '1em 1em',
+                              backgroundPosition: 'right 0.25rem center',
+                              backgroundRepeat: 'no-repeat',
+                              paddingRight: '1.5rem'
+                            }}
+                          >
+                            {DATA_TYPES.map(type => (
+                              <option key={type.value} value={type.value}>
+                                {type.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div 
+                          className="relative inline-block w-full max-w-[140px]" 
                           onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          className="w-full h-9 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none bg-[right_0.5rem_center] bg-no-repeat pr-8"
-                          style={{
-                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                          }}
                         >
-                          {COLUMN_ROLES.map(role => (
-                            <option key={role.value} value={role.value}>
-                              {role.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1 flex-wrap">
-                        {column.tag === 'previously_used_type' && (
-                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-[#41C185] text-white">
-                            <History className="w-3 h-3 mr-1" />
-                            Previously Used Type
-                          </div>
-                        )}
-                        {column.tag === 'previously_used_role' && (
-                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-[#41C185] text-white">
-                            <History className="w-3 h-3 mr-1" />
-                            Previously Used Role
-                          </div>
-                        )}
-                        {column.tag === 'ai_suggestion' && (
-                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-[#FFBD59] text-white">
-                            <Lightbulb className="w-3 h-3 mr-1" />
-                            AI Suggestion
-                          </div>
-                        )}
-                        {column.tag === 'edited_by_user' && (
-                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-[#458EE2] text-white">
-                            <Pencil className="w-3 h-3 mr-1" />
-                            Edited by User
-                          </div>
-                        )}
-                        {column.warning && (
-                          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold text-yellow-700 border-yellow-300 bg-yellow-50">
-                            <AlertTriangle className="w-3 h-3 mr-1" />
-                            Potential Issue
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          <select
+                            value={column.columnRole}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              const value = e.target.value as 'identifier' | 'measure';
+                              handleRoleChange(column.columnName, value);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900"
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              backgroundSize: '1em 1em',
+                              backgroundPosition: 'right 0.25rem center',
+                              backgroundRepeat: 'no-repeat',
+                              paddingRight: '1.5rem'
+                            }}
+                          >
+                            {COLUMN_ROLES.map(role => (
+                              <option key={role.value} value={role.value}>
+                                {role.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div className="flex gap-0.5 flex-wrap overflow-hidden">
+                          {column.tag === 'previously_used_type' && (
+                            <Badge className="bg-[#41C185] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <History className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">Previously Used Type</span>
+                            </Badge>
+                          )}
+                          {column.tag === 'previously_used_role' && (
+                            <Badge className="bg-[#41C185] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <History className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">Previously Used Role</span>
+                            </Badge>
+                          )}
+                          {column.tag === 'ai_suggestion' && (
+                            <Badge className="bg-[#FFBD59] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <Lightbulb className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">AI Suggestion</span>
+                            </Badge>
+                          )}
+                          {column.tag === 'edited_by_user' && (
+                            <Badge className="bg-[#458EE2] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <Pencil className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">Edited by User</span>
+                            </Badge>
+                          )}
+                          {column.warning && (
+                            <Badge className="text-yellow-700 border-yellow-300 bg-yellow-50 text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <AlertTriangle className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">Potential Issue</span>
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
-
-        {/* Debug Section - Remove this after fixing */}
-        <div className="bg-gray-50 border border-gray-300 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium text-gray-700">Debug: Current Saved State</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                const currentSelections = currentFile ? (dataTypeSelections[currentFile.name] || []) : [];
-                console.log('🔍 Current saved dataTypeSelections:', currentSelections);
-                alert(`Saved selections: ${JSON.stringify(currentSelections, null, 2)}`);
-              }}
-            >
-              Show Saved State
-            </Button>
-          </div>
-          <p className="text-xs text-gray-600">
-            Click "Show Saved State" to see what's currently saved in dataTypeSelections. 
-            This should update when you change the "Suggested Type" dropdown.
-          </p>
-        </div>
-
-        {/* Summary */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-gray-700">
-            Most of these types were detected automatically. You can adjust any column that doesn't look right.
-          </p>
-        </div>
-
-        {/* Single-file flow after U1 selection: no file navigation */}
       </div>
     </StageLayout>
   );

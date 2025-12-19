@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pencil, History, RotateCcw, Lightbulb, Trash2, AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -77,8 +77,6 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
   const [loading, setLoading] = useState(true);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [deletedColumns, setDeletedColumns] = useState<Set<number>>(new Set());
-  const tableContainerRef = useRef<HTMLDivElement>(null);
-  const summaryBarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchColumnNames = async () => {
@@ -393,19 +391,6 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
   const hasHistoricalMatches = columns.some(col => col.historicalMatch);
   const keptColumns = columns.filter(col => col.keep);
 
-  // #region agent log
-  useEffect(() => {
-    if (!loading && tableContainerRef.current && summaryBarRef.current) {
-      const tableRect = tableContainerRef.current.getBoundingClientRect();
-      const summaryRect = summaryBarRef.current.getBoundingClientRect();
-      const gap = summaryRect.top - tableRect.bottom;
-      const tableStyles = window.getComputedStyle(tableContainerRef.current);
-      const summaryStyles = window.getComputedStyle(summaryBarRef.current);
-      fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'U3ReviewColumnNames.tsx:395',message:'Spacing measurement',data:{gapPx:gap,gapRem:gap/16,tableMarginBottom:tableStyles.marginBottom,tablePaddingBottom:tableStyles.paddingBottom,summaryMarginTop:summaryStyles.marginTop,summaryPaddingTop:summaryStyles.paddingTop,parentSpaceY:window.getComputedStyle(tableContainerRef.current.parentElement!).gap},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    }
-  }, [loading, columns]);
-  // #endregion
-
   return (
     <StageLayout
       title=""
@@ -508,7 +493,7 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
         )}
 
         {/* Column Table */}
-        <div ref={tableContainerRef} className="border border-gray-200 rounded-lg overflow-hidden">
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
           <div 
             className="overflow-x-auto" 
             style={{ 
@@ -526,7 +511,7 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                 <col style={{ width: '130px' }} />
               </colgroup>
               <thead className="sticky top-0 z-10 bg-gray-50">
-                <tr className="bg-gray-50">
+                <tr className="bg-gray-50" style={{ height: '1.75rem' }}>
                   <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
                     <div className="truncate">
                       Original Name
@@ -687,7 +672,7 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
         </div>
 
         {/* Summary */}
-        <div ref={summaryBarRef} className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-0 -mt-1">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-0 -mt-1">
           <p className="text-xs text-gray-700">
             <strong>{keptColumns.length}</strong> column{keptColumns.length !== 1 ? 's' : ''} will be kept,{' '}
             <strong>{columns.length - keptColumns.length}</strong> column{columns.length - keptColumns.length !== 1 ? 's' : ''} marked for removal.
