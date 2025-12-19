@@ -34,6 +34,7 @@ from app.features.unpivot.endpoint import router as unpivot_router
 from app.features.task_queue.endpoint import router as task_queue_router
 from app.features.kpi_dashboard.endpoint import router as kpi_dashboard_router
 from app.features.table.endpoint import router as table_router
+from app.features.cardinality_view.routes import router as cardinality_view_router
 from app.features.pipeline.endpoint import router as pipeline_router
 
 api_router = APIRouter()
@@ -74,6 +75,11 @@ api_router.include_router(
     table_router,
     prefix="/v1/atoms/table",
     tags=["Table"]
+)
+api_router.include_router(
+    cardinality_view_router,
+    prefix="/cardinality-view",
+    tags=["Cardinality View"]
 )
 
 api_router.include_router(build_feature_router)

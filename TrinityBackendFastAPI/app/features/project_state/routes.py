@@ -780,6 +780,14 @@ async def save_atom_list_configuration(
                         else:
                             logger.info(f"✅ Verified: pivotResults preserved for {atom_id} ({len(pivot_results_after) if isinstance(pivot_results_after, list) else 'N/A'} items)")
                 
+                # Clean up table atom data (strip tableData - data should be in MinIO, not MongoDB)
+                if atom.get("atomId") == "table":
+                    # Strip tableData (rows) - data should be in MinIO, not MongoDB
+                    atom_settings = {
+                        k: v for k, v in atom_settings.items() if k not in {"tableData"}
+                    }
+                    logger.info(f"🧹 [ATOM-CONFIG] Stripped tableData from table atom {atom_id} (stored in MinIO)")
+                
                 # Generate version hash
                 version_hash = hashlib.sha256(
                     json.dumps(atom_settings, sort_keys=True).encode()

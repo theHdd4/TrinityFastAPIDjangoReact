@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown, MoreVertical, Filter } from 'lucide-react';
+import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown, MoreVertical, Filter, Eye, EyeOff, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -24,6 +24,7 @@ import type { TextStylePreset } from '@/components/LaboratoryMode/components/Can
 import { KPI_DASHBOARD_API, LABORATORY_API, IMAGES_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { TrendingUp } from 'lucide-react';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface KPIDashboardCanvasProps {
   atomId: string;
@@ -211,6 +212,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
   const [selectKey, setSelectKey] = useState(0);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [variables, setVariables] = useState<ConfigVariable[]>([]);
+  const metricsInputs = useLaboratoryStore(state => state.metricsInputs);
   
   // Load layouts from settings on mount
   useEffect(() => {
@@ -219,7 +221,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     }
   }, [settings.layouts]);
 
-  // Fetch variables from MongoDB on mount
+  // Fetch variables from MongoDB on mount and when refresh trigger changes
   useEffect(() => {
     const fetchVariables = async () => {
       try {
@@ -273,7 +275,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     };
 
     fetchVariables();
-  }, []);
+  }, [metricsInputs.variablesRefreshTrigger]);
   
   // Save layouts to MongoDB with debouncing
   useEffect(() => {
@@ -299,6 +301,31 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
       }
     };
   }, [layouts]);
+
+  // Save interaction settings when they change (debounced)
+  useEffect(() => {
+    // Skip save on initial mount when layouts is empty
+    if (layouts.length === 0) {
+      return;
+    }
+    
+    // Clear previous timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    // Debounce save by 1 second
+    saveTimeoutRef.current = setTimeout(() => {
+      saveLayoutsToMongoDB(layouts);
+    }, 1000);
+    
+    // Cleanup timeout on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [settings.editInteractionsMode, settings.elementInteractions]);
   
   const saveLayoutsToMongoDB = async (layoutsToSave: Layout[]) => {
     try {
@@ -321,6 +348,8 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
         metricColumns: settings.metricColumns || [],
         changeColumns: settings.changeColumns || [],
         insights: settings.insights || '',
+        editInteractionsMode: settings.editInteractionsMode || false,
+        elementInteractions: settings.elementInteractions || {},
         // Add metadata for debugging and versioning
         savedAt: new Date().toISOString(),
         version: '1.0',
@@ -359,6 +388,8 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
           metricColumns: payload.metricColumns,
           changeColumns: payload.changeColumns,
           insights: payload.insights,
+          editInteractionsMode: payload.editInteractionsMode,
+          elementInteractions: payload.elementInteractions,
         });
         
         console.log('✅ Laboratory store updated (autosave will sync to django_atom_list_configuration)');
@@ -843,6 +874,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   // State for variable selection dialog (used for metric cards)
   const [showVariableDialog, setShowVariableDialog] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [variableDialogPosition, setVariableDialogPosition] = useState<{ side: 'right' | 'left'; width: number; top: number }>({ side: 'right', width: 500, top: 0 });
+  const metricCardRef = useRef<HTMLDivElement>(null);
   
   const textRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -862,6 +895,10 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   const [selectedFilters, setSelectedFilters] = useState<Record<string, string>>({});
   const [loadingFilters, setLoadingFilters] = useState(false);
   const [availableVariables, setAvailableVariables] = useState<any[]>([]);
+  // Metric card hover state for showing/hiding editable fields
+  const [isMetricCardHovered, setIsMetricCardHovered] = useState(false);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [isEditingProjectName, setIsEditingProjectName] = useState(false);
   
   // Chart filter state - moved to top level to avoid conditional hook calls
   const [filterEditorOpen, setFilterEditorOpen] = useState(false);
@@ -872,6 +909,106 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   const [searchTerms, setSearchTerms] = useState<Record<string, string>>({});
   
   const selectedElement = elementTypes.find(e => e.value === box.elementType);
+  
+  // Calculate dropdown position and size when dialog opens (only for metric-card)
+  useEffect(() => {
+    // Only run this effect for metric-card elements
+    if (box.elementType !== 'metric-card') return;
+    
+    if (showVariableDialog && metricCardRef.current) {
+      const calculatePosition = () => {
+        const cardElement = metricCardRef.current;
+        if (!cardElement) return;
+
+        // Find the canvas container - look for the main canvas wrapper
+        // Start from the card and traverse up to find the canvas container
+        let current: HTMLElement | null = cardElement.parentElement;
+        let canvasContainer: HTMLElement | null = null;
+        
+        // Look for the grid container or layout container
+        while (current && !canvasContainer) {
+          const style = window.getComputedStyle(current);
+          // Check if this is likely the canvas container (has grid or is the main wrapper)
+          if (current.classList.contains('grid') || 
+              current.style.overflow === 'visible' ||
+              current.getAttribute('style')?.includes('overflow: visible')) {
+            canvasContainer = current;
+            break;
+          }
+          current = current.parentElement;
+        }
+        
+        // Fallback to finding the main canvas wrapper or use viewport
+        if (!canvasContainer) {
+          canvasContainer = cardElement.closest('.h-full') as HTMLElement;
+        }
+        if (!canvasContainer) {
+          canvasContainer = document.body;
+        }
+
+        const cardRect = cardElement.getBoundingClientRect();
+        const containerRect = canvasContainer.getBoundingClientRect();
+        
+        // Calculate available space to the right and left within the container
+        const spaceRight = containerRect.right - cardRect.right - 16; // 16px margin
+        const spaceLeft = cardRect.left - containerRect.left - 16; // 16px margin
+        
+        // Preferred width
+        const preferredWidth = 500;
+        const minWidth = 350;
+        const maxWidth = 600;
+        
+        let side: 'right' | 'left' = 'right';
+        let width = preferredWidth;
+        
+        // Check if we have enough space on the right
+        if (spaceRight >= minWidth) {
+          side = 'right';
+          width = Math.min(preferredWidth, spaceRight, maxWidth);
+        } else if (spaceLeft >= minWidth) {
+          // Use left side if right doesn't have enough space
+          side = 'left';
+          width = Math.min(preferredWidth, spaceLeft, maxWidth);
+        } else {
+          // Use whichever side has more space, but constrain to available
+          if (spaceRight >= spaceLeft && spaceRight > 0) {
+            side = 'right';
+            width = Math.max(minWidth, Math.min(preferredWidth, spaceRight));
+          } else if (spaceLeft > 0) {
+            side = 'left';
+            width = Math.max(minWidth, Math.min(preferredWidth, spaceLeft));
+          } else {
+            // If no space on either side, use minimum width and prefer right
+            side = 'right';
+            width = minWidth;
+          }
+        }
+
+        // Calculate top position (align with card top)
+        const top = 0;
+
+        setVariableDialogPosition({ side, width, top });
+      };
+
+      // Use requestAnimationFrame to ensure DOM is updated
+      const timeoutId = setTimeout(() => {
+        requestAnimationFrame(calculatePosition);
+      }, 0);
+
+      // Recalculate on window resize and scroll
+      window.addEventListener('resize', calculatePosition);
+      window.addEventListener('scroll', calculatePosition, true);
+
+      return () => {
+        clearTimeout(timeoutId);
+        window.removeEventListener('resize', calculatePosition);
+        window.removeEventListener('scroll', calculatePosition, true);
+      };
+    } else {
+      // Reset position when dialog closes
+      setVariableDialogPosition({ side: 'right', width: 500, top: 0 });
+    }
+  }, [showVariableDialog, box.elementType]);
   
   // Track cursor position and update current style
   const updateCursorStyleFromSelection = () => {
@@ -1660,10 +1797,13 @@ const ElementBox: React.FC<ElementBoxProps> = ({
             {(!box.text || box.text === '') && (
               <div className="absolute inset-0 p-4 pointer-events-none">
                 <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#111827', fontFamily: 'DM Sans', marginBottom: '4px', letterSpacing: '-0.02em', lineHeight: '1.1' }}>
-                  Click Header to apply this style
+                  For your title, select Header in the formatting options
                 </div>
                 <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#111827', fontFamily: 'DM Sans', marginBottom: '6px', letterSpacing: '-0.01em', lineHeight: '1.2' }}>
-                  Click Sub-Header to apply this style
+                  If you want a sub-header, select Sub Header in the options
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: 'normal', color: '#6B7280', fontFamily: 'DM Sans', letterSpacing: '-0.01em', lineHeight: '1.5' }}>
+                  For your primary context, select Paragraph. And yes, these are the only 3 font size options for now.
                 </div>
               </div>
             )}
@@ -4151,7 +4291,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           metricValue: variable.value || '0',
           value: variable.value,
           formula: variable.formula,
-          description: variable.description,
+          // DO NOT auto-populate description or projectName - these should only be set by user input
+          // description: variable.description, // REMOVED - never auto-populate
           usageSummary: variable.usageSummary,
           cardId: variable.cardId,
           atomId: variable.atomId,
@@ -4160,7 +4301,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           clientId: variable.clientId,
           appId: variable.appId,
           projectId: variable.projectId,
-          projectName: variable.projectName,
+          // projectName: variable.projectName, // REMOVED - never auto-populate
           createdAt: variable.createdAt,
           updatedAt: variable.updatedAt,
         });
@@ -4365,11 +4506,94 @@ const ElementBox: React.FC<ElementBoxProps> = ({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Edit Interactions Controls - visible when Edit Interactions mode is enabled */}
+          {settings.editInteractionsMode && (
+            <div 
+              className="absolute top-2 left-2 z-30 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-300 p-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const currentInteraction = settings.elementInteractions?.[boxId] || 'apply';
+                        const newInteraction = currentInteraction === 'apply' ? 'not-apply' : currentInteraction === 'not-apply' ? 'ignore' : 'apply';
+                        onSettingsChange({
+                          elementInteractions: {
+                            ...(settings.elementInteractions || {}),
+                            [boxId]: newInteraction
+                          }
+                        });
+                      }}
+                      className={`p-1.5 rounded transition-colors ${
+                        (settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                          ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                          ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply' ? (
+                        <Filter className="w-4 h-4" />
+                      ) : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply' ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Minus className="w-4 h-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-xs">
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                        ? 'Filters apply (click to change)'
+                        : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                        ? 'Filters don\'t apply (click to change)'
+                        : 'Filters ignored (click to change)'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
+
           {/* Metric Card */}
-          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-yellow-200 shadow-lg p-6 flex flex-col justify-between relative" style={{ minWidth: 0, minHeight: 0 }}>
-            {/* Variable Selection - Show inside the box */}
+          <div 
+            ref={metricCardRef}
+            className={`w-full h-full rounded-xl bg-white border-2 border-yellow-200 shadow-lg p-6 flex flex-col justify-between relative ${showVariableDialog ? 'overflow-visible' : 'overflow-hidden'}`} 
+            style={{ 
+              minWidth: 0, 
+              minHeight: 0,
+              zIndex: showVariableDialog ? 9998 : 'auto'
+            }}
+            onMouseEnter={(e) => {
+              // Only set hover if we're actually entering the card (not bubbling from children)
+              if (e.currentTarget === e.target || e.currentTarget.contains(e.target as Node)) {
+                setIsMetricCardHovered(true);
+              }
+            }}
+            onMouseLeave={(e) => {
+              // Only clear hover if we're actually leaving the card (not moving to a child)
+              const relatedTarget = e.relatedTarget as Node | null;
+              if (!metricCardRef.current?.contains(relatedTarget)) {
+                setIsMetricCardHovered(false);
+              }
+            }}
+          >
+            {/* Variable Selection - Positioned beside the box within canvas */}
             {showVariableDialog && (
-              <div className="absolute inset-0 z-30 bg-white rounded-xl p-4 flex flex-col">
+              <div 
+                className={`absolute top-0 bg-white rounded-xl p-4 flex flex-col shadow-2xl border-2 border-gray-300 ${variableDialogPosition.side === 'right' ? 'left-full ml-2' : 'right-full mr-2'}`}
+                style={{ 
+                  width: `${variableDialogPosition.width}px`, 
+                  height: '100%', 
+                  minHeight: '300px', 
+                  maxHeight: '600px',
+                  top: `${variableDialogPosition.top}px`,
+                  zIndex: 9999
+                }}
+              >
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-800">Select Variable</h3>
                   <button
@@ -4406,7 +4630,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                           onClick={() => handleSelectVariable(variable)}
                           className="p-4 bg-gray-50 hover:bg-yellow-50 border border-gray-200 rounded-lg cursor-pointer transition-colors"
                         >
-                          <div className="font-semibold text-sm text-gray-800">
+                          <div className="font-semibold text-sm text-gray-800 break-words">
                             {variable.variableName}
                           </div>
                           {variable.value && (
@@ -4415,7 +4639,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                             </div>
                           )}
                           {variable.description && (
-                            <div className="text-xs text-gray-500 mt-1">
+                            <div className="text-xs text-gray-500 mt-1 break-words">
                               {variable.description}
                             </div>
                           )}
@@ -4439,24 +4663,116 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     style={{ fontSize: '18px', fontWeight: 'bold', minWidth: 0, width: '100%' }}
                     placeholder="BRAND VALUE"
                   />
-                  <input
-                    type="text"
-                    value={box.description || ''}
-                    onChange={(e) => onTextBoxUpdate(layoutId, boxId, { description: e.target.value })}
-                    className="w-full outline-none bg-transparent border-none text-xs text-gray-500"
-                    style={{ minWidth: 0, width: '100%' }}
-                    placeholder="(In Cr)"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <input
-                    type="text"
-                    value={box.projectName || ''}
-                    onChange={(e) => onTextBoxUpdate(layoutId, boxId, { projectName: e.target.value })}
-                    className="w-full outline-none bg-transparent border-none text-xs text-gray-400 mt-1"
-                    style={{ minWidth: 0, width: '100%' }}
-                    placeholder="MAT (Project Name)"
-                    onClick={(e) => e.stopPropagation()}
-                  />
+                  {/* Description and Project Name fields */}
+                  {/* Placeholder text that should never be saved */}
+                  {(() => {
+                    const PLACEHOLDER_TEXT = 'Additional information…';
+                    
+                    // Helper to check if a value is empty or placeholder
+                    const isEmptyOrPlaceholder = (value: string | undefined | null): boolean => {
+                      if (!value) return true;
+                      const trimmed = value.trim();
+                      return trimmed === '' || trimmed === PLACEHOLDER_TEXT;
+                    };
+                    
+                    // Check if fields have real user-entered content (not placeholder)
+                    const hasDescription = box.description && !isEmptyOrPlaceholder(box.description);
+                    const hasProjectName = box.projectName && !isEmptyOrPlaceholder(box.projectName);
+                    
+                    // Show fields container if: hovering, editing, OR if any field has content
+                    const shouldShowFieldsContainer = isMetricCardHovered || isEditingDescription || isEditingProjectName || hasDescription || hasProjectName;
+                    
+                    if (shouldShowFieldsContainer) {
+                      return (
+                        <>
+                          {/* Description field - Show if hovering, editing, OR has content */}
+                          {(isMetricCardHovered || isEditingDescription || hasDescription) && (
+                            <input
+                              type="text"
+                              value={isEmptyOrPlaceholder(box.description) ? '' : (box.description || '')}
+                              onChange={(e) => {
+                                let newValue = e.target.value;
+                                // If user types exactly the placeholder, treat as empty
+                                if (newValue.trim() === PLACEHOLDER_TEXT) {
+                                  newValue = '';
+                                }
+                                onTextBoxUpdate(layoutId, boxId, { description: newValue });
+                                // If content is entered, keep editing state active
+                                if (newValue.trim() && newValue.trim() !== PLACEHOLDER_TEXT) {
+                                  setIsEditingDescription(true);
+                                }
+                              }}
+                              onFocus={() => setIsEditingDescription(true)}
+                              onBlur={(e) => {
+                                let value = e.target.value.trim();
+                                // Clear if empty or placeholder text
+                                if (!value || value === PLACEHOLDER_TEXT) {
+                                  value = '';
+                                  onTextBoxUpdate(layoutId, boxId, { description: '' });
+                                  // Clear editing state if not hovering (field will be hidden)
+                                  if (!isMetricCardHovered) {
+                                    setIsEditingDescription(false);
+                                  }
+                                } else {
+                                  // Keep editing state active so field remains visible
+                                  setIsEditingDescription(true);
+                                }
+                              }}
+                              onMouseEnter={() => setIsMetricCardHovered(true)}
+                              className="w-full outline-none bg-transparent border-none text-xs text-gray-500"
+                              style={{ minWidth: 0, width: '100%' }}
+                              placeholder={PLACEHOLDER_TEXT}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
+                          {/* Project Name field - Show if hovering, editing, OR has content */}
+                          {(isMetricCardHovered || isEditingProjectName || hasProjectName) && (
+                            <input
+                              type="text"
+                              value={isEmptyOrPlaceholder(box.projectName) ? '' : (box.projectName || '')}
+                              onChange={(e) => {
+                                let newValue = e.target.value;
+                                // If user types exactly the placeholder, treat as empty
+                                if (newValue.trim() === PLACEHOLDER_TEXT) {
+                                  newValue = '';
+                                }
+                                onTextBoxUpdate(layoutId, boxId, { projectName: newValue });
+                                // If content is entered, keep editing state active
+                                if (newValue.trim() && newValue.trim() !== PLACEHOLDER_TEXT) {
+                                  setIsEditingProjectName(true);
+                                }
+                              }}
+                              onFocus={() => setIsEditingProjectName(true)}
+                              onBlur={(e) => {
+                                let value = e.target.value.trim();
+                                // Clear if empty or placeholder text
+                                if (!value || value === PLACEHOLDER_TEXT) {
+                                  value = '';
+                                  onTextBoxUpdate(layoutId, boxId, { projectName: '' });
+                                  // Clear editing state if not hovering (field will be hidden)
+                                  if (!isMetricCardHovered) {
+                                    setIsEditingProjectName(false);
+                                  }
+                                } else {
+                                  // Keep editing state active so field remains visible
+                                  setIsEditingProjectName(true);
+                                }
+                              }}
+                              onMouseEnter={() => setIsMetricCardHovered(true)}
+                              className="w-full outline-none bg-transparent border-none text-xs text-gray-400 mt-1"
+                              style={{ minWidth: 0, width: '100%' }}
+                              placeholder={PLACEHOLDER_TEXT}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
+                        </>
+                      );
+                    } else {
+                      // Completely hidden when not hovering and both fields are empty
+                      // No placeholder text shown at all
+                      return null;
+                    }
+                  })()}
                   {/* Additional Line - Show if exists */}
                   {box.additionalLine !== undefined && box.additionalLine !== null && (
                     <input
@@ -4874,6 +5190,58 @@ const ElementBox: React.FC<ElementBoxProps> = ({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Edit Interactions Controls - visible when Edit Interactions mode is enabled */}
+          {settings.editInteractionsMode && (
+            <div 
+              className="absolute top-2 left-2 z-30 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-300 p-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const currentInteraction = settings.elementInteractions?.[boxId] || 'apply';
+                        const newInteraction = currentInteraction === 'apply' ? 'not-apply' : currentInteraction === 'not-apply' ? 'ignore' : 'apply';
+                        onSettingsChange({
+                          elementInteractions: {
+                            ...(settings.elementInteractions || {}),
+                            [boxId]: newInteraction
+                          }
+                        });
+                      }}
+                      className={`p-1.5 rounded transition-colors ${
+                        (settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                          ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                          ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply' ? (
+                        <Filter className="w-4 h-4" />
+                      ) : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply' ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Minus className="w-4 h-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-xs">
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                        ? 'Filters apply (click to change)'
+                        : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                        ? 'Filters don\'t apply (click to change)'
+                        : 'Filters ignored (click to change)'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
+
           {/* Chart Container */}
           <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-blue-200 shadow-lg relative" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
             <ChartElement 
@@ -5144,6 +5512,58 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           >
             Change
           </button>
+
+          {/* Edit Interactions Controls - visible when Edit Interactions mode is enabled */}
+          {settings.editInteractionsMode && (
+            <div 
+              className="absolute top-2 left-2 z-30 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-300 p-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const currentInteraction = settings.elementInteractions?.[boxId] || 'apply';
+                        const newInteraction = currentInteraction === 'apply' ? 'not-apply' : currentInteraction === 'not-apply' ? 'ignore' : 'apply';
+                        onSettingsChange({
+                          elementInteractions: {
+                            ...(settings.elementInteractions || {}),
+                            [boxId]: newInteraction
+                          }
+                        });
+                      }}
+                      className={`p-1.5 rounded transition-colors ${
+                        (settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                          ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                          ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply' ? (
+                        <Filter className="w-4 h-4" />
+                      ) : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply' ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Minus className="w-4 h-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-xs">
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                        ? 'Filters apply (click to change)'
+                        : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                        ? 'Filters don\'t apply (click to change)'
+                        : 'Filters ignored (click to change)'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
 
           {/* Table Container */}
           <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-teal-200 shadow-lg" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>

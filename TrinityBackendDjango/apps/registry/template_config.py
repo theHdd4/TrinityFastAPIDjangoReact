@@ -351,11 +351,11 @@ def store_template_configuration(*, project: Project, template: Template, state:
             }
             if atom_filter:
                 atom_filter["isDeleted"] = {"$ne": True}
-                atom_cursor = database["django_atom_list_configuration"].find(atom_filter)
+                atom_cursor = database["atom_list_configuration"].find(atom_filter)
                 atom_docs = _serialise_docs(list(atom_cursor))
         except Exception as exc:  # pragma: no cover - network/driver errors only
             logger.error(
-                "Failed to fetch django_atom_list_configuration for template %s: %s",
+                "Failed to fetch atom_list_configuration for template %s: %s",
                 template.pk,
                 exc,
             )
@@ -529,7 +529,7 @@ def apply_template_configuration(*, project: Project, template: Template) -> Non
             scope_keys=("client_name", "app_name", "project_name", "document_type"),
         )
 
-        atom_collection = database["django_atom_list_configuration"]
+        atom_collection = database["atom_list_configuration"]
         _persist_collection_documents(
             atom_collection,
             documents=prepared_atoms,

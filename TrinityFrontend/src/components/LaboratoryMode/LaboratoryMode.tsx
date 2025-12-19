@@ -416,6 +416,19 @@ const LaboratoryMode = () => {
           ? sortCardsInWorkflowOrder(cardsToSave, workflowMolecules)
           : cardsToSave;
 
+        // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
+        // moleculeIndex preserves the original order/position in the array
+        // FIX: If there are no cards, clear workflow molecules to return to regular laboratory mode
+        const workflowMoleculesForSave = (sortedCards.length === 0)
+          ? [] // Clear workflow molecules when no cards remain
+          : workflowMolecules.map((molecule, index) => ({
+            moleculeId: molecule.moleculeId,
+            moleculeTitle: molecule.moleculeTitle,
+            atoms: molecule.atoms || [],
+            isActive: molecule.isActive !== false, // Default to true if not specified
+            moleculeIndex: index // Preserve the original index/position
+          }));
+
         // Save the current laboratory configuration with sorted cards
         const labConfig = {
           cards: sortedCards,

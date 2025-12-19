@@ -143,6 +143,19 @@ const DataFrameOperationsSettings: React.FC<DataFrameOperationsSettingsProps> = 
               Upload File
             </Button>
           )}
+
+          {/* Show Data Summary Toggle - Only when data source is selected (chartmaker pattern) */}
+          {data && data.fileName && data.headers && data.headers.length > 0 && (
+            <div className="flex items-center justify-between pt-4 border-t mt-4">
+              <Label className="text-xs">Show Data Summary</Label>
+              <Switch
+                checked={settings.showDataSummary || false}
+                onCheckedChange={(checked) => {
+                  onSettingsChange({ showDataSummary: checked });
+                }}
+              />
+            </div>
+          )}
         </div>
       </Card>
 

@@ -9,7 +9,7 @@ import { CheckboxTemplate } from '@/templates/checkbox';
 import { Plus } from 'lucide-react';
 import { Database, FileText, GripVertical, Info } from 'lucide-react';
 import { ClassifierData } from '../ColumnClassifierAtom';
-import ColClassifierColumnView from './ColClassifierColumnView';
+import { DataSummaryView } from '@/components/shared/DataSummaryView';
 import { useToast } from '@/hooks/use-toast';
 import {
   Tooltip,
@@ -65,14 +65,12 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
-  // COMMENTED OUT - dimensions disabled
-  // // Dimension settings state
-  // const atom = useLaboratoryStore(state => state.getAtom(atomId || ''));
-  // const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  // const settings: SettingsType = {
-  //   ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
-  //   ...(atom?.settings as SettingsType)
-  // };
+  // Get atom settings for showDataSummary
+  const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
+  const settings: SettingsType = {
+    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+    ...(atom?.settings as SettingsType)
+  };
   // const { toast } = useToast();
 
   // const [enableMapping, setEnableMapping] = useState<boolean>(true);
@@ -581,14 +579,29 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
           </div>
         </div>
         <div className="p-4 space-y-3">
-          {showColumnView && currentFile && (
-            <ColClassifierColumnView
-              objectName={currentFile.fileName}
-              columns={columnsByCategory}
-              filterUnique={filterUnique}
-              onFilterToggle={onFilterToggle}
-              atomId={atomId}
-            />
+          {/* Data Summary - Unified component with metadata support */}
+          {currentFile && settings?.showDataSummary && (
+            <div className="border-b border-slate-200 px-5 py-4">
+              <DataSummaryView
+                objectName={currentFile.fileName}
+                atomId={atomId || ''}
+                title="Data Summary"
+                subtitle="Data in detail"
+                subtitleClickable={!!currentFile.fileName && !!atomId}
+                onSubtitleClick={() => {
+                  if (currentFile.fileName && atomId) {
+                    window.open(`/dataframe?name=${encodeURIComponent(currentFile.fileName)}`, '_blank');
+                  }
+                }}
+              />
+            </div>
+          )}
+          
+          {/* Legacy column view - kept for backward compatibility with enableColumnView */}
+          {showColumnView && currentFile && !settings?.showDataSummary && (
+            <div className="text-xs text-gray-500 p-2">
+              Legacy column view disabled. Enable "Show Data Summary" to view column information.
+            </div>
           )}
           {/* <div className="grid grid-cols-3 gap-6">
             <DroppableSection

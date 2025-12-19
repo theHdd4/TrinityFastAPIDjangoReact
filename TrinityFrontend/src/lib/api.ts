@@ -230,6 +230,9 @@ export const CREATECOLUMN_API =
 export const GROUPBY_API =
   import.meta.env.VITE_GROUPBY_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/groupby`;
 
+export const CARDINALITY_VIEW_API =
+  import.meta.env.VITE_CARDINALITY_VIEW_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/cardinality-view`;
+
 let aiBase = normalizeUrl(import.meta.env.VITE_TRINITY_AI_API);
 if (!aiBase) {
   aiBase = backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);

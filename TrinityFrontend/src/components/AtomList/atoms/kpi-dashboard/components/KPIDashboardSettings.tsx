@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
-import { Plus, X, Upload, ImageIcon, BarChart3, Filter, Settings2 } from 'lucide-react';
+import { Plus, X, Upload, ImageIcon, BarChart3, Filter, Settings2, Edit, Eye, EyeOff, Zap } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { VALIDATE_API, LABORATORY_API, IMAGES_API, SCOPE_SELECTOR_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
@@ -689,6 +689,50 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
         />
       </div>
 
+      {/* Edit Interactions Mode */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex flex-col">
+            <Label className="text-sm font-medium">Edit Interactions</Label>
+            <p className="text-xs text-muted-foreground mt-1">
+              Control which elements respond to global filters
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant={settings.editInteractionsMode ? "default" : "outline"}
+            size="sm"
+            onClick={() => {
+              onSettingsChange({ 
+                editInteractionsMode: !settings.editInteractionsMode 
+              });
+            }}
+            className="h-8 text-xs"
+          >
+            {settings.editInteractionsMode ? (
+              <>
+                <Eye className="w-3 h-3 mr-1" />
+                Exit Mode
+              </>
+            ) : (
+              <>
+                <Edit className="w-3 h-3 mr-1" />
+                Edit Interactions
+              </>
+            )}
+          </Button>
+        </div>
+        {settings.editInteractionsMode && (
+          <Card className="p-3 bg-blue-50 border-blue-200">
+            <p className="text-xs text-blue-800">
+              <Zap className="w-3 h-3 inline mr-1" />
+              Click on dashboard elements to configure their filter interactions. 
+              Use the icons to set whether global filters apply, don't apply, or are ignored.
+            </p>
+          </Card>
+        )}
+      </div>
+
       {/* Global Filters */}
       {(() => {
         // Get all identifiers from availableColumns (data source columns)
@@ -1002,11 +1046,22 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                         // Apply filters automatically to all element types
                         let updatedLayouts = settings.layouts;
                         
-                        // Always apply to charts - sync global filters to chart's individual filters
+                        // Apply to charts - sync global filters to chart's individual filters (respect interaction settings)
                         updatedLayouts = settings.layouts?.map(layout => ({
                           ...layout,
                           boxes: layout.boxes.map(box => {
                             if (box.elementType === 'chart' && box.chartConfig) {
+                              // Check interaction setting for this element
+                              const interaction = settings.elementInteractions?.[box.id] || 'apply';
+                              if (interaction === 'ignore') {
+                                // Ignore mode: don't apply filters, don't remove existing filters
+                                return box;
+                              }
+                              if (interaction === 'not-apply') {
+                                // Not-apply mode: don't apply global filters, but keep existing filters
+                                return box;
+                              }
+                              // 'apply' mode (default): apply global filters normally
                               // Store previous local filters before applying global filter
                               const originalChartConfig = box.chartConfig;
                               const chartConfig = migrateLegacyChart(originalChartConfig);
@@ -1100,11 +1155,22 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                           })
                         }));
                         
-                        // Always apply to tables - sync global filters to table's column filters
+                        // Apply to tables - sync global filters to table's column filters (respect interaction settings)
                         updatedLayouts = updatedLayouts?.map(layout => ({
                           ...layout,
                           boxes: layout.boxes.map(box => {
                             if (box.elementType === 'table' && box.tableSettings) {
+                              // Check interaction setting for this element
+                              const interaction = settings.elementInteractions?.[box.id] || 'apply';
+                              if (interaction === 'ignore') {
+                                // Ignore mode: don't apply filters, don't remove existing filters
+                                return box;
+                              }
+                              if (interaction === 'not-apply') {
+                                // Not-apply mode: don't apply global filters, but keep existing filters
+                                return box;
+                              }
+                              // 'apply' mode (default): apply global filters normally
                               // Only update table filters if table is in a valid state (has tableId and is loaded)
                               // Skip if table is blank or not yet loaded
                               if (!box.tableSettings.tableId || box.tableSettings.mode !== 'load' || !box.tableSettings.tableData) {
@@ -1244,6 +1310,17 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
                           ...layout,
                           boxes: layout.boxes.map(box => {
                             if (box.elementType === 'metric-card' && (box.variableNameKey || box.variableName)) {
+                              // Check interaction setting for this element
+                              const interaction = settings.elementInteractions?.[box.id] || 'apply';
+                              if (interaction === 'ignore') {
+                                // Ignore mode: don't apply filters, don't change variable
+                                return box;
+                              }
+                              if (interaction === 'not-apply') {
+                                // Not-apply mode: don't apply global filters, keep current variable
+                                return box;
+                              }
+                              // 'apply' mode (default): apply global filters normally
                               const variableKey = box.variableNameKey || box.variableName || '';
                               if (variableKey) {
                                 // Parse current identifiers from variable key

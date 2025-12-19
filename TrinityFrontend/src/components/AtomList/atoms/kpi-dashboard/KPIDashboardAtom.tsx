@@ -46,6 +46,8 @@ export interface KPIDashboardSettings {
   }>; // Global filters automatically apply to all elements
   previousLocalFilters?: Record<string, Record<string, any>>; // Store previous local filters for restoration
   enabledGlobalFilterIdentifiers?: string[]; // User-selected identifiers to show in Global Filters section
+  editInteractionsMode?: boolean; // Toggle for Edit Interactions mode
+  elementInteractions?: Record<string, 'apply' | 'not-apply' | 'ignore'>; // Interaction settings per element (boxId -> interaction type)
 }
 
 interface KPIDashboardAtomProps {
@@ -65,7 +67,9 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
       insights: '',
       layouts: [],
       globalFilters: {} as Record<string, { values: string[] }>,
-      previousLocalFilters: {} as Record<string, Record<string, any>>
+      previousLocalFilters: {} as Record<string, Record<string, any>>,
+      editInteractionsMode: false,
+      elementInteractions: {} as Record<string, 'apply' | 'not-apply' | 'ignore'>
     };
   }, [atom?.settings]);
   
@@ -109,6 +113,8 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
                   metricColumns: result.data.metricColumns || [],
                   changeColumns: result.data.changeColumns || [],
                   insights: result.data.insights || '',
+                  editInteractionsMode: result.data.editInteractionsMode || false,
+                  elementInteractions: result.data.elementInteractions || {},
                 });
               }
               return; // Done - use this data

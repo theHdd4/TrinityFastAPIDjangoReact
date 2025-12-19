@@ -60,7 +60,7 @@ import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
 import FormularBar from './FormularBar';
 import CollapsibleFormulaBar from './CollapsibleFormulaBar';
-import DataFrameCardinalityView from './DataFrameCardinalityView';
+import { DataSummaryView } from '@/components/shared/DataSummaryView';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 import {
   PivotTableSettings as PivotSettings,
@@ -5901,10 +5901,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           </div>
         )}
-        {/* Cardinality view (aligned with Column Classifier) */}
-        {data && data.headers && data.headers.length > 0 && (
+        {/* Data Summary - Unified component with metadata support */}
+        {settings.selectedFile && settings.showDataSummary && (
           <div className="border-b border-slate-200 px-5 py-4">
-            <DataFrameCardinalityView data={data} atomId={atomId} />
+            <DataSummaryView
+              objectName={settings.selectedFile}
+              atomId={atomId}
+              title="Data Summary"
+              subtitle="Data in detail"
+              subtitleClickable={!!settings.selectedFile}
+              onSubtitleClick={() => {
+                if (settings.selectedFile) {
+                  window.open(`/dataframe?name=${encodeURIComponent(settings.selectedFile)}`, '_blank');
+                }
+              }}
+            />
           </div>
         )}
 

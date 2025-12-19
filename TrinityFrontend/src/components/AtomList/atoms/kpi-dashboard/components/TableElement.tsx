@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Table2, Loader2, Save, FileText, AlertCircle } from 'lucide-react';
+import { Table2, Loader2, AlertCircle } from 'lucide-react';
 import TableCanvas from '@/components/AtomList/atoms/table/components/TableCanvas';
 import TablePagination from '@/components/AtomList/atoms/table/components/TablePagination';
 import { Button } from '@/components/ui/button';
@@ -220,6 +220,25 @@ const TableElement: React.FC<TableElementProps> = ({
   // Track previous filters to detect changes
   const previousFiltersRef = useRef<string>('');
   const isReloadingRef = useRef(false);
+  const isInitializedRef = useRef(false);
+  const previousTableIdRef = useRef<string | number | undefined>(undefined);
+  
+  // Initialize previousFiltersRef when table becomes ready (after refresh/reload)
+  useEffect(() => {
+    // Reset initialization if tableId changed (new table loaded)
+    if (previousTableIdRef.current !== undefined && previousTableIdRef.current !== settings.tableId) {
+      isInitializedRef.current = false;
+      previousFiltersRef.current = '';
+    }
+    previousTableIdRef.current = settings.tableId;
+    
+    // Only initialize if table is ready and we haven't initialized yet
+    if (settings.tableId && tableSettings?.mode === 'load' && tableSettings?.tableData && !isInitializedRef.current) {
+      const currentFiltersStr = JSON.stringify(settings.filters || {});
+      previousFiltersRef.current = currentFiltersStr;
+      isInitializedRef.current = true;
+    }
+  }, [settings.tableId, tableSettings?.mode, tableSettings?.tableData]);
   
   // Reload table when filters change (e.g., from global filters)
   useEffect(() => {
@@ -227,6 +246,10 @@ const TableElement: React.FC<TableElementProps> = ({
       // Only reload if we have a tableId and it's a loaded table (not blank)
       // CRITICAL: Also check that tableData exists to ensure table is fully loaded
       if (!settings.tableId || !tableSettings?.mode || tableSettings.mode !== 'load' || !tableSettings?.tableData) {
+        // Reset initialization flag if table becomes unavailable
+        if (!settings.tableId || !tableSettings?.tableData) {
+          isInitializedRef.current = false;
+        }
         return;
       }
 
@@ -238,6 +261,13 @@ const TableElement: React.FC<TableElementProps> = ({
 
       // Serialize current filters for comparison
       const currentFiltersStr = JSON.stringify(settings.filters || {});
+      
+      // Initialize previousFiltersRef if not yet initialized (handles case where table becomes ready)
+      if (!isInitializedRef.current) {
+        previousFiltersRef.current = currentFiltersStr;
+        isInitializedRef.current = true;
+        return; // Don't reload on initial setup, just sync the ref
+      }
       
       // Skip if filters haven't actually changed
       if (currentFiltersStr === previousFiltersRef.current) {
@@ -739,91 +769,10 @@ const TableElement: React.FC<TableElementProps> = ({
   })();
 
   // Render the table in a constrained container with pagination
+  // CRITICAL: The 'group' class on this container ensures hover is strictly scoped to this table element only
+  // Hovering elsewhere on the canvas will NOT trigger pagination visibility
   return (
-    <div className="w-full h-full flex flex-col overflow-hidden bg-white rounded-xl border border-slate-200 shadow-lg" style={{ maxHeight: height, maxWidth: width }}>
-      {/* Save Buttons Bar */}
-      <div className="px-4 py-2 border-b border-gray-200 bg-white flex items-center justify-between gap-2 flex-shrink-0">
-        {/* Filename Display */}
-        <div className="flex items-center space-x-2 flex-1 min-w-0">
-          {(() => {
-            // Determine filename to display
-            let displayName = '';
-            if (tableSettings.savedFile) {
-              // User saved with a new name
-              displayName = tableSettings.savedFile.includes('/') 
-                ? tableSettings.savedFile.split('/').pop() || tableSettings.savedFile
-                : tableSettings.savedFile;
-            } else if (tableSettings.sourceFile) {
-              // Loaded from file or saved to original
-              displayName = tableSettings.sourceFile.includes('/')
-                ? tableSettings.sourceFile.split('/').pop() || tableSettings.sourceFile
-                : tableSettings.sourceFile;
-            } else if (tableSettings.mode === 'blank' && (tableSettings.tableData?.table_id || tableSettings.tableId)) {
-              // Blank table - show table ID
-              displayName = tableSettings.tableData?.table_id || tableSettings.tableId || 'Untitled Table';
-            } else if (tableSettings.tableData?.object_name) {
-              // Fallback to object_name from backend
-              displayName = tableSettings.tableData.object_name.includes('/')
-                ? tableSettings.tableData.object_name.split('/').pop() || tableSettings.tableData.object_name
-                : tableSettings.tableData.object_name;
-            } else if (tableSettings.tableData?.table_id) {
-              // Last resort: use table_id
-              displayName = tableSettings.tableData.table_id;
-            }
-            
-            if (displayName) {
-              return (
-                <div className="flex items-center space-x-2 px-3 py-1.5 rounded-md bg-blue-50 border border-blue-200">
-                  <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                  <span className="text-sm font-medium text-gray-700 truncate">{displayName}</span>
-                </div>
-              );
-            }
-            return null;
-          })()}
-        </div>
-        
-        {/* Save Buttons */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Button
-            onClick={handleSave}
-            disabled={saving || !tableSettings.tableId || !tableSettings.sourceFile}
-            className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2 px-4"
-            size="sm"
-          >
-            {saving ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                <span>Saving...</span>
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                <span>Save</span>
-              </>
-            )}
-          </Button>
-          <Button
-            onClick={handleSaveAs}
-            disabled={saving || !tableSettings.tableId}
-            className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4"
-            size="sm"
-          >
-            {saving ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                <span>Saving...</span>
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                <span>Save As</span>
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
-
+    <div className="group relative w-full h-full flex flex-col overflow-hidden bg-white rounded-xl border border-slate-200 shadow-lg" style={{ maxHeight: height, maxWidth: width }}>
       {/* Table Canvas with horizontal and vertical scrolling */}
       {/* CRITICAL: Use overflow-hidden like TableAtom to ensure proper toolbar/portal rendering */}
       {/* CRITICAL: Pass atomId in spread like TableAtom does */}
@@ -839,14 +788,17 @@ const TableElement: React.FC<TableElementProps> = ({
         />
       </div>
       
-      {/* Pagination - only for load mode */}
+      {/* Pagination - only for load mode, hidden by default, shown on hover */}
+      {/* CRITICAL: group-hover only triggers when hovering within the table container (group parent) */}
       {tableSettings.mode === 'load' && tableSettings.tableData?.row_count && (
-        <TablePagination
-          currentPage={tableSettings.currentPage || 1}
-          pageSize={tableSettings.pageSize || 50}
-          totalRows={tableSettings.tableData.row_count}
-          onPageChange={handlePageChange}
-        />
+        <div className="max-h-0 overflow-hidden opacity-0 group-hover:max-h-[200px] group-hover:opacity-100 transition-all duration-300 ease-in-out pointer-events-none group-hover:pointer-events-auto">
+          <TablePagination
+            currentPage={tableSettings.currentPage || 1}
+            pageSize={tableSettings.pageSize || 50}
+            totalRows={tableSettings.tableData.row_count}
+            onPageChange={handlePageChange}
+          />
+        </div>
       )}
 
       {/* Save As Dialog */}
