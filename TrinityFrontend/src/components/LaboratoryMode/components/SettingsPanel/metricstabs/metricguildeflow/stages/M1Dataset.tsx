@@ -12,7 +12,7 @@ import {
   Hash,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { GROUPBY_API } from '@/lib/api';
+import { GROUPBY_API, CREATECOLUMN_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useSavedDataframes } from '../../hooks/useSavedDataframes';
 import type { SavedFrame } from '../../hooks/useSavedDataframes';
@@ -51,7 +51,7 @@ interface ColumnMetadata {
   data_type: string;
   unique_count: number;
   unique_values: any[];
-  classification?: 'numerical' | 'identifiers';
+  classification?: 'measures' | 'identifiers';
 }
 
 interface PreviewRow {
@@ -71,6 +71,9 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId, readO
   const [previewColumns, setPreviewColumns] = useState<string[]>([]);
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [activeDataTab, setActiveDataTab] = useState<'summary' | 'preview'>('summary');
+  const [identifiers, setIdentifiers] = useState<string[]>([]);
+  const [measures, setMeasures] = useState<string[]>([]);
+  const [loadingClassification, setLoadingClassification] = useState(false);
 
   const cardinalityRequestId = useRef(0);
 
@@ -184,6 +187,65 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId, readO
     }
   }, [frames, state.dataSource, tempSelectedDataSource, resolveObjectName]);
 
+  // Fetch identifiers and measures from API (same pattern as group by operation)
+  useEffect(() => {
+    async function fetchClassificationData() {
+      if (!tempSelectedDataSource) {
+        setIdentifiers([]);
+        setMeasures([]);
+        return;
+      }
+
+      setLoadingClassification(true);
+      const resolvedName = resolveObjectName(tempSelectedDataSource);
+      
+      // Extract client/app/project and file_name from file path (same pattern as group by operation)
+      const pathParts = resolvedName.split('/');
+      const clientName = pathParts[0] ?? '';
+      const appName = pathParts[1] ?? '';
+      const projectName = pathParts[2] ?? '';
+      // Extract file_name (everything after project_name, remove .arrow if present)
+      let fileName = pathParts.slice(3).join('/') || null;
+      if (fileName && fileName.endsWith('.arrow')) {
+        fileName = fileName.slice(0, -6); // Remove .arrow extension
+      }
+
+      try {
+        if (clientName && appName && projectName) {
+          // Fetch identifiers (same API as group by operation)
+          const urlParams = new URLSearchParams({
+            client_name: clientName,
+            app_name: appName,
+            project_name: projectName,
+          });
+          if (fileName) {
+            urlParams.append('file_name', fileName);
+          }
+          
+          const resp = await fetch(`${CREATECOLUMN_API}/identifier_options?${urlParams.toString()}`);
+          if (resp.ok) {
+            const data = await resp.json();
+            if (Array.isArray(data.identifiers)) {
+              setIdentifiers(data.identifiers || []);
+            }
+            // Measures are also returned from the same endpoint
+            if (Array.isArray(data.measures)) {
+              setMeasures(data.measures || []);
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch classification data from API', error);
+        setIdentifiers([]);
+        setMeasures([]);
+      } finally {
+        setLoadingClassification(false);
+      }
+    }
+    
+    fetchClassificationData();
+  }, [tempSelectedDataSource, resolveObjectName]);
+
   // Auto-fetch cardinality data when tempSelectedDataSource changes
   useEffect(() => {
     if (!tempSelectedDataSource) {
@@ -201,22 +263,25 @@ export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId, readO
     };
   }, [tempSelectedDataSource, fetchCardinalityData, resolveObjectName, setState]);
 
-  // Classification logic
-  const classifyColumn = useCallback((dataType: string): 'numerical' | 'identifiers' => {
-    const t = dataType.toLowerCase();
-    if (t.includes('int') || t.includes('float') || t.includes('number')) {
-      return 'numerical';
+  // Classification logic - use API-fetched identifiers and measures
+  const getColumnClassification = useCallback((columnName: string): 'measures' | 'identifiers' => {
+    const colLower = columnName.toLowerCase();
+    // Check if column is in the identifiers list from API
+    if (identifiers.some(id => id.toLowerCase() === colLower)) {
+      return 'identifiers';
     }
-    return 'identifiers';
-  }, []);
+    // Everything else is measures (replacing manual numerical classification)
+    // The API returns measures, but if not available, we classify non-identifiers as measures
+    return 'measures';
+  }, [identifiers]);
 
-  // Transform cardinalityData to include classification
+  // Transform cardinalityData to include classification based on API data
   const cardinalityWithClassification = useMemo(() => {
     return cardinalityData.map(col => ({
       ...col,
-      classification: classifyColumn(col.data_type)
+      classification: getColumnClassification(col.column)
     }));
-  }, [cardinalityData, classifyColumn]);
+  }, [cardinalityData, getColumnClassification]);
 
   // Build simple preview rows from cardinality API data (unique_values)
   useEffect(() => {

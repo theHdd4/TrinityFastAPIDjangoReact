@@ -2015,7 +2015,7 @@ interface LaboratoryStore {
   globalGuidedModeEnabled: boolean;
   // Metric Guided Flow State
   isMetricGuidedFlowOpen: boolean;
-  activeMetricGuidedFlow: { currentStage: MetricStage; state: Partial<MetricGuidedFlowState> } | null;
+  activeMetricGuidedFlow: { currentStage: MetricStage; state: Partial<MetricGuidedFlowState>; fixedCardId?: string; cardsCountWhenOpened?: number } | null;
 
   // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
@@ -2078,7 +2078,7 @@ interface LaboratoryStore {
   // --- Metric Guided Flow Actions ---
   openMetricGuidedFlow: (initialContext?: Partial<MetricGuidedFlowState>) => void;
   closeMetricGuidedFlow: () => void;
-  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>) => void;
+  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>, fixedCardId?: string) => void;
 }
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
@@ -2773,16 +2773,20 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   // --- Metric Guided Flow Actions ---
   openMetricGuidedFlow: (initialContext?: Partial<MetricGuidedFlowState>) => {
     console.log('[MetricGuidedFlow] openMetricGuidedFlow called', { initialContext });
+    const currentState = get();
+    const cardsCountWhenOpened = Array.isArray(currentState.cards) ? currentState.cards.length : 0;
     const newState = {
       isMetricGuidedFlowOpen: true,
       activeMetricGuidedFlow: initialContext
         ? {
             currentStage: initialContext.currentStage || 'type',
             state: initialContext,
+            cardsCountWhenOpened,
           }
         : {
             currentStage: 'type',
             state: {},
+            cardsCountWhenOpened,
           },
     };
     console.log('[MetricGuidedFlow] Setting store state:', newState);
@@ -2797,11 +2801,15 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     });
   },
 
-  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>) => {
+  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>, fixedCardId?: string) => {
     set((prev) => ({
       activeMetricGuidedFlow: {
         currentStage,
         state: state || prev.activeMetricGuidedFlow?.state || {},
+        // Only update fixedCardId if provided; preserve existing one if not provided
+        fixedCardId: fixedCardId !== undefined ? fixedCardId : prev.activeMetricGuidedFlow?.fixedCardId,
+        // Preserve cardsCountWhenOpened
+        cardsCountWhenOpened: prev.activeMetricGuidedFlow?.cardsCountWhenOpened,
       },
     }));
   },

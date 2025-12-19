@@ -1251,6 +1251,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     isMetricGuidedFlowOpen,
     activeMetricGuidedFlow,
     closeMetricGuidedFlow,
+    setActiveMetricGuidedFlow,
     metricsInputs,
     findCardByAtomId,
   } = useLaboratoryStore();
@@ -1269,6 +1270,19 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       return undefined;
     }
 
+    // First, check if we have a fixedCardId stored - if so, use it (this prevents the flow from moving)
+    const storedFixedCardId = activeMetricGuidedFlow?.fixedCardId;
+    if (storedFixedCardId) {
+      // Verify the fixed card still exists in the layout
+      const cardExists = Array.isArray(layoutCards) && layoutCards.some(card => card.id === storedFixedCardId);
+      if (cardExists) {
+        console.log('[MetricGuidedFlow] Using stored fixedCardId:', storedFixedCardId);
+        return storedFixedCardId;
+      }
+      // If card doesn't exist, return undefined (we'll handle clearing in useEffect)
+    }
+
+    // If no fixedCardId is set, compute from context (for initial attachment only)
     const contextAtomId = metricsInputs.contextAtomId;
     const contextCardId = metricsInputs.contextCardId;
 
@@ -1292,6 +1306,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
     console.log('[MetricGuidedFlow] Resolved target card for inline flow', {
       isMetricGuidedFlowOpen,
+      storedFixedCardId: storedFixedCardId || null,
       contextCardId: contextCardId || null,
       contextAtomId: contextAtomId || null,
       targetCardId: targetCardId || null,
@@ -1300,11 +1315,60 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     return targetCardId;
   }, [
     isMetricGuidedFlowOpen,
+    activeMetricGuidedFlow?.fixedCardId,
     metricsInputs.contextAtomId,
     metricsInputs.contextCardId,
     findCardByAtomId,
     layoutCards,
   ]);
+
+  // Set fixedCardId when flow first attaches to a card, or clear it if the card is deleted
+  React.useEffect(() => {
+    if (!isMetricGuidedFlowOpen || !activeMetricGuidedFlow) {
+      return;
+    }
+
+    const storedFixedCardId = activeMetricGuidedFlow.fixedCardId;
+    const computedCardId = metricContextCardId;
+
+    // If we have a stored fixedCardId, verify it still exists
+    if (storedFixedCardId) {
+      const cardExists = Array.isArray(layoutCards) && layoutCards.some(card => card.id === storedFixedCardId);
+      if (!cardExists) {
+        // Card was deleted, clear the fixedCardId
+        console.log('[MetricGuidedFlow] Fixed card no longer exists, clearing fixedCardId');
+        setActiveMetricGuidedFlow(
+          activeMetricGuidedFlow.currentStage,
+          activeMetricGuidedFlow.state,
+          undefined
+        );
+      }
+    } else if (computedCardId) {
+      // If we computed a card ID but don't have a fixedCardId yet, set it now (first attachment)
+      console.log('[MetricGuidedFlow] Setting fixedCardId for first time:', computedCardId);
+      setActiveMetricGuidedFlow(
+        activeMetricGuidedFlow.currentStage,
+        activeMetricGuidedFlow.state,
+        computedCardId
+      );
+    }
+  }, [isMetricGuidedFlowOpen, activeMetricGuidedFlow, metricContextCardId, layoutCards, setActiveMetricGuidedFlow]);
+
+  // Split cards into "existing" (before flow) and "new" (after flow) when flow is at bottom
+  const { cardsBeforeFlow, cardsAfterFlow } = useMemo(() => {
+    if (!isMetricGuidedFlowOpen || !activeMetricGuidedFlow || metricContextCardId) {
+      // Flow is attached to a card, render all cards normally
+      return { cardsBeforeFlow: Array.isArray(layoutCards) ? layoutCards : [], cardsAfterFlow: [] };
+    }
+
+    // Flow is at bottom - split cards based on when flow was opened
+    const cardsCountWhenOpened = activeMetricGuidedFlow.cardsCountWhenOpened ?? 0;
+    const allCards = Array.isArray(layoutCards) ? layoutCards : [];
+    const cardsBefore = allCards.slice(0, cardsCountWhenOpened);
+    const cardsAfter = allCards.slice(cardsCountWhenOpened);
+
+    return { cardsBeforeFlow: cardsBefore, cardsAfterFlow: cardsAfter };
+  }, [isMetricGuidedFlowOpen, activeMetricGuidedFlow, metricContextCardId, layoutCards]);
 
   // Helper function to render inline guided flow for an atom
   const renderInlineGuidedFlow = (atom: DroppedAtom) => {
@@ -6332,7 +6396,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         <div className={`${canEdit ? '' : 'pointer-events-none'} min-w-0`}>
           {/* Layout Cards Container */}
           <div data-lab-cards-container="true" className="p-2 space-y-6 w-full min-w-0">
-            {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
+            {/* Render cards before flow (existing cards when flow was opened) */}
+            {cardsBeforeFlow.length > 0 && cardsBeforeFlow.map((card, index) => {
+              const allCardsIndex = Array.isArray(layoutCards) ? layoutCards.findIndex(c => c.id === card.id) : -1;
               const cardTitle = card.moleculeTitle
                 ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                 : (Array.isArray(card.atoms) && card.atoms.length > 0)
@@ -6626,20 +6692,20 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                       />
                     </div>
                   )}
-                  {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
+                  {allCardsIndex >= 0 && allCardsIndex < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
                     <div className="flex justify-center my-4">
                       <button
-                        onClick={() => addNewCard(undefined, index + 1)}
-                        onDragEnter={e => handleAddDragEnter(e, `p-${index}`)}
+                        onClick={() => addNewCard(undefined, allCardsIndex + 1)}
+                        onDragEnter={e => handleAddDragEnter(e, `p-${allCardsIndex}`)}
                         onDragLeave={handleAddDragLeave}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => {
-                          void handleDropNewCard(e, undefined, index + 1);
+                          void handleDropNewCard(e, undefined, allCardsIndex + 1);
                         }}
-                        className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `p-${index}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                        className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `p-${allCardsIndex}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                         title="Add new card"
                       >
-                        <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `p-${index}` ? 'scale-125 mb-2' : ''}`} />
+                        <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `p-${allCardsIndex}` ? 'scale-125 mb-2' : ''}`} />
                         <span
                           className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                         >
@@ -6652,8 +6718,287 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               );
             })}
 
-            {/* Global Metric Guided Workflow inline card (not tied to any atom) */}
+            {/* Global Metric Guided Workflow inline card (not tied to any atom) - renders here when at bottom */}
             {renderMetricInlineGuidedFlow()}
+
+            {/* Render cards after flow (new cards added after flow was opened) */}
+            {cardsAfterFlow.length > 0 && cardsAfterFlow.map((card) => {
+              const allCardsIndex = Array.isArray(layoutCards) ? layoutCards.findIndex(c => c.id === card.id) : -1;
+              const cardTitle = card.moleculeTitle
+                ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+                : (Array.isArray(card.atoms) && card.atoms.length > 0)
+                  ? card.atoms[0].title
+                  : 'Card';
+
+              // Check if someone is editing this card
+              const editor = cardEditors?.get(card.id);
+              const isBeingEdited = !!editor;
+
+              return (
+                <React.Fragment key={card.id}>
+                  <Card
+                    data-card-id={card.id}
+            className={`relative w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+              dragOver === card.id
+                        ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
+                        : isBeingEdited
+                          ? `shadow-lg`
+                          : 'border-gray-200 shadow-sm hover:shadow-md'
+                      }`}
+                    style={isBeingEdited ? {
+                      borderColor: editor.user_color,
+                      boxShadow: `0 0 0 2px ${editor.user_color}40`,
+                    } : undefined}
+                    onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
+                    onDragOver={(e) => handleDragOver(e, card.id)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, card.id)}
+                    onMouseEnter={() => onCardFocus?.(card.id)}
+                    onMouseLeave={() => onCardBlur?.(card.id)}
+                  >
+                    {/* Editor Badge - shows who's editing this card */}
+                    {isBeingEdited && editor && (
+                      <div
+                        className="absolute top-2 right-2 px-2 py-1 rounded-full text-xs font-medium text-white shadow-md z-10 flex items-center gap-1"
+                        style={{ backgroundColor: editor.user_color }}
+                      >
+                        <div
+                          className="w-2 h-2 rounded-full bg-white/80 animate-pulse"
+                          title={`${editor.user_name} is editing`}
+                        />
+                        <span className="max-w-[150px] truncate">
+                          {editor.user_email}
+                        </span>
+                      </div>
+                    )}
+
+            <div className="flex items-center justify-between py-1.5 px-2">
+                      <div className="flex items-center space-x-1.5">
+                {card.atoms.length > 0 && card.atoms[0].color && (
+                  <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
+                )}
+                        <span className="text-xs font-medium text-gray-700">
+                          {cardTitle}
+                        </span>
+                {card.atoms.length === 0 ? (
+                        <AIChatBot
+                          cardId={card.id}
+                          cardTitle={cardTitle}
+                          onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                  />
+                ) : card.atoms.length > 0 && card.atoms[0] ? (
+                  <AtomAIChatBot
+                    atomId={card.atoms[0].id}
+                    atomType={card.atoms[0].atomId}
+                    atomTitle={card.atoms[0].title}
+                    disabled={!LLM_MAP[card.atoms[0].atomId]}
+                    className="transition-transform hover:scale-110"
+                  />
+                ) : null}
+                        <button
+                          onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                          className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Card Settings"
+                          disabled={!canEdit}
+                        >
+                          <Settings className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            refreshCardAtoms(card.id);
+                          }}
+                          className="p-0.5 hover:bg-gray-100 rounded"
+                          title="Refresh Atom"
+                        >
+                          <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleCardTextBox(card.id);
+                  }}
+                  className={`p-1 rounded hover:bg-gray-100 ${
+                    card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                  }`}
+                  title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                >
+                  <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                        </button>
+                      </div>
+                      <div className="flex items-center space-x-1.5">
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            const cardTitle = card.moleculeTitle || (Array.isArray(card.atoms) && card.atoms.length > 0 ? card.atoms[0]?.title : undefined) || 'Card';
+                            handleDeleteCardClick(card.id, cardTitle);
+                          }}
+                          className="p-0.5 hover:bg-gray-100 rounded"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            toggleCardExpand(card.id);
+                          }}
+                          className="p-0.5 hover:bg-gray-100 rounded"
+                          title="Expand Card"
+                        >
+                          <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            toggleCardCollapse(card.id);
+                          }}
+                          className="p-0.5 hover:bg-gray-100 rounded"
+                          title="Toggle Card"
+                        >
+                          {collapsedCards[card.id] ? (
+                            <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                          ) : (
+                            <Minus className="w-3.5 h-3.5 text-gray-400" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Card Content */}
+            <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+                      {card.atoms.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
+                          <AtomSuggestion
+                            cardId={card.id}
+                            isVisible={true}
+                            onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
+                            onAddAtom={handleAddAtomFromSuggestion}
+                            allowedAtomIds={allowedAtomIds}
+                          />
+                        </div>
+                      ) : (
+                        <div
+                  className={`grid gap-4 w-full ${
+                    card.atoms.length === 1
+                              ? 'grid-cols-1'
+                              : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                            }`}
+                        >
+                          {card.atoms.map((atom) => (
+                            <React.Fragment key={atom.id}>
+                            <AtomBox
+                              className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
+                              onClick={(e) => handleAtomClick(e, atom.id)}
+                            >
+                              {/* Atom Content */}
+                              {atom.atomId === 'text-box' ? (
+                                <TextBoxEditor textId={atom.id} />
+                              ) : atom.atomId === 'data-upload' ? (
+                                <DataUploadAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-validate' ? (
+                                <DataValidateAtom atomId={atom.id} />
+                              ) : atom.atomId === 'feature-overview' ? (
+                                <FeatureOverviewAtom atomId={atom.id} />
+                              ) : atom.atomId === 'clustering' ? (
+                                <ClusteringAtom atomId={atom.id} />
+                              ) : atom.atomId === 'explore' ? (
+                                <ExploreAtom atomId={atom.id} />
+                              ) : atom.atomId === 'chart-maker' ? (
+                                <ChartMakerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'pivot-table' ? (
+                                <PivotTableAtom atomId={atom.id} />
+                              ) : atom.atomId === 'unpivot' ? (
+                                <UnpivotAtom atomId={atom.id} />
+                              ) : atom.atomId === 'concat' ? (
+                                <ConcatAtom atomId={atom.id} />
+                              ) : atom.atomId === 'merge' ? (
+                                <MergeAtom atomId={atom.id} />
+                              ) : atom.atomId === 'column-classifier' ? (
+                                <ColumnClassifierAtom atomId={atom.id} />
+                              ) : atom.atomId === 'dataframe-operations' ? (
+                                <DataFrameOperationsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'table' ? (
+                                <TableAtom atomId={atom.id} />
+                              ) : atom.atomId === 'create-column' ? (
+                                <CreateColumnAtom atomId={atom.id} />
+                              ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                <GroupByAtom atomId={atom.id} />
+                              ) : atom.atomId === 'build-model-feature-based' ? (
+                                <BuildModelFeatureBasedAtom atomId={atom.id} />
+                              ) : atom.atomId === 'scenario-planner' ? (
+                                <ScenarioPlannerAtom atomId={atom.id} />
+                      ) : atom.atomId === 'kpi-dashboard' ? (
+                        <KPIDashboardAtom atomId={atom.id} />
+                              ) : atom.atomId === 'select-models-feature' ? (
+                                <SelectModelsFeatureAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-feature' ? (
+                                <EvaluateModelsFeatureAtom atomId={atom.id} />
+                              ) : atom.atomId === 'scope-selector' ? (
+                                <ScopeSelectorAtom atomId={atom.id} />
+                              ) : atom.atomId === 'correlation' ? (
+                                <CorrelationAtom atomId={atom.id} />
+                              ) : atom.atomId === 'auto-regressive-models' ? (
+                                <AutoRegressiveModelsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : (
+                                <div>
+                                  <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
+                                  <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
+                                  <p className="text-xs text-gray-500">
+                                    Configure this atom for your application
+                                  </p>
+                                </div>
+                              )}
+                            </AtomBox>
+                    {/* Inline Guided Flow - Renders below atom when active */}
+                    {renderInlineGuidedFlow(atom)}
+                  </React.Fragment>
+                          ))}
+                        </div>
+                      )}
+          {renderCardTextBox(card)}
+                      {renderAppendedVariables(card)}
+                    </div>
+                  </Card>
+                  {/* Global Metric Guided Workflow inline card anchored below the target card when context is available */}
+                  {isMetricGuidedFlowOpen && metricContextCardId === card.id && (
+                    <div className="w-full min-w-0 overflow-hidden mt-4">
+                      <MetricGuidedFlowInline
+                        initialStage={activeMetricGuidedFlow?.currentStage}
+                        savedState={activeMetricGuidedFlow?.state}
+                        onClose={closeMetricGuidedFlow}
+                        contextAtomId={metricsInputs.contextAtomId}
+                      />
+                    </div>
+                  )}
+                  {allCardsIndex >= 0 && allCardsIndex < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
+                    <div className="flex justify-center my-4">
+                      <button
+                        onClick={() => addNewCard(undefined, allCardsIndex + 1)}
+                        onDragEnter={e => handleAddDragEnter(e, `p-${allCardsIndex}`)}
+                        onDragLeave={handleAddDragLeave}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={e => {
+                          void handleDropNewCard(e, undefined, allCardsIndex + 1);
+                        }}
+                        className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `p-${allCardsIndex}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                        title="Add new card"
+                      >
+                        <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `p-${allCardsIndex}` ? 'scale-125 mb-2' : ''}`} />
+                        <span
+                          className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                        >
+                          Add New Card
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
 
             {/* Add New Card Button */}
             <div className="flex justify-center">

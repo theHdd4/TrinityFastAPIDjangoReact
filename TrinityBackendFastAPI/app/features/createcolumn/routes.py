@@ -97,10 +97,17 @@ async def identifier_options(
     else:
         logger.warning(f"[identifier_options] No identifiers found in config. Config type: {type(cfg)}, has 'identifiers' key: {cfg and 'identifiers' in cfg if cfg else False}")
     
-    # Return all identifiers without filtering - frontend will handle filtering as needed
+    measures: list[str] = []
+    if cfg and isinstance(cfg.get("measures"), list):
+        measures = cfg["measures"]
+        logger.info(f"[identifier_options] Found {len(measures)} measures: {measures}")
+    else:
+        logger.warning(f"[identifier_options] No measures found in config. Config type: {type(cfg)}, has 'measures' key: {cfg and 'measures' in cfg if cfg else False}")
+    
+    # Return all identifiers and measures without filtering - frontend will handle filtering as needed
     # This allows compute_metrics_within_group to access all identifiers including date columns
-    logger.info(f"[identifier_options] Returning {len(identifiers)} identifiers: {identifiers}")
-    return {"identifiers": identifiers}
+    logger.info(f"[identifier_options] Returning {len(identifiers)} identifiers and {len(measures)} measures")
+    return {"identifiers": identifiers, "measures": measures}
 
 
 @router.post("/settings")
