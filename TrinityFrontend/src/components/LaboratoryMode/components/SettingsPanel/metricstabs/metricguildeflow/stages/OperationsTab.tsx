@@ -44,6 +44,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import MultiSelectDropdown from '@/templates/dropdown/multiselect/MultiSelectDropdown';
 import type { CreatedVariable, CreatedColumn, CreatedTable, OperationsState, PreviewColumnData } from '../useMetricGuidedFlow';
 import MetricsColOps, { MetricsColOpsRef } from './MetricsColOps';
+import { VariableIcon } from '../components/VariableIcon';
 
 // Type Definitions
 export type SavedVar = {
@@ -2248,7 +2249,7 @@ const OperationsTab = forwardRef<OperationsTabRef, OperationsTabProps>(({
                     readOnly && "opacity-60 cursor-not-allowed"
                   )}
                 >
-                  <Sparkles className="w-4 h-4" />
+                  <VariableIcon className="w-5 h-5" />
                   <span>Assign</span>
                   <TooltipProvider>
                     <Tooltip>

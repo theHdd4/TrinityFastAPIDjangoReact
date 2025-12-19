@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { FEATURE_OVERVIEW_API, CREATECOLUMN_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
+import MultiSelectDropdown from '@/templates/dropdown/multiselect/MultiSelectDropdown';
 import type { CreatedColumn, CreatedTable, ColumnOperationsState, PreviewColumnData } from '../useMetricGuidedFlow';
 
 // Operation type definition
@@ -938,6 +939,7 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
     );
   };
 
+
   const addColumnSelector = (opId: string) => {
     const op = selectedOperations.find(o => o.id === opId);
     if (!op) return;
@@ -1073,43 +1075,73 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
     if (opType === 'filter_percentile') return allAvailableColumns;
     if (opType === 'rename') return allAvailableColumns;
     if (opType === 'fill_na') {
-      // Only return columns that have missing values
-      return columnsWithMissingValues;
+      // Return all available columns - users should be able to fill NA in any column
+      return allAvailableColumns;
     }
     return numericalColumns;
   };
 
   // Helper to get the output column name for an operation
+  // IMPORTANT: These names must match the backend naming in service.py
   const getOutputColName = (op: typeof selectedOperations[0]) => {
     if (op.rename && typeof op.rename === 'string' && op.rename.trim()) return op.rename.trim();
     const columns = op.columns?.filter(Boolean) || [];
     switch (op.type) {
+      // Backend: "_plus_".join(columns)
       case 'add': return columns.join('_plus_');
+      // Backend: "_minus_".join(columns)
       case 'subtract': return columns.join('_minus_');
-      case 'multiply': return columns.join('_times_');
-      case 'divide': return columns.join('_dividedby_');
+      // Backend: "_x_".join(columns)
+      case 'multiply': return columns.join('_x_');
+      // Backend: "_div_".join(columns)
+      case 'divide': return columns.join('_div_');
+      // Backend: f"{col2}_pct_change_from_{col1}"
       case 'pct_change': return columns.length === 2 ? `${columns[1]}_pct_change_from_${columns[0]}` : 'pct_change';
+      // Backend: f"Res_{y_var}"
       case 'residual': return `Res_${columns[0] || ''}`;
+      // Backend: f"{col}_dummy"
       case 'dummy': return columns.length > 0 ? `${columns[0]}_dummy` : 'dummy';
+      // Backend: f"{col}_log"
       case 'log': return columns.length > 0 ? `${columns[0]}_log` : 'log';
+      // Backend: f"{col}_sqrt"
       case 'sqrt': return columns.length > 0 ? `${columns[0]}_sqrt` : 'sqrt';
+      // Backend: f"{col}_exp"
       case 'exp': return columns.length > 0 ? `${columns[0]}_exp` : 'exp';
+      // Backend: f"{col}_abs"
+      case 'abs': return columns.length > 0 ? `${columns[0]}_abs` : 'abs';
+      // Backend: f"{col}_power{param}"
       case 'power': return columns.length > 0 && op.param ? `${columns[0]}_power${op.param}` : 'power';
+      // Backend: f"{col}_zscore_scaled"
       case 'standardize_zscore': return columns.length > 0 ? `${columns[0]}_zscore_scaled` : 'zscore_scaled';
+      // Backend: f"{col}_minmax_scaled"
       case 'standardize_minmax': return columns.length > 0 ? `${columns[0]}_minmax_scaled` : 'minmax_scaled';
+      // Backend: f"{col}_logistic"
       case 'logistic': return columns.length > 0 ? `${columns[0]}_logistic` : 'logistic';
+      // Backend: f"{col}_detrended"
       case 'detrend': return columns.length > 0 ? `${columns[0]}_detrended` : 'detrended';
+      // Backend: f"{col}_deseasonalized"
       case 'deseasonalize': return columns.length > 0 ? `${columns[0]}_deseasonalized` : 'deseasonalized';
+      // Backend: f"{col}_detrend_deseasonalized"
       case 'detrend_deseasonalize': return columns.length > 0 ? `${columns[0]}_detrend_deseasonalized` : 'detrend_deseasonalized';
+      // Backend: f"{col}_lag"
       case 'lag': return columns.length > 0 ? `${columns[0]}_lag` : 'lag';
+      // Backend: f"{col}_lead"
       case 'lead': return columns.length > 0 ? `${columns[0]}_lead` : 'lead';
+      // Backend: f"{col}_diff"
       case 'diff': return columns.length > 0 ? `${columns[0]}_diff` : 'diff';
+      // Backend: f"{col}_rolling_mean"
       case 'rolling_mean': return columns.length > 0 ? `${columns[0]}_rolling_mean` : 'rolling_mean';
+      // Backend: f"{col}_rolling_sum"
       case 'rolling_sum': return columns.length > 0 ? `${columns[0]}_rolling_sum` : 'rolling_sum';
+      // Backend: f"{col}_rolling_min"
       case 'rolling_min': return columns.length > 0 ? `${columns[0]}_rolling_min` : 'rolling_min';
+      // Backend: f"{col}_rolling_max"
       case 'rolling_max': return columns.length > 0 ? `${columns[0]}_rolling_max` : 'rolling_max';
+      // Backend: f"{col}_cumulative_sum"
       case 'cumulative_sum': return columns.length > 0 ? `${columns[0]}_cumulative_sum` : 'cumulative_sum';
+      // Backend: f"{col}_growth_rate"
       case 'growth_rate': return columns.length > 0 ? `${columns[0]}_growth_rate` : 'growth_rate';
+      // Backend: f"{date_col}_year", f"{date_col}_month", etc.
       case 'datetime': {
         if (columns.length > 0 && op.param) {
           const dateCol = columns[0];
@@ -1122,6 +1154,74 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
           if (param === 'to_month_name') return `${dateCol}_month_name`;
         }
         return 'datetime_extract';
+      }
+      // Backend: f"{date_col}_fiscal_year", f"{date_col}_fiscal_quarter", etc.
+      case 'fiscal_mapping': {
+        if (columns.length > 0 && op.param) {
+          const dateCol = columns[0];
+          const param = op.param as string;
+          if (param === 'fiscal_year') return `${dateCol}_fiscal_year`;
+          if (param === 'fiscal_quarter') return `${dateCol}_fiscal_quarter`;
+          if (param === 'fiscal_month') return `${dateCol}_fiscal_month`;
+          if (param === 'fiscal_year_full') return `${dateCol}_fiscal_year_full`;
+        }
+        return 'fiscal_mapping';
+      }
+      // Backend: f"{date_col}_is_weekend"
+      case 'is_weekend': return columns.length > 0 ? `${columns[0]}_is_weekend` : 'is_weekend';
+      // Backend: f"{date_col}_is_month_end"
+      case 'is_month_end': return columns.length > 0 ? `${columns[0]}_is_month_end` : 'is_month_end';
+      // Backend: f"{date_col}_is_qtr_end"
+      case 'is_qtr_end': return columns.length > 0 ? `${columns[0]}_is_qtr_end` : 'is_qtr_end';
+      // Backend: "built_date"
+      case 'date_builder': return 'built_date';
+      // Backend: "is_outlier"
+      case 'stl_outlier': return 'is_outlier';
+      // Backend: f"{metric_col}_group_{method}" for compute_metrics_within_group
+      case 'compute_metrics_within_group': {
+        if (op.param && typeof op.param === 'object') {
+          const param = op.param as Record<string, any>;
+          const metricCols = param.metric_cols;
+          if (Array.isArray(metricCols) && metricCols.length > 0) {
+            // Return all generated column names joined (for display purposes)
+            return metricCols.map((item: any) => {
+              const rename = item.rename?.trim();
+              if (rename) return rename;
+              return `${item.metric_col}_group_${item.method}`;
+            }).join(', ');
+          }
+        }
+        return 'compute_metrics_within_group';
+      }
+      // Backend: f"{metric_col}_share_of_total"
+      case 'group_share_of_total': {
+        if (op.param && typeof op.param === 'object') {
+          const param = op.param as Record<string, any>;
+          const metricCols = param.metric_cols;
+          if (Array.isArray(metricCols) && metricCols.length > 0) {
+            return metricCols.map((item: any) => {
+              const rename = item.rename?.trim();
+              if (rename) return rename;
+              return `${item.metric_col}_share_of_total`;
+            }).join(', ');
+          }
+        }
+        return 'group_share_of_total';
+      }
+      // Backend: f"{metric_col}_contribution"
+      case 'group_contribution': {
+        if (op.param && typeof op.param === 'object') {
+          const param = op.param as Record<string, any>;
+          const metricCols = param.metric_cols;
+          if (Array.isArray(metricCols) && metricCols.length > 0) {
+            return metricCols.map((item: any) => {
+              const rename = item.rename?.trim();
+              if (rename) return rename;
+              return `${item.metric_col}_contribution`;
+            }).join(', ');
+          }
+        }
+        return 'group_contribution';
       }
       default: return `${op.type}_${columns.join('_')}`;
     }
@@ -1157,7 +1257,7 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
   };
 
   // Perform operations (internal function that returns preview data)
-  const performOperations = async (operationsToPerform?: typeof selectedOperations): Promise<any[]> => {
+  const performOperations = async (operationsToPerform?: typeof selectedOperations): Promise<{ results: any[]; resultFile: string | null }> => {
     // Use provided operations or fall back to selectedOperations
     const ops = operationsToPerform || selectedOperations;
     
@@ -1628,14 +1728,15 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
       // Store preview data
       if (data.results && Array.isArray(data.results)) {
         setPreview(data.results);
-        if (data.result_file) {
-          setPreviewFile(data.result_file);
+        const resultFile = data.result_file || null;
+        if (resultFile) {
+          setPreviewFile(resultFile);
         }
-        return data.results;
+        return { results: data.results, resultFile };
       } else {
         console.warn('⚠️ No results in perform response:', data);
         setPreview([]);
-        return [];
+        return { results: [], resultFile: null };
       }
     } catch (e: any) {
       const errorMsg = e?.message || (typeof e === 'string' ? e : 'Failed to create columns');
@@ -1664,7 +1765,7 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
     setSaveError(null);
     try {
       // First perform operations
-      const previewData = await performOperations();
+      const { results: previewData } = await performOperations();
       if (previewData.length === 0) {
         throw new Error('No data to save');
       }
@@ -1783,7 +1884,7 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
     setSaveError(null);
     try {
       // First perform operations
-      const previewData = await performOperations();
+      const { results: previewData } = await performOperations();
       if (previewData.length === 0) {
         throw new Error('No data to save');
       }
@@ -1895,7 +1996,7 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
     
     try {
       // Perform operations (doesn't save, just returns preview data)
-      const previewResults = await performOperations();
+      const { results: previewResults, resultFile } = await performOperations();
       if (previewResults.length === 0) {
         throw new Error('No data to preview');
       }
@@ -1923,7 +2024,7 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
       // Build preview data structure
       const previewData: PreviewColumnData = {
         previewResults,
-        resultFile: previewFile || undefined,
+        resultFile: resultFile || undefined,
         operationDetails
       };
       
@@ -2335,43 +2436,41 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                         <>
                           <div className="space-y-1 w-full">
                             <label className="text-[10px] text-gray-600">Select Columns</label>
-                            <div className="w-full">
-                              <select
-                                multiple
-                                value={opColumns.filter(Boolean)}
-                                onChange={e => {
-                                  const selected = Array.from(e.target.selectedOptions).map((opt: HTMLOptionElement) => opt.value);
-                                  updateOperationColumns(selectedOperation.id, selected);
-                                  // Initialize conditions for new columns
-                                  const currentParam = (selectedOperation.param as Record<string, any>) || {};
-                                  const newParam = { ...currentParam };
-                                  selected.forEach((col, idx) => {
-                                    if (!newParam[`condition_${idx}_operator`]) {
-                                      newParam[`condition_${idx}_operator`] = '==';
-                                      newParam[`condition_${idx}_value`] = '';
-                                    }
-                                  });
-                                  // Remove conditions for removed columns
-                                  Object.keys(newParam).forEach(key => {
-                                    if (key.startsWith('condition_') && !selected.some((_, idx) => key === `condition_${idx}_operator` || key === `condition_${idx}_value`)) {
-                                      delete newParam[key];
-                                    }
-                                  });
-                                  setSelectedOperations(prev =>
-                                    prev.map(op =>
-                                      op.id === selectedOperation.id
-                                        ? { ...op, param: newParam }
-                                        : op
-                                    )
-                                  );
-                                }}
-                                className="w-full h-24 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              >
-                                {getAvailableColumns(opType).map(option => (
-                                  <option key={option} value={option}>{option}</option>
-                                ))}
-                              </select>
-                            </div>
+                            <MultiSelectDropdown
+                              placeholder="Select columns"
+                              selectedValues={opColumns.filter(Boolean)}
+                              onSelectionChange={(selected) => {
+                                updateOperationColumns(selectedOperation.id, selected);
+                                // Initialize conditions for new columns
+                                const currentParam = (selectedOperation.param as Record<string, any>) || {};
+                                const newParam = { ...currentParam };
+                                selected.forEach((col, idx) => {
+                                  if (!newParam[`condition_${idx}_operator`]) {
+                                    newParam[`condition_${idx}_operator`] = '==';
+                                    newParam[`condition_${idx}_value`] = '';
+                                  }
+                                });
+                                // Remove conditions for removed columns
+                                Object.keys(newParam).forEach(key => {
+                                  if (key.startsWith('condition_') && !selected.some((_, idx) => key === `condition_${idx}_operator` || key === `condition_${idx}_value`)) {
+                                    delete newParam[key];
+                                  }
+                                });
+                                setSelectedOperations(prev =>
+                                  prev.map(op =>
+                                    op.id === selectedOperation.id
+                                      ? { ...op, param: newParam }
+                                      : op
+                                  )
+                                );
+                              }}
+                              options={getAvailableColumns(opType).map(col => ({ value: col, label: col }))}
+                              showSelectAll={true}
+                              showDeselectAll={false}
+                              showTrigger={true}
+                              triggerClassName="h-6 text-[10px]"
+                              maxHeight="200px"
+                            />
                           </div>
                           {opColumns.filter(Boolean).length > 0 && (
                             <div className="space-y-2">
@@ -2434,21 +2533,17 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                         <>
                           <div className="space-y-1 w-full">
                             <label className="text-[10px] text-gray-600">Select Columns (Identifiers + Metric)</label>
-                            <div className="w-full">
-                              <select
-                                multiple
-                                value={opColumns.filter(Boolean)}
-                                onChange={e => {
-                                  const selected = Array.from(e.target.selectedOptions).map((opt: HTMLOptionElement) => opt.value);
-                                  updateOperationColumns(selectedOperation.id, selected);
-                                }}
-                                className="w-full h-24 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              >
-                                {getAvailableColumns(opType).map(option => (
-                                  <option key={option} value={option}>{option}</option>
-                                ))}
-                              </select>
-                            </div>
+                            <MultiSelectDropdown
+                              placeholder="Select columns"
+                              selectedValues={opColumns.filter(Boolean)}
+                              onSelectionChange={(selected) => updateOperationColumns(selectedOperation.id, selected)}
+                              options={getAvailableColumns(opType).map(col => ({ value: col, label: col }))}
+                              showSelectAll={true}
+                              showDeselectAll={false}
+                              showTrigger={true}
+                              triggerClassName="h-6 text-[10px]"
+                              maxHeight="200px"
+                            />
                           </div>
                           {opColumns.filter(Boolean).length > 0 && (
                             <>
@@ -2596,21 +2691,17 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                         <>
                           <div className="space-y-1 w-full">
                             <label className="text-[10px] text-gray-600">Identifiers</label>
-                            <div className="w-full">
-                              <select
-                                multiple
-                                value={opColumns.filter(Boolean)}
-                                onChange={e => {
-                                  const selected = Array.from(e.target.selectedOptions).map((opt: HTMLOptionElement) => opt.value);
-                                  updateOperationColumns(selectedOperation.id, selected);
-                                }}
-                                className="w-full h-24 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              >
-                                {allIdentifiers.map(id => (
-                                  <option key={id} value={id}>{id}</option>
-                                ))}
-                              </select>
-                            </div>
+                            <MultiSelectDropdown
+                              placeholder="Select identifiers"
+                              selectedValues={opColumns.filter(Boolean)}
+                              onSelectionChange={(selected) => updateOperationColumns(selectedOperation.id, selected)}
+                              options={allIdentifiers.map(id => ({ value: id, label: id }))}
+                              showSelectAll={true}
+                              showDeselectAll={false}
+                              showTrigger={true}
+                              triggerClassName="h-6 text-[10px]"
+                              maxHeight="200px"
+                            />
                           </div>
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
@@ -2754,21 +2845,17 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                         <>
                           <div className="space-y-1 w-full">
                             <label className="text-[10px] text-gray-600">Identifiers</label>
-                            <div className="w-full">
-                              <select
-                                multiple
-                                value={opColumns.filter(Boolean)}
-                                onChange={e => {
-                                  const selected = Array.from(e.target.selectedOptions).map((opt: HTMLOptionElement) => opt.value);
-                                  updateOperationColumns(selectedOperation.id, selected);
-                                }}
-                                className="w-full h-24 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              >
-                                {allIdentifiers.map(id => (
-                                  <option key={id} value={id}>{id}</option>
-                                ))}
-                              </select>
-                            </div>
+                            <MultiSelectDropdown
+                              placeholder="Select identifiers"
+                              selectedValues={opColumns.filter(Boolean)}
+                              onSelectionChange={(selected) => updateOperationColumns(selectedOperation.id, selected)}
+                              options={allIdentifiers.map(id => ({ value: id, label: id }))}
+                              showSelectAll={true}
+                              showDeselectAll={false}
+                              showTrigger={true}
+                              triggerClassName="h-6 text-[10px]"
+                              maxHeight="200px"
+                            />
                           </div>
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
@@ -2883,21 +2970,17 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                         <>
                           <div className="space-y-1 w-full">
                             <label className="text-[10px] text-gray-600">Identifiers</label>
-                            <div className="w-full">
-                              <select
-                                multiple
-                                value={opColumns.filter(Boolean)}
-                                onChange={e => {
-                                  const selected = Array.from(e.target.selectedOptions).map((opt: HTMLOptionElement) => opt.value);
-                                  updateOperationColumns(selectedOperation.id, selected);
-                                }}
-                                className="w-full h-24 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              >
-                                {allIdentifiers.map(id => (
-                                  <option key={id} value={id}>{id}</option>
-                                ))}
-                              </select>
-                            </div>
+                            <MultiSelectDropdown
+                              placeholder="Select identifiers"
+                              selectedValues={opColumns.filter(Boolean)}
+                              onSelectionChange={(selected) => updateOperationColumns(selectedOperation.id, selected)}
+                              options={allIdentifiers.map(id => ({ value: id, label: id }))}
+                              showSelectAll={true}
+                              showDeselectAll={false}
+                              showTrigger={true}
+                              triggerClassName="h-6 text-[10px]"
+                              maxHeight="200px"
+                            />
                           </div>
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
@@ -3011,35 +3094,42 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
                       ) : selectedOperation.type === 'select_columns' || selectedOperation.type === 'drop_columns' || selectedOperation.type === 'reorder' || selectedOperation.type === 'deduplicate' || selectedOperation.type === 'sort_rows' || selectedOperation.type === 'lower' || selectedOperation.type === 'upper' || selectedOperation.type === 'strip' ? (
                         <>
                           <div className="space-y-1 w-full">
-                            <label className="text-[10px] text-gray-600">Select Columns</label>
-                            <div className="w-full">
-                              <select
-                                multiple
-                                value={opColumns.filter(Boolean)}
-                                onChange={e => {
-                                  const selected = Array.from(e.target.selectedOptions).map((opt: HTMLOptionElement) => opt.value);
-                                  updateOperationColumns(selectedOperation.id, selected);
-                                }}
-                                className="w-full h-24 text-[10px] px-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                title={
-                                  selectedOperation.type === 'select_columns' 
-                                    ? "Select columns to keep" 
-                                    : selectedOperation.type === 'drop_columns'
-                                    ? "Select columns to drop"
-                                    : selectedOperation.type === 'reorder'
-                                    ? "Select columns in desired order"
-                                    : selectedOperation.type === 'deduplicate'
-                                    ? "Select columns to check for duplicates"
-                                    : selectedOperation.type === 'sort_rows'
-                                    ? "Select columns to sort by (in priority order)"
-                                    : "Select columns to transform"
-                                }
-                              >
-                                {getAvailableColumns(opType).map(option => (
-                                  <option key={option} value={option}>{option}</option>
-                                ))}
-                              </select>
-                            </div>
+                            <label className="text-[10px] text-gray-600">
+                              {selectedOperation.type === 'select_columns' 
+                                ? "Select columns to keep" 
+                                : selectedOperation.type === 'drop_columns'
+                                ? "Select columns to drop"
+                                : selectedOperation.type === 'reorder'
+                                ? "Select columns in desired order"
+                                : selectedOperation.type === 'deduplicate'
+                                ? "Select columns to check for duplicates"
+                                : selectedOperation.type === 'sort_rows'
+                                ? "Select columns to sort by (in priority order)"
+                                : "Select columns to transform"}
+                            </label>
+                            <MultiSelectDropdown
+                              placeholder={
+                                selectedOperation.type === 'select_columns' 
+                                  ? "Select columns to keep" 
+                                  : selectedOperation.type === 'drop_columns'
+                                  ? "Select columns to drop"
+                                  : selectedOperation.type === 'reorder'
+                                  ? "Select columns in desired order"
+                                  : selectedOperation.type === 'deduplicate'
+                                  ? "Select columns to check for duplicates"
+                                  : selectedOperation.type === 'sort_rows'
+                                  ? "Select columns to sort by (in priority order)"
+                                  : "Select columns to transform"
+                              }
+                              selectedValues={opColumns.filter(Boolean)}
+                              onSelectionChange={(selected) => updateOperationColumns(selectedOperation.id, selected)}
+                              options={getAvailableColumns(opType).map(col => ({ value: col, label: col }))}
+                              showSelectAll={true}
+                              showDeselectAll={false}
+                              showTrigger={true}
+                              triggerClassName="h-6 text-[10px]"
+                              maxHeight="200px"
+                            />
                           </div>
                         </>
                       ) : selectedOperation.type === 'residual' ? (

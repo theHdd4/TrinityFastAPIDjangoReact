@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -220,7 +220,147 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, rea
   const hasCreatedItems = 
     state.createdVariables.length > 0 ||
     state.createdColumns.length > 0 ||
-    state.createdTables.length > 0;
+    state.createdTables.length > 0 ||
+    !!state.previewColumnData;
+
+  // Dataframe-level operations that don't create new columns but transform the dataframe
+  const dataframeOps = [
+    'select_columns',
+    'drop_columns',
+    'rename',
+    'reorder',
+    'deduplicate',
+    'sort_rows',
+    'filter_rows_condition',
+    'filter_top_n_per_group',
+    'filter_percentile',
+  ];
+
+  // Mapping from operation_type to human-readable names
+  const operationNames: Record<string, string> = {
+    'filter_rows_condition': 'Filter Rows Based Condition',
+    'filter_top_n_per_group': 'Filter Rows Top N Per Group',
+    'filter_percentile': 'Filter Percentile',
+    'select_columns': 'Select Only Special Columns',
+    'drop_columns': 'Drop Columns',
+    'rename': 'Rename',
+    'reorder': 'Reorder',
+    'deduplicate': 'Deduplicate',
+    'sort_rows': 'Sort Rows',
+  };
+
+  // Helper function to build human-readable description for dataframe transformations
+  const buildTransformationDescription = (op: {
+    operation_type: string;
+    columns: string[];
+    rename?: string | Record<string, any> | null;
+    param?: string | number | Record<string, any> | null;
+  }): string => {
+    const operationName = operationNames[op.operation_type] || op.operation_type;
+    const columns = op.columns?.filter(Boolean) || [];
+    
+    switch (op.operation_type) {
+      case 'drop_columns':
+        return columns.length > 0 ? `Dropped: ${columns.join(', ')}` : 'Drop Columns';
+      case 'rename':
+        // Handle rename - show old -> new mapping if available
+        if (op.rename && typeof op.rename === 'object') {
+          const renamePairs = Object.entries(op.rename).map(([oldName, newName]) => `${oldName} → ${newName}`);
+          return renamePairs.length > 0 ? renamePairs.join(', ') : operationName;
+        }
+        return columns.length > 0 ? `Renamed: ${columns.join(', ')}` : operationName;
+      case 'reorder':
+        return columns.length > 0 ? `Order: ${columns.join(', ')}` : operationName;
+      case 'deduplicate':
+        return columns.length > 0 ? `Based on: ${columns.join(', ')}` : operationName;
+      case 'sort_rows':
+        return columns.length > 0 ? `By: ${columns.join(', ')}` : operationName;
+      case 'select_columns':
+        return columns.length > 0 ? `Selected: ${columns.join(', ')}` : operationName;
+      case 'filter_rows_condition':
+        return columns.length > 0 ? `On: ${columns.join(', ')}` : operationName;
+      case 'filter_top_n_per_group':
+        // Show N and metric if param is available
+        if (op.param && typeof op.param === 'object') {
+          const param = op.param as any;
+          const n = param.n || 'N';
+          const metricCol = param.metric_col || '';
+          return metricCol ? `Top ${n} per group by ${metricCol}` : `Top ${n} per group`;
+        }
+        return operationName;
+      case 'filter_percentile':
+        // Show percentile and metric if param is available
+        if (op.param && typeof op.param === 'object') {
+          const param = op.param as any;
+          const percentile = param.percentile || 'N';
+          const metricCol = param.metric_col || '';
+          const direction = param.direction || 'top';
+          return metricCol ? `${percentile}th percentile (${direction}) by ${metricCol}` : `${percentile}th percentile`;
+        }
+        return operationName;
+      default:
+        return operationName;
+    }
+  };
+
+  // Get set of newly created column names for highlighting in preview table
+  const newlyCreatedColumns = useMemo(() => {
+    if (!state.previewColumnData?.operationDetails?.operations) {
+      return new Set<string>();
+    }
+    const columnSet = new Set<string>();
+    state.previewColumnData.operationDetails.operations.forEach((op) => {
+      // Only include columns from operations that actually create new columns
+      if (!dataframeOps.includes(op.operation_type) && op.created_column_name) {
+        columnSet.add(op.created_column_name);
+      }
+    });
+    return columnSet;
+  }, [state.previewColumnData?.operationDetails?.operations]);
+
+  // Categorize operations into column-creating vs dataframe transformations
+  const { columnCreatingOps, dataframeTransformOps } = useMemo(() => {
+    if (!state.previewColumnData?.operationDetails?.operations) {
+      return { columnCreatingOps: [], dataframeTransformOps: [] };
+    }
+
+    const columnOps: typeof state.previewColumnData.operationDetails.operations = [];
+    const dataframeOpsList: typeof state.previewColumnData.operationDetails.operations = [];
+
+    state.previewColumnData.operationDetails.operations.forEach((op) => {
+      if (dataframeOps.includes(op.operation_type)) {
+        dataframeOpsList.push(op);
+      } else {
+        // Only include operations that actually create columns
+        if (op.created_column_name) {
+          columnOps.push(op);
+        }
+      }
+    });
+
+    return {
+      columnCreatingOps: columnOps,
+      dataframeTransformOps: dataframeOpsList,
+    };
+  }, [state.previewColumnData?.operationDetails?.operations]);
+
+  // Ref for table container to control scrolling
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll table to rightmost position when new columns are created
+  useEffect(() => {
+    if (tableContainerRef.current && newlyCreatedColumns.size > 0 && state.previewColumnData?.previewResults?.length) {
+      // Find the scrollable container within the table wrapper
+      const scrollableContainer = tableContainerRef.current.querySelector('.table-overflow') as HTMLElement;
+      if (scrollableContainer) {
+        // Scroll to the rightmost position after a short delay to ensure table is rendered
+        const timeoutId = setTimeout(() => {
+          scrollableContainer.scrollLeft = scrollableContainer.scrollWidth;
+        }, 150);
+        return () => clearTimeout(timeoutId);
+      }
+    }
+  }, [newlyCreatedColumns.size, state.previewColumnData?.previewResults?.length]);
 
   // Group variables by method for dynamic header
   const variablesByMethod = useMemo(() => {
@@ -393,89 +533,101 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, rea
         {/* Column Operations Preview Section */}
         {state.previewColumnData && (
           <div className="space-y-4">
-            <div className="text-lg font-semibold text-gray-900">
-              Preview ready. Review your data before saving.
-            </div>
-            
-            {/* Data Summary Card */}
-            <Card className="p-4">
-              <div className="space-y-3">
-                <div className="flex items-center gap-4">
-                  <div>
-                    <div className="text-sm text-gray-600">Rows</div>
-                    <div className="text-lg font-semibold">{state.previewColumnData.previewResults.length}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-600">Columns</div>
-                    <div className="text-lg font-semibold">
-                      {state.previewColumnData.previewResults.length > 0
-                        ? Object.keys(state.previewColumnData.previewResults[0]).length
-                        : 0}
-                    </div>
+            {/* New/Transformed Columns Section - Only for column-creating operations */}
+            {columnCreatingOps.length > 0 && (
+              <Card className="p-4">
+                <div className="space-y-3">
+                  <div className="text-sm text-gray-600 mb-2">New/Transformed Columns:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {columnCreatingOps.map((op, idx) => (
+                      <Badge key={idx} variant="secondary">
+                        {op.created_column_name || `${op.operation_type}_${idx}`}
+                      </Badge>
+                    ))}
                   </div>
                 </div>
-                {state.previewColumnData.operationDetails.operations.length > 0 && (
-                  <div>
-                    <div className="text-sm text-gray-600 mb-2">New/Transformed Columns:</div>
-                    <div className="flex flex-wrap gap-2">
-                      {state.previewColumnData.operationDetails.operations.map((op, idx) => (
-                        <Badge key={idx} variant="secondary">
-                          {op.created_column_name || `${op.operation_type}_${idx}`}
-                        </Badge>
-                      ))}
-                    </div>
+              </Card>
+            )}
+
+            {/* Dataframe Transformations Section - For dataframe-level operations */}
+            {dataframeTransformOps.length > 0 && (
+              <Card className="p-4">
+                <div className="space-y-3">
+                  <div className="text-sm text-gray-600 mb-2">Dataframe Transformations:</div>
+                  <div className="space-y-2">
+                    {dataframeTransformOps.map((op, idx) => (
+                      <div key={idx} className="flex items-center gap-2 text-sm">
+                        <Badge variant="outline">{operationNames[op.operation_type] || op.operation_type}</Badge>
+                        <span className="text-gray-700">{buildTransformationDescription(op)}</span>
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
-            </Card>
+                </div>
+              </Card>
+            )}
 
             {/* Preview Table */}
-            {state.previewColumnData.previewResults.length > 0 && (
-              <Table
-                headers={Object.keys(state.previewColumnData.previewResults[0])}
-                colClasses={Object.keys(state.previewColumnData.previewResults[0]).map(() => 'w-auto')}
-                bodyClassName="max-h-[350px] overflow-y-auto"
-                defaultMinimized={false}
-                borderColor="border-green-500"
-                customHeader={{
-                  title: (
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold">Data Preview</span>
-                      <span className="text-slate-400">|</span>
-                      {state.previewColumnData.resultFile && (
-                        <span
-                          className="text-xs text-blue-500 cursor-pointer hover:text-blue-700 hover:underline"
-                          onClick={() => {
-                            const url = `/dataframe?name=${encodeURIComponent(state.previewColumnData!.resultFile!)}`;
-                            window.open(url, '_blank');
-                          }}
-                        >
-                          Data in detail
-                        </span>
-                      )}
-                    </div>
-                  ),
-                  subtitle: undefined,
-                  subtitleClickable: false,
-                  onSubtitleClick: undefined,
-                  compactHeader: true,
-                }}
-              >
-                {state.previewColumnData.previewResults.slice(0, 10).map((row, rowIdx) => (
-                  <tr key={rowIdx} className="table-row">
-                    {Object.keys(state.previewColumnData.previewResults[0]).map((col) => (
-                      <td key={col} className="table-cell">
-                        {row[col] !== null && row[col] !== undefined ? (
-                          typeof row[col] === 'number' ? row[col] : String(row[col])
-                        ) : (
-                          <span className="italic text-slate-400">null</span>
-                        )}
-                      </td>
+            {state.previewColumnData.previewResults.length > 0 && (() => {
+              const headers = Object.keys(state.previewColumnData.previewResults[0]);
+              
+              // Find indices of newly created columns for CSS targeting
+              const newColumnIndices = headers
+                .map((header, index) => newlyCreatedColumns.has(header) ? index + 1 : null)
+                .filter((idx): idx is number => idx !== null);
+              
+              // Generate CSS selector for newly created column headers
+              const newColumnSelector = newColumnIndices.length > 0
+                ? newColumnIndices.map(idx => `.preview-table-scrollable thead th:nth-child(${idx})`).join(', ')
+                : '';
+              
+              return (
+                <div className="preview-table-wrapper" ref={tableContainerRef}>
+                  {/* Add CSS for header background color */}
+                  {newColumnSelector && (
+                    <style>{`
+                      ${newColumnSelector} {
+                        background-color: rgb(240 253 244) !important;
+                      }
+                    `}</style>
+                  )}
+                  <Table
+                    headers={headers}
+                    colClasses={headers.map(() => 'w-auto')}
+                    bodyClassName="max-h-[350px] overflow-y-auto preview-table-scrollable"
+                    defaultMinimized={false}
+                    borderColor="border-green-500"
+                    customHeader={{
+                      title: (
+                        <span className="text-sm font-semibold">Data Preview</span>
+                      ),
+                      subtitle: undefined,
+                      subtitleClickable: false,
+                      compactHeader: true,
+                    }}
+                  >
+                    {state.previewColumnData.previewResults.slice(0, 10).map((row, rowIdx) => (
+                      <tr key={rowIdx} className="table-row">
+                        {headers.map((col) => {
+                          const isNewColumn = newlyCreatedColumns.has(col);
+                          return (
+                            <td 
+                              key={col} 
+                              className={`table-cell ${isNewColumn ? 'bg-green-50' : ''}`}
+                            >
+                              {row[col] !== null && row[col] !== undefined ? (
+                                typeof row[col] === 'number' ? row[col] : String(row[col])
+                              ) : (
+                                <span className="italic text-slate-400">null</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
                     ))}
-                  </tr>
-                ))}
-              </Table>
-            )}
+                  </Table>
+                </div>
+              );
+            })()}
           </div>
         )}
 
