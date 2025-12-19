@@ -10,6 +10,12 @@ import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
+// Helper to extract filename from path
+const getFileName = (path: string): string => {
+  const parts = path.split('/');
+  return parts[parts.length - 1] || path;
+};
+
 interface U6FinalPreviewProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
   onNext: () => void;
@@ -480,53 +486,136 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           
           console.log('U6 Approve: Sending column classifications:', columnClassifications);
           
+          // Extract sheet name if this is a sheet file (format: "fileName (sheetName)")
+          let selectedSheet: string | undefined = undefined;
+          let baseFileName = currentFile.name;
+          let useFolderStructure = false;
+          
+          if (currentFile.selectedSheet) {
+            selectedSheet = currentFile.selectedSheet;
+            // Extract base file name (remove sheet suffix)
+            const sheetMatch = currentFile.name.match(/^(.+?)\s*\(([^)]+)\)$/);
+            if (sheetMatch) {
+              baseFileName = sheetMatch[1];
+            }
+          }
+          
+          // Check if this is part of a multi-sheet Excel file (should use folder structure)
+          // Method 1: Check totalSheets property
+          if (currentFile.totalSheets && currentFile.totalSheets > 1) {
+            useFolderStructure = true;
+          } 
+          // Method 2: Check sheetNames array
+          else if (currentFile.sheetNames && Array.isArray(currentFile.sheetNames) && currentFile.sheetNames.length > 1) {
+            useFolderStructure = true;
+          } 
+          // Method 3: Check if there are other files with the same base name (indicates multi-sheet)
+          else if (selectedSheet || (currentFile.name.includes('(') && currentFile.name.includes(')'))) {
+            // Extract base name from current file
+            const baseNameMatch = currentFile.name.match(/^(.+?)\s*\(/);
+            const currentBaseName = baseNameMatch ? baseNameMatch[1] : currentFile.name.replace(/\.[^.]+$/, '');
+            
+            // Check if there are other files in uploadedFiles with the same base name
+            const filesWithSameBase = uploadedFiles.filter(f => {
+              if (f.name === currentFile.name) return false; // Exclude current file
+              const otherBaseMatch = f.name.match(/^(.+?)\s*\(/);
+              const otherBaseName = otherBaseMatch ? otherBaseMatch[1] : f.name.replace(/\.[^.]+$/, '');
+              return otherBaseName === currentBaseName;
+            });
+            
+            if (filesWithSameBase.length > 0) {
+              useFolderStructure = true;
+            }
+          }
+          
+          const finalizePayload: any = {
+            file_path: currentFile.path,
+            file_name: currentFile.name,
+            client_name: projectContext.client_name || '',
+            app_name: projectContext.app_name || '',
+            project_name: projectContext.project_name || '',
+            validator_atom_id: atomId,
+            column_classifications: columnClassifications,
+          };
+          
+          // Add selectedSheet if this is a sheet file
+          if (selectedSheet) {
+            finalizePayload.selected_sheet = selectedSheet;
+          }
+          
+          // Add use_folder_structure flag if this is a multi-sheet Excel file
+          if (useFolderStructure) {
+            finalizePayload.use_folder_structure = true;
+            // Also pass the base file name for folder naming
+            finalizePayload.base_file_name = baseFileName;
+          }
+          
           const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({
-              file_path: currentFile.path,
-              file_name: currentFile.name,
-              client_name: projectContext.client_name || '',
-              app_name: projectContext.app_name || '',
-              project_name: projectContext.project_name || '',
-              validator_atom_id: atomId,
-              column_classifications: columnClassifications,
-            }),
+            body: JSON.stringify(finalizePayload),
           });
           
           if (finalizeRes.ok) {
             const result = await finalizeRes.json();
             console.log('U6 Approve: File finalized successfully:', result);
             
-            const savedFilePath = result.saved_path || currentFile.path;
-            const fileName = currentFile.name;
+            // Use saved_path (saved object name) from backend response - this is the actual saved file identifier
+            const savedObjectName = result.saved_path || currentFile.path;
+            const savedFileName = result.saved_path ? getFileName(result.saved_path) : currentFile.name;
             
-            // Mark file as primed
-            await markFileAsPrimed(currentFile.path || currentFile.name);
+            // Mark file as primed using the saved object name (not the original file name)
+            // This ensures sheets are correctly identified
+            await markFileAsPrimed(savedObjectName);
             
             // Dispatch events immediately BEFORE closing panel to ensure UI updates
-            const eventDetail = { filePath: savedFilePath, fileName: fileName };
+            // Use saved object name for proper file identification
+            const eventDetail = { 
+              filePath: savedObjectName, 
+              fileName: savedFileName,
+              isPrimed: true, // Explicitly mark as primed for immediate UI update
+              objectName: savedObjectName // Add object name for status lookup
+            };
             
-            // Dispatch immediately (synchronously)
+            // Dispatch immediately (synchronously) with primed status
             window.dispatchEvent(new CustomEvent('dataframe-saved', { detail: eventDetail }));
-            window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
+            window.dispatchEvent(new CustomEvent('priming-status-changed', { 
+              detail: { ...eventDetail, status: { isPrimed: true, isInProgress: false, currentStage: 'U7' } }
+            }));
+            
+            // Force immediate status update in SavedDataFramesPanel by dispatching a refresh event
+            window.dispatchEvent(new CustomEvent('force-refresh-priming-status', { 
+              detail: { objectName: savedObjectName, isPrimed: true }
+            }));
             
             // Use requestAnimationFrame to ensure events are processed before closing
             requestAnimationFrame(() => {
               // Dispatch again to ensure all listeners catch it
               window.dispatchEvent(new CustomEvent('dataframe-saved', { detail: eventDetail }));
-              window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
+              window.dispatchEvent(new CustomEvent('priming-status-changed', { 
+                detail: { ...eventDetail, status: { isPrimed: true, isInProgress: false, currentStage: 'U7' } }
+              }));
               
               // Dispatch again with small delays to ensure UI updates
               setTimeout(() => {
                 window.dispatchEvent(new CustomEvent('dataframe-saved', { detail: eventDetail }));
-                window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
+                window.dispatchEvent(new CustomEvent('priming-status-changed', { 
+                  detail: { ...eventDetail, status: { isPrimed: true, isInProgress: false, currentStage: 'U7' } }
+                }));
+                window.dispatchEvent(new CustomEvent('force-refresh-priming-status', { 
+                  detail: { objectName: savedObjectName, isPrimed: true }
+                }));
               }, 50);
               
               setTimeout(() => {
                 window.dispatchEvent(new CustomEvent('dataframe-saved', { detail: eventDetail }));
-                window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
+                window.dispatchEvent(new CustomEvent('priming-status-changed', { 
+                  detail: { ...eventDetail, status: { isPrimed: true, isInProgress: false, currentStage: 'U7' } }
+                }));
+                window.dispatchEvent(new CustomEvent('force-refresh-priming-status', { 
+                  detail: { objectName: savedObjectName, isPrimed: true }
+                }));
               }, 200);
             });
             
@@ -547,8 +636,10 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           } else {
             const errorText = await finalizeRes.text();
             console.warn('U6 Approve: Failed to finalize file:', errorText);
-            // Fallback: just mark as primed
-            await markFileAsPrimed(currentFile.path || currentFile.name);
+            // Fallback: try to mark as primed with current file identifier
+            // For sheets, use the file name which includes sheet info
+            const fileIdentifier = currentFile.path || currentFile.name;
+            await markFileAsPrimed(fileIdentifier);
             const eventDetail = { filePath: currentFile.path, fileName: currentFile.name };
             window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
             setTimeout(() => {
@@ -566,8 +657,10 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           }
         } catch (finalizeError) {
           console.error('U6 Approve: Error finalizing file:', finalizeError);
-          // Fallback: just mark as primed
-          await markFileAsPrimed(currentFile.path || currentFile.name);
+          // Fallback: try to mark as primed with current file identifier
+          // For sheets, use the file name which includes sheet info
+          const fileIdentifier = currentFile.path || currentFile.name;
+          await markFileAsPrimed(fileIdentifier);
           const eventDetail = { filePath: currentFile.path, fileName: currentFile.name };
           window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
           setTimeout(() => {

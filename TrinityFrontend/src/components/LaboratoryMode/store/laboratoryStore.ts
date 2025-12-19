@@ -2021,6 +2021,15 @@ interface LaboratoryStore {
   // --- Guided Mode State ---
   globalGuidedModeEnabled: boolean;
   activeGuidedFlows: Record<string, any>;
+  
+  // --- Direct Review Panel State ---
+  directReviewTarget: {
+    object_name: string;
+    csv_name: string;
+    arrow_name?: string;
+    last_modified?: string;
+    size?: number;
+  } | null;
 
   // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
@@ -2075,6 +2084,15 @@ interface LaboratoryStore {
   updateGuidedFlowStage: (atomId: string, stage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7') => void;
   isGuidedModeActiveForAtom: (atomId: string) => boolean;
   removeActiveGuidedFlow: (atomId: string) => void;
+  
+  // --- Direct Review Panel Actions ---
+  setDirectReviewTarget: (frame: {
+    object_name: string;
+    csv_name: string;
+    arrow_name?: string;
+    last_modified?: string;
+    size?: number;
+  } | null) => void;
 }
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
@@ -2100,6 +2118,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   subMode: 'analytics',  // Default to analytics mode
   globalGuidedModeEnabled: false,
   activeGuidedFlows: {},
+  directReviewTarget: null,
   setCards: (cards: LayoutCard[]) => {
     const currentSubMode = get().subMode;
     
@@ -2826,6 +2845,10 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     const { [atomId]: removed, ...remainingFlows } = currentFlows;
     set({ activeGuidedFlows: remainingFlows });
   },
+  
+  setDirectReviewTarget: (frame) => {
+    set({ directReviewTarget: frame });
+  },
 
   reset: () => {
     set({
@@ -2834,6 +2857,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       pendingClarification: null,
       globalGuidedModeEnabled: false,
       activeGuidedFlows: {},
+      directReviewTarget: null,
     });
     if (typeof window !== 'undefined') {
       localStorage.removeItem('trinity_lab_pending_clarification');

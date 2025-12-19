@@ -263,6 +263,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   // Laboratory store hooks for guided flow
   const setActiveGuidedFlow = useLaboratoryStore((state) => state.setActiveGuidedFlow);
   const setGlobalGuidedMode = useLaboratoryStore((state) => state.setGlobalGuidedMode);
+  const setDirectReviewTarget = useLaboratoryStore((state) => state.setDirectReviewTarget);
+  const directReviewTarget = useLaboratoryStore((state) => state.directReviewTarget);
   const cards = useLaboratoryStore((state) => state.cards);
   const updateCard = useLaboratoryStore((state) => state.updateCard);
   const setCards = useLaboratoryStore((state) => state.setCards);
@@ -1195,10 +1197,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   }, [findOrCreateDataUploadAtom, setActiveGuidedFlow, setGlobalGuidedMode, updateCard, setCards, cards]);
 
   const openProcessingModal = async (frame: Frame) => {
-    setProcessingTarget(frame);
-    setProcessingColumns([]);
-    setProcessingError('');
-    setProcessingLoading(true);
+    // Set direct review target in store to show panel instead of modal
+    // Don't set processingTarget to prevent modal from opening
+    setDirectReviewTarget(frame);
+    
+    // Don't set local state - we only want the panel, not the modal
+    // setProcessingTarget(frame);
+    // setProcessingColumns([]);
+    // setProcessingError('');
+    // setProcessingLoading(true);
     try {
       const res = await fetch(`${VALIDATE_API}/file-metadata`, {
         method: 'POST',
@@ -1734,7 +1741,56 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       }
     };
     
+    // Listen for immediate priming status updates (for instant green status after approval)
+    const handleForceRefreshPrimingStatus = (event: any) => {
+      if (!cancelled && event.detail) {
+        const { objectName, isPrimed } = event.detail;
+        console.log('[SavedDataFramesPanel] force-refresh-priming-status event received:', { objectName, isPrimed });
+        
+        // Immediately update the status for this specific file
+        setFilePrimingStatus(prev => ({
+          ...prev,
+          [objectName]: {
+            isPrimed: isPrimed === true,
+            isInProgress: false,
+            currentStage: isPrimed ? 'U7' : undefined,
+            completedSteps: isPrimed ? ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'] : [],
+            missingSteps: isPrimed ? [] : ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'],
+          }
+        }));
+        
+        // Also trigger a full refresh to ensure consistency
+        setReloadToken(prev => prev + 1);
+      }
+    };
+    
+    // Listen for priming-status-changed events with status info
+    const handlePrimingStatusChanged = (event: any) => {
+      if (!cancelled && event.detail) {
+        const { objectName, filePath, status } = event.detail;
+        const targetObjectName = objectName || filePath;
+        
+        if (targetObjectName && status) {
+          console.log('[SavedDataFramesPanel] priming-status-changed event with status:', { targetObjectName, status });
+          
+          // Immediately update the status for this specific file
+          setFilePrimingStatus(prev => ({
+            ...prev,
+            [targetObjectName]: {
+              isPrimed: status.isPrimed === true,
+              isInProgress: status.isInProgress === false,
+              currentStage: status.currentStage || (status.isPrimed ? 'U7' : undefined),
+              completedSteps: status.completedSteps || (status.isPrimed ? ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'] : []),
+              missingSteps: status.missingSteps || (status.isPrimed ? [] : ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7']),
+            }
+          }));
+        }
+      }
+    };
+    
     window.addEventListener('dataframe-saved', handleDataframeSaved);
+    window.addEventListener('force-refresh-priming-status', handleForceRefreshPrimingStatus);
+    window.addEventListener('priming-status-changed', handlePrimingStatusChanged);
 
     const load = async () => {
       setLoading(true);
@@ -2081,21 +2137,139 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     return () => {
       cancelled = true;
       window.removeEventListener('dataframe-saved', handleDataframeSaved);
+      window.removeEventListener('force-refresh-priming-status', handleForceRefreshPrimingStatus);
+      window.removeEventListener('priming-status-changed', handlePrimingStatusChanged);
     };
   }, [isOpen, user, reloadToken]);
 
+  // Auto-approve function to skip preview modal and directly approve files
+  const autoApproveFile = useCallback(async (frame: Frame) => {
+    try {
+      const fileName = frame.object_name || '';
+      const envStr = localStorage.getItem('env');
+      const stored = localStorage.getItem('current-project');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const project = stored ? JSON.parse(stored) : {};
+
+      // Check if config already exists
+      let savedConfig: { identifiers: string[]; measures: string[] } | null = null;
+      try {
+        const queryParams = new URLSearchParams({
+          client_name: env.CLIENT_NAME || '',
+          app_name: env.APP_NAME || '',
+          project_name: env.PROJECT_NAME || '',
+          bypass_cache: 'true',
+        });
+        if (fileName) {
+          queryParams.append('file_name', fileName);
+        }
+        const configRes = await fetch(`${CLASSIFIER_API}/get_config?${queryParams.toString()}`, {
+          credentials: 'include'
+        });
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          if (configData?.data) {
+            savedConfig = {
+              identifiers: Array.isArray(configData.data.identifiers) ? configData.data.identifiers : [],
+              measures: Array.isArray(configData.data.measures) ? configData.data.measures : []
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('Error checking saved config:', err);
+      }
+
+      // If no saved config, run auto-classification
+      let identifiers: string[] = [];
+      let measures: string[] = [];
+      
+      if (savedConfig && (savedConfig.identifiers.length > 0 || savedConfig.measures.length > 0)) {
+        // Use existing saved config
+        identifiers = savedConfig.identifiers;
+        measures = savedConfig.measures;
+      } else {
+        // Auto-classify columns
+        const form = new FormData();
+        form.append('dataframe', fileName);
+        form.append('identifiers', '[]');
+        form.append('measures', '[]');
+        form.append('unclassified', '[]');
+        form.append('bypass_cache', 'true');
+        
+        const classifyRes = await fetch(`${CLASSIFIER_API}/classify_columns`, {
+          method: 'POST',
+          body: form,
+          credentials: 'include'
+        });
+        
+        if (classifyRes.ok) {
+          const classifyData = await classifyRes.json();
+          const fc = classifyData?.final_classification || {};
+          identifiers = Array.isArray(fc.identifiers) ? fc.identifiers : [];
+          measures = Array.isArray(fc.measures) ? fc.measures : [];
+        } else {
+          console.warn('Auto-classification failed, skipping approval');
+          return;
+        }
+      }
+
+      // Save classification config
+      const payload: Record<string, any> = {
+        project_id: project.id || null,
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || '',
+        identifiers,
+        measures,
+        dimensions: {}
+      };
+      if (fileName) {
+        payload.file_name = fileName;
+      }
+
+      const saveRes = await fetch(`${CLASSIFIER_API}/save_config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include'
+      });
+
+      if (saveRes.ok) {
+        // Mark file as primed
+        if (fileName) {
+          await markFileAsPrimed(fileName);
+          window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+            detail: { filePath: frame.object_name, fileName: fileName } 
+          }));
+          window.dispatchEvent(new CustomEvent('priming-status-changed', { 
+            detail: { filePath: frame.object_name, fileName: fileName } 
+          }));
+        }
+        toast({ 
+          title: 'File approved automatically', 
+          description: `${frame.arrow_name || frame.csv_name || frame.object_name} has been classified and primed.` 
+        });
+      } else {
+        console.warn('Failed to save auto-approval config');
+      }
+    } catch (err) {
+      console.error('Error in auto-approve:', err);
+      // Silently fail - don't show error to user, just log it
+    }
+  }, [markFileAsPrimed, toast]);
+
   useEffect(() => {
-    // Only open modal if there's no modal currently open and we have files in the queue
+    // Auto-approve files instead of opening preview modal
     if (processingTarget || pendingProcessFiles.length === 0 || !files.length) return;
     
     const nextFileToProcess = pendingProcessFiles[0];
     const frame = files.find(f => f.object_name === nextFileToProcess);
     if (frame) {
-      // Remove this file from the queue and open modal
+      // Remove this file from the queue and auto-approve
       setPendingProcessFiles(prev => prev.slice(1));
-      openProcessingModal(frame);
+      void autoApproveFile(frame);
     }
-  }, [files, pendingProcessFiles, processingTarget]);
+  }, [files, pendingProcessFiles, processingTarget, autoApproveFile]);
 
   const handleOpen = (obj: string) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
@@ -3854,7 +4028,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         </div>,
         document.body
       )}
-      {processingTarget && createPortal(
+      {/* Only show modal if processingTarget is set AND directReviewTarget is NOT set (to prevent both from showing) */}
+      {processingTarget && !directReviewTarget && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-lg shadow-xl w-[1000px] max-w-[98vw] p-4 max-h-[90vh] flex flex-col">
             <h4 className="text-lg font-semibold text-gray-900 mb-2">Dataframe Profiling (Verify details)</h4>

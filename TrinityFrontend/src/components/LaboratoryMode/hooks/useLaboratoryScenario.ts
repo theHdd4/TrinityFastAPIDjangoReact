@@ -80,13 +80,26 @@ export function useLaboratoryScenario(): ScenarioData {
 
         const filesData = await filesRes.json();
         const fetchedFiles = Array.isArray(filesData?.files) ? filesData.files : [];
+        const excelFolders = Array.isArray(filesData?.excel_folders) ? filesData.excel_folders : [];
+        
+        // Collect all files including sheets from Excel folders
+        const allFiles: Array<{ object_name: string; [key: string]: any }> = [...fetchedFiles];
+        excelFolders.forEach((folder: any) => {
+          if (Array.isArray(folder.sheets)) {
+            folder.sheets.forEach((sheet: any) => {
+              if (sheet.object_name) {
+                allFiles.push({ object_name: sheet.object_name, ...sheet });
+              }
+            });
+          }
+        });
 
         if (!cancelled) {
-          setFiles(fetchedFiles);
+          setFiles(allFiles);
         }
 
         // Scenario A: No files exist
-        if (fetchedFiles.length === 0) {
+        if (allFiles.length === 0) {
           if (!cancelled) {
             setScenario('A');
             setPrimingStatuses([]);
@@ -94,10 +107,10 @@ export function useLaboratoryScenario(): ScenarioData {
           return;
         }
 
-        // Step 2: Check priming status for each file
+        // Step 2: Check priming status for each file (including sheets in folders)
         const statusChecks: FilePrimingStatus[] = [];
 
-        for (const file of fetchedFiles) {
+        for (const file of allFiles) {
           const fileName = file.object_name || file.arrow_name || file.csv_name;
 
           // Check classifier config in MongoDB

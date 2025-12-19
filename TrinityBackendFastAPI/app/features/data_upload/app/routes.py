@@ -5565,6 +5565,9 @@ async def finalize_primed_file(request: Request):
         
         file_path = body.get("file_path", "")
         file_name = body.get("file_name", "")
+        selected_sheet = body.get("selected_sheet")  # For Excel sheets
+        use_folder_structure = body.get("use_folder_structure", False)  # For multi-sheet Excel files
+        base_file_name_param = body.get("base_file_name")  # Base filename for folder structure
         client_name = body.get("client_name", "")
         app_name = body.get("app_name", "")
         project_name = body.get("project_name", "")
@@ -5577,6 +5580,27 @@ async def finalize_primed_file(request: Request):
         if not file_name:
             # Use the original file name from path
             file_name = Path(file_path).stem
+        
+        # Handle sheet files: file_name format is "fileName (sheetName)"
+        # Extract base filename and sheet name for proper arrow file naming
+        base_file_name = base_file_name_param or file_name
+        sheet_name = None
+        if selected_sheet:
+            sheet_name = selected_sheet
+            # If file_name contains sheet info like "file.xlsx (Sheet1)", extract base name
+            import re
+            sheet_match = re.match(r'^(.+?)\s*\(([^)]+)\)$', file_name)
+            if sheet_match:
+                base_file_name = base_file_name_param or sheet_match.group(1).strip()
+                if not sheet_name:
+                    sheet_name = sheet_match.group(2).strip()
+        elif '(' in file_name and ')' in file_name:
+            # Extract sheet name from file_name format "fileName (sheetName)"
+            import re
+            sheet_match = re.match(r'^(.+?)\s*\(([^)]+)\)$', file_name)
+            if sheet_match:
+                base_file_name = base_file_name_param or sheet_match.group(1).strip()
+                sheet_name = sheet_match.group(2).strip()
         
         # Read the transformed file from MinIO
         try:
@@ -5628,8 +5652,24 @@ async def finalize_primed_file(request: Request):
         os.environ["PROJECT_NAME"] = project_name
         prefix = await get_object_prefix()
         
-        # Create the arrow file name
-        arrow_name = Path(file_name).stem + ".arrow"
+        # Create the arrow file name and determine folder structure
+        # For multi-sheet Excel files, use folder structure: {excel_folder_name}/sheets/{sheet_name}.arrow
+        if use_folder_structure and sheet_name:
+            # Normalize Excel folder name from base file name
+            excel_folder_name = Path(base_file_name).stem.replace(' ', '_').replace('.', '_')
+            # Normalize sheet name (remove spaces, special chars)
+            from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
+            normalized_sheet = normalize_sheet_name(sheet_name)
+            # Use folder structure: {excel_folder_name}/sheets/{normalized_sheet}.arrow
+            arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet}.arrow"
+        elif sheet_name:
+            # Single sheet or not using folder structure - include sheet name in filename
+            normalized_sheet = sheet_name.replace(' ', '_').replace('/', '_').replace('\\', '_')
+            normalized_sheet = ''.join(c for c in normalized_sheet if c.isalnum() or c in ('_', '-'))
+            base_name = Path(base_file_name).stem
+            arrow_name = f"{base_name}_{normalized_sheet}.arrow"
+        else:
+            arrow_name = Path(base_file_name).stem + ".arrow"
         
         # Upload to MinIO with proper prefix (not tmp/)
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
@@ -5654,9 +5694,11 @@ async def finalize_primed_file(request: Request):
         )
         redis_client.set(f"flight:{flight_path}", saved_object_name)
         
-        # Mark as primed in Redis
-        primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+        # Mark as primed in Redis using saved_object_name (not original file_name)
+        # This ensures sheets are correctly identified by their saved arrow file name
+        primed_key_parts = ("primed_files", client_name, app_name, project_name, saved_object_name)
         redis_client.set(primed_key_parts, "true", ttl=86400 * 30)
+        logger.info(f"✅ Marked as primed in Redis: {saved_object_name}")
         
         # Save column classifications to MongoDB if provided from guided flow
         if column_classifications:

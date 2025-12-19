@@ -7,6 +7,7 @@ import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { DirectReviewPanel } from '@/components/LaboratoryMode/components/DirectReviewPanel';
 
 interface PartialPrimedCardProps {
   atomId: string;
@@ -37,6 +38,8 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
   const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
   const removeActiveGuidedFlow = useLaboratoryStore((state) => state.removeActiveGuidedFlow);
   const updateAtomSettings = useLaboratoryStore((state) => state.updateAtomSettings);
+  const directReviewTarget = useLaboratoryStore((state) => state.directReviewTarget);
+  const setDirectReviewTarget = useLaboratoryStore((state) => state.setDirectReviewTarget);
   
   // Check if this atom has an active guided flow
   const hasActiveGuidedFlow = activeGuidedFlows[atomId] && isGuidedModeActiveForAtom(atomId);
@@ -76,13 +79,27 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
 
       const data = await res.json();
       const files = Array.isArray(data?.files) ? data.files : [];
-      if (files.length === 0) {
+      const excelFolders = Array.isArray(data?.excel_folders) ? data.excel_folders : [];
+      
+      // Collect all files including sheets from Excel folders
+      const allFiles: Array<{ object_name: string; [key: string]: any }> = [...files];
+      excelFolders.forEach((folder: any) => {
+        if (Array.isArray(folder.sheets)) {
+          folder.sheets.forEach((sheet: any) => {
+            if (sheet.object_name) {
+              allFiles.push({ object_name: sheet.object_name, ...sheet });
+            }
+          });
+        }
+      });
+      
+      if (allFiles.length === 0) {
         setPrimingStats({ total: 0, primed: 0, unprimed: 0 });
         return;
       }
 
-      // Check priming status for all files
-      const statusChecks = await Promise.all(files.map(async (f: typeof files[0]) => {
+      // Check priming status for all files (including sheets in folders)
+      const statusChecks = await Promise.all(allFiles.map(async (f: typeof allFiles[0]) => {
         try {
           const queryParams = new URLSearchParams({
             client_name: projectContext.client_name || '',
@@ -491,6 +508,20 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           <ArrowRight className="w-4 h-4 ml-2" />
         </Button>
       </div>
+
+      {/* Direct Review Panel - Show BELOW the buttons when Directly Review is clicked */}
+      {directReviewTarget && (
+        <DirectReviewPanel
+          frame={directReviewTarget}
+          onClose={() => {
+            setDirectReviewTarget(null);
+          }}
+          onSave={() => {
+            // Refresh priming stats after save
+            fetchPrimingStats();
+          }}
+        />
+      )}
 
       {/* Guided Flow Steps - Show BELOW the buttons, extending the card downward */}
       {/* Only show for the selected file (existingDataframe must match the clicked file) */}
