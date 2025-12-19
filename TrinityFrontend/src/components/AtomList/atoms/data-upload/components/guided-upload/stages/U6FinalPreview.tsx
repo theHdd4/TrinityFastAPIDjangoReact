@@ -637,195 +637,246 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           </div>
         )}
 
+        {/* Column Table - Using same compact format as U3/U4 */}
         <div className="border border-gray-200 rounded-lg overflow-hidden">
-          <div className="overflow-x-auto" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
-            <table className="w-full min-w-full">
-              <thead className="bg-gradient-to-r from-blue-50 to-blue-100 sticky top-0 z-10">
-                <tr>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
-                    Column Name
+          <div 
+            className="overflow-x-auto" 
+            style={{ 
+              maxHeight: '8.75rem',
+              overflowY: 'auto',
+              scrollbarGutter: 'stable'
+            }}
+          >
+            <table className="text-[10px] table-fixed w-full">
+              <colgroup>
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '80px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '80px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '70px' }} />
+              </colgroup>
+              <thead className="sticky top-0 z-10 bg-gray-50">
+                <tr className="bg-gray-50" style={{ height: '1.75rem' }}>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Column Name
+                    </div>
                   </th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
-                    Rename
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Rename
+                    </div>
                   </th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
-                    Current Type
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Current Type
+                    </div>
                   </th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
-                    Change Type
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Change Type
+                    </div>
                   </th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
-                    Missing Values
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Missing
+                    </div>
                   </th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
-                    Strategy
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Strategy
+                    </div>
                   </th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
-                    Classification
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Classification
+                    </div>
                   </th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
-                    Drop Column
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Drop
+                    </div>
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody>
                 {columns.map((col, idx) => {
                   const dtypeOptions = getDtypeOptions(col.originalDtype);
                   const missingOptions = getMissingOptions(col.selectedDtype);
                   const hasMissingValues = col.missingCount > 0;
                   const inputsDisabled = col.dropColumn;
 
+                  // Build unique sample values preview (match behavior from U3/U4 tables)
+                  const uniqueSampleValues = Array.from(new Set(col.sampleValues || []));
+                  const previewSampleValues = uniqueSampleValues.slice(0, 5).join(', ');
+                  const fullSampleValuesText = uniqueSampleValues.join(', ');
+
                   return (
-                    <tr key={`col-${col.name}-${idx}`} className={col.dropColumn ? 'opacity-50' : ''}>
-                      <td className="px-3 py-2 align-top">
-                        <div>
-                          <p className="font-medium text-xs text-gray-900">{col.newName}</p>
-                          {col.sampleValues && col.sampleValues.length > 0 && (
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              {col.sampleValues.slice(0, 5).join(', ')}
-                              {col.sampleValues.length > 5 && '...'}
-                            </p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <Input
-                          value={col.newName}
-                          onChange={e => updateColumn(idx, { newName: e.target.value })}
-                          className="h-7 text-xs"
-                          placeholder="Rename column"
-                          disabled={inputsDisabled}
-                        />
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getDtypeBadgeColor(col.originalDtype)}`}>
-                          {col.originalDtype}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <div className={`space-y-2 ${inputsDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
-                          <Select
-                            value={col.selectedDtype}
-                            onValueChange={value => updateColumn(idx, { selectedDtype: value })}
-                            disabled={inputsDisabled}
-                          >
-                            <SelectTrigger className="w-full h-7 text-xs">
-                              <SelectValue placeholder="Select dtype" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {dtypeOptions.map(opt => (
-                                <SelectItem key={`dtype-${col.name}-${opt.value}`} value={opt.value}>
-                                  {opt.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {col.selectedDtype === 'datetime64' && (
-                            <div className="space-y-1">
-                              <Select
-                                value={col.datetimeFormat || ''}
-                                onValueChange={value => updateColumn(idx, { datetimeFormat: value })}
-                                disabled={inputsDisabled}
-                              >
-                                <SelectTrigger className="w-full h-7 text-xs">
-                                  <SelectValue placeholder="Select format" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {[
-                                    { value: '%Y-%m-%d', label: '%Y-%m-%d (2024-12-31)' },
-                                    { value: '%d/%m/%Y', label: '%d/%m/%Y (31/12/2024)' },
-                                    { value: '%m/%d/%Y', label: '%m/%d/%Y (12/31/2024)' },
-                                    { value: '%Y-%m-%d %H:%M:%S', label: '%Y-%m-%d %H:%M:%S' },
-                                  ].map(opt => (
-                                    <SelectItem key={`dt-format-${opt.value}`} value={opt.value}>
-                                      {opt.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                    <tr
+                      key={`col-${col.name}-${idx}`}
+                      className={col.dropColumn ? 'bg-gray-50 opacity-60 hover:bg-gray-50' : 'hover:bg-gray-50'}
+                      style={{ height: '1.75rem' }}
+                    >
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={col.newName}>
+                        <div className="truncate">
+                          <div className="text-gray-700 text-[10px] leading-tight truncate">
+                            {col.newName}
+                          </div>
+                          {uniqueSampleValues.length === 0 ? (
+                            <div className="text-gray-400 text-[9px] leading-tight truncate">No samples</div>
+                          ) : (
+                            <div 
+                              className="text-gray-500 text-[9px] leading-tight truncate" 
+                              title={fullSampleValuesText}
+                            >
+                              {previewSampleValues}
+                              {uniqueSampleValues.length > 5 && '...'}
                             </div>
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2 align-top">
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <input
+                          type="text"
+                          value={col.newName}
+                          onChange={e => updateColumn(idx, { newName: e.target.value })}
+                          disabled={inputsDisabled}
+                          className="w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] disabled:bg-gray-100 disabled:cursor-not-allowed"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div className="truncate">
+                          <span className={`inline-flex items-center rounded-full border px-1 py-0 text-[9px] font-semibold ${getDtypeBadgeColor(col.originalDtype)}`}>
+                            {col.originalDtype}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div 
+                          className="relative inline-block w-full max-w-[90px]" 
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <select
+                            value={col.selectedDtype}
+                            onChange={e => {
+                              e.stopPropagation();
+                              updateColumn(idx, { selectedDtype: e.target.value });
+                            }}
+                            disabled={inputsDisabled}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed`}
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              backgroundSize: '1em 1em',
+                              backgroundPosition: 'right 0.25rem center',
+                              backgroundRepeat: 'no-repeat',
+                              paddingRight: '1.5rem'
+                            }}
+                          >
+                            {dtypeOptions.map(opt => (
+                              <option key={`dtype-${col.name}-${opt.value}`} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
                         {hasMissingValues ? (
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="inline-flex items-center rounded-full border border-red-300 text-red-600 px-2 py-0.5 text-[11px] font-semibold">
+                          <div className="truncate">
+                            <span className="text-red-600 text-[9px] font-semibold">
                               {col.missingCount}
                             </span>
-                            <span className="text-gray-500">
+                            <span className="text-gray-500 text-[9px]">
                               ({col.missingPercentage.toFixed(1)}%)
                             </span>
                           </div>
                         ) : (
-                          <span className="text-xs text-gray-500">None</span>
+                          <span className="text-gray-400 text-[10px]">None</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 align-top">
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
                         {hasMissingValues ? (
-                          <div className={`space-y-1 ${inputsDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
-                            <Select
+                          <div 
+                            className="relative inline-block w-full max-w-[90px]" 
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <select
                               value={col.missingStrategy}
-                              onValueChange={value => updateColumn(idx, { 
-                                missingStrategy: value,
-                                ...(value !== 'custom' ? { missingCustomValue: '' } : {})
-                              })}
+                              onChange={e => {
+                                e.stopPropagation();
+                                updateColumn(idx, { 
+                                  missingStrategy: e.target.value,
+                                  ...(e.target.value !== 'custom' ? { missingCustomValue: '' } : {})
+                                });
+                              }}
                               disabled={inputsDisabled}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              className="w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                backgroundSize: '1em 1em',
+                                backgroundPosition: 'right 0.25rem center',
+                                backgroundRepeat: 'no-repeat',
+                                paddingRight: '1.5rem'
+                              }}
                             >
-                              <SelectTrigger className="w-full h-7 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {missingOptions.map(opt => (
-                                  <SelectItem key={`missing-${col.name}-${opt.value}`} value={opt.value}>
-                                    {opt.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {col.missingStrategy === 'custom' && (
-                              <Input
-                                value={col.missingCustomValue}
-                                onChange={e => updateColumn(idx, { missingCustomValue: e.target.value })}
-                                placeholder="Custom value"
-                                className="h-7 text-xs"
-                                disabled={inputsDisabled}
-                              />
-                            )}
+                              {missingOptions.map(opt => (
+                                <option key={`missing-${col.name}-${opt.value}`} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                         ) : (
-                          <span className="text-xs text-gray-400">N/A</span>
+                          <span className="text-gray-400 text-[10px]">N/A</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 align-top">
-                        <div className={`${inputsDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
-                          <Select
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div 
+                          className="relative inline-block w-full max-w-[90px]" 
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <select
                             value={col.classification || 'unclassified'}
-                            onValueChange={(value: 'identifiers' | 'measures' | 'unclassified') => 
-                              updateColumn(idx, { classification: value })
-                            }
+                            onChange={e => {
+                              e.stopPropagation();
+                              const value = e.target.value as 'identifiers' | 'measures' | 'unclassified';
+                              updateColumn(idx, { classification: value });
+                            }}
                             disabled={inputsDisabled}
-                          >
-                            <SelectTrigger className={`w-full h-7 text-xs ${
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none disabled:bg-gray-100 disabled:cursor-not-allowed ${
                               col.classification === 'identifiers' ? 'text-blue-600 border-blue-300' :
                               col.classification === 'measures' ? 'text-green-600 border-green-300' :
                               'text-yellow-600 border-yellow-300'
-                            }`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="identifiers">Identifiers</SelectItem>
-                              <SelectItem value="measures">Measures</SelectItem>
-                              <SelectItem value="unclassified">Unclassified</SelectItem>
-                            </SelectContent>
-                          </Select>
+                            }`}
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              backgroundSize: '1em 1em',
+                              backgroundPosition: 'right 0.25rem center',
+                              backgroundRepeat: 'no-repeat',
+                              paddingRight: '1.5rem'
+                            }}
+                          >
+                            <option value="identifiers">Identifiers</option>
+                            <option value="measures">Measures</option>
+                            <option value="unclassified">Unclassified</option>
+                          </select>
                         </div>
                       </td>
-                      <td className="px-3 py-2 align-top">
-                        <label className="flex items-center gap-2 text-xs text-gray-700">
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div className="flex items-center justify-center">
                           <input
                             type="checkbox"
-                            className="h-4 w-4 accent-red-600"
+                            className="h-3 w-3 accent-red-600 cursor-pointer"
                             checked={col.dropColumn}
                             onChange={e => {
                               const checked = e.target.checked;
@@ -838,9 +889,9 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
                                 } : {})
                               });
                             }}
+                            onClick={(e) => e.stopPropagation()}
                           />
-                          Drop column
-                        </label>
+                        </div>
                       </td>
                     </tr>
                   );

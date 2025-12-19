@@ -3,7 +3,6 @@ import { safeStringify } from "@/utils/safeStringify";
 import { atoms as allAtoms } from "@/components/AtomList/data";
 import { ClarificationRequestMessage as ClarificationRequest } from "@/types/streaming";
 import { LABORATORY_API } from "@/lib/api";
-import type { UploadStage, GuidedUploadFlowState } from "@/components/AtomList/atoms/data-upload/components/guided-upload/useGuidedUploadFlow";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -325,6 +324,7 @@ export interface FeatureOverviewSettings {
   filterUnique?: boolean;
   isLoading?: boolean;
   loadingMessage?: string;
+  showDataSummary?: boolean;
   loadingStatus?: string;
   exhibitionSelections?: FeatureOverviewExhibitionSelection[];
 }
@@ -361,6 +361,7 @@ export interface ConcatSettings {
   performConcat: boolean;
   concatResults?: any;
   concatId?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
@@ -401,6 +402,7 @@ export interface CorrelationSettings {
     selectFilter: string;
     uploadedFile?: string;
     filterDimensions?: Record<string, string[]>;
+    saveFiltered?: boolean; // Whether to save filtered data to MinIO (default: false)
   };
   // Enhanced visualization options
   visualizationOptions?: {
@@ -453,6 +455,8 @@ export interface CorrelationSettings {
   // Note functionality (matching ChartMaker pattern)
   note?: string;
   showNote?: boolean;
+  // Data Summary functionality
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
@@ -498,7 +502,8 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   columnValuesLoading: false,
   columnValuesError: undefined,
   note: '',
-  showNote: false
+  showNote: false,
+  showDataSummary: false
 };
 
 export interface ColumnClassifierColumn {
@@ -530,6 +535,7 @@ export interface ColumnClassifierSettings {
   isLoading?: boolean;
   loadingMessage?: string;
   loadingStatus?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -561,6 +567,7 @@ export interface DataFrameOperationsSettings {
   selectedFile?: string;
   tableData?: any;
   data?: any;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings = {
@@ -574,6 +581,7 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   selectedFile: '',
   tableData: undefined,
   data: undefined,
+  showDataSummary: false,
 };
 
 export interface ChartData {
@@ -682,6 +690,7 @@ export interface ChartMakerSettings {
   };
   error?: string;
   exhibitionSelections?: ChartMakerExhibitionSelection[];
+  showDataSummary?: boolean;
 }
 
 export interface SelectModelsFeatureSettings {
@@ -842,6 +851,7 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   },
   error: undefined,
   exhibitionSelections: [],
+  showDataSummary: false,
 };
 
 export interface ClusteringData {
@@ -1572,6 +1582,7 @@ export interface ScopeSelectorSettings {
   }>;
   dataSource?: string;
   previewRows?: ScopeSelectorPreviewRow[];
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_SCOPE_SELECTOR_SETTINGS: ScopeSelectorSettings = {
@@ -1739,7 +1750,8 @@ export interface GroupByAtomSettings {
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
-  showCardinalityView?: boolean;
+  showCardinalityView?: boolean; // Deprecated - use showDataSummary instead
+  showDataSummary?: boolean;
   
   // GroupBy results
   groupbyResults?: {
@@ -1771,7 +1783,8 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   sortColumn: 'unique_count',
   sortDirection: 'desc',
   columnFilters: {},
-  showCardinalityView: false,
+  showCardinalityView: false, // Deprecated - use showDataSummary instead
+  showDataSummary: false,
   groupbyResults: {
     result_file: '',
     result_shape: [0, 0],
@@ -2004,8 +2017,10 @@ interface LaboratoryStore {
   subMode: LaboratorySubMode;
   isLaboratorySession: boolean;
   pendingClarification?: ClarificationRequest | null;
-  activeGuidedFlows: Record<string, { atomId: string; currentStage: UploadStage; state: Partial<GuidedUploadFlowState> }>;
+  
+  // --- Guided Mode State ---
   globalGuidedModeEnabled: boolean;
+  activeGuidedFlows: Record<string, any>;
 
   // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
@@ -2053,16 +2068,13 @@ interface LaboratoryStore {
   ) => Promise<void>;
   findCardByAtomId: (atomId: string) => LayoutCard | undefined;
   findCardIndex: (cardId: string) => number;
-
-  // --- Guided Flow Actions ---
-  setActiveGuidedFlow: (atomId: string, currentStage: UploadStage, state?: Partial<GuidedUploadFlowState>) => void;
-  updateGuidedFlowStage: (atomId: string, stage: UploadStage) => void;
-  removeActiveGuidedFlow: (atomId: string) => void;
   
-  // --- Guided Mode Toggle Actions ---
+  // --- Guided Mode Actions ---
   setGlobalGuidedMode: (enabled: boolean) => void;
-  toggleAtomGuidedMode: (atomId: string) => void;
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => void;
+  updateGuidedFlowStage: (atomId: string, stage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7') => void;
   isGuidedModeActiveForAtom: (atomId: string) => boolean;
+  removeActiveGuidedFlow: (atomId: string) => void;
 }
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
@@ -2086,8 +2098,8 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     : null,
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   subMode: 'analytics',  // Default to analytics mode
-  activeGuidedFlows: {},
   globalGuidedModeEnabled: false,
+  activeGuidedFlows: {},
   setCards: (cards: LayoutCard[]) => {
     const currentSubMode = get().subMode;
     
@@ -2119,11 +2131,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       const filteredCards: LayoutCard[] = [];
       
       for (const card of cardsToSet) {
+        // CRITICAL FIX: Allow landing-screen atoms in dashboard mode for empty state
         const allowedAtoms = (card.atoms || []).filter(atom => 
-          allowedAtomIdsSet.has(atom.atomId as any)
+          allowedAtomIdsSet.has(atom.atomId as any) || atom.atomId === 'landing-screen'
         );
         
-        // CRITICAL FIX: Allow empty cards OR cards with allowed atoms
+        // CRITICAL FIX: Allow empty cards OR cards with allowed atoms (including landing-screen)
         // Empty cards must be preserved for "Add New Card" functionality in dashboard mode
         if (allowedAtoms.length > 0 || (card.atoms || []).length === 0) {
           // Keep only first allowed atom (one atom per card), or preserve empty array
@@ -2141,9 +2154,9 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
           removed: cardsToSet.length - filteredCards.length,
           removedCards: cardsToSet.filter(card => {
             const allowedAtoms = (card.atoms || []).filter(atom => 
-              allowedAtomIdsSet.has(atom.atomId as any)
+              allowedAtomIdsSet.has(atom.atomId as any) || atom.atomId === 'landing-screen'
             );
-            return allowedAtoms.length === 0;
+            return allowedAtoms.length === 0 && (card.atoms || []).length > 0;
           }).map(c => ({
             id: c.id,
             atoms: c.atoms.map(a => a.atomId)
@@ -2279,17 +2292,98 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       
       const updatedCards = state.cards.map((card) => ({
         ...card,
-        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) =>
-          atom.id === atomId
-            ? { 
-                ...atom, 
-                settings: { 
-                  ...(atom.settings || {}), 
-                  ...settings
-                } 
+        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) => {
+          if (atom.id !== atomId) {
+            return atom;
+          }
+          
+          // 🔧 CRITICAL FIX: Special handling for chart-maker charts array to prevent duplicates
+          const currentSettings = atom.settings || {};
+          const newSettings = { ...currentSettings, ...settings };
+          
+          // If this is a chart-maker atom and charts are being updated, merge by ID to prevent duplicates
+          if (atom.type === 'chart-maker' && settings.charts && Array.isArray(settings.charts)) {
+            const existingCharts = Array.isArray(currentSettings.charts) ? currentSettings.charts : [];
+            const newCharts = settings.charts;
+            
+            // 🔧 CRITICAL: Deduplicate and merge charts by ID
+            const chartMap = new Map<string, any>();
+            
+            // First, add all existing charts to the map
+            existingCharts.forEach((chart: any) => {
+              if (chart && chart.id) {
+                chartMap.set(chart.id, chart);
               }
-            : atom,
-        ) : [],
+            });
+            
+            // Then, update or add new charts
+            newCharts.forEach((chart: any) => {
+              if (chart && chart.id) {
+                const existingChart = chartMap.get(chart.id);
+                if (existingChart) {
+                  // Chart exists - merge the update (preserve existing properties, update with new ones)
+                  // 🔧 CRITICAL: NEVER change the chart ID - it must remain stable
+                  const mergedChart = {
+                    ...existingChart,
+                    ...chart
+                  };
+                  // Force preserve original ID in case it was accidentally changed
+                  mergedChart.id = existingChart.id;
+                  chartMap.set(chart.id, mergedChart);
+                } else {
+                  // New chart - add it (but verify ID is unique)
+                  if (chartMap.has(chart.id)) {
+                    console.warn('⚠️ [STORE] Attempted to add chart with existing ID, merging instead', {
+                      chartId: chart.id,
+                      existingChart: chartMap.get(chart.id)
+                    });
+                    // Merge with existing instead of replacing
+                    const existing = chartMap.get(chart.id)!;
+                    chartMap.set(chart.id, {
+                      ...existing,
+                      ...chart,
+                      id: existing.id // Preserve original ID
+                    });
+                  } else {
+                    chartMap.set(chart.id, chart);
+                  }
+                }
+              } else {
+                console.warn('⚠️ [STORE] Chart without ID detected, skipping', chart);
+              }
+            });
+            
+            // Convert map back to array, preserving order
+            const mergedCharts = Array.from(chartMap.values());
+            
+            // Verify no duplicates
+            const chartIds = mergedCharts.map((c: any) => c.id);
+            const uniqueIds = new Set(chartIds);
+            if (chartIds.length !== uniqueIds.size) {
+              console.error('❌ [STORE] Duplicate chart IDs detected after merge!', {
+                chartIds,
+                duplicateIds: chartIds.filter((id, index) => chartIds.indexOf(id) !== index)
+              });
+              // Remove duplicates, keeping the first occurrence
+              const seen = new Set<string>();
+              const deduplicatedCharts = mergedCharts.filter((chart: any) => {
+                if (seen.has(chart.id)) {
+                  return false;
+                }
+                seen.add(chart.id);
+                return true;
+              });
+              newSettings.charts = deduplicatedCharts;
+            } else {
+              newSettings.charts = mergedCharts;
+            }
+          }
+          
+          return {
+            ...atom,
+            settings: newSettings
+          };
+        }) : [],
       }));
       
       return { cards: updatedCards };
@@ -2689,55 +2783,48 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     return { success: true, tableAtomId: newTableAtomId };
   },
 
-  // --- Guided Flow Actions ---
-  setActiveGuidedFlow: (atomId: string, currentStage: UploadStage, state?: Partial<GuidedUploadFlowState>) => {
-    set((prev) => ({
+  // --- Guided Mode Actions ---
+  setGlobalGuidedMode: (enabled: boolean) => {
+    set({ globalGuidedModeEnabled: enabled });
+  },
+  
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => {
+    const currentFlows = get().activeGuidedFlows;
+    set({
       activeGuidedFlows: {
-        ...prev.activeGuidedFlows,
+        ...currentFlows,
         [atomId]: {
-          atomId,
           currentStage,
           state: state || {},
         },
       },
-    }));
+    });
   },
-
-  updateGuidedFlowStage: (atomId: string, stage: UploadStage) => {
-    set((prev) => {
-      const flow = prev.activeGuidedFlows[atomId];
-      if (!flow) return prev;
-      return {
+  
+  updateGuidedFlowStage: (atomId: string, stage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7') => {
+    const currentFlows = get().activeGuidedFlows;
+    if (currentFlows[atomId]) {
+      set({
         activeGuidedFlows: {
-          ...prev.activeGuidedFlows,
+          ...currentFlows,
           [atomId]: {
-            ...flow,
+            ...currentFlows[atomId],
             currentStage: stage,
           },
         },
-      };
-    });
+      });
+    }
   },
-
-  removeActiveGuidedFlow: (atomId: string) => {
-    set((prev) => {
-      const { [atomId]: removed, ...rest } = prev.activeGuidedFlows;
-      return { activeGuidedFlows: rest };
-    });
-  },
-
-  // --- Guided Mode Toggle Actions ---
-  setGlobalGuidedMode: (enabled: boolean) => {
-    set({ globalGuidedModeEnabled: enabled });
-  },
-
-
-
+  
   isGuidedModeActiveForAtom: (atomId: string) => {
-    const state = get();
-    // When global guided mode is enabled, it applies to ALL atoms
-    // Individual atom overrides are ignored to maintain global consistency
-    return state.globalGuidedModeEnabled;
+    const activeFlows = get().activeGuidedFlows;
+    return !!activeFlows[atomId];
+  },
+  
+  removeActiveGuidedFlow: (atomId: string) => {
+    const currentFlows = get().activeGuidedFlows;
+    const { [atomId]: removed, ...remainingFlows } = currentFlows;
+    set({ activeGuidedFlows: remainingFlows });
   },
 
   reset: () => {
@@ -2745,8 +2832,8 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       cards: [],
       metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
       pendingClarification: null,
-      activeGuidedFlows: {},
       globalGuidedModeEnabled: false,
+      activeGuidedFlows: {},
     });
     if (typeof window !== 'undefined') {
       localStorage.removeItem('trinity_lab_pending_clarification');

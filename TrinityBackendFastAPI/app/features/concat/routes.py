@@ -34,9 +34,6 @@ async def ping():
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
     object_name = unquote(object_name)
-    print(f"➡️ column_summary request: {object_name}")
-    if not object_name.startswith(OBJECT_PREFIX):
-        print(f"⚠️ column_summary prefix mismatch: {object_name} (expected {OBJECT_PREFIX})")
     try:
         df = load_dataframe(object_name)
         df.columns = df.columns.str.lower()
@@ -70,7 +67,6 @@ async def column_summary(object_name: str):
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ column_summary error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/cardinality")
@@ -89,18 +85,10 @@ async def cardinality(
         # Construct the full object path
         full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
         
-        # print(f"🔍 Concat Cardinality file path resolution:")
-        # print(f"  Original object_names: {object_names}")
-        # print(f"  Current prefix: {prefix}")
-        # print(f"  Full object path: {full_object_path}")
-        # print(f"  Source type: {source_type}")
-        
         # Load the dataframe using the correct path
         from .deps import get_minio_df
         df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
         df.columns = df.columns.str.strip().str.lower()
-        
-        # print(f"✅ Successfully loaded {source_type} dataframe for cardinality with shape: {df.shape}")
         
         # Generate cardinality data
         cardinality = []
@@ -137,7 +125,6 @@ async def cardinality(
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ cardinality error for {file_key}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/cached_dataframe")
@@ -148,9 +135,6 @@ async def cached_dataframe(
 ):
     """Return the saved dataframe as CSV text from Redis or MinIO with pagination."""
     object_name = unquote(object_name)
-    print(f"➡️ cached_dataframe request: {object_name}, page={page}, page_size={page_size}")
-    if not object_name.startswith(OBJECT_PREFIX):
-        print(f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {OBJECT_PREFIX})")
     try:
         content = redis_client.get(object_name)
         if content is None:
@@ -224,13 +208,16 @@ async def cached_dataframe(
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ cached_dataframe error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/init")
 async def init_concat(
     file1: str = Body(...),
-    file2: str = Body(...)
+    file2: str = Body(...),
+    # Pipeline tracking (optional)
+    validator_atom_id: str = Body(None),
+    card_id: str = Body(None),
+    canvas_position: int = Body(0),
 ):
     """Initialize concat operation by analyzing two files from storage."""
     try:
@@ -248,6 +235,100 @@ async def init_concat(
             "file2": file2,
             "message": "Files referenced successfully."
         }
+        
+        # Record pipeline execution if validator_atom_id is provided
+        if validator_atom_id:
+            try:
+                # Extract client/app/project from file paths
+                prefix = await get_object_prefix()
+                full_path1 = f"{prefix}{file1}" if not file1.startswith(prefix) else file1
+                full_path2 = f"{prefix}{file2}" if not file2.startswith(prefix) else file2
+                
+                path_parts1 = full_path1.split("/")
+                client_name = path_parts1[0] if len(path_parts1) > 0 else ""
+                app_name = path_parts1[1] if len(path_parts1) > 1 else ""
+                project_name = path_parts1[2] if len(path_parts1) > 2 else ""
+                
+                # Get user_id from atom configuration
+                from app.features.project_state.routes import get_atom_list_configuration
+                user_id = None
+                try:
+                    atom_config = await get_atom_list_configuration(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        mode="laboratory"
+                    )
+                    if atom_config.get("status") == "success":
+                        cards = atom_config.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            atom = next((a for a in atoms if a.get("id") == validator_atom_id), None)
+                            if atom:
+                                user_id = atom.get("user_id")
+                                break
+                except Exception:
+                    pass
+                
+                # Build configuration for pipeline tracking
+                configuration = {
+                    "file1": full_path1,
+                    "file2": full_path2,
+                }
+                
+                # Build API calls
+                execution_started_at = datetime.datetime.utcnow()
+                api_calls = [
+                    {
+                        "endpoint": "/concat/init",
+                        "method": "POST",
+                        "timestamp": execution_started_at,
+                        "params": configuration.copy(),
+                        "response_status": 200,
+                        "response_data": col_info
+                    }
+                ]
+                
+                # No output files for init
+                output_files = []
+                
+                execution_completed_at = datetime.datetime.utcnow()
+                execution_status = "success"
+                execution_error = None
+                
+                # Record execution (async, don't wait for it)
+                from app.features.pipeline.service import record_atom_execution
+                try:
+                    await record_atom_execution(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        atom_instance_id=validator_atom_id,
+                        card_id=card_id or "",
+                        atom_type="concat",
+                        atom_title="Concat Data",
+                        input_files=[full_path1, full_path2],
+                        configuration=configuration,
+                        api_calls=api_calls,
+                        output_files=output_files,
+                        execution_started_at=execution_started_at,
+                        execution_completed_at=execution_completed_at,
+                        execution_status=execution_status,
+                        execution_error=execution_error,
+                        user_id=user_id or "unknown",
+                        mode="laboratory",
+                        canvas_position=canvas_position or 0
+                    )
+                except Exception as e:
+                    # Don't fail the request if pipeline recording fails
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"⚠️ Failed to record concat init execution for pipeline: {e}")
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"⚠️ Error during concat init pipeline tracking: {e}")
+        
         return col_info
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to process files: {e}")
@@ -256,9 +337,12 @@ async def init_concat(
 async def perform_concat(
     file1: str = Body(...),
     file2: str = Body(...),
-    concat_direction: str = Body(...)
+    concat_direction: str = Body(...),
+    # Pipeline tracking (optional)
+    validator_atom_id: str = Body(None),
+    card_id: str = Body(None),
+    canvas_position: int = Body(0),
 ):
-    print('DEBUG: Received in /perform:', {'file1': file1, 'file2': file2, 'concat_direction': concat_direction})
     if not file1 or not file2 or not concat_direction:
         raise HTTPException(status_code=400, detail=f"file1, file2, and concat_direction are required and must be non-empty. Got: file1={file1!r}, file2={file2!r}, concat_direction={concat_direction!r}")
     try:
@@ -274,13 +358,6 @@ async def perform_concat(
         # Construct full object paths
         full_path1 = f"{prefix}{file1}" if not file1.startswith(prefix) else file1
         full_path2 = f"{prefix}{file2}" if not file2.startswith(prefix) else file2
-        
-        print(f"🔍 CONCAT PERFORM - Path resolution:")
-        print(f"   Original file1: {file1}")
-        print(f"   Original file2: {file2}")
-        print(f"   Current prefix: {prefix}")
-        print(f"   Full path1: {full_path1}")
-        print(f"   Full path2: {full_path2}")
         
         # Read first file from storage using direct MinIO access
         try:
@@ -325,8 +402,6 @@ async def perform_concat(
         concat_id = str(uuid.uuid4())[:8]  # Shorten UUID for readability
         concat_key = f"{concat_id}_concat.arrow"
 
-        print('Received:', file1, file2, concat_direction)
-
         # Save as Arrow file instead of CSV
         import pyarrow as pa
         table = pa.Table.from_pandas(result)
@@ -357,7 +432,7 @@ async def perform_concat(
         # Return CSV as string (like Merge API does)
         csv_text = result.to_csv(index=False)
         
-        return {
+        result_data = {
             "concat_id": concat_id,
             "data": csv_text,  # Add CSV data to response
             "result_shape": result.shape,
@@ -365,6 +440,98 @@ async def perform_concat(
             "result_file": concat_key,
             "message": "Concatenation completed successfully"
         }
+        
+        # Record pipeline execution if validator_atom_id is provided
+        if validator_atom_id:
+            try:
+                # Extract client/app/project from file paths
+                path_parts1 = full_path1.split("/")
+                client_name = path_parts1[0] if len(path_parts1) > 0 else ""
+                app_name = path_parts1[1] if len(path_parts1) > 1 else ""
+                project_name = path_parts1[2] if len(path_parts1) > 2 else ""
+                
+                # Get user_id from atom configuration
+                from app.features.project_state.routes import get_atom_list_configuration
+                user_id = None
+                try:
+                    atom_config = await get_atom_list_configuration(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        mode="laboratory"
+                    )
+                    if atom_config.get("status") == "success":
+                        cards = atom_config.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            atom = next((a for a in atoms if a.get("id") == validator_atom_id), None)
+                            if atom:
+                                user_id = atom.get("user_id")
+                                break
+                except Exception:
+                    pass
+                
+                # Build configuration for pipeline tracking
+                configuration = {
+                    "file1": full_path1,
+                    "file2": full_path2,
+                    "concat_direction": concat_direction,
+                }
+                
+                # Build API calls
+                execution_started_at = datetime.datetime.utcnow()
+                api_calls = [
+                    {
+                        "endpoint": "/concat/perform",
+                        "method": "POST",
+                        "timestamp": execution_started_at,
+                        "params": configuration.copy(),
+                        "response_status": 200,
+                        "response_data": result_data
+                    }
+                ]
+                
+                # No output files for perform (save handles that)
+                output_files = []
+                
+                execution_completed_at = datetime.datetime.utcnow()
+                execution_status = "success"
+                execution_error = None
+                
+                # Record execution (async, don't wait for it)
+                from app.features.pipeline.service import record_atom_execution
+                try:
+                    await record_atom_execution(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        atom_instance_id=validator_atom_id,
+                        card_id=card_id or "",
+                        atom_type="concat",
+                        atom_title="Concat Data",
+                        input_files=[full_path1, full_path2],
+                        configuration=configuration,
+                        api_calls=api_calls,
+                        output_files=output_files,
+                        execution_started_at=execution_started_at,
+                        execution_completed_at=execution_completed_at,
+                        execution_status=execution_status,
+                        execution_error=execution_error,
+                        user_id=user_id or "unknown",
+                        mode="laboratory",
+                        canvas_position=canvas_position or 0
+                    )
+                except Exception as e:
+                    # Don't fail the request if pipeline recording fails
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"⚠️ Failed to record concat perform execution for pipeline: {e}")
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"⚠️ Error during concat perform pipeline tracking: {e}")
+        
+        return result_data
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Concat failed: {str(e)}")
@@ -372,7 +539,11 @@ async def perform_concat(
 @router.post("/save")
 async def save_concat_dataframe(
     csv_data: str = Body(..., embed=True),
-    filename: str = Body(..., embed=True)
+    filename: str = Body(..., embed=True),
+    # Pipeline tracking (optional)
+    validator_atom_id: str = Body(None),
+    card_id: str = Body(None),
+    canvas_position: int = Body(0),
 ):
     """Save a concatenated dataframe (CSV) to MinIO as Arrow file and return file info."""
     import pandas as pd
@@ -462,15 +633,116 @@ async def save_concat_dataframe(
         # Cache in Redis
         redis_client.setex(full_path, 3600, arrow_bytes)
         
-        # Return file info
-        return {
+        result_data = {
             "result_file": full_path,
             "shape": df.shape,
             "columns": list(df.columns),
             "message": "DataFrame saved successfully"
         }
+        
+        # Record save operation in pipeline (if atom_id is provided)
+        if validator_atom_id:
+            try:
+                # Extract client/app/project from file path
+                path_parts = full_path.split("/")
+                client_name = path_parts[0] if len(path_parts) > 0 else ""
+                app_name = path_parts[1] if len(path_parts) > 1 else ""
+                project_name = path_parts[2] if len(path_parts) > 2 else ""
+                
+                # Determine if it's a default name
+                is_default_name = not filename or filename.strip() == ""
+                save_as_name = filename if filename else "concat_result"
+                
+                # Build API call for save operation
+                save_started_at = datetime.datetime.utcnow()
+                save_api_call = {
+                    "endpoint": "/concat/save",
+                    "method": "POST",
+                    "timestamp": save_started_at,
+                    "params": {
+                        "filename": filename,
+                        "is_default_name": is_default_name,
+                    },
+                    "response_status": 200,
+                    "response_data": {
+                        "status": "SUCCESS",
+                        "result_file": full_path,
+                        "shape": df.shape,
+                        "columns": list(df.columns),
+                    }
+                }
+                
+                # Get existing execution step and update it with output file
+                from app.features.pipeline.service import get_pipeline_collection
+                coll = await get_pipeline_collection()
+                doc_id = f"{client_name}/{app_name}/{project_name}"
+                existing_doc = await coll.find_one({"_id": doc_id})
+                
+                if existing_doc:
+                    pipeline = existing_doc.get("pipeline", {})
+                    execution_graph = pipeline.get("execution_graph", [])
+                    
+                    # Find the step for this atom
+                    for step in execution_graph:
+                        if (step.get("atom_instance_id") == validator_atom_id and 
+                            step.get("card_id") == card_id):
+                            # Add save API call to the step
+                            if "api_calls" not in step:
+                                step["api_calls"] = []
+                            step["api_calls"].append(save_api_call)
+                            
+                            # Update output files to include the saved file
+                            if "outputs" not in step:
+                                step["outputs"] = []
+                            
+                            # Check if this saved file already exists in outputs
+                            existing_output = None
+                            for output in step["outputs"]:
+                                if output.get("file_key") == full_path:
+                                    existing_output = output
+                                    break
+                            
+                            if existing_output:
+                                # Update existing output with save_as_name
+                                existing_output["save_as_name"] = save_as_name
+                                existing_output["is_default_name"] = is_default_name
+                            else:
+                                # Add new output for saved file
+                                step["outputs"].append({
+                                    "file_key": full_path,
+                                    "file_path": full_path,
+                                    "flight_path": full_path,
+                                    "file_name": filename,
+                                    "file_type": "arrow",
+                                    "size": len(arrow_bytes),
+                                    "save_as_name": save_as_name,
+                                    "is_default_name": is_default_name,
+                                    "columns": list(df.columns),
+                                    "row_count": len(df)
+                                })
+                            
+                            # Update the document
+                            await coll.update_one(
+                                {"_id": doc_id},
+                                {
+                                    "$set": {
+                                        "pipeline.execution_graph": execution_graph,
+                                        "execution_timestamp": datetime.datetime.utcnow()
+                                    }
+                                }
+                            )
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            logger.info(f"✅ Updated concat execution step with output file: {full_path}")
+                            break
+            except Exception as e:
+                # Don't fail the save if pipeline recording fails
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"⚠️ Failed to record concat save operation in pipeline: {e}")
+        
+        return result_data
     except Exception as e:
-        print(f"⚠️ save_concat_dataframe error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/results")
@@ -511,7 +783,6 @@ async def get_concat_data(
 async def export_csv(object_name: str):
     """Export concatenated data as CSV file."""
     object_name = unquote(object_name)
-    print(f"➡️ export_csv request: {object_name}")
     
     try:
         # Try Redis cache first
@@ -556,14 +827,12 @@ async def export_csv(object_name: str):
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ export_csv error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/export_excel")
 async def export_excel(object_name: str):
     """Export concatenated data as Excel file."""
     object_name = unquote(object_name)
-    print(f"➡️ export_excel request: {object_name}")
     
     try:
         # Try Redis cache first
@@ -611,5 +880,4 @@ async def export_excel(object_name: str):
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ export_excel error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))

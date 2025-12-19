@@ -28,11 +28,6 @@ PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 _redis_settings = get_redis_settings()
 redis_client = feature_cache.router("concat")
 
-if os.getenv("ENVIRONMENT", "production").lower() == "development":
-    print(
-        f"✅ [dev] Concat atom using shared Redis {_redis_settings.host}:{_redis_settings.port}"
-    )
-
 
 def load_names_from_db() -> None:
     global CLIENT_NAME, APP_NAME, PROJECT_NAME
@@ -45,7 +40,7 @@ def load_names_from_db() -> None:
             APP_NAME = APP_NAME_DB or APP_NAME
             PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
         except Exception as exc:
-            print(f"⚠️ Failed to load names from DB: {exc}")
+            pass
 
 load_names_from_db()
 
@@ -85,7 +80,6 @@ def resolve_file_path(file_key: str) -> str:
         return f"{current_prefix}{file_key}"
         
     except Exception as e:
-        print(f"⚠️ Failed to get dynamic path, using fallback: {e}")
         # Fallback to static prefix if dynamic path fails
         if "/" in file_key:
             if file_key.startswith(OBJECT_PREFIX):
@@ -109,14 +103,10 @@ def ensure_minio_bucket():
         if not minio_client.bucket_exists(MINIO_BUCKET):
             try:
                 minio_client.make_bucket(MINIO_BUCKET)
-                print(f"✅ Created MinIO bucket: {MINIO_BUCKET}")
             except Exception as e:
-                print(f"⚠️ Failed to create MinIO bucket {MINIO_BUCKET}: {e}")
                 raise
-        else:
-            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for concat")
     except Exception as e:
-        print(f"⚠️ MinIO connection error: {e}")
+        pass
 
 ensure_minio_bucket()
 
@@ -130,10 +120,9 @@ if _USE_MONGO:
     MONGO_DB = os.getenv("MONGO_DB", "trinity")
     
     if not MONGO_URI:
-        print("⚠️ CONCAT_USE_MONGO is true but MONGO_URI is not set. MongoDB features will be disabled.")
+        pass
     else:
         try:
-            print(f"🔌 Attempting to connect to MongoDB at {MONGO_URI}...")
             mongo_client = AsyncIOMotorClient(
                 MONGO_URI,
                 serverSelectionTimeoutMS=5000,  # 5 second timeout
@@ -152,11 +141,8 @@ if _USE_MONGO:
             loop.run_until_complete(mongo_client.admin.command('ping'))
             
             concat_db = mongo_client[MONGO_DB]
-            print(f"✅ Connected to MongoDB: {MONGO_URI} (DB: {MONGO_DB})")
             
         except Exception as exc:
-            print(f"⚠️ Failed to connect to MongoDB: {exc}")
-            print("⚠️ Continuing without MongoDB. Some features may be limited.")
             mongo_client = None
             concat_db = None
 
@@ -178,7 +164,6 @@ def load_dataframe(object_name: str) -> pd.DataFrame:
     # Try Redis cache first using the resolved path
     content = redis_client.get(resolved_path)
     if content is not None:
-        print(f"✅ Loaded {filename_only} from Redis cache using path: {resolved_path}")
         if filename_only.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
         elif filename_only.endswith((".xls", ".xlsx")):
@@ -198,11 +183,8 @@ def load_dataframe(object_name: str) -> pd.DataFrame:
         # For Arrow Flight, we need just the filename without extension
         flight_path = filename_only.replace('.arrow', '').replace('.csv', '').replace('.xlsx', '')
         df = download_dataframe(flight_path)
-        print(f"✅ Loaded {filename_only} from Arrow Flight")
         return df
     except Exception as e:
-        print(f"⚠️ Arrow Flight download failed for {filename_only}: {e}, falling back to MinIO.")
-        
         # Fallback to MinIO using the resolved path
         try:
             response = minio_client.get_object(MINIO_BUCKET, resolved_path)
@@ -223,12 +205,9 @@ def load_dataframe(object_name: str) -> pd.DataFrame:
                 raise ValueError(f"Unsupported file format: {filename_only}")
             
             df.columns = df.columns.str.lower()
-            print(f"✅ Loaded {filename_only} from MinIO fallback using path: {resolved_path}")
             return df
             
         except Exception as minio_error:
-            print(f"❌ MinIO fallback also failed for {filename_only}: {minio_error}")
-            print(f"   Tried path: {resolved_path}")
             raise minio_error
 
 def save_concat_result_to_minio(key: str, df: pd.DataFrame):
@@ -249,7 +228,6 @@ async def save_concat_metadata_to_mongo(collection, metadata: dict):
         # Mongo not configured – behave like merge atom and do nothing.
         return
     await collection.insert_one(metadata)
-    print(f"📦 Stored in {collection.name}: {metadata}")
 
 def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
     try:

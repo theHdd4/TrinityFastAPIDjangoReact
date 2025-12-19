@@ -56,6 +56,11 @@ class FilterAndCorrelateRequest(BaseModel):
     date_column: Optional[str] = Field(None, description="Specific date column to use for filtering")
     date_range_filter: Optional[dict] = Field(None, description="Date range filter {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}")
     aggregation_level: Optional[str] = Field(None, description="Time aggregation level (e.g., 'daily','monthly')")
+    
+    # Pipeline tracking (optional)
+    validator_atom_id: Optional[str] = Field(None, description="Atom instance ID for pipeline tracking")
+    card_id: Optional[str] = Field(None, description="Card ID for pipeline tracking")
+    canvas_position: Optional[int] = Field(None, description="Canvas position for pipeline tracking")
 
 
 # ─── Response Schemas ────────────────────────────────────────────────────

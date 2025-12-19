@@ -43,7 +43,7 @@ export const ColumnInfoIcon: React.FC<ColumnInfoIconProps> = ({ metadata }) => {
     return null;
   }
   
-  console.log('✅ [ColumnInfoIcon] Rendering icon for column');
+  console.log('✅ [ColumnInfoIcon] Rendering ENHANCED icon for column with formula:', metadata.formula);
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -56,10 +56,11 @@ export const ColumnInfoIcon: React.FC<ColumnInfoIconProps> = ({ metadata }) => {
         <TooltipTrigger asChild>
           <button
             onClick={handleClick}
-            className="inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-blue-100 text-blue-600 hover:text-blue-700 transition-colors"
+            className="inline-flex items-center justify-center w-5 h-5 rounded-full hover:bg-blue-100 text-blue-600 hover:text-blue-700 transition-colors border border-blue-200 bg-blue-50 relative z-10 flex-shrink-0"
             aria-label="Column creation info"
+            style={{ minWidth: '20px', minHeight: '20px' }}
           >
-            <Info className="w-3.5 h-3.5" />
+            <Info className="w-4 h-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent className="max-w-xs">
