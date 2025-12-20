@@ -361,6 +361,9 @@ read_minio_object = data_upload_service.read_minio_object
 
 @router.get("/get_object_prefix")
 async def get_object_prefix_endpoint(
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
     client_name: str = "",
     app_name: str = "",
     project_name: str = "",
@@ -370,9 +373,15 @@ async def get_object_prefix_endpoint(
     The endpoint resolves the MinIO prefix for the provided client/app/project
     combination. Environment variables are sourced from Redis when available
     and otherwise retrieved from Postgres' ``registry_environment`` table.
+    
+    Can accept either IDs or names (or both). If names are provided, they take precedence.
+    If only IDs are provided, names will be resolved dynamically from the database.
     """
 
     prefix, env, env_source = await get_object_prefix(
+        client_id=client_id,
+        app_id=app_id,
+        project_id=project_id,
         client_name=client_name,
         app_name=app_name,
         project_name=project_name,

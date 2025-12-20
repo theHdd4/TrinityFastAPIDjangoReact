@@ -1823,7 +1823,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           if (target.app) env.APP_NAME = target.app;
           if (target.project) env.PROJECT_NAME = target.project;
 
+          // Include IDs if names are missing, so backend can resolve names dynamically
           const query = new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
             client_name: target.client || '',
             app_name: target.app || '',
             project_name: target.project || '',
@@ -2896,13 +2900,22 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                             ? 'equalizer-blink-unprimed' 
                             : 'text-gray-400'
                         }`}
-                        onClick={() => setModeSelectionTarget({
-                          object_name: sheet.object_name,
-                          csv_name: sheet.csv_name,
-                          arrow_name: sheet.arrow_name,
-                          last_modified: sheet.last_modified,
-                          size: sheet.size
-                        })}
+                        onClick={() => {
+                          console.log('🔍 [SavedDataFramesPanel] Clicked on Excel sheet:', {
+                            object_name: sheet.object_name,
+                            csv_name: sheet.csv_name,
+                            arrow_name: sheet.arrow_name,
+                            folderPath: node.path, // Use node.path (Excel folder path)
+                            fullSheet: sheet
+                          });
+                          setModeSelectionTarget({
+                            object_name: sheet.object_name,
+                            csv_name: sheet.csv_name,
+                            arrow_name: sheet.arrow_name,
+                            last_modified: sheet.last_modified,
+                            size: sheet.size
+                          });
+                        }}
                         title={!sheetStatus?.isApproved ? "Click to approve this file" : "Process columns"}
                       />
                       {/* Wrench icon removed - not in use */}

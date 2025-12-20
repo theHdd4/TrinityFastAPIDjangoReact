@@ -47,6 +47,16 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
   const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
   const currentFile = uploadedFiles[chosenIndex];
   
+  // CRITICAL: Log the currentFile path immediately to see if it's correct
+  if (currentFile) {
+    console.log('🔍 [U6FinalPreview] currentFile from uploadedFiles:', {
+      name: currentFile.name,
+      path: currentFile.path,
+      fullFile: currentFile,
+      allUploadedFiles: uploadedFiles.map(f => ({ name: f.name, path: f.path }))
+    });
+  }
+  
   const [columns, setColumns] = useState<ProcessingColumnConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -373,12 +383,21 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
         .filter(inst => Object.keys(inst).length > 1);
 
       // Extract identifiers and measures exactly like Direct Review mode does
+      // After processing, columns will have their new names, so use newName (final name after rename)
       const identifiers = columns
         .filter(c => !c.dropColumn && c.classification === 'identifiers')
-        .map(c => c.newName || c.name); // Use newName if renamed
+        .map(c => {
+          // If column was renamed, use newName (final name), otherwise use original name
+          const finalName = c.newName && c.newName.trim() && c.newName !== c.name ? c.newName.trim() : c.name;
+          return finalName;
+        });
       const measures = columns
         .filter(c => !c.dropColumn && c.classification === 'measures')
-        .map(c => c.newName || c.name); // Use newName if renamed
+        .map(c => {
+          // If column was renamed, use newName (final name), otherwise use original name
+          const finalName = c.newName && c.newName.trim() && c.newName !== c.name ? c.newName.trim() : c.name;
+          return finalName;
+        });
 
       const hasProcessingChanges = instructions.length > 0;
       const canSaveClassifications = columns.length > 0;
@@ -389,14 +408,81 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
         return;
       }
 
+      // CRITICAL: Extract and validate the exact MinIO path ONCE at the start
+      // This path will be used for ALL operations (processing, classification, status updates)
+      // For Excel sheets in folders, this should be: "Quant Matrix AI/blank/New Custom Project/folder_name/sheets/Sheet1.arrow"
+      let exactMinIOPath = currentFile.path || '';
+      
+      // CRITICAL DIAGNOSIS: Log the path we're about to use to diagnose path issues
+      console.error('🔴 [U6FinalPreview] DIAGNOSIS - currentFile.path at save time:', {
+        path: exactMinIOPath,
+        name: currentFile.name,
+        segmentCount: exactMinIOPath.split('/').filter(s => s.length > 0).length,
+        expectedSegmentCount: '>= 6 for Excel sheets in folders (client/app/project/folder/sheets/file.arrow)',
+        fullCurrentFile: currentFile,
+        allUploadedFiles: uploadedFiles.map(f => ({ name: f.name, path: f.path }))
+      });
+      
+      if (!exactMinIOPath) {
+        throw new Error('File path is missing - cannot save dataframe');
+      }
+
       // Process dataframe if there are changes (exactly like Direct Review mode)
+      // CRITICAL: Use the exact MinIO path from currentFile.path (includes full folder structure)
+      // This ensures files in subfolders (like folder_name/sheets/Sheet1.arrow) stay in the same location
       if (hasProcessingChanges) {
+        
+        console.log('🔧 [U6FinalPreview] Processing dataframe with path:', exactMinIOPath);
+        console.log('🔧 [U6FinalPreview] Current file object:', { name: currentFile.name, path: currentFile.path, fullFile: currentFile });
+        
+        // CRITICAL CHECK: Detect if file is from an Excel folder structure
+        // Excel folders have structure: client/app/project/folder_name/sheets/sheet_name.arrow
+        const pathSegments = exactMinIOPath.split('/').filter(s => s.length > 0);
+        const isExcelFolderFile = pathSegments.length >= 5 && pathSegments[pathSegments.length - 3] === 'sheets';
+        const isInFolderStructure = pathSegments.length >= 4; // At least client/app/project/filename or client/app/project/folder/filename
+        
+        console.log('🔍 [U6FinalPreview] Path analysis:', {
+          path: exactMinIOPath,
+          segments: pathSegments,
+          segmentCount: pathSegments.length,
+          isExcelFolderFile,
+          isInFolderStructure,
+          lastThreeSegments: pathSegments.slice(-3)
+        });
+        
+        // If file is from an Excel folder, ensure we preserve the exact folder structure
+        if (isExcelFolderFile) {
+          // File is in: client/app/project/folder_name/sheets/sheet_name.arrow
+          // Verify the path structure is correct
+          const folderName = pathSegments[pathSegments.length - 3]; // Should be the folder name before 'sheets'
+          const sheetName = pathSegments[pathSegments.length - 1]; // The .arrow file
+          
+          if (pathSegments[pathSegments.length - 2] !== 'sheets') {
+            console.error('❌ [U6FinalPreview] Invalid Excel folder structure - expected "sheets" directory:', pathSegments);
+            throw new Error(`Invalid Excel folder structure in path: ${exactMinIOPath}`);
+          }
+          
+          console.log('✅ [U6FinalPreview] Detected Excel folder file - preserving folder structure:', {
+            folderName,
+            sheetName,
+            fullPath: exactMinIOPath
+          });
+        } else if (isInFolderStructure) {
+          // File is in a folder but not an Excel folder structure
+          console.log('✅ [U6FinalPreview] Detected file in folder structure - preserving path:', exactMinIOPath);
+        } else {
+          // File is at root level (client/app/project/filename.arrow)
+          console.warn('⚠️ [U6FinalPreview] File appears to be at root level (not in folder):', exactMinIOPath);
+        }
+        
+        // Use the exact path as-is - backend will overwrite at this exact location
+        console.log('📤 [U6FinalPreview] Sending process_saved_dataframe request with object_name:', exactMinIOPath);
         const res = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            object_name: currentFile.path, // Use original path - file will be overwritten in-place
+            object_name: exactMinIOPath, // Use exact MinIO path - file will be overwritten in-place at this exact location
             instructions,
           }),
         });
@@ -415,7 +501,11 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
         const envStr = localStorage.getItem('env');
         const project = stored ? JSON.parse(stored) : {};
         const env = envStr ? JSON.parse(envStr) : {};
-        const fileName = currentFile.path || '';
+        // CRITICAL: Use exact MinIO path for classification save (same as process_saved_dataframe)
+        // This ensures the classification is saved for the exact file location in MinIO
+        // IMPORTANT: exactMinIOPath is already declared at function scope level above - use that same variable
+        // This ensures consistency across all operations (processing, classification, status updates)
+        console.log('🔧 [U6FinalPreview] Saving classification config with exact MinIO path:', exactMinIOPath);
 
         const payload: Record<string, any> = {
           project_id: project.id || null,
@@ -426,8 +516,8 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           measures,
           dimensions: {},
         };
-        if (fileName) {
-          payload.file_name = fileName;
+        if (exactMinIOPath) {
+          payload.file_name = exactMinIOPath; // Use exact MinIO path for classification save
         }
 
         const saveRes = await fetch(`${CLASSIFIER_API}/save_config`, {
@@ -439,26 +529,44 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
 
         if (saveRes.ok) {
           // Mark file as primed (exactly like Direct Review mode)
-          if (fileName) {
-            await markFileAsPrimed(fileName);
+          // CRITICAL: Use exact MinIO path for all status updates to ensure UI matches the actual file location
+          // This MUST be the same path used for process_saved_dataframe to ensure files in folders stay in folders
+          if (exactMinIOPath) {
+            // Final verification: ensure path contains folder structure if it should
+            const pathSegments = exactMinIOPath.split('/').filter(s => s.length > 0);
+            const isExcelFolderFile = pathSegments.length >= 5 && pathSegments[pathSegments.length - 3] === 'sheets';
+            
+            if (isExcelFolderFile) {
+              console.log('✅ [U6FinalPreview] Confirmed: File is from Excel folder, using exact path:', exactMinIOPath);
+              console.log('✅ [U6FinalPreview] Path segments:', pathSegments);
+            } else {
+              console.log('ℹ️ [U6FinalPreview] File path (may or may not be in folder):', exactMinIOPath);
+            }
+            
+            console.log('✅ [U6FinalPreview] Marking file as primed with exact MinIO path:', exactMinIOPath);
+            await markFileAsPrimed(exactMinIOPath);
             window.dispatchEvent(
               new CustomEvent('dataframe-saved', {
-                detail: { filePath: currentFile.path, fileName: fileName },
+                detail: { filePath: exactMinIOPath, fileName: exactMinIOPath },
               })
             );
             window.dispatchEvent(
               new CustomEvent('priming-status-changed', {
-                detail: { filePath: currentFile.path, fileName: fileName },
+                detail: { filePath: exactMinIOPath, fileName: exactMinIOPath },
               })
             );
             window.dispatchEvent(
               new CustomEvent('force-refresh-priming-status', {
-                detail: { objectName: currentFile.path, isPrimed: true },
+                detail: { objectName: exactMinIOPath, isPrimed: true },
               })
             );
+            console.log('✅ [U6FinalPreview] File marked as primed and events dispatched for:', exactMinIOPath);
+          } else {
+            console.error('❌ [U6FinalPreview] Cannot mark file as primed - path is missing!');
           }
 
-          // Close guided mode
+          // Close guided mode (exactly like Direct Review mode calls onClose)
+          setSaving(false);
           setTimeout(() => {
             try {
               setGlobalGuidedMode(false);
@@ -474,7 +582,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
       }
     } catch (err: any) {
       console.error('U6 Approve: Error:', err);
-      setError(err.message || 'Failed to save and finalize changes');
+      setError(err.message || 'Failed to save changes');
       setSaving(false);
     }
   };

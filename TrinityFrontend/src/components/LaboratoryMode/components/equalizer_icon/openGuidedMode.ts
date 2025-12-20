@@ -178,11 +178,21 @@ export const openGuidedMode = async ({
     // - initialFile: { name, path, size } - custom property extracted by CanvasArea and passed as existingDataframe to GuidedUploadFlowInline
     // - Other properties: Partial<GuidedUploadFlowState> - will be merged with saved state if available
     // CanvasArea extracts initialFile from flowState?.state?.initialFile and passes it as existingDataframe prop
+    // CRITICAL: Use frame.object_name as-is - it should already contain the full MinIO path including folder structure
+    // For Excel sheets in folders, this should be something like: "default_client/blank/Project/folder_name/sheets/Sheet1.arrow"
     const initialFile = {
       name: frame.arrow_name || frame.csv_name || frame.object_name,
-      path: frame.object_name,
+      path: frame.object_name, // Use exact object_name - should include full folder path for sheets in Excel folders
       size: frame.size || 0,
     };
+    
+    console.log('[openGuidedMode] Opening guided mode with frame:', {
+      object_name: frame.object_name,
+      arrow_name: frame.arrow_name,
+      csv_name: frame.csv_name,
+      initialFilePath: initialFile.path,
+      fullFrame: frame
+    });
     
     console.log('[openGuidedMode] Calling setActiveGuidedFlow with:', { 
       atomId, 
@@ -235,5 +245,6 @@ export const openGuidedMode = async ({
     throw error;
   }
 };
+
 
 

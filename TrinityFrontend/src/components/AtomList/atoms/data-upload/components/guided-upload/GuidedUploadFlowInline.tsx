@@ -2,8 +2,6 @@ import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useGuidedUploadFlow, type UploadStage, type GuidedUploadFlowState } from './useGuidedUploadFlow';
-import { U0FileUpload } from './stages/U0FileUpload';
-import { U1StructuralScan } from './stages/U1StructuralScan';
 import { U2UnderstandingFiles } from './stages/U2UnderstandingFiles';
 import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
 import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
@@ -38,9 +36,8 @@ interface GuidedUploadFlowInlineProps {
   onClose?: () => void;
 }
 
-const STAGE_COMPONENTS: Record<UploadStage, React.ComponentType<any>> = {
-  U0: U0FileUpload,
-  U1: U1StructuralScan,
+// Only U2-U6 are used now (U0 handled by atom, U1 and U7 removed)
+const STAGE_COMPONENTS: Partial<Record<UploadStage, React.ComponentType<any>>> = {
   U2: U2UnderstandingFiles,
   U3: U3ReviewColumnNames,
   U4: U4ReviewDataTypes,
@@ -48,22 +45,18 @@ const STAGE_COMPONENTS: Record<UploadStage, React.ComponentType<any>> = {
   U6: U6FinalPreview,
 };
 
-// Step 1 (Atom): Split panel for file selection/upload - NOT shown in inline flow
-// Panel flow shows U2-U6 (U1 removed - start directly at U2)
-const STAGE_TITLES: Record<UploadStage, string> = {
-  U0: 'Choose Your Data Source', // Handled by atom (not shown in inline flow)
-  U1: 'Structural Scan', // Removed from flow but kept for backward compatibility
-  U2: 'Confirm Your Column Headers', // Step 1 in the guided flow
+const STAGE_TITLES: Partial<Record<UploadStage, string>> = {
+  U2: 'Confirm Your Column Headers',
   U3: 'Review Your Column Names',
   U4: 'Review Your Column Types',
   U5: 'Review Missing Values',
-  U6: 'Final Preview Before Priming',
+  U6: 'Final Preview Before Priming', // U6 handles priming - no U7 needed
 };
 
-// Full stage order for internal navigation (U1 removed - start directly at U2)
-const STAGE_ORDER: UploadStage[] = ['U0', 'U2', 'U3', 'U4', 'U5', 'U6'];
+// Stage order: only U2-U6 (U0 handled by atom, U1 and U7 removed)
+const STAGE_ORDER: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
 
-// Stages visible in the inline flow accordion (U0 is handled by atom, U1 removed)
+// All stages are visible in the inline flow
 const VISIBLE_STAGES: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
 
 // Helper to get stage index
@@ -71,12 +64,10 @@ const getStageIndex = (stage: UploadStage): number => {
   return STAGE_ORDER.indexOf(stage);
 };
 
-// Helper to get display step number (U2=1, U3=2, etc. since U1 is removed)
+// Helper to get display step number (U2=1, U3=2, etc.)
 const getDisplayStepNumber = (stage: UploadStage): number => {
-  const stageMap: Record<UploadStage, number> = {
-    'U0': 0, // Not displayed
-    'U1': 0, // Removed, not displayed
-    'U2': 1, // First visible step
+  const stageMap: Partial<Record<UploadStage, number>> = {
+    'U2': 1,
     'U3': 2,
     'U4': 3,
     'U5': 4,
@@ -98,8 +89,44 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   savedState,
   onClose,
 }) => {
-  const flow = useGuidedUploadFlow(savedState);
-  const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage } = flow;
+  // CRITICAL FIX: If existingDataframe is provided, merge its path into savedState BEFORE initializing the hook
+  // This ensures the correct path (with folder structure) is used even if savedState has a wrong/stripped path
+  const mergedSavedState = useMemo(() => {
+    if (existingDataframe && existingDataframe.path && savedState?.uploadedFiles) {
+      // Check if any file in savedState matches existingDataframe.name but has wrong path
+      const updatedFiles = savedState.uploadedFiles.map(file => {
+        if (file.name === existingDataframe.name && file.path !== existingDataframe.path) {
+          console.log('🔧 [GuidedUploadFlowInline] Merging correct path into savedState:', {
+            fileName: file.name,
+            oldPath: file.path,
+            newPath: existingDataframe.path
+          });
+          return { ...file, path: existingDataframe.path };
+        }
+        return file;
+      });
+      
+      // If no matching file found, add it
+      const hasMatchingFile = updatedFiles.some(f => f.name === existingDataframe.name);
+      if (!hasMatchingFile) {
+        updatedFiles.push({
+          name: existingDataframe.name,
+          path: existingDataframe.path,
+          size: existingDataframe.size || 0,
+        });
+        console.log('🔧 [GuidedUploadFlowInline] Added file with correct path to savedState');
+      }
+      
+      return {
+        ...savedState,
+        uploadedFiles: updatedFiles,
+      };
+    }
+    return savedState;
+  }, [existingDataframe, savedState]);
+  
+  const flow = useGuidedUploadFlow(mergedSavedState);
+  const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage, updateUploadedFilePath } = flow;
   const { saveState, markFileAsPrimed } = useGuidedFlowPersistence();
   const { setActiveGuidedFlow, updateGuidedFlowStage, removeActiveGuidedFlow } = useLaboratoryStore();
   
@@ -169,25 +196,91 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     }
 
     // If existing dataframe provided, initialize flow with it
-    if (existingDataframe && state.uploadedFiles.length === 0) {
-      addUploadedFiles([{
+    // CRITICAL: Use existingDataframe.path as-is - it should contain the full MinIO path including folder structure
+    // For Excel sheets in folders, this should be something like: "Quant Matrix AI/blank/New Custom Project/folder_name/sheets/Sheet1.arrow"
+    // IMPORTANT: Always use the fresh existingDataframe path, even if savedState has files, to ensure the correct path is used
+    if (existingDataframe) {
+      console.log('🔍 [GuidedUploadFlowInline] Initializing with existing dataframe:', {
         name: existingDataframe.name,
         path: existingDataframe.path,
-        size: existingDataframe.size || 0,
-      }]);
+        fullDataframe: existingDataframe,
+        currentUploadedFilesLength: state.uploadedFiles.length,
+        currentUploadedFilesPaths: state.uploadedFiles.map(f => f.path)
+      });
+      
+      // Validate that path includes folder structure for Excel sheets
+      const path = existingDataframe.path || '';
+      const pathSegments = path.split('/').filter(s => s.length > 0);
+      const isExcelFolderFile = pathSegments.length >= 5 && pathSegments[pathSegments.length - 3] === 'sheets';
+      
+      if (isExcelFolderFile) {
+        console.log('✅ [GuidedUploadFlowInline] Detected Excel folder file, path includes folder structure:', path);
+      } else {
+        console.warn('⚠️ [GuidedUploadFlowInline] Path may not include folder structure:', path, 'segments:', pathSegments);
+      }
+      
+      // CRITICAL FIX: Always replace uploadedFiles with the fresh existingDataframe path
+      // This ensures we use the correct path even if savedState has an old/stripped path
+      // IMPORTANT: We need to update the path immediately, regardless of what's in state
+      // because savedState might have a wrong/stripped path that needs to be corrected
+      
+      // Find matching file by name (path might be wrong)
+      const existingFileIndex = state.uploadedFiles.findIndex(f => f.name === existingDataframe.name);
+      const existingFile = existingFileIndex >= 0 ? state.uploadedFiles[existingFileIndex] : null;
+      const hasCorrectPath = existingFile && existingFile.path === existingDataframe.path;
+      
+      if (!hasCorrectPath) {
+        console.log('🔧 [GuidedUploadFlowInline] Path mismatch detected - correcting path:', {
+          existingPath: existingFile?.path || '(no file found)',
+          correctPath: existingDataframe.path,
+          fileName: existingDataframe.name,
+          existingFileIndex,
+          uploadedFilesLength: state.uploadedFiles.length
+        });
+        
+        if (state.uploadedFiles.length === 0) {
+          // No files yet, add the correct one
+          addUploadedFiles([{
+            name: existingDataframe.name,
+            path: existingDataframe.path, // Use exact path from existingDataframe - should include full folder structure
+            size: existingDataframe.size || 0,
+          }]);
+          console.log('✅ [GuidedUploadFlowInline] Added file with correct path via addUploadedFiles');
+        } else if (existingFileIndex >= 0 && updateUploadedFilePath) {
+          // File exists but path is wrong - update it
+          updateUploadedFilePath(existingDataframe.name, existingDataframe.path);
+          console.log('✅ [GuidedUploadFlowInline] Updated file path via updateUploadedFilePath:', {
+            fileName: existingDataframe.name,
+            oldPath: existingFile.path,
+            newPath: existingDataframe.path
+          });
+        } else if (state.uploadedFiles.length > 0 && updateUploadedFilePath) {
+          // File might be at index 0 even if name doesn't match (edge case)
+          // Update the first file's path to match existingDataframe
+          const firstFile = state.uploadedFiles[0];
+          updateUploadedFilePath(firstFile.name, existingDataframe.path);
+          console.log('⚠️ [GuidedUploadFlowInline] Updated first file path (name mismatch, using path from existingDataframe):', {
+            fileName: firstFile.name,
+            oldPath: firstFile.path,
+            newPath: existingDataframe.path,
+            existingDataframeName: existingDataframe.name
+          });
+        } else {
+          console.error('❌ [GuidedUploadFlowInline] Cannot update path - updateUploadedFilePath not available or unexpected state');
+        }
+      } else {
+        console.log('✅ [GuidedUploadFlowInline] File already has correct path, no update needed:', {
+          fileName: existingDataframe.name,
+          path: existingDataframe.path
+        });
+      }
     }
 
-    // Set initial stage - only if we're at U0 or U1 and haven't initialized from savedState
-    // Skip U1 (removed) and go directly to U2
-    if ((state.currentStage === 'U0' || state.currentStage === 'U1') && effectiveInitialStage !== 'U0' && !hasInitializedFromSavedStateRef.current) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GuidedUploadFlowInline.tsx:139',message:'Resetting stage to initial',data:{from:state.currentStage,to:effectiveInitialStage,initialStage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      // If effectiveInitialStage is U1, skip to U2 instead
-      const targetStage = effectiveInitialStage === 'U1' ? 'U2' : effectiveInitialStage;
-      goToStage(targetStage);
+    // Set initial stage if we're not at a valid stage (U2-U6)
+    if (!['U2', 'U3', 'U4', 'U5', 'U6'].includes(state.currentStage) && !hasInitializedFromSavedStateRef.current) {
+      goToStage(effectiveInitialStage);
     }
-  }, [existingDataframe, initialStage, effectiveInitialStage, savedState, state.currentStage, state.uploadedFiles.length, addUploadedFiles, goToStage]);
+  }, [existingDataframe, initialStage, effectiveInitialStage, savedState, state.currentStage, state.uploadedFiles.length, state.uploadedFiles, addUploadedFiles, updateUploadedFilePath, goToStage]);
 
   // Debounced save function
   const debouncedSave = useCallback((stateToSave: GuidedUploadFlowState) => {
@@ -299,14 +392,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     }
   }, [storeCurrentStage, state.currentStage, goToStage]);
 
-  // Mark completion when reaching U6
-  useEffect(() => {
-    if (state.currentStage === 'U6' && state.uploadedFiles.length > 0) {
-      state.uploadedFiles.forEach(file => {
-        markFileAsPrimed(file.path || file.name);
-      });
-    }
-  }, [state.currentStage, state.uploadedFiles, markFileAsPrimed]);
+  // No need to mark as primed here - U6FinalPreview handles it
 
   const handleNext = async () => {
     // #region agent log
@@ -314,155 +400,14 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     // #endregion
     
     if (state.currentStage === 'U6') {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GuidedUploadFlowInline.tsx:223',message:'Calling goToNextStage from U6',data:{from:state.currentStage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
-      
-      // CRITICAL: Apply all transformations before completing
-      const chosenIndex = state.selectedFileIndex !== undefined && state.selectedFileIndex < state.uploadedFiles.length 
-        ? state.selectedFileIndex : 0;
-      const currentFile = state.uploadedFiles[chosenIndex];
-      
-      if (currentFile?.path) {
-        try {
-          const currentColumnEdits = state.columnNameEdits[currentFile.name] || [];
-          const currentDataTypes = state.dataTypeSelections[currentFile.name] || [];
-          const currentStrategies = state.missingValueStrategies[currentFile.name] || [];
-          
-          // Build columns_to_drop from columnNameEdits (U3) - columns marked as keep=false
-          const columnsToDrop: string[] = [];
-          currentColumnEdits.forEach(edit => {
-            if (edit.keep === false) {
-              columnsToDrop.push(edit.originalName);
-            }
-          });
-          
-          // Build column_renames from columnNameEdits (U3) - only for kept columns
-          const columnRenames: Record<string, string> = {};
-          currentColumnEdits.forEach(edit => {
-            if (edit.keep !== false && edit.editedName && edit.editedName !== edit.originalName) {
-              columnRenames[edit.originalName] = edit.editedName;
-            }
-          });
-          
-          // Build dtype_changes from dataTypeSelections (U4)
-          const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
-          currentDataTypes.forEach(dt => {
-            // Use updateType (user's selection from U4) instead of selectedType
-            const userSelectedType = dt.updateType || dt.selectedType;
-            if (userSelectedType && userSelectedType !== dt.detectedType) {
-              if ((userSelectedType === 'date' || userSelectedType === 'datetime') && dt.format) {
-                dtypeChanges[dt.columnName] = { dtype: 'datetime64', format: dt.format };
-              } else {
-                // Map frontend types to backend types
-                const backendType = userSelectedType === 'number' ? 'float64' : 
-                                   userSelectedType === 'int' ? 'int64' :
-                                   userSelectedType === 'float' ? 'float64' :
-                                   userSelectedType === 'category' ? 'object' :
-                                   userSelectedType === 'string' ? 'object' :
-                                   userSelectedType === 'date' ? 'datetime64' :
-                                   userSelectedType === 'datetime' ? 'datetime64' :
-                                   userSelectedType === 'boolean' ? 'bool' :
-                                   userSelectedType;
-                dtypeChanges[dt.columnName] = backendType;
-              }
-            }
-          });
-          
-          // Build missing_value_strategies from missingValueStrategies (U5)
-          const missingValueStrategiesPayload: Record<string, { strategy: string; value?: string | number }> = {};
-          currentStrategies.forEach(s => {
-            if (s.strategy !== 'none') {
-              const strategyConfig: { strategy: string; value?: string | number } = {
-                strategy: s.strategy,
-              };
-              if (s.strategy === 'custom' && s.value !== undefined) {
-                strategyConfig.value = s.value;
-              }
-              missingValueStrategiesPayload[s.columnName] = strategyConfig;
-            }
-          });
-          
-          // Apply transformations if there are any changes
-          if (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategiesPayload).length > 0) {
-            console.log('🔄 Applying final transformations before U7:', { columnsToDrop, columnRenames, dtypeChanges, missingValueStrategiesPayload });
-            
-            const transformRes = await fetch(`${UPLOAD_API}/apply-data-transformations`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({
-                file_path: currentFile.path,
-                columns_to_drop: columnsToDrop,
-                column_renames: columnRenames,
-                dtype_changes: dtypeChanges,
-                missing_value_strategies: missingValueStrategiesPayload,
-              }),
-            });
-            
-            if (transformRes.ok) {
-              console.log('✅ Transformations applied successfully before completion');
-            } else {
-              console.warn('⚠️ Failed to apply transformations before completion');
-            }
-          }
-        } catch (error) {
-          console.error('Error applying transformations before completion:', error);
-        }
-      }
-      
-      // Complete the flow
-      const projectContext = getActiveProjectContext();
-      if (projectContext && state.uploadedFiles.length > 0) {
-        for (const file of state.uploadedFiles) {
-          // Finalize the primed file - save transformed data to saved dataframes location
-          try {
-            console.log('🔄 Finalizing primed file:', file.path || file.name);
-            
-            // Get column classifications from dataTypeSelections (U4 stage)
-            const dataTypes = state.dataTypeSelections[file.name] || [];
-            const columnClassifications = dataTypes.map(dt => ({
-              columnName: dt.columnName,
-              columnRole: dt.columnRole || 'identifier', // Default to identifier if not set
-            }));
-            
-            console.log('📊 Sending column classifications:', columnClassifications);
-            
-            const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({
-                file_path: file.path,
-                file_name: file.name,
-                client_name: projectContext.client_name || '',
-                app_name: projectContext.app_name || '',
-                project_name: projectContext.project_name || '',
-                validator_atom_id: atomId || 'guided-upload',
-                column_classifications: columnClassifications,
-              }),
-            });
-            
-            if (finalizeRes.ok) {
-              const result = await finalizeRes.json();
-              console.log('✅ File finalized successfully:', result);
-              // Trigger refresh of SavedDataFramesPanel
-              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-                detail: { filePath: result.saved_path, fileName: file.name } 
-              }));
-            } else {
-              console.warn('⚠️ Failed to finalize file:', await finalizeRes.text());
-              // Fallback to just marking as primed
-              await markFileAsPrimed(file.path || file.name);
-            }
-          } catch (error) {
-            console.error('Error finalizing primed file:', error);
-            // Fallback to just marking as primed
-            await markFileAsPrimed(file.path || file.name);
-          }
-        }
-      }
-      
+      // U6FinalPreview's handleSave already handles everything:
+      // - process_saved_dataframe (overwrites file in-place)
+      // - save_config (saves classifications)
+      // - mark as primed
+      // So we just move to the next stage - no additional processing needed
+      goToNextStage();
+    } else if (state.currentStage === 'U7') {
+      // Flow complete - U6FinalPreview already did all the work
       onComplete?.({
         uploadedFiles: state.uploadedFiles,
         headerSelections: state.headerSelections,
@@ -536,9 +481,8 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   };
 
   const handleBack = () => {
-    // U1 is now the first stage in the panel (U0/atom handles file selection)
-    // So if we're at U1, close the guided flow to go back to atom
-    if (state.currentStage === 'U1') {
+    // U2 is the first stage - if at U2, close the guided flow
+    if (state.currentStage === 'U2') {
       onClose?.();
     } else {
       goToPreviousStage();
@@ -555,8 +499,8 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   };
 
   const CurrentStageComponent = STAGE_COMPONENTS[state.currentStage];
-  // U1 is the first stage in the panel (U0/atom handles file selection)
-  const canGoBack = state.currentStage !== 'U1';
+  // U2 is the first stage in the panel
+  const canGoBack = state.currentStage !== 'U2';
   const isLastStage = state.currentStage === 'U6';
 
   // Track expanded collapsed stages (for viewing completed stages)
@@ -794,15 +738,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                 {isCurrent ? (
               <>
                 <div className="p-6 min-h-[10px]">
-                  {state.currentStage === 'U1' ? (
-                    <StageComponent 
-                      flow={flow} 
-                      onNext={handleNext} 
-                      onBack={handleBack}
-                      onRestart={handleRestart}
-                      onCancel={handleClose}
-                    />
-                  ) : state.currentStage === 'U2' ? (
+                  {state.currentStage === 'U2' ? (
                     <StageComponent 
                       flow={flow} 
                       onNext={handleNext} 
@@ -829,7 +765,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                 </div>
 
                 {/* Navigation Footer for current stage */}
-                {state.currentStage !== 'U1' && state.currentStage !== 'U6' && (
+                {state.currentStage !== 'U6' && (
                   <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0">
                     <div className="flex gap-2">
                       {canGoBack && (
@@ -890,16 +826,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
             ) : isCompleted && isExpanded ? (
               <>
                 <div className="p-6 min-h-[10px]">
-                  {stage === 'U1' ? (
-                    <StageComponent 
-                      flow={flow} 
-                      onNext={() => {}} 
-                      onBack={() => {}}
-                      onRestart={handleRestart}
-                      onCancel={handleClose}
-                      onStageDataChange={() => handleCompletedStageChange(stage)}
-                    />
-                  ) : stage === 'U2' ? (
+                  {stage === 'U2' ? (
                     <StageComponent 
                       flow={flow} 
                       onNext={() => {}} 
@@ -948,7 +875,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                 </div>
 
                 {/* Navigation Footer for expanded completed stage */}
-                {stage !== 'U1' && stage !== 'U6' && (
+                {stage !== 'U6' && (
                   <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0">
                     <div className="flex gap-2">
                       {getStageIndex(stage) > getStageIndex('U2') && (
@@ -1050,16 +977,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     
     return (
       <div className="p-8">
-        {stage === 'U1' ? (
-          <StageComponent 
-            flow={flow} 
-            onNext={() => {}} 
-            onBack={() => {}}
-            onRestart={handleRestart}
-            onCancel={() => {}}
-            isMaximized={true}
-          />
-        ) : stage === 'U2' ? (
+        {stage === 'U2' ? (
           <StageComponent 
             flow={flow} 
             onNext={() => {}} 
@@ -1093,7 +1011,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   return (
     <>
       <div className="w-full mt-2 flex flex-col">
-        {/* Render only visible stages (U1-U6) - U0 is handled by atom */}
+        {/* Render only visible stages (U2-U6) */}
         {VISIBLE_STAGES.map(stage => renderStageItem(stage))}
       </div>
       
