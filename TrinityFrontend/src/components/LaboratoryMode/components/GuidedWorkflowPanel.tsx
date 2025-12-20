@@ -92,16 +92,27 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
         </Button>
       </div>
 
-      {/* Current Atom Info - Made bigger and bolder */}
-      {selectedAtom && (
+      {/* Priming Info - Made bigger and bolder */}
+      {selectedFlow && (
         <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50/30">
-          <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Current Atom</div>
+          <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Priming</div>
           <button
             onClick={toggleProgressStepper}
             className="w-full text-left flex items-center justify-between group hover:opacity-80 transition-opacity"
           >
             <div className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              {selectedAtom.title}
+              {(() => {
+                // Get file name from guided flow state
+                const state = selectedFlow.state;
+                const fileName = 
+                  state?.initialFile?.name ||
+                  (state?.uploadedFiles && state.uploadedFiles.length > 0 
+                    ? (state.selectedFileIndex !== undefined && state.uploadedFiles[state.selectedFileIndex]
+                      ? state.uploadedFiles[state.selectedFileIndex].name
+                      : state.uploadedFiles[0].name)
+                    : null);
+                return fileName || 'No file selected';
+              })()}
             </div>
             {isProgressCollapsed ? (
               <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />

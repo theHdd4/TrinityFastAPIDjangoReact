@@ -6127,7 +6127,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         {expandedCard &&
           createPortal(
             <div
-              className="fixed inset-0 z-40 pointer-events-none"
+              className="fixed inset-0 z-[60] pointer-events-none"
               role="dialog"
               aria-modal="true"
             >
@@ -6155,6 +6155,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         }
 
                         if (!card) return 'Card';
+                        
+                        // Check if this is a landing card - use scenario-based title (same logic as minimized view)
+                        const isLandingCard = card.atoms?.some(atom => atom.atomId === 'landing-screen');
+                        if (isLandingCard) {
+                          // Case 1 (Scenario A): No files -> "Initialize"
+                          // Case 2 (Scenarios B, C): Some files not primed -> "Continue priming your data"
+                          // Case 3 (Scenario D): All files primed -> "Priming Complete"
+                          // While loading, default to "Initialize"
+                          if (scenarioData.scenario === 'loading' || scenarioData.scenario === 'A') {
+                            return 'Initialize';
+                          } else if (scenarioData.scenario === 'D') {
+                            return 'Priming Complete';
+                          } else {
+                            return 'Continue priming your data';
+                          }
+                        }
+                        
+                        // For non-landing cards, use moleculeTitle or atom title
                         return card.moleculeTitle
                           ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                           : (Array.isArray(card.atoms) && card.atoms.length > 0)
@@ -6203,28 +6221,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     ) : (
                       <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                         {card.atoms.map((atom) => (
-                          <React.Fragment key={`${atom.id}-expanded`}>
+                          <React.Fragment key={atom.id}>
                           <AtomBox
                             className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                           >
-                            {/* Atom Header */}
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="flex items-center space-x-2">
-                                <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
-                              </div>
-                              {/* <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                                }}
-                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4 text-gray-400" />
-                            </button> */}
-                            </div>
-
-                            {/* Atom Content */}
+                            {/* Atom Content - No duplicate header, card header already shows it */}
                             <div className="w-full flex-1 overflow-visible">
                               {atom.atomId === 'text-box' ? (
                                 <TextBoxEditor textId={atom.id} />
@@ -6279,22 +6280,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'landing-screen' ? (
-                                <LandingScreenAtom 
-                                  atomId={atom.id} 
-                                  cardId={card.id}
-                                  onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
-                                  onAddNewCard={() => {
-                                    // Find the landing card's position and add new card right after it
-                                    const arr = Array.isArray(layoutCards) ? layoutCards : [];
-                                    // Find landing card by checking for landing-screen atom
-                                    const landingCardIndex = arr.findIndex(c => 
-                                      c.atoms?.some(a => a.atomId === 'landing-screen')
-                                    );
-                                    // If landing card found, add after it; otherwise add at end
-                                    const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
-                                    addNewCard(undefined, insertPosition);
-                                  }}
-                                />
+                                <div className="w-full h-full">
+                                  <LandingScreenAtom 
+                                    atomId={atom.id} 
+                                    cardId={card.id}
+                                    onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                    onAddNewCard={() => {
+                                      // Find the landing card's position and add new card right after it
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      // Find landing card by checking for landing-screen atom
+                                      const landingCardIndex = arr.findIndex(c => 
+                                        c.atoms?.some(a => a.atomId === 'landing-screen')
+                                      );
+                                      // If landing card found, add after it; otherwise add at end
+                                      const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                      addNewCard(undefined, insertPosition);
+                                    }}
+                                  />
+                                </div>
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
@@ -6648,22 +6651,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'landing-screen' ? (
-                                <LandingScreenAtom 
-                                  atomId={atom.id} 
-                                  cardId={card.id}
-                                  onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
-                                  onAddNewCard={() => {
-                                    // Find the landing card's position and add new card right after it
-                                    const arr = Array.isArray(layoutCards) ? layoutCards : [];
-                                    // Find landing card by checking for landing-screen atom
-                                    const landingCardIndex = arr.findIndex(c => 
-                                      c.atoms?.some(a => a.atomId === 'landing-screen')
-                                    );
-                                    // If landing card found, add after it; otherwise add at end
-                                    const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
-                                    addNewCard(undefined, insertPosition);
-                                  }}
-                                />
+                                <div className="w-full h-full">
+                                  <LandingScreenAtom 
+                                    atomId={atom.id} 
+                                    cardId={card.id}
+                                    onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                    onAddNewCard={() => {
+                                      // Find the landing card's position and add new card right after it
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      // Find landing card by checking for landing-screen atom
+                                      const landingCardIndex = arr.findIndex(c => 
+                                        c.atoms?.some(a => a.atomId === 'landing-screen')
+                                      );
+                                      // If landing card found, add after it; otherwise add at end
+                                      const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                      addNewCard(undefined, insertPosition);
+                                    }}
+                                  />
+                                </div>
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -6739,7 +6744,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         {expandedCard &&
           createPortal(
             <div
-              className="fixed inset-0 z-40 pointer-events-none"
+              className="fixed inset-0 z-[60] pointer-events-none"
               role="dialog"
               aria-modal="true"
             >
@@ -6755,6 +6760,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                       {(() => {
                         const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
                         if (!card) return 'Card';
+                        
+                        // Check if this is a landing card - use scenario-based title (same logic as minimized view)
+                        const isLandingCard = card.atoms?.some(atom => atom.atomId === 'landing-screen');
+                        if (isLandingCard) {
+                          // Case 1 (Scenario A): No files -> "Initialize"
+                          // Case 2 (Scenarios B, C): Some files not primed -> "Continue priming your data"
+                          // Case 3 (Scenario D): All files primed -> "Priming Complete"
+                          // While loading, default to "Initialize"
+                          if (scenarioData.scenario === 'loading' || scenarioData.scenario === 'A') {
+                            return 'Initialize';
+                          } else if (scenarioData.scenario === 'D') {
+                            return 'Priming Complete';
+                          } else {
+                            return 'Continue priming your data';
+                          }
+                        }
+                        
+                        // For non-landing cards, use moleculeTitle or atom title
                         return card.moleculeTitle
                           ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                           : (Array.isArray(card.atoms) && card.atoms.length > 0)
@@ -6791,28 +6814,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     ) : (
                       <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                         {card.atoms.map((atom) => (
-                          <React.Fragment key={`${atom.id}-expanded`}>
+                          <React.Fragment key={atom.id}>
                           <AtomBox
                             className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                           >
-                            {/* Atom Header */}
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="flex items-center space-x-2">
-                                <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
-                              </div>
-                          {/* <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                                }}
-                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4 text-gray-400" />
-                          </button> */}
-                            </div>
-
-                            {/* Atom Content */}
+                            {/* Atom Content - No duplicate header, card header already shows it */}
                             <div className="w-full flex-1 overflow-visible">
                               {atom.atomId === 'text-box' ? (
                                 <TextBoxEditor textId={atom.id} />
@@ -6867,22 +6873,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'landing-screen' ? (
-                                <LandingScreenAtom 
-                                  atomId={atom.id} 
-                                  cardId={card.id}
-                                  onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
-                                  onAddNewCard={() => {
-                                    // Find the landing card's position and add new card right after it
-                                    const arr = Array.isArray(layoutCards) ? layoutCards : [];
-                                    // Find landing card by checking for landing-screen atom
-                                    const landingCardIndex = arr.findIndex(c => 
-                                      c.atoms?.some(a => a.atomId === 'landing-screen')
-                                    );
-                                    // If landing card found, add after it; otherwise add at end
-                                    const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
-                                    addNewCard(undefined, insertPosition);
-                                  }}
-                                />
+                                <div className="w-full h-full">
+                                  <LandingScreenAtom 
+                                    atomId={atom.id} 
+                                    cardId={card.id}
+                                    onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                    onAddNewCard={() => {
+                                      // Find the landing card's position and add new card right after it
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      // Find landing card by checking for landing-screen atom
+                                      const landingCardIndex = arr.findIndex(c => 
+                                        c.atoms?.some(a => a.atomId === 'landing-screen')
+                                      );
+                                      // If landing card found, add after it; otherwise add at end
+                                      const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                      addNewCard(undefined, insertPosition);
+                                    }}
+                                  />
+                                </div>
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>

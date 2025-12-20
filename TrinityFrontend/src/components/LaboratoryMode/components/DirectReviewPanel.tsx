@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Loader2, X, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
@@ -42,6 +43,7 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
   const { markFileAsPrimed } = useGuidedFlowPersistence();
 
   useEffect(() => {
@@ -381,42 +383,25 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
     );
   }
 
-  return (
-    <div className="w-full border-t-2 border-gray-200 bg-white flex-shrink-0" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
-      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 sticky top-0 z-10 flex items-center justify-between">
-        <div>
-          <h3 className="text-base font-semibold text-gray-800">Preview of data set</h3>
-          <p className="text-xs text-gray-600 mt-1">
-            {frame.arrow_name || frame.csv_name || frame.object_name}
-          </p>
+  // Render the preview content (used in both normal and maximized views)
+  const renderPreviewContent = (isMaximizedView: boolean = false) => (
+    <>
+      {error && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+          <p className="text-xs text-yellow-800">{error}</p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-          className="h-8 w-8 p-0"
+      )}
+
+      {/* Column Table - Using same compact format as U6 */}
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <div 
+          className="overflow-x-auto" 
+          style={{ 
+            maxHeight: isMaximizedView ? 'calc(100vh - 250px)' : '8.75rem',
+            overflowY: 'auto',
+            scrollbarGutter: 'stable'
+          }}
         >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
-      <div className="p-4 space-y-4">
-        {error && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-            <p className="text-xs text-yellow-800">{error}</p>
-          </div>
-        )}
-
-        {/* Column Table - Using same compact format as U6 */}
-        <div className="border border-gray-200 rounded-lg overflow-hidden">
-          <div 
-            className="overflow-x-auto" 
-            style={{ 
-              maxHeight: '8.75rem',
-              overflowY: 'auto',
-              scrollbarGutter: 'stable'
-            }}
-          >
             <table className="text-[10px] table-fixed w-full">
               <colgroup>
                 <col style={{ width: '100px' }} />
@@ -654,16 +639,96 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 pt-4 border-t border-gray-200">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving || loading || columns.length === 0}>
-            {saving ? 'Saving…' : 'Approve'}
-          </Button>
+      <div className="flex justify-end gap-2 pt-4 border-t border-gray-200">
+        <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={handleSave} disabled={saving || loading || columns.length === 0}>
+          {saving ? 'Saving…' : 'Approve'}
+        </Button>
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* Normal View - Embedded in panel */}
+      <div className="w-full border-t-2 border-gray-200 bg-white flex-shrink-0" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+        <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 sticky top-0 z-10 flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-gray-800">Preview of data set</h3>
+            <p className="text-xs text-gray-600 mt-1">
+              {frame.arrow_name || frame.csv_name || frame.object_name}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsMaximized(true)}
+              className="h-8 w-8 p-0"
+              title="Maximize preview"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="h-8 w-8 p-0"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {renderPreviewContent(false)}
         </div>
       </div>
-    </div>
+
+      {/* Maximized View - Full screen Modal (using same pattern as card maximization) */}
+      {isMaximized &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-40 pointer-events-none"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="absolute inset-0 bg-black/40 pointer-events-auto"
+              aria-hidden="true"
+              onClick={() => setIsMaximized(false)}
+            />
+            <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
+                <div>
+                  <span className="text-lg font-semibold text-gray-900">
+                    Preview of data set
+                  </span>
+                  <p className="text-xs text-gray-600 mt-1">
+                    {frame.arrow_name || frame.csv_name || frame.object_name}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsMaximized(false)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Close Fullscreen"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+
+              {/* Fullscreen Content */}
+              <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
+                {renderPreviewContent(true)}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
   );
 };
 

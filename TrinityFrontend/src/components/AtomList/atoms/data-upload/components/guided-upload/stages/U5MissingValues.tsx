@@ -430,11 +430,28 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
               customValue = '';
             }
           }
+          
+          // Determine tag: only mark as edited if treatment differs from suggestion
+          // If user selects the suggested treatment, keep the AI suggestion tag (yellow)
+          // If user selects historical treatment, use previously_used tag (green)
+          // If user changes to something else, mark as edited (blue)
+          let newTag: 'previously_used' | 'ai_suggestion' | 'edited_by_user' | undefined = col.tag;
+          if (col.historicalTreatment && treatment === col.historicalTreatment) {
+            // User selected the historical treatment
+            newTag = 'previously_used';
+          } else if (treatment === col.suggestedTreatment) {
+            // User selected the same as AI suggested - keep AI suggestion tag (yellow)
+            newTag = col.tag === 'ai_suggestion' ? 'ai_suggestion' : (col.tag || 'ai_suggestion');
+          } else {
+            // User changed from the suggested treatment - mark as edited (blue)
+            newTag = 'edited_by_user';
+          }
+          
           const updatedCol = {
             ...col,
             selectedTreatment: treatment,
             customValue,
-            tag: 'edited_by_user' as const,
+            tag: newTag,
           };
           console.log('🔧 U5 Updated column:', updatedCol);
           return updatedCol;
@@ -711,29 +728,6 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
       <div className="space-y-2">
         {/* Bulk Actions */}
         <div className="flex flex-wrap gap-2 pb-2 border-b">
-          {hasAISuggestions && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleApplyAISuggestions}
-              className="flex items-center gap-1.5 text-xs h-7"
-              type="button"
-            >
-              <Lightbulb className="w-3.5 h-3.5" />
-              Apply AI Suggestions
-            </Button>
-          )}
-          {hasNumericMeasures && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleApplyAllNumeric}
-              className="flex items-center gap-1.5 text-xs h-7"
-              type="button"
-            >
-              Apply to All Numeric
-            </Button>
-          )}
           {hasCategoricalIdentifiers && (
             <Button
               variant="outline"
