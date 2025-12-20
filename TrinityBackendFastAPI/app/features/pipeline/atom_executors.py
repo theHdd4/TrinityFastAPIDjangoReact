@@ -2066,8 +2066,10 @@ class TableExecutor(BaseAtomExecutor):
         )
         from app.features.table.service import SESSIONS
         
-        # Get primary input file (fallback only)
-        primary_file = input_files[0] if input_files else configuration.get("object_name", "")
+        # Get primary input file
+        # 🔧 CRITICAL: Use configuration.object_name as source of truth (it's the last loaded file)
+        # Only fall back to input_files[0] if configuration doesn't have it
+        primary_file = configuration.get("object_name") or (input_files[0] if input_files else "")
         
         # For table atoms, process each API call SEQUENTIALLY to maintain load->operations->save sequences
         # Each API call may have its own object_name in params (for /load)
@@ -2075,7 +2077,8 @@ class TableExecutor(BaseAtomExecutor):
         
         # 🔧 CRITICAL: Track current file context and table_id for each sequence
         current_file_context = primary_file
-        current_table_id = None
+        # Initialize with table_id from configuration (if available) to maintain consistency during pipeline runs
+        current_table_id = configuration.get("table_id")
         
         result_file = None
         task_response = None
@@ -2142,11 +2145,25 @@ class TableExecutor(BaseAtomExecutor):
                     else:
                         column_lookup = {}  # Reset if no object_name
                     
+                    # 🔧 CRITICAL: Reuse table_id from configuration during pipeline runs
+                    # This keeps the table_id consistent so the frontend can continue using the same ID
+                    reuse_table_id = None
+                    if current_table_id is None:
+                        # First load in this pipeline run - use table_id from configuration
+                        reuse_table_id = configuration.get("table_id")
+                        if reuse_table_id:
+                            logger.info(f"🔄 [TABLE] First load: will reuse table_id from configuration: {reuse_table_id}")
+                    else:
+                        # Subsequent loads - keep using the current table_id
+                        reuse_table_id = current_table_id
+                        logger.info(f"🔄 [TABLE] Subsequent load: will reuse current table_id: {reuse_table_id}")
+                    
                     # Build TableLoadRequest
                     request = TableLoadRequest(
                         object_name=object_name,
                         atom_id=atom_instance_id,
                         project_id=kwargs.get("project_name"),
+                        reuse_table_id=reuse_table_id,
                     )
                     
                     # Call load_table endpoint directly
@@ -2386,6 +2403,13 @@ class TableExecutor(BaseAtomExecutor):
                         result = await delete_column(
                             table_id=current_table_id,
                             column=column,
+                            atom_id=atom_instance_id,
+                            project_id=kwargs.get("project_name"),
+                            client_name=kwargs.get("client_name"),
+                            app_name=kwargs.get("app_name"),
+                            project_name=kwargs.get("project_name"),
+                            card_id=card_id,
+                            canvas_position=kwargs.get("canvas_position", 0),
                         )
                     
                     elif "/table/insert-column" in endpoint.lower() or endpoint.endswith("/insert-column"):
@@ -2395,6 +2419,13 @@ class TableExecutor(BaseAtomExecutor):
                             index=params.get("index"),
                             name=params.get("name"),
                             default_value=params.get("default_value"),
+                            atom_id=atom_instance_id,
+                            project_id=kwargs.get("project_name"),
+                            client_name=kwargs.get("client_name"),
+                            app_name=kwargs.get("app_name"),
+                            project_name=kwargs.get("project_name"),
+                            card_id=card_id,
+                            canvas_position=kwargs.get("canvas_position", 0),
                         )
                     
                     elif "/table/rename-column" in endpoint.lower() or endpoint.endswith("/rename-column"):
@@ -2447,6 +2478,13 @@ class TableExecutor(BaseAtomExecutor):
                                 table_id=rename_table_id,
                                 old_name=old_name,
                                 new_name=new_name,
+                                atom_id=atom_instance_id,
+                                project_id=kwargs.get("project_name"),
+                                client_name=kwargs.get("client_name"),
+                                app_name=kwargs.get("app_name"),
+                                project_name=kwargs.get("project_name"),
+                                card_id=card_id,
+                                canvas_position=kwargs.get("canvas_position", 0),
                             )
                             logger.info(
                                 f"✅ [TABLE] Rename operation completed: '{old_name}' -> '{new_name}' "
@@ -2473,6 +2511,13 @@ class TableExecutor(BaseAtomExecutor):
                             table_id=current_table_id,
                             column=column,
                             decimal_places=params.get("decimal_places"),
+                            atom_id=atom_instance_id,
+                            project_id=kwargs.get("project_name"),
+                            client_name=kwargs.get("client_name"),
+                            app_name=kwargs.get("app_name"),
+                            project_name=kwargs.get("project_name"),
+                            card_id=card_id,
+                            canvas_position=kwargs.get("canvas_position", 0),
                         )
                     
                     elif "/table/retype-column" in endpoint.lower() or endpoint.endswith("/retype-column"):
@@ -2488,6 +2533,13 @@ class TableExecutor(BaseAtomExecutor):
                             table_id=current_table_id,
                             column=column,
                             new_type=params.get("new_type"),
+                            atom_id=atom_instance_id,
+                            project_id=kwargs.get("project_name"),
+                            client_name=kwargs.get("client_name"),
+                            app_name=kwargs.get("app_name"),
+                            project_name=kwargs.get("project_name"),
+                            card_id=card_id,
+                            canvas_position=kwargs.get("canvas_position", 0),
                         )
                     
                     elif "/table/transform-case" in endpoint.lower() or endpoint.endswith("/transform-case"):
@@ -2503,6 +2555,13 @@ class TableExecutor(BaseAtomExecutor):
                             table_id=current_table_id,
                             column=column,
                             case_type=params.get("case_type"),
+                            atom_id=atom_instance_id,
+                            project_id=kwargs.get("project_name"),
+                            client_name=kwargs.get("client_name"),
+                            app_name=kwargs.get("app_name"),
+                            project_name=kwargs.get("project_name"),
+                            card_id=card_id,
+                            canvas_position=kwargs.get("canvas_position", 0),
                         )
                     
                     elif "/table/duplicate-column" in endpoint.lower() or endpoint.endswith("/duplicate-column"):
@@ -2518,6 +2577,13 @@ class TableExecutor(BaseAtomExecutor):
                             table_id=current_table_id,
                             column=column,
                             new_name=params.get("new_name"),
+                            atom_id=atom_instance_id,
+                            project_id=kwargs.get("project_name"),
+                            client_name=kwargs.get("client_name"),
+                            app_name=kwargs.get("app_name"),
+                            project_name=kwargs.get("project_name"),
+                            card_id=card_id,
+                            canvas_position=kwargs.get("canvas_position", 0),
                         )
                     
                     elif "/table/create-blank" in endpoint.lower() or endpoint.endswith("/create-blank"):

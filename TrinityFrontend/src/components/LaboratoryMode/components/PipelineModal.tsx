@@ -1340,14 +1340,17 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 // 1. Update sourceFile to replacement file (if it was replaced)
                 // CRITICAL: Table atom uses sourceFile, not object_name or dataSource
                 // Always update even if same, to ensure consistency and trigger reload
+                // 🔧 CRITICAL: Use configuration.object_name as source of truth (it's the last loaded file)
+                // Only fall back to input_files[0] if configuration doesn't have it
                 let replacementFile = null;
-                if (logEntry.input_files && logEntry.input_files.length > 0) {
-                  // Use the first input file (which is the replacement file after pipeline processing)
-                  replacementFile = logEntry.input_files[0];
-                } else if (stepConfig.object_name) {
+                if (stepConfig.object_name) {
+                  // Configuration has the last loaded file (after all operations) - use this!
                   replacementFile = stepConfig.object_name;
                 } else if (stepConfig.file_key) {
                   replacementFile = stepConfig.file_key;
+                } else if (logEntry.input_files && logEntry.input_files.length > 0) {
+                  // Fallback: Use the first input file (original file)
+                  replacementFile = logEntry.input_files[0];
                 }
                 
                 // ALWAYS update sourceFile if we have a replacement file

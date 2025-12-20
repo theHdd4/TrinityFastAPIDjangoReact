@@ -11,6 +11,7 @@ class TableLoadRequest(BaseModel):
     object_name: str
     atom_id: Optional[str] = None  # Atom ID for session tracking
     project_id: Optional[str] = None  # Project ID for session tracking
+    reuse_table_id: Optional[str] = None  # Reuse existing table_id during pipeline runs (instead of creating new UUID)
 
 
 class TableSettings(BaseModel):

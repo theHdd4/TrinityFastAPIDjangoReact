@@ -50,6 +50,28 @@ from .service import (
 from app.features.data_upload_validate.app.routes import get_object_prefix
 
 
+def _convert_numeric_keys_to_strings(obj: Any) -> Any:
+    """
+    Recursively convert all numeric keys in dictionaries to strings.
+    MongoDB requires all dictionary keys to be strings.
+    
+    Args:
+        obj: Any object (dict, list, or primitive)
+        
+    Returns:
+        Object with all numeric dict keys converted to strings
+    """
+    if isinstance(obj, dict):
+        return {
+            str(k) if isinstance(k, (int, float)) else k: _convert_numeric_keys_to_strings(v)
+            for k, v in obj.items()
+        }
+    elif isinstance(obj, list):
+        return [_convert_numeric_keys_to_strings(item) for item in obj]
+    else:
+        return obj
+
+
 def normalize_table_settings_for_pipeline(settings: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize table settings for pipeline storage by converting all column names to lowercase.
@@ -312,8 +334,15 @@ async def load_table(
         # Load DataFrame from MinIO (returns tuple with styles and metadata)
         df, conditional_format_styles, table_metadata = load_table_from_minio(object_name)
         
-        # Create session
-        table_id = str(uuid.uuid4())
+        # Create or reuse session
+        # 🔧 CRITICAL: During pipeline runs, reuse the existing table_id from configuration
+        # This keeps the table_id consistent so the frontend can continue using the same ID
+        if request.reuse_table_id:
+            table_id = request.reuse_table_id
+            logger.info(f"🔄 [TABLE-LOAD] Reusing existing table_id: {table_id} (pipeline run)")
+        else:
+            table_id = str(uuid.uuid4())
+            logger.info(f"🆕 [TABLE-LOAD] Created new table_id: {table_id}")
         SESSIONS[table_id] = df
         
         # Get project context for MongoDB storage
@@ -969,6 +998,9 @@ async def save_table(
         if request.metadata:
             # Convert Pydantic model to dict
             table_metadata_dict = request.metadata.dict(exclude_none=True)
+            # 🔧 CRITICAL: Convert all numeric keys to strings for MongoDB compatibility
+            # MongoDB requires all dictionary keys to be strings, not integers
+            table_metadata_dict = _convert_numeric_keys_to_strings(table_metadata_dict)
             logger.info(f"📋 [TABLE-SAVE] Saving table metadata (formatting, design, layout)")
             # CRITICAL: Log cell_formatting to verify it's being saved
             if table_metadata_dict.get('cell_formatting'):
@@ -1011,9 +1043,45 @@ async def save_table(
             raise Exception(f"Failed to save table: {save_err}") from save_err
         
         # Clear draft and update metadata
-        project_id, atom_id = _get_project_context()
-        atom_id = request.atom_id or atom_id
-        project_id = request.project_id or project_id
+        # 🔧 CRITICAL: Get atom_id from session metadata first (stored during /table/load)
+        # This ensures save operations after cell edits are recorded properly
+        original_metadata = await get_session_metadata(request.table_id)
+        metadata_atom_id = original_metadata.get("atom_id") if original_metadata else None
+        metadata_project_id = original_metadata.get("project_id") if original_metadata else None
+        original_object_name = original_metadata.get("object_name") if original_metadata else ""
+        
+        # If metadata doesn't have atom_id, try to get it from the pipeline document
+        if not metadata_atom_id:
+            logger.warning(f"⚠️ [TABLE-SAVE] No atom_id found in session metadata for table_id {request.table_id}")
+            try:
+                from app.features.pipeline.service import get_pipeline_collection
+                coll = await get_pipeline_collection()
+                project_id_from_env, _ = _get_project_context()
+                final_project_name_for_lookup = project_name or project_id_from_env or os.getenv("PROJECT_NAME", "")
+                final_client_name_for_lookup = client_name or os.getenv("CLIENT_NAME", "")
+                final_app_name_for_lookup = app_name or os.getenv("APP_NAME", "")
+                
+                if final_client_name_for_lookup and final_app_name_for_lookup and final_project_name_for_lookup:
+                    doc_id = f"{final_client_name_for_lookup}/{final_app_name_for_lookup}/{final_project_name_for_lookup}"
+                    doc = await coll.find_one({"_id": doc_id})
+                    if doc and "pipeline" in doc and "execution_graph" in doc["pipeline"]:
+                        # Find the step that has this table_id in its configuration
+                        for step in doc["pipeline"]["execution_graph"]:
+                            step_config = step.get("configuration", {})
+                            if step_config.get("table_id") == request.table_id:
+                                metadata_atom_id = step.get("atom_instance_id")
+                                if metadata_atom_id:
+                                    logger.info(f"✅ [TABLE-SAVE] Found atom_id from pipeline step: {metadata_atom_id}")
+                                    break
+            except Exception as e:
+                logger.warning(f"Failed to get atom_id from pipeline: {e}")
+        
+        # Now use metadata_atom_id first, then fallback to request or environment
+        project_id_env, atom_id_env = _get_project_context()
+        atom_id = metadata_atom_id or request.atom_id or atom_id_env
+        project_id = request.project_id or metadata_project_id or project_id_env
+        
+        logger.info(f"📋 [TABLE-SAVE] Using atom_id: {atom_id} (from metadata: {metadata_atom_id}, from request: {request.atom_id}, from env: {atom_id_env})")
         
         # Clear draft (if exists)
         await clear_draft(request.table_id)
@@ -1038,16 +1106,15 @@ async def save_table(
         execution_error = None
         
         # Build API call record
+        # 🔧 CRITICAL: Convert all numeric keys to strings in params for MongoDB compatibility
+        params_dict = request.dict()
+        params_dict = _convert_numeric_keys_to_strings(params_dict)
         api_calls = [{
             "endpoint": "/table/save",
             "method": "POST",
-            "params": request.dict(),
+            "params": params_dict,
             "timestamp": execution_started_at.isoformat()
         }]
-        
-        # Get original object_name from metadata for input file
-        original_metadata = await get_session_metadata(request.table_id)
-        original_object_name = original_metadata.get("object_name") if original_metadata else ""
         
         # Build configuration
         configuration = {
@@ -1113,7 +1180,9 @@ async def save_table(
                 except Exception as e:
                     logger.warning(f"Failed to get atom configuration: {e}")
             
-            if final_client_name and final_app_name and final_project_name and atom_id:
+            # 🔧 CRITICAL: Only record if we have a valid atom_id (not "unknown")
+            if final_client_name and final_app_name and final_project_name and atom_id and atom_id != "unknown":
+                logger.info(f"✅ [TABLE-SAVE] Recording execution to MongoDB: atom_id={atom_id}, card_id={final_card_id}, file={object_name}")
                 await record_atom_execution(
                     client_name=final_client_name,
                     app_name=final_app_name,
@@ -1134,9 +1203,16 @@ async def save_table(
                     mode="laboratory",
                     canvas_position=final_canvas_position
                 )
+            else:
+                logger.warning(
+                    f"⚠️ [TABLE-SAVE] Skipping MongoDB recording: "
+                    f"client={final_client_name}, app={final_app_name}, project={final_project_name}, atom_id={atom_id}"
+                )
         except Exception as e:
             # Don't fail the request if pipeline recording fails
-            logger.warning(f"Failed to record table save execution for pipeline: {e}")
+            logger.error(f"❌ [TABLE-SAVE] Failed to record table save execution for pipeline: {e}")
+            import traceback
+            logger.error(f"❌ [TABLE-SAVE] Traceback: {traceback.format_exc()}")
         
         return TableSaveResponse(
             object_name=object_name,
@@ -1521,7 +1597,14 @@ async def edit_cell(
 @router.post("/delete-column", response_model=TableResponse)
 async def delete_column(
     table_id: str = Body(...),
-    column: str = Body(...)
+    column: str = Body(...),
+    atom_id: Optional[str] = Body(None),
+    project_id: Optional[str] = Body(None),
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
 ):
     """
     Delete a column from the table.
@@ -1533,6 +1616,7 @@ async def delete_column(
     Returns:
         Updated table data
     """
+    execution_started_at = datetime.utcnow()
     logger.info(f"🗑️ [TABLE-DELETE-COLUMN] Deleting column: {column}")
     
     # Get DataFrame from session
@@ -1553,6 +1637,44 @@ async def delete_column(
         # Update session
         SESSIONS[table_id] = df
         
+        # Get project context
+        project_id_env, atom_id_env = _get_project_context()
+        atom_id_final = atom_id or atom_id_env
+        project_id_final = project_id or project_id_env
+        
+        # Get original object_name from metadata
+        metadata = await get_session_metadata(table_id)
+        object_name = metadata.get("object_name") if metadata else ""
+        
+        # Record execution for pipeline tracking
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        params = {
+            "table_id": table_id,
+            "column": column,
+            "atom_id": atom_id_final,
+            "project_id": project_id_final,
+        }
+        
+        await _record_table_execution(
+            endpoint="/table/delete-column",
+            method="POST",
+            params=params,
+            execution_started_at=execution_started_at,
+            execution_completed_at=execution_completed_at,
+            execution_status=execution_status,
+            execution_error=execution_error,
+            atom_id=atom_id_final,
+            object_name=object_name,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            card_id=card_id,
+            canvas_position=canvas_position,
+        )
+        
         # Return updated data
         response = dataframe_to_response(df, table_id)
         return TableResponse(**response)
@@ -1569,7 +1691,14 @@ async def insert_column(
     table_id: str = Body(...),
     index: int = Body(...),
     name: str = Body(...),
-    default_value: Any = Body(None)
+    default_value: Any = Body(None),
+    atom_id: Optional[str] = Body(None),
+    project_id: Optional[str] = Body(None),
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
 ):
     """
     Insert a new column into the table at the specified index.
@@ -1583,6 +1712,7 @@ async def insert_column(
     Returns:
         Updated table data
     """
+    execution_started_at = datetime.utcnow()
     logger.info(f"➕ [TABLE-INSERT-COLUMN] Inserting column '{name}' at index {index}")
     
     # Get DataFrame from session
@@ -1612,6 +1742,46 @@ async def insert_column(
         
         # Update session
         SESSIONS[table_id] = df
+        
+        # Get project context
+        project_id_env, atom_id_env = _get_project_context()
+        atom_id_final = atom_id or atom_id_env
+        project_id_final = project_id or project_id_env
+        
+        # Get original object_name from metadata
+        metadata = await get_session_metadata(table_id)
+        object_name = metadata.get("object_name") if metadata else ""
+        
+        # Record execution for pipeline tracking
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        params = {
+            "table_id": table_id,
+            "index": index,
+            "name": name,
+            "default_value": default_value,
+            "atom_id": atom_id_final,
+            "project_id": project_id_final,
+        }
+        
+        await _record_table_execution(
+            endpoint="/table/insert-column",
+            method="POST",
+            params=params,
+            execution_started_at=execution_started_at,
+            execution_completed_at=execution_completed_at,
+            execution_status=execution_status,
+            execution_error=execution_error,
+            atom_id=atom_id_final,
+            object_name=object_name,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            card_id=card_id,
+            canvas_position=canvas_position,
+        )
         
         # Return updated data
         response = dataframe_to_response(df, table_id)
@@ -1843,7 +2013,14 @@ async def rename_column(
 async def round_column(
     table_id: str = Body(...),
     column: str = Body(...),
-    decimal_places: int = Body(...)
+    decimal_places: int = Body(...),
+    atom_id: Optional[str] = Body(None),
+    project_id: Optional[str] = Body(None),
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
 ):
     """
     Round numeric values in a column to the specified decimal places.
@@ -1856,6 +2033,7 @@ async def round_column(
     Returns:
         Updated table data
     """
+    execution_started_at = datetime.utcnow()
     logger.info(f"🔢 [TABLE-ROUND-COLUMN] Rounding column '{column}' to {decimal_places} decimal places")
     
     # Get DataFrame from session
@@ -1895,6 +2073,45 @@ async def round_column(
         # Update session
         SESSIONS[table_id] = df
         
+        # Get project context
+        project_id_env, atom_id_env = _get_project_context()
+        atom_id_final = atom_id or atom_id_env
+        project_id_final = project_id or project_id_env
+        
+        # Get original object_name from metadata
+        metadata = await get_session_metadata(table_id)
+        object_name = metadata.get("object_name") if metadata else ""
+        
+        # Record execution for pipeline tracking
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        params = {
+            "table_id": table_id,
+            "column": column,
+            "decimal_places": decimal_places,
+            "atom_id": atom_id_final,
+            "project_id": project_id_final,
+        }
+        
+        await _record_table_execution(
+            endpoint="/table/round-column",
+            method="POST",
+            params=params,
+            execution_started_at=execution_started_at,
+            execution_completed_at=execution_completed_at,
+            execution_status=execution_status,
+            execution_error=execution_error,
+            atom_id=atom_id_final,
+            object_name=object_name,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            card_id=card_id,
+            canvas_position=canvas_position,
+        )
+        
         # Return updated data
         response = dataframe_to_response(df, table_id)
         return TableResponse(**response)
@@ -1910,7 +2127,14 @@ async def round_column(
 async def retype_column(
     table_id: str = Body(...),
     column: str = Body(...),
-    new_type: str = Body(...)
+    new_type: str = Body(...),
+    atom_id: Optional[str] = Body(None),
+    project_id: Optional[str] = Body(None),
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
 ):
     """
     Change the data type of a column.
@@ -1923,6 +2147,7 @@ async def retype_column(
     Returns:
         Updated table data
     """
+    execution_started_at = datetime.utcnow()
     logger.info(f"🔄 [TABLE-RETYPE-COLUMN] Changing column '{column}' type to '{new_type}'")
     
     # Get DataFrame from session
@@ -1953,6 +2178,45 @@ async def retype_column(
         # Update session
         SESSIONS[table_id] = df
         
+        # Get project context
+        project_id_env, atom_id_env = _get_project_context()
+        atom_id_final = atom_id or atom_id_env
+        project_id_final = project_id or project_id_env
+        
+        # Get original object_name from metadata
+        metadata = await get_session_metadata(table_id)
+        object_name = metadata.get("object_name") if metadata else ""
+        
+        # Record execution for pipeline tracking
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        params = {
+            "table_id": table_id,
+            "column": column,
+            "new_type": new_type,
+            "atom_id": atom_id_final,
+            "project_id": project_id_final,
+        }
+        
+        await _record_table_execution(
+            endpoint="/table/retype-column",
+            method="POST",
+            params=params,
+            execution_started_at=execution_started_at,
+            execution_completed_at=execution_completed_at,
+            execution_status=execution_status,
+            execution_error=execution_error,
+            atom_id=atom_id_final,
+            object_name=object_name,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            card_id=card_id,
+            canvas_position=canvas_position,
+        )
+        
         # Return updated data
         response = dataframe_to_response(df, table_id)
         return TableResponse(**response)
@@ -1968,7 +2232,14 @@ async def retype_column(
 async def transform_case(
     table_id: str = Body(...),
     column: str = Body(...),
-    case_type: str = Body(...)
+    case_type: str = Body(...),
+    atom_id: Optional[str] = Body(None),
+    project_id: Optional[str] = Body(None),
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
 ):
     """
     Transform the case of text values in a column.
@@ -1981,6 +2252,7 @@ async def transform_case(
     Returns:
         Updated table data
     """
+    execution_started_at = datetime.utcnow()
     logger.info(f"🔤 [TABLE-TRANSFORM-CASE] Transforming column '{column}' to '{case_type}' case")
     
     # Get DataFrame from session
@@ -2041,6 +2313,45 @@ async def transform_case(
         # Update session
         SESSIONS[table_id] = df
         
+        # Get project context
+        project_id_env, atom_id_env = _get_project_context()
+        atom_id_final = atom_id or atom_id_env
+        project_id_final = project_id or project_id_env
+        
+        # Get original object_name from metadata
+        metadata = await get_session_metadata(table_id)
+        object_name = metadata.get("object_name") if metadata else ""
+        
+        # Record execution for pipeline tracking
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        params = {
+            "table_id": table_id,
+            "column": column,
+            "case_type": case_type,
+            "atom_id": atom_id_final,
+            "project_id": project_id_final,
+        }
+        
+        await _record_table_execution(
+            endpoint="/table/transform-case",
+            method="POST",
+            params=params,
+            execution_started_at=execution_started_at,
+            execution_completed_at=execution_completed_at,
+            execution_status=execution_status,
+            execution_error=execution_error,
+            atom_id=atom_id_final,
+            object_name=object_name,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            card_id=card_id,
+            canvas_position=canvas_position,
+        )
+        
         # Return updated data
         response = dataframe_to_response(df, table_id)
         return TableResponse(**response)
@@ -2056,7 +2367,14 @@ async def transform_case(
 async def duplicate_column(
     table_id: str = Body(...),
     column: str = Body(...),
-    new_name: str = Body(...)
+    new_name: str = Body(...),
+    atom_id: Optional[str] = Body(None),
+    project_id: Optional[str] = Body(None),
+    client_name: Optional[str] = Query(None),
+    app_name: Optional[str] = Query(None),
+    project_name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
+    canvas_position: Optional[int] = Query(0),
 ):
     """
     Duplicate a column and place it right after the original column.
@@ -2069,6 +2387,7 @@ async def duplicate_column(
     Returns:
         Updated table data
     """
+    execution_started_at = datetime.utcnow()
     logger.info(f"📋 [TABLE-DUPLICATE-COLUMN] Duplicating column '{column}' as '{new_name}'")
     
     # Get DataFrame from session
@@ -2104,6 +2423,45 @@ async def duplicate_column(
         
         # Update session
         SESSIONS[table_id] = df
+        
+        # Get project context
+        project_id_env, atom_id_env = _get_project_context()
+        atom_id_final = atom_id or atom_id_env
+        project_id_final = project_id or project_id_env
+        
+        # Get original object_name from metadata
+        metadata = await get_session_metadata(table_id)
+        object_name = metadata.get("object_name") if metadata else ""
+        
+        # Record execution for pipeline tracking
+        execution_completed_at = datetime.utcnow()
+        execution_status = "success"
+        execution_error = None
+        
+        params = {
+            "table_id": table_id,
+            "column": column,
+            "new_name": new_name,
+            "atom_id": atom_id_final,
+            "project_id": project_id_final,
+        }
+        
+        await _record_table_execution(
+            endpoint="/table/duplicate-column",
+            method="POST",
+            params=params,
+            execution_started_at=execution_started_at,
+            execution_completed_at=execution_completed_at,
+            execution_status=execution_status,
+            execution_error=execution_error,
+            atom_id=atom_id_final,
+            object_name=object_name,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            card_id=card_id,
+            canvas_position=canvas_position,
+        )
         
         # Return updated data
         response = dataframe_to_response(df, table_id)
