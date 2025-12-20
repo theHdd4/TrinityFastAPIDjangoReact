@@ -103,6 +103,7 @@ export const openGuidedMode = async ({
     const projectContext = getActiveProjectContext();
     // Default to U2 (Confirm Headers) for files uploaded directly from Saved DataFrames (U1 removed)
     let startStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7' = 'U2';
+    let isPrimed = false;
     
     if (projectContext) {
       try {
@@ -122,15 +123,17 @@ export const openGuidedMode = async ({
           const primingData = await primingCheckRes.json();
           const currentStage = primingData?.current_stage;
           const isInProgress = primingData?.is_in_progress;
-          const isPrimed = primingData?.is_primed;
+          isPrimed = primingData?.is_primed;
           
-          // If file is fully primed, start at U2 to allow re-processing
+          // If file is fully primed, skip the guided workflow and just continue
           if (isPrimed) {
-            startStage = 'U2';
+            console.log('[openGuidedMode] File is already primed, skipping guided workflow');
+            return; // Exit early - don't show guided workflow
           }
+          
           // If file is in progress (partially primed), continue from current stage
           // Skip U1 if it was the current stage, go to U2 instead
-          else if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+          if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
             startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
           }
           // If file has started but not in progress (U0 or U1), start at U2 (U1 removed)
