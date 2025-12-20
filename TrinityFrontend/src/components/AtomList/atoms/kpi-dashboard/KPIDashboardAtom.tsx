@@ -41,11 +41,14 @@ export interface KPIDashboardSettings {
   insights: string;
   layouts?: Layout[]; // Store layouts in settings
   selectedBoxId?: string; // ID of the currently selected box for per-element settings
+  selectedBoxIds?: string[]; // IDs of multiple selected boxes for multi-selection
   globalFilters?: Record<string, {
     values: string[];
-    applyToMetricCards?: boolean;
-    applyToCharts?: boolean;
-  }>; // Global filters with element type selection
+  }>; // Global filters automatically apply to all elements
+  previousLocalFilters?: Record<string, Record<string, any>>; // Store previous local filters for restoration
+  enabledGlobalFilterIdentifiers?: string[]; // User-selected identifiers to show in Global Filters section
+  editInteractionsMode?: boolean; // Toggle for Edit Interactions mode
+  elementInteractions?: Record<string, 'apply' | 'not-apply' | 'ignore'>; // Interaction settings per element (boxId -> interaction type)
 }
 
 interface KPIDashboardAtomProps {
@@ -64,7 +67,10 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
       changeColumns: [],
       insights: '',
       layouts: [],
-      globalFilters: {} as Record<string, { values: string[]; applyToMetricCards?: boolean; applyToCharts?: boolean }>
+      globalFilters: {} as Record<string, { values: string[] }>,
+      previousLocalFilters: {} as Record<string, Record<string, any>>,
+      editInteractionsMode: false,
+      elementInteractions: {} as Record<string, 'apply' | 'not-apply' | 'ignore'>
     };
   }, [atom?.settings]);
   
@@ -81,7 +87,7 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
         
         console.log('🔍 Loading KPI Dashboard configuration from MongoDB...', { atomId });
         
-        // PRIORITY 1: Try kpi_dashboard_configs (most recent auto-saves) with atom_id
+        // PRIORITY 1: Try atom_list_configuration (most recent auto-saves) with atom_id
         const response = await fetch(
           `${KPI_DASHBOARD_API}/get-config?` +
           `client_name=${encodeURIComponent(projectContext.client_name)}&` +
@@ -98,7 +104,7 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
             const hasLayouts = result.data.layouts && result.data.layouts.length > 0;
             
             if (hasLayouts) {
-              console.log('✅ Loaded from kpi_dashboard_configs (auto-saved data):', result.data.layouts.length, 'layouts');
+              console.log('✅ Loaded from atom_list_configuration (auto-saved data):', result.data.layouts.length, 'layouts');
               
               if (isMounted) {
                 // ✅ FIX: Build fresh settings object without spreading stale closure
@@ -108,14 +114,16 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
                   metricColumns: result.data.metricColumns || [],
                   changeColumns: result.data.changeColumns || [],
                   insights: result.data.insights || '',
+                  editInteractionsMode: result.data.editInteractionsMode || false,
+                  elementInteractions: result.data.elementInteractions || {},
                 });
               }
               return; // Done - use this data
             } else {
-              console.log('ℹ️ No layouts in kpi_dashboard_configs, using laboratory store data');
+              console.log('ℹ️ No layouts in atom_list_configuration, using laboratory store data');
             }
           } else {
-            console.log('ℹ️ No data in kpi_dashboard_configs, using laboratory store data');
+            console.log('ℹ️ No data in atom_list_configuration, using laboratory store data');
           }
         }
         
@@ -154,10 +162,19 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
   }, [atom?.metadata, atom?.settings]);
 
   const handleDataUpload = (uploadedData: KPIDashboardData) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardAtom.tsx:156',message:'handleDataUpload entry',data:{atomId,updateSettingsType:typeof updateSettings,updateSettingsIsFunc:typeof updateSettings==='function',uploadedDataType:typeof uploadedData,hasHeaders:!!uploadedData.headers,headersIsArray:Array.isArray(uploadedData.headers),hasRows:!!uploadedData.rows,rowsIsArray:Array.isArray(uploadedData.rows),fileName:uploadedData.fileName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardAtom.tsx:160',message:'Before updateSettings call',data:{settingsKeys:Object.keys(settings)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     updateSettings(atomId, {
       ...settings,
       data: uploadedData
     });
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardAtom.tsx:164',message:'After updateSettings call',data:{success:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
   };
 
   const handleSettingsChange = (newSettings: Partial<KPIDashboardSettings>) => {

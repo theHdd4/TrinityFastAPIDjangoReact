@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowLeft, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown, MoreVertical, Filter, Eye, EyeOff, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -8,17 +8,24 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from '@/components/ui/dropdown-menu';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { chartMakerApi } from '@/components/AtomList/atoms/chart-maker/services/chartMakerApi';
+import { migrateLegacyChart, buildTracesForAPI, validateChart } from '@/components/AtomList/atoms/chart-maker/utils/traceUtils';
 import type { KPIDashboardData, KPIDashboardSettings } from '../KPIDashboardAtom';
 import { ElementType } from './ElementDropdown';
 import ElementRenderer from './ElementRenderer';
 import ChartElement from './ChartElement';
 import TableElement from './TableElement';
+import ElementMenuDropdown from './ElementMenuDropdown';
 import { TextBoxToolbar } from '@/components/LaboratoryMode/components/CanvasArea/text-box/TextBoxToolbar';
 import { TEXT_STYLE_OPTIONS, getTextStyleProperties } from '@/components/LaboratoryMode/components/CanvasArea/text-box/constants';
 import type { TextStylePreset } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
 import { KPI_DASHBOARD_API, LABORATORY_API, IMAGES_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { TrendingUp } from 'lucide-react';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface KPIDashboardCanvasProps {
   atomId: string;
@@ -206,6 +213,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
   const [selectKey, setSelectKey] = useState(0);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [variables, setVariables] = useState<ConfigVariable[]>([]);
+  const metricsInputs = useLaboratoryStore(state => state.metricsInputs);
   
   // Load layouts from settings on mount
   useEffect(() => {
@@ -214,7 +222,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     }
   }, [settings.layouts]);
 
-  // Fetch variables from MongoDB on mount
+  // Fetch variables from MongoDB on mount and when refresh trigger changes
   useEffect(() => {
     const fetchVariables = async () => {
       try {
@@ -268,7 +276,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     };
 
     fetchVariables();
-  }, []);
+  }, [metricsInputs.variablesRefreshTrigger]);
   
   // Save layouts to MongoDB with debouncing
   useEffect(() => {
@@ -294,6 +302,31 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
       }
     };
   }, [layouts]);
+
+  // Save interaction settings when they change (debounced)
+  useEffect(() => {
+    // Skip save on initial mount when layouts is empty
+    if (layouts.length === 0) {
+      return;
+    }
+    
+    // Clear previous timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    // Debounce save by 1 second
+    saveTimeoutRef.current = setTimeout(() => {
+      saveLayoutsToMongoDB(layouts);
+    }, 1000);
+    
+    // Cleanup timeout on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [settings.editInteractionsMode, settings.elementInteractions]);
   
   const saveLayoutsToMongoDB = async (layoutsToSave: Layout[]) => {
     try {
@@ -316,12 +349,14 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
         metricColumns: settings.metricColumns || [],
         changeColumns: settings.changeColumns || [],
         insights: settings.insights || '',
+        editInteractionsMode: settings.editInteractionsMode || false,
+        elementInteractions: settings.elementInteractions || {},
         // Add metadata for debugging and versioning
         savedAt: new Date().toISOString(),
         version: '1.0',
       };
       
-      // ✅ STEP 2: Save to kpi_dashboard_configs collection (with atom_id for per-instance storage)
+      // ✅ STEP 2: Save to atom_list_configuration collection (with atom_id for per-instance storage)
       const response = await fetch(
         `${KPI_DASHBOARD_API}/save-config?` +
         `client_name=${encodeURIComponent(projectContext.client_name)}&` +
@@ -340,7 +375,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
       
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ KPI Dashboard saved to kpi_dashboard_configs:', {
+        console.log('✅ KPI Dashboard saved to atom_list_configuration:', {
           collection: result.collection,
           operation: result.operation,
           mongo_id: result.mongo_id
@@ -354,6 +389,8 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
           metricColumns: payload.metricColumns,
           changeColumns: payload.changeColumns,
           insights: payload.insights,
+          editInteractionsMode: payload.editInteractionsMode,
+          elementInteractions: payload.elementInteractions,
         });
         
         console.log('✅ Laboratory store updated (autosave will sync to django_atom_list_configuration)');
@@ -403,6 +440,20 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
       case '1-box': return 12;
       default: return 12;
     }
+  };
+
+  // Redistribute widths evenly when boxes are deleted
+  // Grid uses 12 columns, so distribute evenly: 1 box = 12, 2 boxes = 6 each, 3 boxes = 4 each, 4 boxes = 3 each
+  const redistributeBoxWidths = (boxes: LayoutBox[]): LayoutBox[] => {
+    if (boxes.length === 0) return boxes;
+    
+    const totalColumns = 12;
+    const widthPerBox = Math.floor(totalColumns / boxes.length);
+    
+    return boxes.map(box => ({
+      ...box,
+      width: widthPerBox
+    }));
   };
 
   const getFilledCount = (layout: Layout) => 
@@ -566,6 +617,100 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     setLayouts(layouts.filter(layout => layout.id !== layoutId));
   };
 
+  const handleDeleteBox = (layoutId: string, boxId: string) => {
+    setLayouts((currentLayouts) => {
+      const updatedLayouts = currentLayouts.map(layout => {
+        if (layout.id === layoutId) {
+          const updatedBoxes = layout.boxes.filter(box => box.id !== boxId);
+          // If no boxes left, remove the entire layout
+          if (updatedBoxes.length === 0) {
+            return null; // Will be filtered out
+          }
+          // Redistribute widths evenly to fill available space
+          const redistributedBoxes = redistributeBoxWidths(updatedBoxes);
+          return {
+            ...layout,
+            boxes: redistributedBoxes
+          };
+        }
+        return layout;
+      }).filter(layout => layout !== null) as Layout[];
+      return updatedLayouts;
+    });
+    
+    // Clear selection if deleted box was selected
+    const selectedBoxIds = settings.selectedBoxIds || [];
+    if (selectedBoxIds.includes(boxId)) {
+      const updatedSelectedBoxIds = selectedBoxIds.filter(id => id !== boxId);
+      onSettingsChange({ 
+        selectedBoxIds: updatedSelectedBoxIds.length > 0 ? updatedSelectedBoxIds : undefined,
+        selectedBoxId: settings.selectedBoxId === boxId ? undefined : settings.selectedBoxId
+      });
+    }
+  };
+
+  const handleDeleteSelectedBoxes = () => {
+    const selectedBoxIds = settings.selectedBoxIds || [];
+    if (selectedBoxIds.length === 0) return;
+
+    setLayouts((currentLayouts) => {
+      const updatedLayouts = currentLayouts.map(layout => {
+        const updatedBoxes = layout.boxes.filter(box => !selectedBoxIds.includes(box.id));
+        // If no boxes left, remove the entire layout
+        if (updatedBoxes.length === 0) {
+          return null; // Will be filtered out
+        }
+        // Redistribute widths evenly to fill available space
+        const redistributedBoxes = redistributeBoxWidths(updatedBoxes);
+        return {
+          ...layout,
+          boxes: redistributedBoxes
+        };
+      }).filter(layout => layout !== null) as Layout[];
+      return updatedLayouts;
+    });
+    
+    // Clear selection
+    onSettingsChange({ 
+      selectedBoxIds: undefined,
+      selectedBoxId: undefined
+    });
+  };
+
+  const handleAddElement = (layoutId: string, boxId: string, position: 'left' | 'right') => {
+    setLayouts((currentLayouts) => {
+      return currentLayouts.map(layout => {
+        if (layout.id === layoutId) {
+          const boxIndex = layout.boxes.findIndex(box => box.id === boxId);
+          if (boxIndex === -1) return layout;
+
+          const defaultWidth = getDefaultWidth(layout.type);
+          const newBox: LayoutBox = {
+            id: `box-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            elementType: undefined,
+            width: defaultWidth
+          };
+
+          const newBoxes = [...layout.boxes];
+          if (position === 'left') {
+            newBoxes.splice(boxIndex, 0, newBox);
+          } else {
+            newBoxes.splice(boxIndex + 1, 0, newBox);
+          }
+
+          // Redistribute widths evenly after adding new box
+          const redistributedBoxes = redistributeBoxWidths(newBoxes);
+          
+          return {
+            ...layout,
+            boxes: redistributedBoxes
+          };
+        }
+        return layout;
+      });
+    });
+  };
+
   const handleLayoutHeightChange = (layoutId: string, newHeight: number) => {
     const clampedHeight = Math.max(120, Math.min(800, newHeight));
     setLayouts(layouts.map(layout => 
@@ -595,8 +740,47 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     document.body.style.userSelect = 'none';
   };
 
+  // Helper function to format active global filters
+  const getFormattedGlobalFilters = (): string | null => {
+    const globalFilters = settings.globalFilters || {};
+    const enabledIdentifiers = settings.enabledGlobalFilterIdentifiers || [];
+    
+    // Get active filter values in the order of enabled identifiers
+    const activeFilterValues: string[] = [];
+    
+    // If enabled identifiers exist, use them to preserve order
+    if (enabledIdentifiers.length > 0) {
+      enabledIdentifiers.forEach(identifier => {
+        const filterConfig = globalFilters[identifier];
+        if (filterConfig && typeof filterConfig === 'object' && 'values' in filterConfig && Array.isArray(filterConfig.values) && filterConfig.values.length > 0) {
+          // Join multiple values with comma, then add to the list
+          activeFilterValues.push(filterConfig.values.join(', '));
+        }
+      });
+    } else {
+      // If no enabled identifiers, use all active filters
+      Object.entries(globalFilters).forEach(([identifier, filterConfig]) => {
+        if (filterConfig && typeof filterConfig === 'object' && 'values' in filterConfig && Array.isArray(filterConfig.values) && filterConfig.values.length > 0) {
+          activeFilterValues.push(filterConfig.values.join(', '));
+        }
+      });
+    }
+    
+    // Return null if no active filters, otherwise join with pipe
+    return activeFilterValues.length > 0 ? activeFilterValues.join(' | ') : null;
+  };
+
+  // Check if first element is a text box
+  const isFirstElementTextBox = (): boolean => {
+    if (layouts.length === 0) return false;
+    const firstLayout = layouts[0];
+    if (!firstLayout.boxes || firstLayout.boxes.length === 0) return false;
+    const firstBox = firstLayout.boxes[0];
+    return firstBox.elementType === 'text-box';
+  };
+
   return (
-    <div className="h-full w-full overflow-y-auto p-8 bg-gradient-to-br from-background via-muted/5 to-background" style={{ minWidth: 0, minHeight: 0 }}>
+    <div className="h-full w-full overflow-y-auto p-8 bg-gradient-to-br from-background via-muted/5 to-background relative" style={{ minWidth: 0, minHeight: 0 }}>
       <div className="w-full space-y-6" style={{ minWidth: 0, width: '100%' }}>
         {/* Empty State */}
         {layouts.length === 0 && (
@@ -634,9 +818,41 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
           </div>
         )}
 
+        {/* Common Delete Icon for Multi-Selection */}
+        {settings.selectedBoxIds && settings.selectedBoxIds.length > 1 && (
+          <div className="fixed top-4 right-4 z-50">
+            <button
+              onClick={handleDeleteSelectedBoxes}
+              className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-lg transition-all duration-200 hover:shadow-xl"
+              title={`Delete ${settings.selectedBoxIds.length} selected boxes`}
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="font-medium">Delete {settings.selectedBoxIds.length} Selected</span>
+            </button>
+          </div>
+        )}
+
+        {/* Global Filters Display - Top Right (when first element is not a text box) */}
+        {layouts.length > 0 && !isFirstElementTextBox() && getFormattedGlobalFilters() && (
+          <div className="absolute top-8 right-8 z-40">
+            <div 
+              className="text-gray-600"
+              style={{
+                fontSize: '22px',
+                fontFamily: 'DM Sans, sans-serif',
+                fontWeight: 'bold',
+                letterSpacing: '-0.01em',
+                lineHeight: '1.2'
+              }}
+            >
+              {getFormattedGlobalFilters()}
+            </div>
+          </div>
+        )}
+
         {/* Layout Rows */}
         {layouts.length > 0 && (
-          <div className="space-y-4" style={{ paddingTop: '80px' }}>
+          <div className="space-y-4" style={{ paddingTop: '16px' }}>
             {layouts.map((layout, rowIndex) => (
               <div
                 key={layout.id}
@@ -660,7 +876,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
 
                   {/* Row Content */}
                   <div className="grid grid-cols-12 gap-2" style={{ height: 'calc(100% - 8px)', overflow: 'visible', minWidth: 0, width: '100%' }}>
-                    {layout.boxes.map((box) => (
+                    {layout.boxes.map((box, boxIndex) => (
                       <ElementBox
                         key={box.id}
                         box={box}
@@ -675,6 +891,13 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                         defaultValueFormat={'none'}
                         settings={settings}
                         onSettingsChange={onSettingsChange}
+                        data={data}
+                        atomId={atomId}
+                        onDeleteBox={handleDeleteBox}
+                        onAddElement={handleAddElement}
+                        boxesInRow={layout.boxes.length}
+                        isFirstElement={rowIndex === 0 && boxIndex === 0}
+                        formattedGlobalFilters={getFormattedGlobalFilters()}
                       />
                     ))}
                   </div>
@@ -758,6 +981,13 @@ interface ElementBoxProps {
   defaultValueFormat?: 'none' | 'thousands' | 'millions' | 'billions' | 'lakhs';
   settings: KPIDashboardSettings;
   onSettingsChange: (settings: Partial<KPIDashboardSettings>) => void;
+  data: KPIDashboardData | null;
+  atomId: string; // CRITICAL: Required for TableElement to work correctly
+  onDeleteBox: (layoutId: string, boxId: string) => void;
+  onAddElement: (layoutId: string, boxId: string, position: 'left' | 'right') => void;
+  boxesInRow: number; // Number of boxes in the current row
+  isFirstElement?: boolean; // Whether this is the first element on the dashboard
+  formattedGlobalFilters?: string | null; // Formatted global filters string
 }
 
 const ElementBox: React.FC<ElementBoxProps> = ({ 
@@ -770,10 +1000,59 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   onSelectElement, 
   onTextBoxUpdate,
   variables = [],
+  isFirstElement = false,
+  formattedGlobalFilters = null,
   defaultValueFormat = 'none',
   settings,
-  onSettingsChange
+  onSettingsChange,
+  data,
+  atomId,
+  onDeleteBox,
+  onAddElement,
+  boxesInRow
 }) => {
+  // Multi-selection handler
+  const handleBoxClick = (e: React.MouseEvent) => {
+    // Don't handle selection if clicking on buttons or inputs
+    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) {
+      return;
+    }
+
+    const selectedBoxIds = settings.selectedBoxIds || [];
+    
+    if (e.ctrlKey || e.metaKey) {
+      // Multi-select mode
+      e.stopPropagation();
+      if (selectedBoxIds.includes(boxId)) {
+        // Deselect
+        const updated = selectedBoxIds.filter(id => id !== boxId);
+        onSettingsChange({ 
+          selectedBoxIds: updated.length > 0 ? updated : undefined,
+          selectedBoxId: settings.selectedBoxId === boxId ? undefined : settings.selectedBoxId
+        });
+      } else {
+        // Add to selection
+        onSettingsChange({ 
+          selectedBoxIds: [...selectedBoxIds, boxId],
+          selectedBoxId: boxId
+        });
+      }
+    } else {
+      // Single select
+      e.stopPropagation();
+      onSettingsChange({ 
+        selectedBoxId: boxId,
+        selectedBoxIds: undefined
+      });
+    }
+  };
+
+  // Check if this box is selected
+  const isSelected = settings.selectedBoxId === boxId;
+  const isMultiSelected = settings.selectedBoxIds?.includes(boxId) || false;
+  const selectionClass = isMultiSelected || isSelected 
+    ? 'ring-2 ring-blue-500 ring-offset-2 bg-blue-50/30' 
+    : '';
   const [isEditMode, setIsEditMode] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showTextBoxToolbar, setShowTextBoxToolbar] = useState(false);
@@ -832,6 +1111,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   // State for variable selection dialog (used for metric cards)
   const [showVariableDialog, setShowVariableDialog] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [variableDialogPosition, setVariableDialogPosition] = useState<{ side: 'right' | 'left'; width: number; top: number }>({ side: 'right', width: 500, top: 0 });
+  const metricCardRef = useRef<HTMLDivElement>(null);
   
   const textRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -845,7 +1126,126 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const imageRef = useRef<HTMLImageElement>(null);
   
+  // Metric card filter state - moved to top level to avoid conditional hook calls
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [identifierOptions, setIdentifierOptions] = useState<Record<string, string[]>>({});
+  const [selectedFilters, setSelectedFilters] = useState<Record<string, string>>({});
+  const [loadingFilters, setLoadingFilters] = useState(false);
+  const [availableVariables, setAvailableVariables] = useState<any[]>([]);
+  // Metric card hover state for showing/hiding editable fields
+  const [isMetricCardHovered, setIsMetricCardHovered] = useState(false);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [isEditingProjectName, setIsEditingProjectName] = useState(false);
+  
+  // Chart filter state - moved to top level to avoid conditional hook calls
+  const [filterEditorOpen, setFilterEditorOpen] = useState(false);
+  const [uniqueValues, setUniqueValues] = useState<Record<string, string[]>>({});
+  const [loadingUniqueValues, setLoadingUniqueValues] = useState(false);
+  const [tempFilters, setTempFilters] = useState<Record<string, string[]>>({});
+  const [expandedIdentifiers, setExpandedIdentifiers] = useState<Record<string, boolean>>({});
+  const [searchTerms, setSearchTerms] = useState<Record<string, string>>({});
+  
   const selectedElement = elementTypes.find(e => e.value === box.elementType);
+  
+  // Calculate dropdown position and size when dialog opens (only for metric-card)
+  useEffect(() => {
+    // Only run this effect for metric-card elements
+    if (box.elementType !== 'metric-card') return;
+    
+    if (showVariableDialog && metricCardRef.current) {
+      const calculatePosition = () => {
+        const cardElement = metricCardRef.current;
+        if (!cardElement) return;
+
+        // Find the canvas container - look for the main canvas wrapper
+        // Start from the card and traverse up to find the canvas container
+        let current: HTMLElement | null = cardElement.parentElement;
+        let canvasContainer: HTMLElement | null = null;
+        
+        // Look for the grid container or layout container
+        while (current && !canvasContainer) {
+          const style = window.getComputedStyle(current);
+          // Check if this is likely the canvas container (has grid or is the main wrapper)
+          if (current.classList.contains('grid') || 
+              current.style.overflow === 'visible' ||
+              current.getAttribute('style')?.includes('overflow: visible')) {
+            canvasContainer = current;
+            break;
+          }
+          current = current.parentElement;
+        }
+        
+        // Fallback to finding the main canvas wrapper or use viewport
+        if (!canvasContainer) {
+          canvasContainer = cardElement.closest('.h-full') as HTMLElement;
+        }
+        if (!canvasContainer) {
+          canvasContainer = document.body;
+        }
+
+        const cardRect = cardElement.getBoundingClientRect();
+        const containerRect = canvasContainer.getBoundingClientRect();
+        
+        // Calculate available space to the right and left within the container
+        const spaceRight = containerRect.right - cardRect.right - 16; // 16px margin
+        const spaceLeft = cardRect.left - containerRect.left - 16; // 16px margin
+        
+        // Preferred width
+        const preferredWidth = 500;
+        const minWidth = 350;
+        const maxWidth = 600;
+        
+        let side: 'right' | 'left' = 'right';
+        let width = preferredWidth;
+        
+        // Check if we have enough space on the right
+        if (spaceRight >= minWidth) {
+          side = 'right';
+          width = Math.min(preferredWidth, spaceRight, maxWidth);
+        } else if (spaceLeft >= minWidth) {
+          // Use left side if right doesn't have enough space
+          side = 'left';
+          width = Math.min(preferredWidth, spaceLeft, maxWidth);
+        } else {
+          // Use whichever side has more space, but constrain to available
+          if (spaceRight >= spaceLeft && spaceRight > 0) {
+            side = 'right';
+            width = Math.max(minWidth, Math.min(preferredWidth, spaceRight));
+          } else if (spaceLeft > 0) {
+            side = 'left';
+            width = Math.max(minWidth, Math.min(preferredWidth, spaceLeft));
+          } else {
+            // If no space on either side, use minimum width and prefer right
+            side = 'right';
+            width = minWidth;
+          }
+        }
+
+        // Calculate top position (align with card top)
+        const top = 0;
+
+        setVariableDialogPosition({ side, width, top });
+      };
+
+      // Use requestAnimationFrame to ensure DOM is updated
+      const timeoutId = setTimeout(() => {
+        requestAnimationFrame(calculatePosition);
+      }, 0);
+
+      // Recalculate on window resize and scroll
+      window.addEventListener('resize', calculatePosition);
+      window.addEventListener('scroll', calculatePosition, true);
+
+      return () => {
+        clearTimeout(timeoutId);
+        window.removeEventListener('resize', calculatePosition);
+        window.removeEventListener('scroll', calculatePosition, true);
+      };
+    } else {
+      // Reset position when dialog closes
+      setVariableDialogPosition({ side: 'right', width: 500, top: 0 });
+    }
+  }, [showVariableDialog, box.elementType]);
   
   // Track cursor position and update current style
   const updateCursorStyleFromSelection = () => {
@@ -1147,6 +1547,263 @@ const ElementBox: React.FC<ElementBoxProps> = ({
     };
   }, [isResizing, resizeStart, layoutId, boxId, onTextBoxUpdate, box.elementType]);
 
+  // Fetch filter options for metric cards when variable is selected or filter menu opens
+  useEffect(() => {
+    // Only run for metric cards
+    if (box.elementType !== 'metric-card') {
+      return;
+    }
+
+    const variableKey = box.variableNameKey || box.variableName;
+    
+    if (!variableKey) {
+      setIdentifierOptions({});
+      setSelectedFilters({});
+      setAvailableVariables([]);
+      return;
+    }
+    
+    // Fetch options when variable is available (will be used when menu opens)
+    
+    const fetchVariableOptions = async () => {
+      setLoadingFilters(true);
+      try {
+        const projectContext = getActiveProjectContext();
+        if (!projectContext) return;
+
+        const params = new URLSearchParams({
+          clientId: projectContext.client_name,
+          appId: projectContext.app_name,
+          projectId: projectContext.project_name,
+        });
+
+        const response = await fetch(`${LABORATORY_API}/variables?${params.toString()}`, {
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.variables && Array.isArray(result.variables)) {
+            const currentKey = box.variableNameKey || box.variableName || '';
+            const currentKeyParts = currentKey.split('_');
+            const basePattern = currentKeyParts.slice(0, 2).join('_');
+            
+            const relatedVariables = result.variables.filter((v: any) => {
+              const vKey = v.variableNameKey || v.variableName;
+              if (!vKey) return false;
+              return vKey.startsWith(basePattern + '_') || vKey === basePattern;
+            });
+            
+            setAvailableVariables(relatedVariables);
+            
+            // Parse identifiers from current variable
+            const currentVariableIdentifiers: Set<string> = new Set();
+            if (currentKey) {
+              const parts = currentKey.split('_');
+              const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+              
+              let i = 2;
+              while (i < parts.length) {
+                const key = parts[i].toLowerCase();
+                if (identifierTypes.includes(key) && i + 1 < parts.length) {
+                  currentVariableIdentifiers.add(key);
+                  let nextIndex = i + 2;
+                  while (nextIndex < parts.length) {
+                    const nextPart = parts[nextIndex].toLowerCase();
+                    if (!identifierTypes.includes(nextPart)) {
+                      nextIndex++;
+                    } else {
+                      break;
+                    }
+                  }
+                  i = nextIndex;
+                } else {
+                  i++;
+                }
+              }
+            }
+            
+            // Parse identifier values from all related variables
+            const identifierMap: Record<string, Set<string>> = {};
+            relatedVariables.forEach((v: any) => {
+              const vKey = v.variableNameKey || v.variableName;
+              if (vKey) {
+                const parts = vKey.split('_');
+                const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+                
+                let i = 2;
+                while (i < parts.length) {
+                  const key = parts[i].toLowerCase();
+                  if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
+                    let value = parts[i + 1];
+                    let nextIndex = i + 2;
+                    while (nextIndex < parts.length) {
+                      const nextPart = parts[nextIndex].toLowerCase();
+                      if (!identifierTypes.includes(nextPart)) {
+                        value += '_' + parts[nextIndex];
+                        nextIndex++;
+                      } else {
+                        break;
+                      }
+                    }
+                    if (!identifierMap[key]) {
+                      identifierMap[key] = new Set();
+                    }
+                    identifierMap[key].add(value);
+                    i = nextIndex;
+                  } else {
+                    i++;
+                  }
+                }
+              }
+            });
+            
+            const options: Record<string, string[]> = {};
+            currentVariableIdentifiers.forEach(key => {
+              if (identifierMap[key]) {
+                options[key] = Array.from(identifierMap[key]).sort();
+              }
+            });
+            
+            setIdentifierOptions(options);
+            
+            // Set initial filter values from current variable
+            if (currentKey) {
+              const parts = currentKey.split('_');
+              const currentFilters: Record<string, string> = {};
+              const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+              
+              let i = 2;
+              while (i < parts.length) {
+                const key = parts[i].toLowerCase();
+                if (identifierTypes.includes(key) && currentVariableIdentifiers.has(key) && i + 1 < parts.length) {
+                  let value = parts[i + 1];
+                  let nextIndex = i + 2;
+                  while (nextIndex < parts.length) {
+                    const nextPart = parts[nextIndex].toLowerCase();
+                    if (!identifierTypes.includes(nextPart)) {
+                      value += '_' + parts[nextIndex];
+                      nextIndex++;
+                    } else {
+                      break;
+                    }
+                  }
+                  if (options[key]) {
+                    currentFilters[key] = value;
+                  }
+                  i = nextIndex;
+                } else {
+                  i++;
+                }
+              }
+              setSelectedFilters(currentFilters);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch variable options:', error);
+      } finally {
+        setLoadingFilters(false);
+      }
+    };
+
+    fetchVariableOptions();
+  }, [box.elementType, box.variableNameKey, box.variableName, filterMenuOpen]);
+
+  // Fetch unique values for chart filter columns
+  useEffect(() => {
+    // Only run for charts
+    if (box.elementType !== 'chart') {
+      return;
+    }
+
+    if (!filterEditorOpen) return;
+
+    // Parse chartConfig if it's a string (from MongoDB)
+    let chartConfig: any = undefined;
+    if (box.chartConfig) {
+      if (typeof box.chartConfig === 'string') {
+        try {
+          chartConfig = JSON.parse(box.chartConfig);
+        } catch (e) {
+          console.error('Failed to parse chartConfig:', e);
+          return;
+        }
+      } else {
+        chartConfig = box.chartConfig;
+      }
+    }
+
+    if (!chartConfig || !data) return;
+
+    const fetchUniqueValues = async () => {
+      setLoadingUniqueValues(true);
+      try {
+        const dataSource = (settings as any).selectedFile || (settings as any).dataSource;
+        let objectName = dataSource || data.fileName;
+        
+        if (!objectName) {
+          setLoadingUniqueValues(false);
+          return;
+        }
+
+        if (!objectName.endsWith('.arrow')) {
+          objectName += '.arrow';
+        }
+
+        const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
+        const fileId = uploadResponse.file_id;
+
+        // Get all columns
+        const allColumnsResponse = await chartMakerApi.getAllColumns(fileId);
+        const allColumns = allColumnsResponse.columns || [];
+
+        // Get unique values for all columns
+        const uniqueValuesResponse = await chartMakerApi.getUniqueValues(fileId, allColumns);
+        setUniqueValues(uniqueValuesResponse.values || {});
+      } catch (error) {
+        console.error('Error fetching unique values:', error);
+      } finally {
+        setLoadingUniqueValues(false);
+      }
+    };
+
+    fetchUniqueValues();
+    
+    // Initialize temp filters with current filters
+    const chartFilters = chartConfig?.filters || {};
+    const currentFilters: Record<string, string[]> = {};
+    Object.entries(chartFilters).forEach(([key, values]) => {
+      currentFilters[key] = Array.isArray(values) ? values : [values];
+    });
+    setTempFilters(currentFilters);
+  }, [box.elementType, box.chartConfig, filterEditorOpen, data, settings]);
+
+  // Initialize expanded state for first few identifiers when filter editor opens
+  useEffect(() => {
+    if (!filterEditorOpen || box.elementType !== 'chart' || !data) return;
+    
+    const getFilterableColumns = () => {
+      if (!data || !data.headers) return [];
+      const chartConfig = box.chartConfig ? (typeof box.chartConfig === 'string' ? JSON.parse(box.chartConfig) : box.chartConfig) : null;
+      if (!chartConfig) return [];
+      const xAxis = chartConfig?.xAxis;
+      const yAxis = chartConfig?.yAxis;
+      return (data.headers as string[]).filter((col: string) => col !== xAxis && col !== yAxis);
+    };
+    
+    const filterableColumns = getFilterableColumns();
+    const newExpanded: Record<string, boolean> = {};
+    filterableColumns.slice(0, 3).forEach(col => {
+      if (expandedIdentifiers[col] === undefined) {
+        newExpanded[col] = true;
+      }
+    });
+    if (Object.keys(newExpanded).length > 0) {
+      setExpandedIdentifiers(prev => ({ ...prev, ...newExpanded }));
+    }
+  }, [filterEditorOpen, box.elementType, box.chartConfig, data, expandedIdentifiers]);
+
   // If element is selected and NOT in edit mode, show the full element
   if (box.elementType && !isEditMode) {
     // Special handling for text-box - show editable interface with full toolbar
@@ -1187,12 +1844,24 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       if (box.isTextSaved) {
         return (
           <div 
-            className="relative group/box" 
-            style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
+            className={`relative group/box ${selectionClass}`}
+            style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' }}
             onDoubleClick={handleEdit}
-            title="Double-click to edit"
+            onClick={handleBoxClick}
+            title="Double-click to edit, Ctrl+Click to multi-select"
           >
-            <div className="relative w-full h-full rounded-xl overflow-hidden bg-white">
+            {/* Three-dots menu - visible on hover */}
+            <ElementMenuDropdown
+              elementTypes={elementTypes}
+              onElementChange={handleElementChange}
+              boxId={boxId}
+              layoutId={layoutId}
+              onDeleteBox={onDeleteBox}
+              onAddElement={onAddElement}
+              selectedBoxIds={settings.selectedBoxIds}
+              boxesInRow={boxesInRow}
+            />
+            <div className="relative w-full flex-1 rounded-xl overflow-hidden bg-white">
               {/* Display formatted text only - no borders, no headers */}
               <div 
                 className="w-full h-full p-4 overflow-auto cursor-pointer hover:bg-gray-50/50 transition-colors"
@@ -1213,6 +1882,23 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                 dangerouslySetInnerHTML={{ __html: box.text || 'No text entered' }}
               />
             </div>
+            {/* Global Filters Display - Below Text Box on Right (when first element) */}
+            {isFirstElement && formattedGlobalFilters && (
+              <div className="w-full flex justify-end mt-2 pr-4">
+                <div 
+                  className="text-gray-600"
+                  style={{
+                    fontSize: '22px',
+                    fontFamily: 'DM Sans, sans-serif',
+                    fontWeight: 'bold',
+                    letterSpacing: '-0.01em',
+                    lineHeight: '1.2'
+                  }}
+                >
+                  {formattedGlobalFilters}
+                </div>
+              </div>
+            )}
           </div>
         );
       }
@@ -1313,9 +1999,21 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       
       return (
         <div 
-          className="relative group/box" 
-          style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
+          className={`relative group/box ${selectionClass}`}
+          onClick={handleBoxClick} 
+          style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' }}
         >
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
           {/* Toolbar - visible only when text box is focused */}
           {showTextBoxToolbar && (
             <div className="absolute left-0 right-0 flex items-center gap-2 bg-white rounded-lg shadow-2xl p-2 border border-gray-200" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
@@ -1372,15 +2070,18 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           )}
           
           {/* Text box ONLY - no border, completely separate from toolbar */}
-          <div className="w-full h-full rounded-xl overflow-hidden bg-white relative">
+          <div className="w-full flex-1 rounded-xl overflow-hidden bg-white relative">
             {/* Custom formatted placeholder - only showing Header and Sub-Header styles */}
             {(!box.text || box.text === '') && (
               <div className="absolute inset-0 p-4 pointer-events-none">
                 <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#111827', fontFamily: 'DM Sans', marginBottom: '4px', letterSpacing: '-0.02em', lineHeight: '1.1' }}>
-                  Click Header to apply this style
+                  For your title, select Header in the formatting options
                 </div>
                 <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#111827', fontFamily: 'DM Sans', marginBottom: '6px', letterSpacing: '-0.01em', lineHeight: '1.2' }}>
-                  Click Sub-Header to apply this style
+                  If you want a sub-header, select Sub Header in the options
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: 'normal', color: '#6B7280', fontFamily: 'DM Sans', letterSpacing: '-0.01em', lineHeight: '1.5' }}>
+                  For your primary context, select Paragraph. And yes, these are the only 3 font size options for now.
                 </div>
               </div>
             )}
@@ -1459,6 +2160,23 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               suppressContentEditableWarning
             />
           </div>
+          {/* Global Filters Display - Below Text Box on Right (when first element) */}
+          {isFirstElement && formattedGlobalFilters && (
+            <div className="w-full flex justify-end mt-2 pr-4">
+              <div 
+                className="text-gray-600"
+                style={{
+                  fontSize: '22px',
+                  fontFamily: 'DM Sans, sans-serif',
+                  fontWeight: 'bold',
+                  letterSpacing: '-0.01em',
+                  lineHeight: '1.2'
+                }}
+              >
+                {formattedGlobalFilters}
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -1636,7 +2354,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       if (isInsightsSaved) {
         return (
           <div 
-            className="relative group/box" 
+            className={`relative group/box ${selectionClass}`}
+          onClick={handleBoxClick} 
             style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
             onDoubleClick={handleEditInsights}
             title="Double-click to edit"
@@ -1685,6 +2404,17 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           className="relative group/box flex flex-col gap-3" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
 
           {/* Toolbar - visible only when content is focused */}
           {showInsightsToolbar && (
@@ -1770,14 +2500,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
           {/* Insights Panel Card */}
           <div className="relative w-full flex-1" style={{ minHeight: 0 }}>
-            {/* Change button (top right corner) */}
-            <button
-              onClick={handleDoubleClick}
-              className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-            >
-              Change
-            </button>
-
             <div 
               className="w-full h-full rounded-xl overflow-hidden p-6 shadow-lg border-2 border-blue-300"
               style={{
@@ -2230,7 +2952,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       if (isBlock1Saved && isBlock2Saved) {
         return (
           <div 
-            className="relative group/box" 
+            className={`relative group/box ${selectionClass}`}
+          onClick={handleBoxClick} 
             style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
             onDoubleClick={() => {
               handleEditBlock1();
@@ -2238,6 +2961,17 @@ const ElementBox: React.FC<ElementBoxProps> = ({
             }}
             title="Double-click to edit"
           >
+            {/* Three-dots menu - visible on hover */}
+            <ElementMenuDropdown
+              elementTypes={elementTypes}
+              onElementChange={handleElementChange}
+              boxId={boxId}
+              layoutId={layoutId}
+              onDeleteBox={onDeleteBox}
+              onAddElement={onAddElement}
+              selectedBoxIds={settings.selectedBoxIds}
+              boxesInRow={boxesInRow}
+            />
             <div className="flex gap-4 h-full">
               {/* Box 1 - Key Drivers */}
               <div 
@@ -2311,6 +3045,17 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           className="relative group/box flex flex-col gap-3" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
           {/* Toolbars for both boxes */}
           {showInteractiveBlock1Toolbar && (
             <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
@@ -2474,12 +3219,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           <div className="flex gap-4 h-full">
             {/* Box 1 - Key Drivers */}
             <div className="relative flex-1" style={{ minHeight: 0 }}>
-              <button
-                onClick={handleDoubleClick}
-                className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-green-600 hover:bg-green-50 transition-colors"
-              >
-                Change
-              </button>
               <div 
                 className="w-full h-full rounded-xl overflow-hidden p-6 shadow-lg border-2 border-green-300"
                 style={{ background: block1Background }}
@@ -2669,12 +3408,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
             {/* Box 2 - Opportunities/Actions */}
             <div className="relative flex-1" style={{ minHeight: 0 }}>
-              <button
-                onClick={handleDoubleClick}
-                className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-yellow-600 hover:bg-yellow-50 transition-colors"
-              >
-                Change
-              </button>
               <div 
                 className="w-full h-full rounded-xl overflow-hidden p-6 shadow-lg border-2 border-yellow-300"
                 style={{ background: block2Background }}
@@ -2927,16 +3660,21 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Single container with both Question and Answer sections (always editable)
       return (
         <div 
-          className="relative group/box" 
+          className={`relative group/box ${selectionClass}`}
+          onClick={handleBoxClick} 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
-          {/* Change button (top right corner) */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-purple-600 hover:bg-purple-50 transition-colors"
-          >
-            Change
-          </button>
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
 
           {/* Toolbar - only show when a field is active */}
           {activeQAField && (
@@ -3504,6 +4242,17 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           className="relative group/box flex flex-col gap-3" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
           {/* Toolbar */}
           {showInsightsToolbar && (
             <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
@@ -3699,9 +4448,85 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       const metricLabel = hasVariable 
         ? (box.metricLabel || box.variableName || 'BRAND VALUE')
         : 'Please select a variable to show its metric value..';
-      const metricValue = hasVariable 
+      
+      // Check if variable matches current global filters
+      let metricValue = hasVariable 
         ? (box.metricValue || box.value || '0')
         : '';
+      
+      // If variable exists, check if it matches current global filters
+      // Only check if element interaction is 'apply' (default) - ignore 'ignore' and 'not-apply' modes
+      const elementInteraction = settings.elementInteractions?.[boxId] || 'apply';
+      if (hasVariable && (box.variableNameKey || box.variableName) && elementInteraction === 'apply') {
+        const variableKey = box.variableNameKey || box.variableName || '';
+        const globalFilters = settings.globalFilters || {};
+        const enabledIdentifiers = settings.enabledGlobalFilterIdentifiers || [];
+        
+        // Parse identifiers from variable key
+        const parseIdentifiersFromKey = (vKey: string): Record<string, string> => {
+          const parts = vKey.split('_');
+          const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+          const vIdentifiers: Record<string, string> = {};
+          
+          let i = 2; // Skip first 2 parts (measure and aggregation)
+          while (i < parts.length) {
+            const key = parts[i]?.toLowerCase();
+            if (identifierTypes.includes(key) && i + 1 < parts.length) {
+              let val = parts[i + 1];
+              let nextIndex = i + 2;
+              
+              while (nextIndex < parts.length) {
+                const nextPart = parts[nextIndex]?.toLowerCase();
+                if (!identifierTypes.includes(nextPart)) {
+                  val += '_' + parts[nextIndex];
+                  nextIndex++;
+                } else {
+                  break;
+                }
+              }
+              
+              vIdentifiers[key] = val;
+              i = nextIndex;
+            } else {
+              i++;
+            }
+          }
+          
+          return vIdentifiers;
+        };
+        
+        const variableIdentifiers = parseIdentifiersFromKey(variableKey);
+        
+        // Check if variable matches all active global filters
+        // Only check enabled identifiers (or all if none are enabled)
+        const identifiersToCheck = enabledIdentifiers.length > 0 
+          ? enabledIdentifiers.map(id => id.toLowerCase())
+          : Object.keys(globalFilters).map(id => id.toLowerCase());
+        
+        // Check if any active global filter doesn't match the variable
+        let variableMatchesFilters = true;
+        
+        for (const identifier of identifiersToCheck) {
+          const filterConfig = globalFilters[identifier];
+          if (filterConfig && filterConfig.values && filterConfig.values.length > 0 && !filterConfig.values.includes('__all__')) {
+            // This identifier has an active global filter
+            const filterValue = filterConfig.values[0];
+            const variableValue = variableIdentifiers[identifier];
+            
+            // If variable doesn't have this identifier or value doesn't match, it's invalid
+            if (!variableValue || variableValue !== filterValue) {
+              variableMatchesFilters = false;
+              break;
+            }
+          }
+        }
+        
+        // If variable doesn't match filters, show "-"
+        if (!variableMatchesFilters) {
+          metricValue = '-';
+        }
+      }
+      
       const metricUnit = box.metricUnit || '';
       const changeValue = box.changeValue || 0;
       const changeType = box.changeType || 'positive';
@@ -3752,8 +4577,10 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       };
       
       // Format value with unit and format
-      const formattedValue = formatNumber(metricValue, valueFormat);
-      const displayValue = metricUnit ? `${formattedValue}${metricUnit}` : formattedValue;
+      // If metricValue is "-", display it directly without formatting
+      const displayValue = metricValue === '-' 
+        ? '-' 
+        : (metricUnit ? `${formatNumber(metricValue, valueFormat)}${metricUnit}` : formatNumber(metricValue, valueFormat));
       
       // Format change percentage
       const changePercentage = changeValue > 0 ? `+${changeValue}%` : `${changeValue}%`;
@@ -3806,7 +4633,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           metricValue: variable.value || '0',
           value: variable.value,
           formula: variable.formula,
-          description: variable.description,
+          // DO NOT auto-populate description or projectName - these should only be set by user input
+          // description: variable.description, // REMOVED - never auto-populate
           usageSummary: variable.usageSummary,
           cardId: variable.cardId,
           atomId: variable.atomId,
@@ -3815,7 +4643,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           clientId: variable.clientId,
           appId: variable.appId,
           projectId: variable.projectId,
-          projectName: variable.projectName,
+          // projectName: variable.projectName, // REMOVED - never auto-populate
           createdAt: variable.createdAt,
           updatedAt: variable.updatedAt,
         });
@@ -3835,47 +4663,319 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) {
           return;
         }
-        e.stopPropagation();
-        onSettingsChange({ selectedBoxId: boxId });
+        // Use the common multi-selection handler
+        handleBoxClick(e);
+      };
+
+      // Find matching variable based on selected filters
+      const findMatchingVariable = (filters: Record<string, string>) => {
+        const activeFilters = Object.entries(filters).filter(([_, val]) => val !== '');
+        if (activeFilters.length === 0) return null;
+        
+        const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+        
+        return availableVariables.find((v: any) => {
+          const vKey = v.variableNameKey || v.variableName;
+          if (!vKey) return false;
+          const parts = vKey.split('_');
+          const varIdentifiers: Record<string, string> = {};
+          
+          let i = 2;
+          while (i < parts.length) {
+            const key = parts[i].toLowerCase();
+            if (identifierTypes.includes(key) && i + 1 < parts.length) {
+              let value = parts[i + 1];
+              let nextIndex = i + 2;
+              while (nextIndex < parts.length) {
+                const nextPart = parts[nextIndex].toLowerCase();
+                if (!identifierTypes.includes(nextPart)) {
+                  value += '_' + parts[nextIndex];
+                  nextIndex++;
+                } else {
+                  break;
+                }
+              }
+              if (identifierOptions[key]) {
+                varIdentifiers[key] = value;
+              }
+              i = nextIndex;
+            } else {
+              i++;
+            }
+          }
+          
+          const allMatch = activeFilters.every(([key, val]) => varIdentifiers[key] === val);
+          return allMatch;
+        });
+      };
+
+      // Handle filter change
+      const handleFilterChange = (identifier: string, value: string) => {
+        const filterValue = value === '__all__' ? '' : value;
+        const newFilters = { ...selectedFilters, [identifier]: filterValue };
+        setSelectedFilters(newFilters);
+        
+        const matchingVar = findMatchingVariable(newFilters);
+        if (matchingVar) {
+          onTextBoxUpdate(layoutId, boxId, {
+            variableId: matchingVar.id,
+            variableName: matchingVar.variableName,
+            variableNameKey: matchingVar.variableNameKey || matchingVar.variableName,
+            metricValue: matchingVar.value || '0',
+            value: matchingVar.value,
+            metricLabel: box.metricLabel || matchingVar.variableName,
+          });
+        }
       };
 
       return (
         <div 
-          className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
+          className={`relative group/box ${selectionClass}`}
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleMetricCardClick}
         >
-          {/* Change button - visible on hover */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-yellow-600 hover:bg-yellow-50 transition-opacity opacity-0 group-hover/box:opacity-100"
-          >
-            Change
-          </button>
+          {/* Three-dots menu - visible on hover */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-2 right-2 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center"
+                title="More options"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                  Change Element
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-48">
+                  {elementTypes.map((element) => {
+                    const Icon = element.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={element.value}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleElementChange(element.value);
+                        }}
+                        className="flex items-center gap-2"
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span>{element.label}</span>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAddVariableClick(e as any); }}>
+                {(!box.variableId && !box.variableNameKey) ? (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Variable
+                  </>
+                ) : (
+                  <>
+                    Change Variable
+                  </>
+                )}
+              </DropdownMenuItem>
+              {hasVariable && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSub onOpenChange={(open) => setFilterMenuOpen(open)}>
+                    <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                      <Filter className="w-4 h-4 mr-2" />
+                      Filter by Identifiers
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-64">
+                      {loadingFilters ? (
+                        <div className="p-3 text-center text-xs text-gray-500">
+                          Loading filter options...
+                        </div>
+                      ) : Object.keys(identifierOptions).length > 0 ? (
+                        Object.keys(identifierOptions).map((identifier) => {
+                          const options = identifierOptions[identifier] || [];
+                          const currentValue = selectedFilters[identifier] || '__all__';
+                          
+                          return (
+                            <DropdownMenuSub key={identifier}>
+                              <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                                <span className="capitalize">{identifier.replace(/_/g, ' ')}</span>
+                                {currentValue !== '__all__' && (
+                                  <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                                    {String(currentValue).replace(/_/g, ' ')}
+                                  </span>
+                                )}
+                              </DropdownMenuSubTrigger>
+                              <DropdownMenuSubContent className="w-56">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleFilterChange(identifier, '__all__');
+                                  }}
+                                  className={currentValue === '__all__' ? 'bg-blue-50' : ''}
+                                >
+                                  <span className="text-xs">All {identifier}s</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                {options.map((value) => (
+                                  <DropdownMenuItem
+                                    key={value}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleFilterChange(identifier, value);
+                                    }}
+                                    className={currentValue === value ? 'bg-blue-50' : ''}
+                                  >
+                                    <span className="text-xs">{String(value).replace(/_/g, ' ')}</span>
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuSubContent>
+                            </DropdownMenuSub>
+                          );
+                        })
+                      ) : (
+                        <div className="p-3 text-center text-xs text-gray-500">
+                          No identifier filters available
+                        </div>
+                      )}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                </>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Element
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-48">
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddElement(layoutId, boxId, 'left');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Add to the Left</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddElement(layoutId, boxId, 'right');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                    <span>Add to the Right</span>
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteBox(layoutId, boxId);
+                }}
+                className="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          {/* Add/Change Variable button - visible on hover */}
-          {(!box.variableId && !box.variableNameKey) ? (
-            <button
-              onClick={handleAddVariableClick}
-              className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg shadow-md text-xs font-medium transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center gap-1"
+          {/* Edit Interactions Controls - visible when Edit Interactions mode is enabled */}
+          {settings.editInteractionsMode && (
+            <div 
+              className="absolute top-2 left-2 z-30 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-300 p-1"
+              onClick={(e) => e.stopPropagation()}
             >
-              <Plus className="w-3 h-3" />
-              Add Variable
-            </button>
-          ) : (
-            <button
-              onClick={handleAddVariableClick}
-              className="absolute top-2 left-2 z-20 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg shadow-md text-xs font-medium transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center gap-1"
-            >
-              Change Variable
-            </button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const currentInteraction = settings.elementInteractions?.[boxId] || 'apply';
+                        const newInteraction = currentInteraction === 'apply' ? 'not-apply' : currentInteraction === 'not-apply' ? 'ignore' : 'apply';
+                        onSettingsChange({
+                          elementInteractions: {
+                            ...(settings.elementInteractions || {}),
+                            [boxId]: newInteraction
+                          }
+                        });
+                      }}
+                      className={`p-1.5 rounded transition-colors ${
+                        (settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                          ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                          ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply' ? (
+                        <Filter className="w-4 h-4" />
+                      ) : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply' ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Minus className="w-4 h-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-xs">
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                        ? 'Filters apply (click to change)'
+                        : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                        ? 'Filters don\'t apply (click to change)'
+                        : 'Filters ignored (click to change)'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
           )}
 
           {/* Metric Card */}
-          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-yellow-200 shadow-lg p-6 flex flex-col justify-between relative" style={{ minWidth: 0, minHeight: 0 }}>
-            {/* Variable Selection - Show inside the box */}
+          <div 
+            ref={metricCardRef}
+            className={`w-full h-full rounded-xl bg-white border-2 border-yellow-200 shadow-lg p-6 flex flex-col justify-between relative ${showVariableDialog ? 'overflow-visible' : 'overflow-hidden'}`} 
+            style={{ 
+              minWidth: 0, 
+              minHeight: 0,
+              zIndex: showVariableDialog ? 9998 : 'auto'
+            }}
+            onMouseEnter={(e) => {
+              // Only set hover if we're actually entering the card (not bubbling from children)
+              if (e.currentTarget === e.target || e.currentTarget.contains(e.target as Node)) {
+                setIsMetricCardHovered(true);
+              }
+            }}
+            onMouseLeave={(e) => {
+              // Only clear hover if we're actually leaving the card (not moving to a child)
+              const relatedTarget = e.relatedTarget as Node | null;
+              if (!metricCardRef.current?.contains(relatedTarget)) {
+                setIsMetricCardHovered(false);
+              }
+            }}
+          >
+            {/* Variable Selection - Positioned beside the box within canvas */}
             {showVariableDialog && (
-              <div className="absolute inset-0 z-30 bg-white rounded-xl p-4 flex flex-col">
+              <div 
+                className={`absolute top-0 bg-white rounded-xl p-4 flex flex-col shadow-2xl border-2 border-gray-300 ${variableDialogPosition.side === 'right' ? 'left-full ml-2' : 'right-full mr-2'}`}
+                style={{ 
+                  width: `${variableDialogPosition.width}px`, 
+                  height: '100%', 
+                  minHeight: '300px', 
+                  maxHeight: '600px',
+                  top: `${variableDialogPosition.top}px`,
+                  zIndex: 9999
+                }}
+              >
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-800">Select Variable</h3>
                   <button
@@ -3912,7 +5012,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                           onClick={() => handleSelectVariable(variable)}
                           className="p-4 bg-gray-50 hover:bg-yellow-50 border border-gray-200 rounded-lg cursor-pointer transition-colors"
                         >
-                          <div className="font-semibold text-sm text-gray-800">
+                          <div className="font-semibold text-sm text-gray-800 break-words">
                             {variable.variableName}
                           </div>
                           {variable.value && (
@@ -3921,7 +5021,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                             </div>
                           )}
                           {variable.description && (
-                            <div className="text-xs text-gray-500 mt-1">
+                            <div className="text-xs text-gray-500 mt-1 break-words">
                               {variable.description}
                             </div>
                           )}
@@ -3945,24 +5045,116 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     style={{ fontSize: '18px', fontWeight: 'bold', minWidth: 0, width: '100%' }}
                     placeholder="BRAND VALUE"
                   />
-                  <input
-                    type="text"
-                    value={box.description || ''}
-                    onChange={(e) => onTextBoxUpdate(layoutId, boxId, { description: e.target.value })}
-                    className="w-full outline-none bg-transparent border-none text-xs text-gray-500"
-                    style={{ minWidth: 0, width: '100%' }}
-                    placeholder="(In Cr)"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <input
-                    type="text"
-                    value={box.projectName || ''}
-                    onChange={(e) => onTextBoxUpdate(layoutId, boxId, { projectName: e.target.value })}
-                    className="w-full outline-none bg-transparent border-none text-xs text-gray-400 mt-1"
-                    style={{ minWidth: 0, width: '100%' }}
-                    placeholder="MAT (Project Name)"
-                    onClick={(e) => e.stopPropagation()}
-                  />
+                  {/* Description and Project Name fields */}
+                  {/* Placeholder text that should never be saved */}
+                  {(() => {
+                    const PLACEHOLDER_TEXT = 'Additional information…';
+                    
+                    // Helper to check if a value is empty or placeholder
+                    const isEmptyOrPlaceholder = (value: string | undefined | null): boolean => {
+                      if (!value) return true;
+                      const trimmed = value.trim();
+                      return trimmed === '' || trimmed === PLACEHOLDER_TEXT;
+                    };
+                    
+                    // Check if fields have real user-entered content (not placeholder)
+                    const hasDescription = box.description && !isEmptyOrPlaceholder(box.description);
+                    const hasProjectName = box.projectName && !isEmptyOrPlaceholder(box.projectName);
+                    
+                    // Show fields container if: hovering, editing, OR if any field has content
+                    const shouldShowFieldsContainer = isMetricCardHovered || isEditingDescription || isEditingProjectName || hasDescription || hasProjectName;
+                    
+                    if (shouldShowFieldsContainer) {
+                      return (
+                        <>
+                          {/* Description field - Show if hovering, editing, OR has content */}
+                          {(isMetricCardHovered || isEditingDescription || hasDescription) && (
+                            <input
+                              type="text"
+                              value={isEmptyOrPlaceholder(box.description) ? '' : (box.description || '')}
+                              onChange={(e) => {
+                                let newValue = e.target.value;
+                                // If user types exactly the placeholder, treat as empty
+                                if (newValue.trim() === PLACEHOLDER_TEXT) {
+                                  newValue = '';
+                                }
+                                onTextBoxUpdate(layoutId, boxId, { description: newValue });
+                                // If content is entered, keep editing state active
+                                if (newValue.trim() && newValue.trim() !== PLACEHOLDER_TEXT) {
+                                  setIsEditingDescription(true);
+                                }
+                              }}
+                              onFocus={() => setIsEditingDescription(true)}
+                              onBlur={(e) => {
+                                let value = e.target.value.trim();
+                                // Clear if empty or placeholder text
+                                if (!value || value === PLACEHOLDER_TEXT) {
+                                  value = '';
+                                  onTextBoxUpdate(layoutId, boxId, { description: '' });
+                                  // Clear editing state if not hovering (field will be hidden)
+                                  if (!isMetricCardHovered) {
+                                    setIsEditingDescription(false);
+                                  }
+                                } else {
+                                  // Keep editing state active so field remains visible
+                                  setIsEditingDescription(true);
+                                }
+                              }}
+                              onMouseEnter={() => setIsMetricCardHovered(true)}
+                              className="w-full outline-none bg-transparent border-none text-xs text-gray-500"
+                              style={{ minWidth: 0, width: '100%' }}
+                              placeholder={PLACEHOLDER_TEXT}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
+                          {/* Project Name field - Show if hovering, editing, OR has content */}
+                          {(isMetricCardHovered || isEditingProjectName || hasProjectName) && (
+                            <input
+                              type="text"
+                              value={isEmptyOrPlaceholder(box.projectName) ? '' : (box.projectName || '')}
+                              onChange={(e) => {
+                                let newValue = e.target.value;
+                                // If user types exactly the placeholder, treat as empty
+                                if (newValue.trim() === PLACEHOLDER_TEXT) {
+                                  newValue = '';
+                                }
+                                onTextBoxUpdate(layoutId, boxId, { projectName: newValue });
+                                // If content is entered, keep editing state active
+                                if (newValue.trim() && newValue.trim() !== PLACEHOLDER_TEXT) {
+                                  setIsEditingProjectName(true);
+                                }
+                              }}
+                              onFocus={() => setIsEditingProjectName(true)}
+                              onBlur={(e) => {
+                                let value = e.target.value.trim();
+                                // Clear if empty or placeholder text
+                                if (!value || value === PLACEHOLDER_TEXT) {
+                                  value = '';
+                                  onTextBoxUpdate(layoutId, boxId, { projectName: '' });
+                                  // Clear editing state if not hovering (field will be hidden)
+                                  if (!isMetricCardHovered) {
+                                    setIsEditingProjectName(false);
+                                  }
+                                } else {
+                                  // Keep editing state active so field remains visible
+                                  setIsEditingProjectName(true);
+                                }
+                              }}
+                              onMouseEnter={() => setIsMetricCardHovered(true)}
+                              className="w-full outline-none bg-transparent border-none text-xs text-gray-400 mt-1"
+                              style={{ minWidth: 0, width: '100%' }}
+                              placeholder={PLACEHOLDER_TEXT}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
+                        </>
+                      );
+                    } else {
+                      // Completely hidden when not hovering and both fields are empty
+                      // No placeholder text shown at all
+                      return null;
+                    }
+                  })()}
                   {/* Additional Line - Show if exists */}
                   {box.additionalLine !== undefined && box.additionalLine !== null && (
                     <input
@@ -4079,8 +5271,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         if ((e.target as HTMLElement).closest('.resize-handle')) {
           return;
         }
-        e.stopPropagation();
-        onSettingsChange({ selectedBoxId: boxId });
+        // Use the common multi-selection handler
+        handleBoxClick(e);
       };
 
       const handleImageResizeStart = (e: React.MouseEvent) => {
@@ -4099,17 +5291,21 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
       return (
         <div 
-          className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
+          className={`relative group/box ${selectionClass}`}
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleImageClick}
         >
-          {/* Change button - visible on hover */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-purple-600 hover:bg-purple-50 transition-opacity opacity-0 group-hover/box:opacity-100"
-          >
-            Change
-          </button>
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
 
           <div className="relative w-full h-full rounded-xl overflow-hidden border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-purple-100/50 shadow-md hover:shadow-lg transition-all">
             {imageUrl && imageUrl.trim() !== '' ? (
@@ -4197,27 +5393,433 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Calculate box height: layout height minus padding (about 20px total)
       const boxHeight = Math.max(150, layoutHeight - 20);
 
+      // Handle chart config changes (for series settings, theme, etc.)
+      const handleChartConfigChange = (updatedConfig: any) => {
+        const updatedLayouts = settings.layouts?.map(layout => ({
+          ...layout,
+          boxes: layout.boxes.map(box =>
+            box.id === boxId
+              ? { ...box, chartConfig: updatedConfig }
+              : box
+          )
+        }));
+        onSettingsChange({ layouts: updatedLayouts });
+      };
+
+      // Handle note changes for the chart - store notes per filter combination
+      const handleNoteChange = (note: string, noteHtml?: string, noteFormatting?: any, filterKey?: string) => {
+        // Initialize notesByFilter if it doesn't exist
+        const currentNotesByFilter = (chartConfig as any).notesByFilter || {};
+        
+        // If filterKey is provided, save note per filter combination
+        if (filterKey) {
+          const updatedNotesByFilter = {
+            ...currentNotesByFilter,
+            [filterKey]: {
+              note,
+              ...(noteHtml !== undefined && { noteHtml }),
+              ...(noteFormatting !== undefined && { noteFormatting })
+            }
+          };
+          
+          const updatedChartConfig = {
+            ...chartConfig,
+            notesByFilter: updatedNotesByFilter,
+            // Also keep legacy note fields for backward compatibility (use current filter's note)
+            note: note,
+            ...(noteHtml !== undefined && { noteHtml }),
+            ...(noteFormatting !== undefined && { noteFormatting })
+          };
+          
+          const updatedLayouts = settings.layouts?.map(layout => ({
+            ...layout,
+            boxes: layout.boxes.map(box =>
+              box.id === boxId
+                ? { ...box, chartConfig: updatedChartConfig }
+                : box
+            )
+          }));
+          onSettingsChange({ layouts: updatedLayouts });
+        } else {
+          // Fallback for backward compatibility (no filter key provided)
+          const updatedChartConfig = {
+            ...chartConfig,
+            note,
+            ...(noteHtml !== undefined && { noteHtml }),
+            ...(noteFormatting !== undefined && { noteFormatting })
+          };
+          const updatedLayouts = settings.layouts?.map(layout => ({
+            ...layout,
+            boxes: layout.boxes.map(box =>
+              box.id === boxId
+                ? { ...box, chartConfig: updatedChartConfig }
+                : box
+            )
+          }));
+          onSettingsChange({ layouts: updatedLayouts });
+        }
+      };
+
+      // Extract filters from chart config
+      const chartFilters = chartConfig?.filters || {};
+      const hasFilters = Object.keys(chartFilters).length > 0;
+
+      // Handle filter change
+      const handleFilterChange = async (column: string, values: string[]) => {
+        const newTempFilters = { ...tempFilters, [column]: values };
+        setTempFilters(newTempFilters);
+
+        // Update chart config immediately
+        const updatedChartConfig = {
+          ...chartConfig,
+          filters: newTempFilters
+        };
+
+        // Re-render chart if it's already rendered
+        if (chartConfig?.chartRendered && data) {
+          try {
+            const dataSource = (settings as any).selectedFile || (settings as any).dataSource;
+            let objectName = dataSource || data.fileName;
+            
+            if (!objectName) return;
+
+            if (!objectName.endsWith('.arrow')) {
+              objectName += '.arrow';
+            }
+
+            const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
+            const fileId = uploadResponse.file_id;
+
+            const migratedChart = migrateLegacyChart(updatedChartConfig);
+            if (!validateChart(migratedChart)) return;
+
+            const traces = buildTracesForAPI(migratedChart);
+            const chartRequest = {
+              file_id: fileId,
+              chart_type: migratedChart.type === 'stacked_bar' ? 'bar' : migratedChart.type,
+              traces: traces,
+              title: migratedChart.title,
+              filters: Object.keys(newTempFilters).length > 0 ? newTempFilters : undefined,
+            };
+
+            const chartResponse = await chartMakerApi.generateChart(chartRequest);
+            
+            const finalChartConfig = {
+              ...updatedChartConfig,
+              chartConfig: chartResponse.chart_config,
+              filteredData: chartResponse.chart_config.data,
+              chartRendered: true,
+            };
+
+            const updatedLayouts = settings.layouts?.map(layout => ({
+              ...layout,
+              boxes: layout.boxes.map(box =>
+                box.id === boxId
+                  ? { ...box, chartConfig: finalChartConfig }
+                  : box
+              )
+            }));
+            onSettingsChange({ layouts: updatedLayouts });
+          } catch (error) {
+            console.error('Error updating chart with new filters:', error);
+          }
+        } else {
+          // Just update the config without re-rendering
+          const updatedLayouts = settings.layouts?.map(layout => ({
+            ...layout,
+            boxes: layout.boxes.map(box =>
+              box.id === boxId
+                ? { ...box, chartConfig: updatedChartConfig }
+                : box
+            )
+          }));
+          onSettingsChange({ layouts: updatedLayouts });
+        }
+      };
+
+      // Get available columns for filtering (exclude x and y axes)
+      const getFilterableColumns = (): string[] => {
+        if (!data || !data.headers) return [];
+        const xAxis = chartConfig?.xAxis;
+        const yAxis = chartConfig?.yAxis;
+        return (data.headers as string[]).filter((col: string) => col !== xAxis && col !== yAxis);
+      };
+
       return (
         <div 
-          className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
+          className={`relative group/box ${selectionClass}`}
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleChartClick}
         >
-          {/* Change button - visible on hover */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-yellow-600 hover:bg-yellow-50 transition-opacity opacity-0 group-hover/box:opacity-100"
-          >
-            Change
-          </button>
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
+
+          {/* Edit Interactions Controls - visible when Edit Interactions mode is enabled */}
+          {settings.editInteractionsMode && (
+            <div 
+              className="absolute top-2 left-2 z-30 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-300 p-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const currentInteraction = settings.elementInteractions?.[boxId] || 'apply';
+                        const newInteraction = currentInteraction === 'apply' ? 'not-apply' : currentInteraction === 'not-apply' ? 'ignore' : 'apply';
+                        onSettingsChange({
+                          elementInteractions: {
+                            ...(settings.elementInteractions || {}),
+                            [boxId]: newInteraction
+                          }
+                        });
+                      }}
+                      className={`p-1.5 rounded transition-colors ${
+                        (settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                          ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                          ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply' ? (
+                        <Filter className="w-4 h-4" />
+                      ) : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply' ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Minus className="w-4 h-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-xs">
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                        ? 'Filters apply (click to change)'
+                        : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                        ? 'Filters don\'t apply (click to change)'
+                        : 'Filters ignored (click to change)'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
 
           {/* Chart Container */}
-          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-blue-200 shadow-lg" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-blue-200 shadow-lg relative" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
             <ChartElement 
               chartConfig={chartConfig}
               width={undefined}
               height={boxHeight}
+              onNoteChange={handleNoteChange}
+              onChartConfigChange={handleChartConfigChange}
+              // fileId is optional - ChartElement will handle chart type changes without it if needed
             />
+            
+            {/* Filter Display - positioned between title and chart, on the left */}
+            {(hasFilters || filterEditorOpen) && (
+              <div className="absolute left-2 z-10 opacity-0 group-hover/box:opacity-100 transition-opacity duration-200 pointer-events-none" style={{ top: chartConfig?.title ? '52px' : '8px' }}>
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  {Object.entries(tempFilters.length > 0 ? tempFilters : chartFilters).map(([key, values]) => {
+                    const filterValues = Array.isArray(values) ? values : [values];
+                    return filterValues.length > 0 ? filterValues.map((value, idx) => (
+                      <div
+                        key={`${key}-${idx}`}
+                        className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-xs font-medium text-blue-700"
+                      >
+                        <Filter className="w-3 h-3 text-blue-600" />
+                        <span className="text-blue-600 font-semibold capitalize">{key}:</span>
+                        <span className="text-blue-800">{String(value).replace(/_/g, ' ')}</span>
+                      </div>
+                    )) : null;
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Filter Editor Button - visible on hover, positioned top-right, left of three-dots */}
+            <Popover open={filterEditorOpen} onOpenChange={setFilterEditorOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFilterEditorOpen(true);
+                  }}
+                  className="absolute top-2 right-10 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center pointer-events-auto"
+                  title="Edit Filters"
+                >
+                  <Filter className="w-4 h-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent 
+                className="w-80 max-h-[550px] p-0 flex flex-col" 
+                align="end"
+                onClick={(e) => e.stopPropagation()}
+                onOpenAutoFocus={(e) => e.preventDefault()}
+              >
+                <div className="p-3 border-b flex-shrink-0">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-sm">Chart Filters</h4>
+                    <button
+                      onClick={() => setFilterEditorOpen(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <ScrollArea className="h-[450px]">
+                  <div className="p-3 space-y-2">
+                    {loadingUniqueValues ? (
+                      <div className="text-center py-4 text-sm text-gray-500">
+                        Loading filter options...
+                      </div>
+                    ) : (
+                      (getFilterableColumns() || []).map((column: string) => {
+                        const columnValues = uniqueValues[column] || [];
+                        const selectedValues = tempFilters[column] || [];
+                        const allSelected = columnValues.length > 0 && selectedValues.length === columnValues.length;
+                        const isExpanded = expandedIdentifiers[column] ?? false;
+                        const searchTerm = searchTerms[column] || '';
+                        
+                        // Filter values based on search term
+                        const filteredValues = searchTerm
+                          ? columnValues.filter(value => 
+                              String(value).toLowerCase().includes(searchTerm.toLowerCase())
+                            )
+                          : columnValues;
+
+                        return (
+                          <div key={column} className="border border-gray-200 rounded-lg overflow-hidden">
+                            {/* Header - Clickable to expand/collapse */}
+                            <button
+                              onClick={() => {
+                                setExpandedIdentifiers(prev => ({
+                                  ...prev,
+                                  [column]: !prev[column]
+                                }));
+                              }}
+                              className="w-full flex items-center justify-between p-2.5 bg-gray-50 hover:bg-gray-100 transition-colors"
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <ChevronDown 
+                                  className={`w-4 h-4 text-gray-500 transition-transform flex-shrink-0 ${
+                                    isExpanded ? 'transform rotate-180' : ''
+                                  }`}
+                                />
+                                <Label className="text-sm font-medium capitalize text-left truncate">
+                                  {column.replace(/_/g, ' ')}
+                                </Label>
+                                {selectedValues.length > 0 && (
+                                  <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                                    {selectedValues.length}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <Checkbox
+                                  checked={allSelected}
+                                  onCheckedChange={(checked) => {
+                                    handleFilterChange(column, checked ? columnValues : []);
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <span className="text-xs text-gray-500">
+                                  All
+                                </span>
+                              </div>
+                            </button>
+                            
+                            {/* Collapsible Content */}
+                            {isExpanded && (
+                              <div className="p-2.5 space-y-2 bg-white">
+                                {/* Search Input */}
+                                {columnValues.length > 5 && (
+                                  <div className="relative">
+                                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                    <Input
+                                      type="text"
+                                      placeholder="Search values..."
+                                      value={searchTerm}
+                                      onChange={(e) => {
+                                        setSearchTerms(prev => ({
+                                          ...prev,
+                                          [column]: e.target.value
+                                        }));
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="pl-8 h-8 text-xs"
+                                    />
+                                  </div>
+                                )}
+                                
+                                {/* Values List */}
+                                <div className="space-y-1 max-h-[200px] overflow-y-auto">
+                                  {filteredValues.length === 0 ? (
+                                    <p className="text-xs text-gray-400 text-center py-2">
+                                      {searchTerm ? 'No matching values' : 'No values available'}
+                                    </p>
+                                  ) : (
+                                    filteredValues.map((value) => (
+                                      <div key={value} className="flex items-center space-x-2 py-0.5">
+                                        <Checkbox
+                                          checked={selectedValues.includes(value)}
+                                          onCheckedChange={(checked) => {
+                                            const newValues = checked
+                                              ? [...selectedValues, value]
+                                              : selectedValues.filter((v) => v !== value);
+                                            handleFilterChange(column, newValues);
+                                          }}
+                                        />
+                                        <span className="text-xs text-gray-700">{String(value).replace(/_/g, ' ')}</span>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                    {getFilterableColumns().length === 0 && !loadingUniqueValues && (
+                      <div className="text-center py-4 text-sm text-gray-500">
+                        No filterable columns available
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+                {hasFilters && (
+                  <div className="p-3 border-t bg-gray-50 flex-shrink-0">
+                    <div className="flex flex-wrap gap-1.5">
+                      {Object.entries(tempFilters).map(([key, values]) => {
+                        const filterValues = Array.isArray(values) ? values : [];
+                        if (filterValues.length === 0) return null;
+                        return filterValues.map((value, idx) => (
+                          <div
+                            key={`${key}-${idx}`}
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-xs font-medium text-blue-700"
+                          >
+                            <span className="text-blue-600 font-semibold capitalize">{key}:</span>
+                            <span className="text-blue-800">{String(value).replace(/_/g, ' ')}</span>
+                          </div>
+                        ));
+                      })}
+                    </div>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
       );
@@ -4231,8 +5833,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         if ((e.target as HTMLElement).closest('button')) {
           return;
         }
-        e.stopPropagation();
-        onSettingsChange({ selectedBoxId: boxId });
+        // Use the common multi-selection handler
+        handleBoxClick(e);
       };
 
       // Parse tableSettings if it's a string (from MongoDB)
@@ -4254,7 +5856,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
       // Handle table settings change (for pagination)
       const handleTableSettingsChange = (newSettings: Partial<typeof tableSettings>) => {
-        const updatedLayouts = layouts.map(l => ({
+        const currentLayouts = settings.layouts || [];
+        const updatedLayouts = currentLayouts.map(l => ({
           ...l,
           boxes: l.boxes.map(b =>
             b.id === boxId
@@ -4268,23 +5871,78 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               : b
           )
         }));
-        setLayouts(updatedLayouts);
         onSettingsChange({ layouts: updatedLayouts });
       };
 
       return (
         <div 
-          className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
+          className={`relative group/box ${selectionClass}`}
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleTableClick}
         >
-          {/* Change button - visible on hover */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-yellow-600 hover:bg-yellow-50 transition-opacity opacity-0 group-hover/box:opacity-100"
-          >
-            Change
-          </button>
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
+
+          {/* Edit Interactions Controls - visible when Edit Interactions mode is enabled */}
+          {settings.editInteractionsMode && (
+            <div 
+              className="absolute top-2 left-2 z-30 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-300 p-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const currentInteraction = settings.elementInteractions?.[boxId] || 'apply';
+                        const newInteraction = currentInteraction === 'apply' ? 'not-apply' : currentInteraction === 'not-apply' ? 'ignore' : 'apply';
+                        onSettingsChange({
+                          elementInteractions: {
+                            ...(settings.elementInteractions || {}),
+                            [boxId]: newInteraction
+                          }
+                        });
+                      }}
+                      className={`p-1.5 rounded transition-colors ${
+                        (settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                          ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                          ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply' ? (
+                        <Filter className="w-4 h-4" />
+                      ) : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply' ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Minus className="w-4 h-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-xs">
+                      {(settings.elementInteractions?.[boxId] || 'apply') === 'apply'
+                        ? 'Filters apply (click to change)'
+                        : (settings.elementInteractions?.[boxId] || 'apply') === 'not-apply'
+                        ? 'Filters don\'t apply (click to change)'
+                        : 'Filters ignored (click to change)'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
 
           {/* Table Container */}
           <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-teal-200 shadow-lg" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
@@ -4293,6 +5951,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               width={undefined}
               height={boxHeight}
               onSettingsChange={handleTableSettingsChange}
+              atomId={atomId}
+              boxId={boxId}
             />
           </div>
         </div>
@@ -4302,7 +5962,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
     // For other element types, show the standard renderer
     return (
       <div 
-        className="relative group/box cursor-pointer" 
+        className={`relative group/box cursor-pointer ${selectionClass}`}
+        onClick={handleBoxClick} 
         style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         onDoubleClick={handleDoubleClick}
         title="Double-click to change element"
@@ -4327,7 +5988,11 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
   // Otherwise, show the dropdown (either no element or in edit mode)
   return (
-    <div className="relative group/box" style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}>
+    <div 
+      className={`relative group/box ${selectionClass}`} 
+      style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
+      onClick={handleBoxClick}
+    >
       {/* Ambient glow for selected elements */}
       {box.elementType && (
         <div className="absolute -inset-1 bg-gradient-to-br from-yellow-100/50 to-yellow-50/30 rounded-xl blur-lg opacity-0 group-hover/box:opacity-100 transition-opacity duration-300" />
