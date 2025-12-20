@@ -1175,6 +1175,80 @@ async def rename_column(df_id: str = Body(...), old_name: str = Body(...), new_n
     logger.info(f"✅ [RENAME] After rename - columns: {df.columns}")
     
     SESSIONS[df_id] = df
+    
+    # Persist rename operation to MongoDB for metadata tracking
+    # This ensures info icons show for renamed columns in Data Summary
+    try:
+        # Get session metadata to find object_name
+        session_metadata = await get_session_metadata(df_id, "dataframe")
+        object_name = session_metadata.get("object_name") if session_metadata else None
+        
+        if object_name:
+            # Normalize object_name for consistent storage
+            normalized_object_name = object_name.strip().strip("/")
+            
+            # Extract client/app/project from object_name path
+            path_parts = normalized_object_name.split("/")
+            extracted_client = path_parts[0] if len(path_parts) > 0 else ""
+            extracted_app = path_parts[1] if len(path_parts) > 1 else ""
+            extracted_project = path_parts[2] if len(path_parts) > 2 else ""
+            
+            # Fallback to environment variables if path extraction fails
+            final_client_name = extracted_client or os.getenv("CLIENT_NAME", "")
+            final_app_name = extracted_app or os.getenv("APP_NAME", "")
+            final_project_name = extracted_project or os.getenv("PROJECT_NAME", "")
+            
+            logger.info(
+                f"🔍 [RENAME] Context extraction: "
+                f"object_name='{object_name}' -> normalized='{normalized_object_name}', "
+                f"context=({final_client_name}/{final_app_name}/{final_project_name})"
+            )
+            
+            if final_client_name and final_app_name and final_project_name:
+                # Build rename operation payload
+                operation_payload = {
+                    "input_file": normalized_object_name,
+                    "saved_file": normalized_object_name,
+                    "operations": [{
+                        "operation_type": "rename",
+                        "columns": [old_name.strip()],
+                        "rename": new_name.strip(),
+                        "param": None,
+                    }],
+                    "file_columns": list(df.columns),
+                    "file_shape": [df.height, df.width],
+                    "client_name": final_client_name,
+                    "app_name": final_app_name,
+                    "project_name": final_project_name,
+                    "user_id": os.getenv("USER_ID", "unknown"),
+                    "project_id": None,
+                }
+                
+                # Store in MongoDB
+                from app.features.createcolumn.service import _store_create_config
+                document_id = f"{final_client_name}/{final_app_name}/{final_project_name}"
+                _store_create_config(document_id, operation_payload)
+                
+                logger.info(
+                    f"✅ [RENAME] Persisted rename operation to MongoDB: "
+                    f"'{old_name}' -> '{new_name}' for '{normalized_object_name}'"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ [RENAME] Skipping rename persistence: missing context "
+                    f"(client='{final_client_name}', app='{final_app_name}', project='{final_project_name}')"
+                )
+        else:
+            logger.info(
+                f"ℹ️ [RENAME] No object_name in session metadata, "
+                f"skipping rename persistence (metadata may not be available)"
+            )
+    except Exception as e:
+        # CRITICAL: Rename must never fail because of metadata persistence
+        logger.warning(f"⚠️ [RENAME] Failed to persist rename operation (non-critical): {e}")
+        import traceback
+        logger.warning(f"⚠️ [RENAME] Traceback: {traceback.format_exc()}")
+    
     result = _df_payload(df, df_id)
     return result
 

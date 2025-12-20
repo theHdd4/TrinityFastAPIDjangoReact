@@ -131,7 +131,28 @@ def _resolve_full_object_path(object_name: str, object_prefix: str) -> str:
     return object_name
 
 
+def _normalize_saved_file_path(path: str) -> str:
+    """
+    Normalize file path for consistent storage and matching.
+    Removes leading/trailing slashes, converts to lowercase, and removes create-data/ prefix.
+    """
+    if not path:
+        return ""
+    normalized = path.strip().lower().strip("/")
+    # Remove create-data/ or create_data/ prefix for matching
+    normalized = normalized.replace("create-data/", "").replace("create_data/", "")
+    return normalized
+
+
 def _store_create_config(document_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Store or update file configuration in MongoDB.
+    
+    Key behavior:
+    - If a file entry with the same saved_file already exists, MERGE operations
+    - This ensures rename operations are combined with created column operations
+    - Prevents duplicate file entries while preserving all operation history
+    """
     try:
         client = _get_mongo_client()
         collection = client[MONGO_DB]["createandtransform_configs"]
@@ -161,10 +182,79 @@ def _store_create_config(document_id: str, payload: Dict[str, Any]) -> Dict[str,
             updated = dict(existing)
             updated["updated_at"] = datetime.utcnow()
             files = list(updated.get("files", []))
-            files.append(payload)
+            
+            # Get the saved_file from payload and normalize for matching
+            payload_saved_file = payload.get("saved_file", "")
+            payload_saved_file_normalized = _normalize_saved_file_path(payload_saved_file)
+            
+            # DEBUG: Log all existing file entries for comparison
+            logger.info(
+                f"🔍 [STORE-CONFIG] Looking for match: payload_saved_file='{payload_saved_file}' "
+                f"-> normalized='{payload_saved_file_normalized}'"
+            )
+            logger.info(
+                f"🔍 [STORE-CONFIG] Existing files ({len(files)} total): "
+                f"{[(f.get('saved_file', ''), _normalize_saved_file_path(f.get('saved_file', ''))) for f in files[:5]]}"
+            )
+            
+            # Find existing entry for this file (by normalized saved_file)
+            existing_idx = None
+            if payload_saved_file_normalized:
+                for idx, f in enumerate(files):
+                    existing_saved_file = f.get("saved_file", "")
+                    existing_saved_file_normalized = _normalize_saved_file_path(existing_saved_file)
+                    logger.info(
+                        f"🔍 [STORE-CONFIG] Comparing idx={idx}: "
+                        f"existing='{existing_saved_file}' -> normalized='{existing_saved_file_normalized}' "
+                        f"vs payload_normalized='{payload_saved_file_normalized}' "
+                        f"match={existing_saved_file_normalized == payload_saved_file_normalized}"
+                    )
+                    if existing_saved_file_normalized == payload_saved_file_normalized:
+                        existing_idx = idx
+                        logger.info(f"✅ [STORE-CONFIG] Found match at idx={idx}")
+                        break
+            
+            if existing_idx is not None:
+                # MERGE: Combine operations from existing entry with new operations
+                existing_entry = files[existing_idx]
+                existing_ops = existing_entry.get("operations", [])
+                new_ops = payload.get("operations", [])
+                
+                # Merge operations: existing + new (preserves order, new ops appended)
+                merged_ops = list(existing_ops) + list(new_ops)
+                
+                logger.info(
+                    f"🔄 [STORE-CONFIG] Merging operations for file '{payload_saved_file}': "
+                    f"existing={len(existing_ops)} ops, new={len(new_ops)} ops, merged={len(merged_ops)} ops"
+                )
+                
+                # Update payload with merged operations
+                payload["operations"] = merged_ops
+                
+                # Preserve original input_file if it exists (for lineage)
+                if existing_entry.get("input_file") and not payload.get("input_file"):
+                    payload["input_file"] = existing_entry["input_file"]
+                
+                # Replace the existing entry with the merged one
+                files[existing_idx] = payload
+                operation = "merged"
+                logger.info(
+                    f"✅ [CREATE-SAVE] Merged operations into existing file entry: "
+                    f"document_id='{document_id}', saved_file='{payload_saved_file}', "
+                    f"total_ops={len(merged_ops)}"
+                )
+            else:
+                # No existing entry for this file - append new entry
+                files.append(payload)
+                operation = "appended"
+                logger.info(
+                    f"✅ [CREATE-SAVE] Appended new file entry: "
+                    f"document_id='{document_id}', saved_file='{payload_saved_file}', "
+                    f"total_files={len(files)}"
+                )
+            
             updated["files"] = files
             collection.replace_one({"_id": document_id}, updated)
-            operation = "updated"
             logger.info(f"✅ [CREATE-SAVE] Updated MongoDB document: {document_id} (now has {len(files)} file entries)")
         else:
             document = {
