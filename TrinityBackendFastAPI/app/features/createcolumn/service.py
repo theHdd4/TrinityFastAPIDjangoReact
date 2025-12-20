@@ -173,10 +173,10 @@ def _store_create_config(document_id: str, payload: Dict[str, Any]) -> Dict[str,
                 new_name = op.get('rename', '?')
                 rename_summary.append(f"{old_name}->{new_name}")
             
-            logger.info(
-                f"💾 [STORE-CONFIG] Storing {len(rename_ops)} rename operation(s) for document_id='{document_id}': "
-                f"{rename_summary}"
-            )
+            # logger.info(
+            #     f"💾 [STORE-CONFIG] Storing {len(rename_ops)} rename operation(s) for document_id='{document_id}': "
+            #     f"{rename_summary}"
+            # )
 
         if existing:
             updated = dict(existing)
@@ -211,7 +211,7 @@ def _store_create_config(document_id: str, payload: Dict[str, Any]) -> Dict[str,
                     )
                     if existing_saved_file_normalized == payload_saved_file_normalized:
                         existing_idx = idx
-                        logger.info(f"✅ [STORE-CONFIG] Found match at idx={idx}")
+                        # logger.info(f"✅ [STORE-CONFIG] Found match at idx={idx}")
                         break
             
             if existing_idx is not None:
@@ -2694,9 +2694,9 @@ def get_column_metadata_for_file(
                     matches.append((idx, file_config))
             return matches
         
-        logger.info(f"🔍 [COLUMN-METADATA] Looking for file: {object_name}")
-        logger.info(f"🔍 [COLUMN-METADATA] Total files in config: {len(files)}")
-        logger.info(f"🔍 [COLUMN-METADATA] Available saved_file paths: {[f.get('saved_file', '') for f in files[:5]]}")
+        # logger.info(f"🔍 [COLUMN-METADATA] Looking for file: {object_name}")
+        # logger.info(f"🔍 [COLUMN-METADATA] Total files in config: {len(files)}")
+        # logger.info(f"🔍 [COLUMN-METADATA] Available saved_file paths: {[f.get('saved_file', '') for f in files[:5]]}")
         
         # Resolve all matching entries for this object_name (overwrite support).
         initial_matches = _find_matching_file_configs(object_name)
@@ -3059,16 +3059,16 @@ def get_column_metadata_for_file(
             }
         
         # Debug: Log all created column names
-        logger.info(f"📋 [COLUMN-METADATA] All created columns (normalized, after rename resolution): {list(column_metadata.keys())}")
+        # logger.info(f"📋 [COLUMN-METADATA] All created columns (normalized, after rename resolution): {list(column_metadata.keys())}")
         
         # Log detailed info for each column with metadata
-        for col_name, meta in column_metadata.items():
-            logger.info(
-                f"📋 [COLUMN-METADATA] Column '{col_name}': is_created={meta.get('is_created')}, "
-                f"operation_type={meta.get('operation_type')}, formula={meta.get('formula')}"
-            )
+        # for col_name, meta in column_metadata.items():
+        #     logger.info(
+        #         f"📋 [COLUMN-METADATA] Column '{col_name}': is_created={meta.get('is_created')}, "
+        #         f"operation_type={meta.get('operation_type')}, formula={meta.get('formula')}"
+        #     )
         
-        logger.info(f"📊 [COLUMN-METADATA] Total columns with metadata: {len(column_metadata)}")
+        # logger.info(f"📊 [COLUMN-METADATA] Total columns with metadata: {len(column_metadata)}")
         return column_metadata
         
     except Exception as e:

@@ -99,9 +99,9 @@ async def _persist_rename_operations(
                 # Note: rename operations don't have created_column_name
                 # They are mappings, not created columns
             })
-            logger.info(
-                f"📝 [TABLE-RENAME-COLUMN] Prepared rename operation: '{old_name.strip()}' -> '{new_name.strip()}'"
-            )
+            # logger.info(
+            #     f"📝 [TABLE-RENAME-COLUMN] Prepared rename operation: '{old_name.strip()}' -> '{new_name.strip()}'"
+            # )
         
         if not operations:
             logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] No valid operations to persist")
@@ -125,13 +125,13 @@ async def _persist_rename_operations(
             "project_id": None,
         }
         
-        logger.info(
-            f"💾 [TABLE-RENAME-COLUMN] Storing rename operations: "
-            f"object_name='{object_name}' -> normalized='{normalized_object_name}', "
-            f"document_id='{client_name}/{app_name}/{project_name}', "
-            f"operations={operations}, "
-            f"saved_file='{normalized_object_name}'"
-        )
+        # logger.info(
+        #     f"💾 [TABLE-RENAME-COLUMN] Storing rename operations: "
+        #     f"object_name='{object_name}' -> normalized='{normalized_object_name}', "
+        #     f"document_id='{client_name}/{app_name}/{project_name}', "
+        #     f"operations={operations}, "
+        #     f"saved_file='{normalized_object_name}'"
+        # )
         
         from app.features.createcolumn.service import _store_create_config  # local import avoids cycles
         
@@ -141,11 +141,11 @@ async def _persist_rename_operations(
         # Build operations summary for logging
         operations_summary = [f"{op['columns'][0]}->{op['rename']}" for op in operations]
         
-        logger.info(
-            f"✅ [TABLE-RENAME-COLUMN] Stored {len(operations)} rename op(s) in createandtransform_configs "
-            f"for saved_file='{normalized_object_name}' document_id='{document_id}' "
-            f"(operations: {operations_summary})"
-        )
+        # logger.info(
+        #     f"✅ [TABLE-RENAME-COLUMN] Stored {len(operations)} rename op(s) in createandtransform_configs "
+        #     f"for saved_file='{normalized_object_name}' document_id='{document_id}' "
+        #     f"(operations: {operations_summary})"
+        # )
         return True
     except Exception as e:
         logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Failed to persist rename operations: {e}")
@@ -1267,15 +1267,49 @@ async def save_table(
 
                         document_id = f"{final_client_name}/{final_app_name}/{final_project_name}"
                         _store_create_config(document_id, operation_payload)
-                        logger.info(
-                            f"✅ [TABLE-SAVE] Stored {len(operations)} rename ops in createandtransform_configs "
-                            f"for saved_file='{object_name}' input_file='{input_file}' "
-                            f"document_id='{document_id}'"
-                        )
+                        # logger.info(
+                        #     f"✅ [TABLE-SAVE] Stored {len(operations)} rename ops in createandtransform_configs "
+                        #     f"for saved_file='{object_name}' input_file='{input_file}' "
+                        #     f"document_id='{document_id}'"
+                        # )
+                        # Mark that we stored operations (for lineage check below)
+                        stored_operations = True
                 else:
                     logger.info(
                         f"ℹ️ [TABLE-SAVE] No rename operations to store (rename_changes was empty)"
                     )
+                    stored_operations = False
+                
+                # ------------------------------------------------------------------
+                # CRITICAL FIX: For "Save As" (new file), always create a lineage entry
+                # even if there are no rename operations. This ensures metadata from
+                # the source file is accessible via lineage traversal.
+                # ------------------------------------------------------------------
+                if not request.overwrite_original and original_object_name and original_object_name != object_name:
+                    # Check if we already stored operations above (don't duplicate)
+                    if not stored_operations:
+                        lineage_payload: Dict[str, Any] = {
+                            "input_file": original_object_name,  # Source file (for lineage)
+                            "saved_file": object_name,            # New file
+                            "operations": [],                      # No operations, just lineage pointer
+                            "file_columns": list(df.columns),
+                            "file_shape": [df.height, df.width],
+                            "client_name": final_client_name,
+                            "app_name": final_app_name,
+                            "project_name": final_project_name,
+                            "user_id": os.getenv("USER_ID", "unknown"),
+                            "project_id": None,
+                        }
+                        
+                        from app.features.createcolumn.service import _store_create_config
+                        
+                        document_id = f"{final_client_name}/{final_app_name}/{final_project_name}"
+                        _store_create_config(document_id, lineage_payload)
+                        # logger.info(
+                        #     f"✅ [TABLE-SAVE] Created lineage entry for Save As: "
+                        #     f"'{original_object_name}' -> '{object_name}' "
+                        #     f"(document_id='{document_id}')"
+                        # )
             else:
                 logger.warning(
                     f"⚠️ [TABLE-SAVE] Skipping rename persistence: missing context "
@@ -1882,7 +1916,7 @@ async def rename_column(
     Returns:
         Updated table data
     """
-    logger.info(f"✏️ [TABLE-RENAME-COLUMN] Renaming '{old_name}' to '{new_name}'")
+    # logger.info(f"✏️ [TABLE-RENAME-COLUMN] Renaming '{old_name}' to '{new_name}'")
     
     # Get DataFrame from session
     df = SESSIONS.get(table_id)
@@ -1897,7 +1931,7 @@ async def rename_column(
         # Rename the column
         df = df.rename({old_name: new_name})
         
-        logger.info(f"✅ [TABLE-RENAME-COLUMN] Column renamed successfully")
+        # logger.info(f"✅ [TABLE-RENAME-COLUMN] Column renamed successfully")
         
         # Update session
         SESSIONS[table_id] = df
@@ -1918,7 +1952,8 @@ async def rename_column(
                 change_data={"old_name": old_name, "new_name": new_name},
             )
             if success:
-                logger.info(f"✅ [TABLE-RENAME-COLUMN] Rename change logged successfully")
+                # logger.info(f"✅ [TABLE-RENAME-COLUMN] Rename change logged successfully")
+                pass
             else:
                 logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] save_change_log returned False")
         except Exception as e:
