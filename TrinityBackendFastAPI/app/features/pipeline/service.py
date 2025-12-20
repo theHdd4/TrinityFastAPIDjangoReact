@@ -360,6 +360,133 @@ def _build_output_file(
     }
 
 
+async def save_data_summary(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    file_key: str,
+    columns: List[str],
+    dtypes: Dict[str, str],
+    mode: str = "laboratory"
+) -> Dict[str, Any]:
+    """Save file data summary (column names and dtypes) to pipeline execution.
+    
+    This stores the original schema of uploaded files for validation purposes.
+    If a file with the same key already exists, it will be replaced.
+    
+    Args:
+        client_name: Client identifier
+        app_name: App identifier
+        project_name: Project identifier
+        file_key: File identifier (object name in MinIO)
+        columns: List of column names
+        dtypes: Dictionary mapping column names to data types
+        mode: Mode (laboratory, workflow, exhibition)
+    
+    Returns:
+        Result dictionary with status
+    """
+    try:
+        coll = await get_pipeline_collection()
+        
+        client_id = client_name
+        app_id = app_name
+        project_id = project_name
+        
+        # Build composite _id
+        doc_id = f"{client_id}/{app_id}/{project_id}"
+        
+        # Get or create pipeline execution document
+        existing_doc = await coll.find_one({"_id": doc_id})
+        
+        execution_timestamp = datetime.utcnow()
+        
+        # Build data summary entry
+        data_summary_entry = {
+            "file_key": file_key,
+            "columns": columns,
+            "dtypes": dtypes,
+            "saved_at": execution_timestamp
+        }
+        
+        if existing_doc:
+            # Update existing document
+            pipeline = existing_doc.get("pipeline", {})
+            data_summaries = pipeline.get("data_summary", [])
+            
+            # Find and remove existing entry for this file_key (if re-uploading)
+            data_summaries = [ds for ds in data_summaries if ds.get("file_key") != file_key]
+            
+            # Add new entry
+            data_summaries.append(data_summary_entry)
+            
+            # Update document
+            await coll.update_one(
+                {"_id": doc_id},
+                {
+                    "$set": {
+                        "pipeline.data_summary": data_summaries,
+                        "updated_at": execution_timestamp
+                    }
+                }
+            )
+            
+            logger.info(
+                f"✅ Updated data summary for file {file_key} in {doc_id} "
+                f"({len(columns)} columns)"
+            )
+        else:
+            # Create new document with all required fields
+            import uuid
+            execution_id = str(uuid.uuid4())
+            
+            doc = {
+                "_id": doc_id,
+                "execution_id": execution_id,  # ✅ Required field
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "execution_timestamp": execution_timestamp,
+                "updated_at": execution_timestamp,
+                "user_id": "system",
+                "pipeline": {
+                    "root_files": [],
+                    "execution_graph": [],
+                    "lineage": {
+                        "nodes": [],
+                        "edges": []
+                    },
+                    "column_operations": [],
+                    "data_summary": [data_summary_entry]
+                },
+                "summary": {
+                    "total_atoms": 0,
+                    "total_files": 0,
+                    "root_files_count": 0,
+                    "derived_files_count": 0,
+                    "total_duration_ms": 0,
+                    "status": "pending"
+                }
+            }
+            
+            await coll.insert_one(doc)
+            logger.info(
+                f"✅ Created new pipeline document with data summary for file {file_key} in {doc_id}"
+            )
+        
+        return {
+            "status": "success",
+            "message": f"Data summary saved for file {file_key}"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving data summary: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
 async def record_atom_execution(
     client_name: str,
     app_name: str,
@@ -2026,6 +2153,17 @@ async def get_pipeline_execution(
             )
             return None
         
+        # 🔧 MIGRATION FIX: Add execution_id if missing (for documents created before this field was required)
+        if "execution_id" not in pipeline_doc or not pipeline_doc["execution_id"]:
+            import uuid
+            execution_id = str(uuid.uuid4())
+            await coll.update_one(
+                {"_id": doc_id},
+                {"$set": {"execution_id": execution_id}}
+            )
+            pipeline_doc["execution_id"] = execution_id
+            logger.info(f"🔧 Added missing execution_id to pipeline document {doc_id}")
+        
         # Convert ObjectId to string if present (shouldn't happen with string _id, but just in case)
         if "_id" in pipeline_doc and not isinstance(pipeline_doc["_id"], str):
             pipeline_doc["_id"] = str(pipeline_doc["_id"])
@@ -2034,18 +2172,19 @@ async def get_pipeline_execution(
         pipeline = pipeline_doc.get("pipeline", {})
         execution_graph = pipeline.get("execution_graph", [])
         column_operations = pipeline.get("column_operations", [])
+        data_summary = pipeline.get("data_summary", [])
         
-        # If document exists but has no execution graph and no column operations, it's essentially empty
-        # But we should still return it if it has at least column operations (they can run even without atoms)
-        if len(execution_graph) == 0 and len(column_operations) == 0:
+        # If document exists but has no execution graph, no column operations, AND no data summary, it's essentially empty
+        # Return it if it has at least one of: atoms, column operations, or data summaries
+        if len(execution_graph) == 0 and len(column_operations) == 0 and len(data_summary) == 0:
             logger.warning(
-                f"⚠️ Pipeline document exists but is empty (no atoms, no column operations) for {doc_id}"
+                f"⚠️ Pipeline document exists but is empty (no atoms, no column operations, no data summaries) for {doc_id}"
             )
             return None
         
         logger.info(
             f"📦 Retrieved pipeline execution data for {client_id}/{app_id}/{project_id} "
-            f"(atoms: {len(execution_graph)}, column_ops: {len(column_operations)})"
+            f"(atoms: {len(execution_graph)}, column_ops: {len(column_operations)}, data_summaries: {len(data_summary)})"
         )
         
         return pipeline_doc

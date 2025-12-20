@@ -537,6 +537,53 @@ async def upload_file(
             tmp_prefix,
         )
 
+        # 🔥 SAVE DATA SUMMARY TO PIPELINE MONGO BEFORE CELERY PROCESSING
+        if client_name and app_name and project_name:
+            try:
+                # Quick parse to get schema (don't store full dataframe)
+                import polars as pl
+                import io as io_module
+                
+                df_sample = None
+                if file.filename.lower().endswith('.csv'):
+                    df_sample = pl.read_csv(io_module.BytesIO(content), n_rows=1)
+                elif file.filename.lower().endswith(('.xlsx', '.xls')):
+                    import openpyxl
+                    df_sample = pl.read_excel(io_module.BytesIO(content), sheet_name=sheet_name or 0, read_csv_options={"n_rows": 1})
+                
+                if df_sample is not None:
+                    columns = list(df_sample.columns)
+                    dtypes = {col: str(df_sample[col].dtype) for col in columns}
+                    
+                    # Build the file_key - matches the actual arrow file path
+                    # Format: client_name/app_name/project_name/filename.arrow
+                    prefix_without_tmp = tmp_prefix.replace("tmp/", "")
+                    file_key = f"{prefix_without_tmp}{file.filename.rsplit('.', 1)[0]}.arrow"
+                    
+                    # Import and call async save_data_summary
+                    from app.features.pipeline.service import save_data_summary
+                    
+                    summary_result = await save_data_summary(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        file_key=file_key,
+                        columns=columns,
+                        dtypes=dtypes,
+                        mode="laboratory"
+                    )
+                    
+                    if summary_result.get("status") == "success":
+                        logger.info(f"✅ Saved data summary for {file.filename} ({len(columns)} columns) to pipeline MongoDB")
+                    else:
+                        logger.warning(f"⚠️ Failed to save data summary: {summary_result.get('error', 'Unknown')}")
+                    
+                    # Clean up sample
+                    del df_sample
+                    gc.collect()
+            except Exception as e:
+                logger.warning(f"⚠️ Could not save data summary (non-critical): {e}")
+
         submission = celery_task_client.submit_callable(
             name="data_upload_validate.upload_file",
             dotted_path="app.features.data_upload_validate.service.process_temp_upload",
@@ -545,6 +592,9 @@ async def upload_file(
                 "filename": file.filename,
                 "tmp_prefix": tmp_prefix,
                 "sheet_name": sheet_name or None,
+                "client_name": client_name or "",
+                "app_name": app_name or "",
+                "project_name": project_name or "",
             },
             metadata={
                 "feature": "data_upload_validate",

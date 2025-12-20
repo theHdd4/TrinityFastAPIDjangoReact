@@ -51,8 +51,21 @@ async def get_pipeline_data(
                 message="No pipeline execution data found for this project"
             )
         
+        # 🔍 DEBUG: Log what we got from MongoDB
+        # logger.info(f"🔍 [DEBUG] Raw pipeline_data keys: {list(pipeline_data.keys())}")
+        # logger.info(f"🔍 [DEBUG] pipeline.pipeline exists: {'pipeline' in pipeline_data}")
+        # if 'pipeline' in pipeline_data:
+        #     logger.info(f"🔍 [DEBUG] pipeline.pipeline keys: {list(pipeline_data.get('pipeline', {}).keys())}")
+        #     logger.info(f"🔍 [DEBUG] data_summary exists: {'data_summary' in pipeline_data.get('pipeline', {})}")
+        #     logger.info(f"🔍 [DEBUG] data_summary length: {len(pipeline_data.get('pipeline', {}).get('data_summary', []))}")
+        
         # Convert to response model (new structure)
         pipeline_execution = PipelineExecutionDocument(**pipeline_data)
+        
+        # 🔍 DEBUG: Log what Pydantic created
+        if pipeline_execution and pipeline_execution.pipeline:
+            logger.info(f"🔍 [DEBUG] Pydantic pipeline keys: {list(pipeline_execution.pipeline.model_dump().keys())}")
+            logger.info(f"🔍 [DEBUG] Pydantic data_summary length: {len(pipeline_execution.pipeline.data_summary)}")
         
         return PipelineGetResponse(
             status="success",
@@ -2047,17 +2060,17 @@ async def run_pipeline(
                                         if len(prefix) == 8 and all(c in '0123456789abcdef' for c in prefix.lower()):
                                             is_concat_key = True
                                 
-                                if not is_concat_key:
-                                    recorded_output_files.append({
-                                        "file_key": result_file,
-                                        "file_path": result_file,
-                                        "flight_path": result_file,
-                                        "save_as_name": "groupby_result" if atom_type.startswith("groupby") else None,
-                                        "is_default_name": True,
-                                        "columns": task_response.get("columns", []) if task_response else [],
-                                        "dtypes": {},
-                                        "row_count": task_response.get("row_count", 0) if task_response else 0
-                                    })
+                            if not is_concat_key:
+                                recorded_output_files.append({
+                                    "file_key": result_file,
+                                    "file_path": result_file,
+                                    "flight_path": result_file,
+                                    "save_as_name": "groupby_result" if atom_type.startswith("groupby") else None,
+                                    "is_default_name": True,
+                                    "columns": task_response.get("columns", []) if task_response else [],
+                                    "dtypes": {},
+                                    "row_count": task_response.get("row_count", 0) if task_response else 0
+                                })
                             
                             # Add saved files from API calls (preserve save_as_name)
                             for api_call in api_calls:
@@ -2153,10 +2166,10 @@ async def run_pipeline(
                                                 "flight_path": saved_file,
                                                 "save_as_name": save_as_name,
                                                 "is_default_name": False,
-                                                "columns": [],
-                                                "dtypes": {},
-                                                "row_count": 0
-                                            })
+                                                    "columns": [],
+                                                    "dtypes": {},
+                                                    "row_count": 0
+                                                })
                             
                             # Also preserve existing outputs from step (for files that were saved in previous runs)
                             for existing_output in step.get("outputs", []):

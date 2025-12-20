@@ -259,6 +259,9 @@ def process_temp_upload(
     filename: str,
     tmp_prefix: str,
     sheet_name: str | None = None,
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
 ) -> Dict[str, Any]:
     content = base64.b64decode(file_b64)
     ensure_minio_bucket()

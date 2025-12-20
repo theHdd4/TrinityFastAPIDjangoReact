@@ -54,11 +54,12 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 }) => {
   // Helper function to get pipeline tracking parameters
   const getPipelineParams = () => {
-    const atomId = (settings as any).atomId || '';
+    // Use prop atomId first, then fallback to settings.atomId
+    const finalAtomId = atomId || (settings as any).atomId || '';
     const cards = useLaboratoryStore.getState().cards;
-    const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+    const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === finalAtomId));
     return {
-      atomId,
+      atomId: finalAtomId,
       cardId: card?.id || '',
       canvasPosition: card?.canvas_position ?? 0
     };
@@ -533,11 +534,20 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     let activeTableId = settings.tableId;
     let deletedCount = 0;
 
+    // Get pipeline tracking parameters
+    const pipelineParams = getPipelineParams();
+    
     try {
       // Delete columns sequentially
       for (const column of columnsToDelete) {
         try {
-          const resp = await apiDeleteColumn(activeTableId, column);
+          const resp = await apiDeleteColumn(
+            activeTableId, 
+            column,
+            pipelineParams.atomId,
+            pipelineParams.cardId,
+            pipelineParams.canvasPosition
+          );
           activeTableId = resp.table_id; // Update tableId for next iteration
           deletedCount++;
           
@@ -562,7 +572,13 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
             try {
               const newTableId = await reloadTableFromSource();
               if (newTableId) {
-                const resp = await apiDeleteColumn(newTableId, column);
+                const resp = await apiDeleteColumn(
+                  newTableId, 
+                  column,
+                  pipelineParams.atomId,
+                  pipelineParams.cardId,
+                  pipelineParams.canvasPosition
+                );
                 activeTableId = resp.table_id;
                 deletedCount++;
                 
@@ -642,9 +658,20 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
     const name = columnName || getNextColKey(data.columns);
     let activeTableId = settings.tableId;
+    
+    // Get pipeline tracking parameters
+    const pipelineParams = getPipelineParams();
 
     try {
-      const resp = await apiInsertColumn(activeTableId, colIdx, name, '');
+      const resp = await apiInsertColumn(
+        activeTableId, 
+        colIdx, 
+        name, 
+        '',
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
 
       // Update tableData from response
       onSettingsChange({
@@ -672,7 +699,15 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            const resp = await apiInsertColumn(newTableId, colIdx, name, '');
+            const resp = await apiInsertColumn(
+              newTableId, 
+              colIdx, 
+              name, 
+              '',
+              pipelineParams.atomId,
+              pipelineParams.cardId,
+              pipelineParams.canvasPosition
+            );
             
             onSettingsChange({
               tableData: {
@@ -716,9 +751,19 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId || !newName.trim()) return;
 
     let activeTableId = settings.tableId;
+    
+    // Get pipeline tracking parameters
+    const pipelineParams = getPipelineParams();
 
     try {
-      const resp = await apiRenameColumn(activeTableId, oldName, newName);
+      const resp = await apiRenameColumn(
+        activeTableId, 
+        oldName, 
+        newName,
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
 
       // Update tableData from response
       onSettingsChange({
@@ -821,9 +866,19 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId) return;
 
     let activeTableId = settings.tableId;
+    
+    // Get pipeline tracking parameters
+    const pipelineParams = getPipelineParams();
 
     try {
-      const resp = await apiRoundColumn(activeTableId, column, decimalPlaces);
+      const resp = await apiRoundColumn(
+        activeTableId, 
+        column, 
+        decimalPlaces,
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
 
       // Update tableData from response
       onSettingsChange({
@@ -849,7 +904,14 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            const resp = await apiRoundColumn(newTableId, column, decimalPlaces);
+            const resp = await apiRoundColumn(
+              newTableId, 
+              column, 
+              decimalPlaces,
+              pipelineParams.atomId,
+              pipelineParams.cardId,
+              pipelineParams.canvasPosition
+            );
             
             onSettingsChange({
               tableData: {
@@ -891,9 +953,19 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId) return;
 
     let activeTableId = settings.tableId;
+    
+    // Get pipeline tracking parameters
+    const pipelineParams = getPipelineParams();
 
     try {
-      const resp = await apiRetypeColumn(activeTableId, column, newType);
+      const resp = await apiRetypeColumn(
+        activeTableId, 
+        column, 
+        newType,
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
 
       // Update tableData from response
       onSettingsChange({
@@ -919,7 +991,14 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            const resp = await apiRetypeColumn(newTableId, column, newType);
+            const resp = await apiRetypeColumn(
+              newTableId, 
+              column, 
+              newType,
+              pipelineParams.atomId,
+              pipelineParams.cardId,
+              pipelineParams.canvasPosition
+            );
             
             onSettingsChange({
               tableData: {
@@ -961,9 +1040,19 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId) return;
 
     let activeTableId = settings.tableId;
+    
+    // Get pipeline tracking parameters
+    const pipelineParams = getPipelineParams();
 
     try {
-      const resp = await apiTransformCase(activeTableId, column, caseType);
+      const resp = await apiTransformCase(
+        activeTableId, 
+        column, 
+        caseType,
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
 
       // Update tableData from response
       onSettingsChange({
@@ -989,7 +1078,14 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            const resp = await apiTransformCase(newTableId, column, caseType);
+            const resp = await apiTransformCase(
+              newTableId, 
+              column, 
+              caseType,
+              pipelineParams.atomId,
+              pipelineParams.cardId,
+              pipelineParams.canvasPosition
+            );
             
             onSettingsChange({
               tableData: {
@@ -1031,9 +1127,19 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId || !newName.trim()) return;
 
     let activeTableId = settings.tableId;
+    
+    // Get pipeline tracking parameters
+    const pipelineParams = getPipelineParams();
 
     try {
-      const resp = await apiDuplicateColumn(activeTableId, column, newName);
+      const resp = await apiDuplicateColumn(
+        activeTableId, 
+        column, 
+        newName,
+        pipelineParams.atomId,
+        pipelineParams.cardId,
+        pipelineParams.canvasPosition
+      );
 
       // Update tableData from response
       onSettingsChange({
@@ -1061,7 +1167,14 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
         try {
           const newTableId = await reloadTableFromSource();
           if (newTableId) {
-            const resp = await apiDuplicateColumn(newTableId, column, newName);
+            const resp = await apiDuplicateColumn(
+              newTableId, 
+              column, 
+              newName,
+              pipelineParams.atomId,
+              pipelineParams.cardId,
+              pipelineParams.canvasPosition
+            );
             
             onSettingsChange({
               tableData: {

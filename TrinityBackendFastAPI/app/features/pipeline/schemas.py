@@ -119,6 +119,14 @@ class ColumnOperationsConfig(BaseModel):
     execution_order: Optional[int] = Field(None, description="Order in which to execute (for derived files)")
 
 
+class DataSummaryEntry(BaseModel):
+    """Data summary entry for a file (original columns and dtypes)."""
+    file_key: str = Field(..., description="File key/path")
+    columns: List[str] = Field(default_factory=list, description="Original column names")
+    dtypes: Dict[str, str] = Field(default_factory=dict, description="Column data types")
+    saved_at: Optional[datetime] = Field(None, description="When data summary was saved")
+
+
 class PipelineData(BaseModel):
     """Pipeline execution data."""
     root_files: List[FileMetadata] = Field(default_factory=list, description="Root input files")
@@ -127,6 +135,10 @@ class PipelineData(BaseModel):
     column_operations: List[ColumnOperationsConfig] = Field(
         default_factory=list, 
         description="Global column operations from metrics tab"
+    )
+    data_summary: List[DataSummaryEntry] = Field(
+        default_factory=list,
+        description="Original file column names and dtypes (for validation)"
     )
 
 

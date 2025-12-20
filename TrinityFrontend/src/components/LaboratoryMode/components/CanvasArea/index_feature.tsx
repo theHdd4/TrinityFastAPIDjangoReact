@@ -40,6 +40,7 @@ import {
   FEATURE_OVERVIEW_API,
   CLASSIFIER_API,
   MOLECULES_API,
+  PIPELINE_API,
 } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
@@ -4365,6 +4366,36 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(card)
       }).catch(() => {});
+
+      // Remove pipeline steps for this card
+      const projectContext = getActiveProjectContext();
+      if (projectContext && projectContext.client_name && projectContext.app_name && projectContext.project_name) {
+        // Remove pipeline steps - use 'laboratory' mode (backend default, mode not used for filtering in new structure)
+        const params = new URLSearchParams({
+          client_name: projectContext.client_name || '',
+          app_name: projectContext.app_name || '',
+          project_name: projectContext.project_name || '',
+          card_id: cardId,
+          mode: 'laboratory',
+        });
+        fetch(`${PIPELINE_API}/remove-steps-by-card?${params}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+        })
+          .then(async (response) => {
+            const result = await response.json();
+            if (result.status === 'success') {
+              console.log(`🗑️ Removed ${result.removed_steps || 0} pipeline step(s) for card ${cardId}`);
+            }
+          })
+          .catch((error) => {
+            // Ignore errors - pipeline cleanup is not critical for card deletion
+            console.warn(`⚠️ Failed to remove pipeline steps for card ${cardId}:`, error);
+          });
+      }
     }
 
     const current = localStorage.getItem('current-project');

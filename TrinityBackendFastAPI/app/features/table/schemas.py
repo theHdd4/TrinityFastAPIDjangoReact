@@ -243,5 +243,3 @@ class RestoreSessionResponse(BaseModel):
     change_count: int = 0
     data: Optional[TableResponse] = None
     message: Optional[str] = None
-
-

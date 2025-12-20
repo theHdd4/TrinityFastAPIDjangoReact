@@ -453,12 +453,36 @@ export const editTableCell = async (
 
 /**
  * Delete a column from the table
+ * @param tableId Table session ID
+ * @param column Column name to delete
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
-export const deleteColumn = async (tableId: string, column: string): Promise<TableResponse> => {
-  const response = await fetch(`${TABLE_API}/delete-column`, {
+export const deleteColumn = async (
+  tableId: string, 
+  column: string,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
+): Promise<TableResponse> => {
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/delete-column${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table_id: tableId, column })
+    body: JSON.stringify({ 
+      table_id: tableId, 
+      column,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
+    })
   });
 
   if (!response.ok) {
@@ -471,21 +495,41 @@ export const deleteColumn = async (tableId: string, column: string): Promise<Tab
 
 /**
  * Insert a new column into the table
+ * @param tableId Table session ID
+ * @param index Index where to insert the column
+ * @param name Column name
+ * @param defaultValue Default value for the new column
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
 export const insertColumn = async (
   tableId: string,
   index: number,
   name: string,
-  defaultValue?: any
+  defaultValue?: any,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
 ): Promise<TableResponse> => {
-  const response = await fetch(`${TABLE_API}/insert-column`, {
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/insert-column${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       table_id: tableId,
       index,
       name,
-      default_value: defaultValue
+      default_value: defaultValue,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
     })
   });
 
@@ -499,19 +543,38 @@ export const insertColumn = async (
 
 /**
  * Rename a column
+ * @param tableId Table session ID
+ * @param oldName Current column name
+ * @param newName New column name
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
 export const renameColumn = async (
   tableId: string,
   oldName: string,
-  newName: string
+  newName: string,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
 ): Promise<TableResponse> => {
-  const response = await fetch(`${TABLE_API}/rename-column`, {
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/rename-column${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       table_id: tableId,
       old_name: oldName,
-      new_name: newName
+      new_name: newName,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
     })
   });
 
@@ -525,19 +588,38 @@ export const renameColumn = async (
 
 /**
  * Round numeric values in a column
+ * @param tableId Table session ID
+ * @param column Column name
+ * @param decimalPlaces Number of decimal places
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
 export const roundColumn = async (
   tableId: string,
   column: string,
-  decimalPlaces: number
+  decimalPlaces: number,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
 ): Promise<TableResponse> => {
-  const response = await fetch(`${TABLE_API}/round-column`, {
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/round-column${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       table_id: tableId,
       column,
-      decimal_places: decimalPlaces
+      decimal_places: decimalPlaces,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
     })
   });
 
@@ -551,19 +633,38 @@ export const roundColumn = async (
 
 /**
  * Change column data type
+ * @param tableId Table session ID
+ * @param column Column name
+ * @param newType New data type
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
 export const retypeColumn = async (
   tableId: string,
   column: string,
-  newType: string
+  newType: string,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
 ): Promise<TableResponse> => {
-  const response = await fetch(`${TABLE_API}/retype-column`, {
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/retype-column${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       table_id: tableId,
       column,
-      new_type: newType
+      new_type: newType,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
     })
   });
 
@@ -577,19 +678,38 @@ export const retypeColumn = async (
 
 /**
  * Transform text case in a column
+ * @param tableId Table session ID
+ * @param column Column name
+ * @param caseType Case type (uppercase, lowercase, title)
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
 export const transformCase = async (
   tableId: string,
   column: string,
-  caseType: string
+  caseType: string,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
 ): Promise<TableResponse> => {
-  const response = await fetch(`${TABLE_API}/transform-case`, {
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/transform-case${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       table_id: tableId,
       column,
-      case_type: caseType
+      case_type: caseType,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
     })
   });
 
@@ -604,18 +724,40 @@ export const transformCase = async (
 /**
  * Duplicate a column
  */
+/**
+ * Duplicate a column
+ * @param tableId Table session ID
+ * @param column Column name to duplicate
+ * @param newName Name for the duplicated column
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
+ */
 export const duplicateColumn = async (
   tableId: string,
   column: string,
-  newName: string
+  newName: string,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
 ): Promise<TableResponse> => {
-  const response = await fetch(`${TABLE_API}/duplicate-column`, {
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/duplicate-column${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       table_id: tableId,
       column,
-      new_name: newName
+      new_name: newName,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
     })
   });
 

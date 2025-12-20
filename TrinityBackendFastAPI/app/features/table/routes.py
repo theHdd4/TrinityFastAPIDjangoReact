@@ -199,7 +199,10 @@ async def _record_table_execution(
     canvas_position: int = 0,
 ):
     """Helper function to record table atom execution for pipeline tracking."""
-    if not atom_id:
+    # 🔧 CRITICAL: Don't record if atom_id is missing, empty, or "unknown"
+    # Operations without valid atom_id should NOT create separate steps
+    if not atom_id or atom_id == "unknown" or atom_id.strip() == "":
+        logger.debug(f"⚠️ [TABLE] Skipping pipeline recording for {endpoint}: atom_id is missing or 'unknown'")
         return
     
     try:
@@ -534,8 +537,8 @@ async def update_table(
             try:
                 from app.features.pipeline.service import get_pipeline_collection
                 coll = await get_pipeline_collection()
-                project_id_env, _ = _get_project_context()
-                final_project_name = project_name or project_id_env
+                # Use same logic as client/app - just query param or env var
+                final_project_name = project_name or os.getenv("PROJECT_NAME", "")
                 final_client_name = client_name or os.getenv("CLIENT_NAME", "")
                 final_app_name = app_name or os.getenv("APP_NAME", "")
                 
@@ -673,7 +676,10 @@ async def update_table(
                 except Exception as e:
                     logger.warning(f"Failed to get atom configuration: {e}")
             
-            if final_client_name and final_app_name and final_project_name and atom_id:
+            # 🔧 CRITICAL: Only record if we have a valid atom_id (not "unknown" or empty)
+            # Update operations should be merged into existing table atom step, not create new steps
+            if final_client_name and final_app_name and final_project_name and atom_id and atom_id != "unknown" and atom_id.strip() != "":
+                logger.info(f"✅ [TABLE-UPDATE] Recording execution to MongoDB: atom_id={atom_id}, card_id={final_card_id}, file={object_name}")
                 await record_atom_execution(
                     client_name=final_client_name,
                     app_name=final_app_name,
@@ -693,6 +699,11 @@ async def update_table(
                     user_id=user_id,
                     mode="laboratory",
                     canvas_position=final_canvas_position
+                )
+            else:
+                logger.warning(
+                    f"⚠️ [TABLE-UPDATE] Skipping MongoDB recording: "
+                    f"client={final_client_name}, app={final_app_name}, project={final_project_name}, atom_id={atom_id}"
                 )
         except Exception as e:
             # Don't fail the request if pipeline recording fails
@@ -1056,8 +1067,8 @@ async def save_table(
             try:
                 from app.features.pipeline.service import get_pipeline_collection
                 coll = await get_pipeline_collection()
-                project_id_from_env, _ = _get_project_context()
-                final_project_name_for_lookup = project_name or project_id_from_env or os.getenv("PROJECT_NAME", "")
+                # Use same logic as client/app - just query param or env var
+                final_project_name_for_lookup = project_name or os.getenv("PROJECT_NAME", "")
                 final_client_name_for_lookup = client_name or os.getenv("CLIENT_NAME", "")
                 final_app_name_for_lookup = app_name or os.getenv("APP_NAME", "")
                 
@@ -1180,8 +1191,9 @@ async def save_table(
                 except Exception as e:
                     logger.warning(f"Failed to get atom configuration: {e}")
             
-            # 🔧 CRITICAL: Only record if we have a valid atom_id (not "unknown")
-            if final_client_name and final_app_name and final_project_name and atom_id and atom_id != "unknown":
+            # 🔧 CRITICAL: Only record if we have a valid atom_id (not "unknown" or empty)
+            # Update operations should be merged into existing table atom step, not create new steps
+            if final_client_name and final_app_name and final_project_name and atom_id and atom_id != "unknown" and atom_id.strip() != "":
                 logger.info(f"✅ [TABLE-SAVE] Recording execution to MongoDB: atom_id={atom_id}, card_id={final_card_id}, file={object_name}")
                 await record_atom_execution(
                     client_name=final_client_name,
@@ -1490,7 +1502,8 @@ async def edit_cell(
             try:
                 from app.features.pipeline.service import get_pipeline_collection
                 coll = await get_pipeline_collection()
-                final_project_name = project_name or project_id_final
+                # Use same logic as client/app - just query param or env var
+                final_project_name = project_name or os.getenv("PROJECT_NAME", "")
                 final_client_name = client_name or os.getenv("CLIENT_NAME", "")
                 final_app_name = app_name or os.getenv("APP_NAME", "")
                 
@@ -1818,6 +1831,7 @@ async def rename_column(
     """
     execution_started_at = datetime.utcnow()
     logger.info(f"✏️ [TABLE-RENAME-COLUMN] Renaming '{old_name}' to '{new_name}'")
+    logger.info(f"🔍 [TABLE-RENAME-COLUMN] Request params: atom_id={atom_id}, card_id={card_id}, project_name={project_name}, canvas_position={canvas_position}")
     
     # Get DataFrame from session
     df = SESSIONS.get(table_id)
@@ -1862,29 +1876,66 @@ async def rename_column(
             # This ensures rename operations are appended to the same step as the load operation
             if not metadata_atom_id:
                 logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] No atom_id found in session metadata for table_id {table_id}")
-                # Try to get from existing pipeline step
+                # Try to get from existing pipeline step by table_id
                 try:
                     from app.features.pipeline.service import get_pipeline_collection
                     coll = await get_pipeline_collection()
-                    project_id_from_env, _ = _get_project_context()
-                    final_project_name_for_lookup = project_name or project_id_from_env or os.getenv("PROJECT_NAME", "")
+                    # Use same logic as client/app - just query param or env var
+                    final_project_name_for_lookup = project_name or os.getenv("PROJECT_NAME", "")
                     final_client_name_for_lookup = client_name or os.getenv("CLIENT_NAME", "")
                     final_app_name_for_lookup = app_name or os.getenv("APP_NAME", "")
+                    
+                    logger.info(f"🔍 [TABLE-RENAME-COLUMN] Looking up atom_id from pipeline: client={final_client_name_for_lookup}, app={final_app_name_for_lookup}, project={final_project_name_for_lookup}, table_id={table_id}")
                     
                     if final_client_name_for_lookup and final_app_name_for_lookup and final_project_name_for_lookup:
                         doc_id = f"{final_client_name_for_lookup}/{final_app_name_for_lookup}/{final_project_name_for_lookup}"
                         doc = await coll.find_one({"_id": doc_id})
+                        
+                        # 🔧 FALLBACK: If doc not found, try searching by client/app prefix and table_id
+                        if not doc:
+                            logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Pipeline doc not found with id={doc_id}, trying search by table_id")
+                            # Search for any pipeline document that contains this table_id
+                            pipeline_docs = await coll.find({
+                                "client_id": final_client_name_for_lookup,
+                                "app_id": final_app_name_for_lookup
+                            }).to_list(length=10)
+                            
+                            for pipeline_doc in pipeline_docs:
+                                if "pipeline" in pipeline_doc and "execution_graph" in pipeline_doc["pipeline"]:
+                                    execution_graph = pipeline_doc["pipeline"]["execution_graph"]
+                                    for step in execution_graph:
+                                        step_config = step.get("configuration", {})
+                                        step_table_id = step_config.get("table_id")
+                                        if step_table_id == table_id:
+                                            metadata_atom_id = step.get("atom_instance_id")
+                                            if metadata_atom_id:
+                                                logger.info(f"✅ [TABLE-RENAME-COLUMN] Found via search: atom_id={metadata_atom_id}")
+                                                break
+                                    if metadata_atom_id:
+                                        break
+                        
                         if doc and "pipeline" in doc and "execution_graph" in doc["pipeline"]:
+                            execution_graph = doc["pipeline"]["execution_graph"]
+                            logger.info(f"🔍 [TABLE-RENAME-COLUMN] Found pipeline doc with {len(execution_graph)} steps, searching for table_id={table_id}")
+                            
                             # Find the step that has this table_id in its configuration
-                            for step in doc["pipeline"]["execution_graph"]:
+                            for step in execution_graph:
                                 step_config = step.get("configuration", {})
-                                if step_config.get("table_id") == table_id:
-                                    metadata_atom_id = step.get("atom_instance_id")
+                                step_table_id = step_config.get("table_id")
+                                step_atom_id = step.get("atom_instance_id")
+                                
+                                logger.debug(f"🔍 [TABLE-RENAME-COLUMN] Checking step: atom_id={step_atom_id}, config_table_id={step_table_id}, target_table_id={table_id}")
+                                
+                                if step_table_id == table_id:
+                                    metadata_atom_id = step_atom_id
                                     if metadata_atom_id:
                                         logger.info(f"✅ [TABLE-RENAME-COLUMN] Found atom_id from pipeline step: {metadata_atom_id}")
                                         break
+                            
+                            if not metadata_atom_id:
+                                logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Could not find table_id {table_id} in any pipeline step configuration")
                 except Exception as e:
-                    logger.warning(f"Failed to get atom_id from pipeline: {e}")
+                    logger.error(f"❌ [TABLE-RENAME-COLUMN] Failed to get atom_id from pipeline: {e}", exc_info=True)
             
             # Get project context
             project_id_from_env, atom_id_from_env = _get_project_context()
@@ -1892,42 +1943,82 @@ async def rename_column(
             final_atom_id = metadata_atom_id or atom_id or atom_id_from_env
             final_project_id = project_id or metadata_project_id or project_id_from_env
             
-            # Get client/app/project from query params or environment
+            # Get client/app/project from query params or environment - SAME LOGIC FOR ALL THREE
             final_client_name = client_name or os.getenv("CLIENT_NAME", "")
             final_app_name = app_name or os.getenv("APP_NAME", "")
-            final_project_name = project_name or final_project_id or os.getenv("PROJECT_NAME", "")
+            final_project_name = project_name or os.getenv("PROJECT_NAME", "")
             final_card_id = card_id
             final_canvas_position = canvas_position or 0
             
-            # 🔧 CRITICAL: If we still don't have atom_id, try to get card_id first and then find atom_id from it
+            # 🔧 CRITICAL: If we still don't have atom_id, try again with more aggressive lookup
             if not final_atom_id or final_atom_id == "unknown":
-                # Try to get card_id from session metadata or pipeline
+                logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Still no atom_id after first lookup (metadata_atom_id={metadata_atom_id}, atom_id={atom_id}, atom_id_from_env={atom_id_from_env})")
+                # Try to get from pipeline using table_id (more aggressive search)
                 try:
-                    if not final_card_id:
-                        # Try to get card_id from pipeline using table_id
-                        from app.features.pipeline.service import get_pipeline_collection
-                        coll = await get_pipeline_collection()
-                        project_id_from_env, _ = _get_project_context()
-                        final_project_name_for_lookup = project_name or project_id_from_env or os.getenv("PROJECT_NAME", "")
-                        final_client_name_for_lookup = client_name or os.getenv("CLIENT_NAME", "")
-                        final_app_name_for_lookup = app_name or os.getenv("APP_NAME", "")
+                    from app.features.pipeline.service import get_pipeline_collection
+                    coll = await get_pipeline_collection()
+                    # 🔧 CRITICAL: Use PROJECT_NAME (not PROJECT_ID) for lookup - project_id might be numeric like "4"
+                    final_project_name_for_lookup = project_name or os.getenv("PROJECT_NAME", "")
+                    final_client_name_for_lookup = client_name or os.getenv("CLIENT_NAME", "")
+                    final_app_name_for_lookup = app_name or os.getenv("APP_NAME", "")
+                    
+                    logger.info(f"🔍 [TABLE-RENAME-COLUMN] Second lookup attempt: client={final_client_name_for_lookup}, app={final_app_name_for_lookup}, project={final_project_name_for_lookup}, table_id={table_id}")
+                    
+                    if final_client_name_for_lookup and final_app_name_for_lookup and final_project_name_for_lookup:
+                        doc_id = f"{final_client_name_for_lookup}/{final_app_name_for_lookup}/{final_project_name_for_lookup}"
+                        doc = await coll.find_one({"_id": doc_id})
                         
-                        if final_client_name_for_lookup and final_app_name_for_lookup and final_project_name_for_lookup:
-                            doc_id = f"{final_client_name_for_lookup}/{final_app_name_for_lookup}/{final_project_name_for_lookup}"
-                            doc = await coll.find_one({"_id": doc_id})
-                            if doc and "pipeline" in doc and "execution_graph" in doc["pipeline"]:
-                                # Find the step that has this table_id in its configuration
-                                for step in doc["pipeline"]["execution_graph"]:
-                                    step_config = step.get("configuration", {})
-                                    if step_config.get("table_id") == table_id:
-                                        final_atom_id = step.get("atom_instance_id")
+                        # 🔧 FALLBACK: If doc not found, try searching by client/app prefix and table_id
+                        if not doc:
+                            logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Pipeline doc not found with id={doc_id}, trying search by table_id")
+                            # Search for any pipeline document that contains this table_id
+                            pipeline_docs = await coll.find({
+                                "client_id": final_client_name_for_lookup,
+                                "app_id": final_app_name_for_lookup
+                            }).to_list(length=10)
+                            
+                            for pipeline_doc in pipeline_docs:
+                                if "pipeline" in pipeline_doc and "execution_graph" in pipeline_doc["pipeline"]:
+                                    execution_graph = pipeline_doc["pipeline"]["execution_graph"]
+                                    for step in execution_graph:
+                                        step_config = step.get("configuration", {})
+                                        step_table_id = step_config.get("table_id")
+                                        if step_table_id == table_id:
+                                            final_atom_id = step.get("atom_instance_id")
+                                            if not final_card_id:
+                                                final_card_id = step.get("card_id")
+                                            if final_canvas_position == 0:
+                                                final_canvas_position = step.get("canvas_position", 0)
+                                            if final_atom_id:
+                                                logger.info(f"✅ [TABLE-RENAME-COLUMN] Found via search (second lookup): atom_id={final_atom_id}")
+                                                break
+                                    if final_atom_id:
+                                        break
+                        
+                        if doc and "pipeline" in doc and "execution_graph" in doc["pipeline"]:
+                            execution_graph = doc["pipeline"]["execution_graph"]
+                            logger.info(f"🔍 [TABLE-RENAME-COLUMN] Second lookup: Found {len(execution_graph)} steps, searching for table_id={table_id}")
+                            
+                            # Find the step that has this table_id in its configuration
+                            for step in execution_graph:
+                                step_config = step.get("configuration", {})
+                                step_table_id = step_config.get("table_id")
+                                step_atom_id = step.get("atom_instance_id")
+                                
+                                if step_table_id == table_id:
+                                    final_atom_id = step_atom_id
+                                    if not final_card_id:
                                         final_card_id = step.get("card_id")
+                                    if final_canvas_position == 0:
                                         final_canvas_position = step.get("canvas_position", 0)
-                                        if final_atom_id:
-                                            logger.info(f"✅ [TABLE-RENAME-COLUMN] Found atom_id and card_id from pipeline step: {final_atom_id}, {final_card_id}")
-                                            break
+                                    if final_atom_id:
+                                        logger.info(f"✅ [TABLE-RENAME-COLUMN] Second lookup SUCCESS: Found atom_id={final_atom_id}, card_id={final_card_id}")
+                                        break
+                            
+                            if not final_atom_id or final_atom_id == "unknown":
+                                logger.error(f"❌ [TABLE-RENAME-COLUMN] Could not find table_id {table_id} in any pipeline step after second lookup")
                 except Exception as e:
-                    logger.warning(f"Failed to get atom_id/card_id from pipeline: {e}")
+                    logger.error(f"❌ [TABLE-RENAME-COLUMN] Failed to get atom_id/card_id from pipeline (second lookup): {e}", exc_info=True)
             
             # Build configuration
             configuration = {
@@ -1975,7 +2066,9 @@ async def rename_column(
                     logger.warning(f"Failed to get atom configuration: {e}")
             
             # 🔧 CRITICAL: Only record if we have a valid atom_id (not "unknown")
+            logger.info(f"🔍 [TABLE-RENAME-COLUMN] Final values before recording: atom_id={final_atom_id}, client={final_client_name}, app={final_app_name}, project={final_project_name}, card_id={final_card_id}")
             if final_client_name and final_app_name and final_project_name and final_atom_id and final_atom_id != "unknown":
+                logger.info(f"✅ [TABLE-RENAME-COLUMN] Recording execution with atom_id={final_atom_id}")
                 await record_atom_execution(
                     client_name=final_client_name,
                     app_name=final_app_name,
@@ -1996,9 +2089,12 @@ async def rename_column(
                     mode="laboratory",
                     canvas_position=final_canvas_position
                 )
+                logger.info(f"✅ [TABLE-RENAME-COLUMN] Successfully recorded execution")
+            else:
+                logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Skipping recording: client={final_client_name}, app={final_app_name}, project={final_project_name}, atom_id={final_atom_id}")
         except Exception as e:
             # Don't fail the request if pipeline recording fails
-            logger.warning(f"Failed to record table rename-column execution for pipeline: {e}")
+            logger.error(f"❌ [TABLE-RENAME-COLUMN] Failed to record table rename-column execution for pipeline: {e}", exc_info=True)
         
         return TableResponse(**response)
         
@@ -2547,6 +2643,3 @@ async def clear_formatting_cache(table_id: str):
         del CF_CACHE[key]
     logger.info(f"🗑️ [CF] Cleared cache for table {table_id}")
     return {"status": "success", "cleared_keys": len(keys_to_remove)}
-
-
-
