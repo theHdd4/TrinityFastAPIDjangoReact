@@ -265,7 +265,7 @@ const getExampleInsights = (atomType: string): string[] => {
       'Exploration generated two visualizations: a bar chart showing sales by product category and a line chart displaying monthly trends. The bar chart reveals Electronics category leads with $5M sales, while the line chart shows consistent growth from January to December.',
       'Three exploration charts were created analyzing customer segments. The visualizations show demographic distribution, purchase frequency patterns, and revenue by segment. Key insight: Millennials represent 45% of customers but generate 60% of revenue.',
     ],
-    'data-upload-validate': [
+    'data-validate': [
       'Data validation completed successfully. The file contains 25,000 rows and 15 columns with no critical errors. Minor warnings were found: 3 duplicate rows and 5 missing values in optional columns. The dataset is ready for analysis.',
       'Validation identified 2 critical issues: 150 rows with invalid date formats and 50 rows with negative values in "quantity" field. After cleaning, 24,800 valid rows remain. The dataset structure is correct with all required columns present.',
     ],

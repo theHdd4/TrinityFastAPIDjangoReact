@@ -39,14 +39,15 @@ import {
   FEATURE_OVERVIEW_API,
   CLASSIFIER_API,
   MOLECULES_API,
-  PIPELINE_API,
 } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 import { AtomSuggestion } from '@/components/AtomSuggestion';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
-import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
+import DataValidateAtom from '@/components/AtomList/atoms/data-validate/DataValidateAtom';
+import DataUploadAtom from '@/components/AtomList/atoms/data-upload/DataUploadAtom';
+import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
@@ -78,6 +79,8 @@ import {
 } from '@/components/AtomList/atoms/column-classifier/prefillManager';
 import { TextBoxToolbar } from './text-box/TextBoxToolbar';
 import type { TextAlignOption, TextStylePreset } from './text-box/types';
+import { LandingScreenAtom } from '../../LandingScreen/LandingScreenAtom';
+import { useLaboratoryScenario } from '../../hooks/useLaboratoryScenario';
 
 import {
   useLaboratoryStore,
@@ -199,6 +202,7 @@ interface CanvasAreaProps {
 
 interface CanvasAreaRef {
   syncWorkflowCollection: () => Promise<void>;
+  addNewCardWithAtom: (atomId: string, moleculeId?: string, position?: number) => Promise<void>;
 }
 
 
@@ -214,7 +218,8 @@ const LLM_MAP: Record<string, string> = {
   'correlation': 'Agent Correlation',
   'dataframe-operations': 'Agent DataFrame Operations',
   'pivot-table': 'Agent Pivot Table',
-  'data-upload-validate': 'Agent Data Validation',
+  'data-upload': 'Agent Data Upload',
+  'data-validate': 'Agent Data Validation',
 };
 
 const hydrateDroppedAtom = (atom: any): DroppedAtom => {
@@ -289,7 +294,12 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     return null;
   }
 
-  return rawCards.map((card: any) => ({
+  // Filter out landing cards before hydrating
+  const cardsWithoutLanding = rawCards.filter((card: any) => 
+    !card.atoms?.some((atom: any) => atom.atomId === 'landing-screen')
+  );
+
+  return cardsWithoutLanding.map((card: any) => ({
     id: card.id,
     atoms: Array.isArray(card.atoms)
       ? card.atoms.map((atom: any) => hydrateDroppedAtom(atom))
@@ -1235,7 +1245,20 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   onCardFocus,
   onCardBlur,
 }, ref) => {
-  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen, subMode } = useLaboratoryStore();
+  const { 
+    cards: layoutCards, 
+    setCards: setLayoutCards, 
+    updateAtomSettings, 
+    setAuxiliaryMenuLeftOpen, 
+    subMode,
+    activeGuidedFlows,
+    isGuidedModeActiveForAtom,
+    removeActiveGuidedFlow,
+    globalGuidedModeEnabled
+  } = useLaboratoryStore();
+
+  // Get scenario to determine landing card title
+  const scenarioData = useLaboratoryScenario();
 
   // Calculate allowed atom IDs based on current mode
   const allowedAtomIds = useMemo(() => {
@@ -1244,6 +1267,51 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
     return undefined; // undefined = show all atoms for analytics mode
   }, [subMode]);
+
+  // Helper function to render inline guided flow for an atom
+  const renderInlineGuidedFlow = (atom: DroppedAtom) => {
+    if (!activeGuidedFlows[atom.id] || !isGuidedModeActiveForAtom(atom.id)) {
+      return null;
+    }
+    
+    // Get the initial file from the saved state (set by wrench icon in SavedDataFramesPanel)
+    const flowState = activeGuidedFlows[atom.id];
+    const existingDataframe = flowState?.state?.initialFile as { name: string; path: string; size?: number } | undefined;
+    
+    // Skip rendering the separate panel for U0 stage - the atom itself handles U0
+    // The DataUploadAtom's upload area IS step 1 (U0)
+    const currentStage = flowState?.currentStage || 'U0';
+    if (currentStage === 'U0') {
+      return null;
+    }
+    
+    return (
+      <div className="mt-2">
+        <GuidedUploadFlowInline
+          atomId={atom.id}
+          onComplete={(result) => {
+            // Handle completion - update atom settings
+            const fileNames = result.uploadedFiles.map((f: any) => f.name);
+            const filePathMap: Record<string, string> = {};
+            result.uploadedFiles.forEach((f: any) => {
+              filePathMap[f.name] = f.path;
+            });
+            
+            updateAtomSettings(atom.id, {
+              uploadedFiles: fileNames,
+              filePathMap: filePathMap,
+            });
+          }}
+          onClose={() => {
+            removeActiveGuidedFlow(atom.id);
+          }}
+          savedState={activeGuidedFlows[atom.id]?.state}
+          initialStage={activeGuidedFlows[atom.id]?.currentStage}
+          existingDataframe={existingDataframe}
+        />
+      </div>
+    );
+  };
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
@@ -1286,6 +1354,41 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   const initialLoad = React.useRef(true);
   const { setCards } = useExhibitionStore();
   const { toast } = useToast();
+  
+  // Automatically create landing card when there are no cards
+  React.useEffect(() => {
+    if (!Array.isArray(layoutCards) || layoutCards.length === 0) {
+      // Check if landing card already exists
+      const hasLandingCard = Array.isArray(layoutCards) && 
+        layoutCards.some(card => 
+          card.atoms?.some(atom => atom.atomId === 'landing-screen')
+        );
+      
+      if (!hasLandingCard) {
+        // Create landing card with landing-screen atom
+        const landingCardId = `landing-card-${Date.now()}`;
+        const landingAtomId = `landing-atom-${Date.now()}`;
+        
+        const landingCard: LayoutCard = {
+          id: landingCardId,
+          atoms: [{
+            id: landingAtomId,
+            atomId: 'landing-screen',
+            title: 'Project Landing',
+            category: 'System',
+            color: '#458EE2',
+            settings: {},
+          }],
+          isExhibited: false,
+        };
+        
+        setLayoutCards([landingCard]);
+      }
+    }
+    // NOTE: Landing card should remain even when other cards are added
+    // Removed the logic that automatically removes landing card when non-landing cards exist
+    // This allows users to keep the landing card and add new cards below it
+  }, [layoutCards, setLayoutCards]);
 
   const renderAppendedVariables = (card: LayoutCard) => {
     const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
@@ -1651,7 +1754,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             };
             break outer;
           }
-          if (a.atomId === 'data-upload-validate') {
+          if (a.atomId === 'data-validate') {
             const req = a.settings?.requiredFiles?.[0];
             const validatorId = a.settings?.validatorId;
             if (req) {
@@ -3013,23 +3116,25 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         settings:
           atom.id === 'text-box'
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
-            : atom.id === 'data-upload-validate'
+            : atom.id === 'data-upload'
               ? createDefaultDataUploadSettings()
-              : atom.id === 'feature-overview'
-                ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-                : atom.id === 'explore'
-                  ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
-                  : atom.id === 'chart-maker'
-                    ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-                    : atom.id === 'pivot-table'
-                      ? { ...DEFAULT_PIVOT_TABLE_SETTINGS }
-                      : atom.id === 'dataframe-operations'
-                        ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
-                        : atom.id === 'select-models-feature'
-                          ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
-                          : atom.id === 'auto-regressive-models'
-                            ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
-                            : undefined,
+              : atom.id === 'data-validate'
+                ? createDefaultDataUploadSettings()
+                : atom.id === 'feature-overview'
+                  ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+                  : atom.id === 'explore'
+                    ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
+                    : atom.id === 'chart-maker'
+                      ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+                      : atom.id === 'pivot-table'
+                        ? { ...DEFAULT_PIVOT_TABLE_SETTINGS }
+                        : atom.id === 'dataframe-operations'
+                          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+                          : atom.id === 'select-models-feature'
+                            ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
+                            : atom.id === 'auto-regressive-models'
+                              ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
+                              : undefined,
       };
 
       // Calculate position accounting for existing workflow molecule atoms
@@ -3692,7 +3797,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     switch (atomId) {
       case 'text-box':
         return { ...DEFAULT_TEXTBOX_SETTINGS };
-      case 'data-upload-validate':
+      case 'data-upload':
+        return createDefaultDataUploadSettings();
+      case 'data-validate':
         return createDefaultDataUploadSettings();
       case 'feature-overview':
         return { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
@@ -4007,7 +4114,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
     const card = arr.find(c => c.id === cardId);
     const atom = card?.atoms.find(a => a.id === atomId);
-    if (atom?.atomId === 'data-upload-validate') {
+    if (atom?.atomId === 'data-validate') {
       const vid = (atom.settings as DataUploadSettings)?.validatorId;
       if (vid) {
         fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
@@ -4155,6 +4262,50 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
   };
 
+  // Replace an atom in a card (used for landing screen to replace itself with another atom)
+  const replaceAtomInCard = (cardId: string, oldAtomId: string, newAtomId: string) => {
+    const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+    if (!card) return;
+
+    // Check if the card has the landing-screen atom
+    const hasLandingAtom = card.atoms.some(a => a.id === oldAtomId && a.atomId === 'landing-screen');
+    if (!hasLandingAtom) {
+      // If not a landing atom, use normal add flow
+      addAtomByName(cardId, newAtomId);
+      return;
+    }
+
+    // Build the new atom
+    const info = allAtoms.find(a => a.id === newAtomId);
+    if (!info) return;
+
+    const newAtom = buildAtomFromApiPayload(info.id, {
+      atomId: info.id,
+      source: 'landing-action',
+    });
+
+    // Replace the landing atom with the new atom
+    setLayoutCards(
+      (Array.isArray(layoutCards) ? layoutCards : []).map(c =>
+        c.id === cardId 
+          ? { ...c, atoms: [newAtom] } // Replace all atoms with just the new one
+          : c
+      )
+    );
+
+    prefillAtomIfRequired(cardId, newAtom);
+
+    // Automatically open properties panel
+    setTimeout(() => {
+      if (onAtomSelect) {
+        onAtomSelect(newAtom.id);
+      }
+      if (onOpenSettingsPanel) {
+        onOpenSettingsPanel();
+      }
+    }, 0);
+  };
+
 
   const deleteCard = async (cardId: string) => {
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
@@ -4199,7 +4350,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       card.atoms.forEach(atom => {
         if (atom.atomId === 'text-box') {
           fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
-        } else if (atom.atomId === 'data-upload-validate') {
+        } else if (atom.atomId === 'data-upload') {
+          // TODO: Add cleanup logic for data-upload atoms if needed
+        } else if (atom.atomId === 'data-validate') {
           const vid = (atom.settings as DataUploadSettings)?.validatorId;
           if (vid) {
             fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
@@ -4211,25 +4364,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(card)
       }).catch(() => {});
-
-      // Remove pipeline execution steps for this card
-      const projectContext = getActiveProjectContext();
-      if (projectContext) {
-        const params = new URLSearchParams({
-          client_name: projectContext.client_name || '',
-          app_name: projectContext.app_name || '',
-          project_name: projectContext.project_name || '',
-          card_id: cardId,
-          mode: 'laboratory'
-        });
-        fetch(`${PIPELINE_API}/remove-steps-by-card?${params}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include'
-        }).catch(err => {
-          console.warn('⚠️ Failed to remove pipeline steps for card:', err);
-        });
-      }
     }
 
     const current = localStorage.getItem('current-project');
@@ -4456,7 +4590,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         card.atoms.forEach(atom => {
           if (atom.atomId === 'text-box') {
             fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
-          } else if (atom.atomId === 'data-upload-validate') {
+          } else if (atom.atomId === 'data-upload') {
+            // TODO: Add cleanup logic for data-upload atoms if needed
+          } else if (atom.atomId === 'data-validate') {
             const vid = (atom.settings as DataUploadSettings)?.validatorId;
             if (vid) {
               fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
@@ -5186,8 +5322,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
   // Expose sync function to parent component via ref
   React.useImperativeHandle(ref, () => ({
-    syncWorkflowCollection: syncWorkflowCollectionOnLaboratorySave
-  }), [pendingChanges, layoutCards]);
+    syncWorkflowCollection: syncWorkflowCollectionOnLaboratorySave,
+    addNewCardWithAtom: addNewCardWithAtom
+  }), [pendingChanges, layoutCards, addNewCardWithAtom]);
 
   if (isCanvasLoading) {
     return (
@@ -5519,8 +5656,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                 }`}
                                             >
                                               {card.atoms.map(atom => (
+                                                <React.Fragment key={atom.id}>
                                                 <AtomBox
-                                                  key={atom.id}
                                                   className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                                   onClick={(e) => handleAtomClick(e, atom.id)}
                                                 >
@@ -5564,8 +5701,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
                                                   {atom.atomId === 'text-box' ? (
                                                     <TextBoxEditor textId={atom.id} />
-                                                  ) : atom.atomId === 'data-upload-validate' ? (
-                                                    <DataUploadValidateAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'data-upload' ? (
+                                                    <DataUploadAtom atomId={atom.id} />
+                                                  ) : atom.atomId === 'data-validate' ? (
+                                                    <DataValidateAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'feature-overview' ? (
                                                     <FeatureOverviewAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'explore' ? (
@@ -5620,6 +5759,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                     </div>
                                                   )}
                                                 </AtomBox>
+                                                
+                                                {/* Inline Guided Flow - Renders below atom when active */}
+                                                {renderInlineGuidedFlow(atom)}
+                                              </React.Fragment>
                                               ))}
                                             </div>
                                           )}
@@ -5826,8 +5969,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 }`}
                             >
                               {card.atoms.map((atom) => (
+                                <React.Fragment key={atom.id}>
                                 <AtomBox
-                                  key={atom.id}
                                   className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                   onClick={(e) => handleAtomClick(e, atom.id)}
                                 >
@@ -5875,8 +6018,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
                                   {atom.atomId === 'text-box' ? (
                                     <TextBoxEditor textId={atom.id} />
-                                  ) : atom.atomId === 'data-upload-validate' ? (
-                                    <DataUploadValidateAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'data-upload' ? (
+                                    <DataUploadAtom atomId={atom.id} />
+                                  ) : atom.atomId === 'data-validate' ? (
+                                    <DataValidateAtom atomId={atom.id} />
                                   ) : atom.atomId === 'feature-overview' ? (
                                     <FeatureOverviewAtom atomId={atom.id} />
                                   ) : atom.atomId === 'clustering' ? (
@@ -5931,6 +6076,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                     </div>
                                   )}
                                 </AtomBox>
+                                {/* Inline Guided Flow - Renders below atom when active */}
+                                {renderInlineGuidedFlow(atom)}
+                              </React.Fragment>
                               ))}
                             </div>
                           )}
@@ -5979,7 +6127,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         {expandedCard &&
           createPortal(
             <div
-              className="fixed inset-0 z-40 pointer-events-none"
+              className="fixed inset-0 z-[60] pointer-events-none"
               role="dialog"
               aria-modal="true"
             >
@@ -6007,6 +6155,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         }
 
                         if (!card) return 'Card';
+                        
+                        // Check if this is a landing card - use scenario-based title (same logic as minimized view)
+                        const isLandingCard = card.atoms?.some(atom => atom.atomId === 'landing-screen');
+                        if (isLandingCard) {
+                          // Case 1 (Scenario A): No files -> "Initialize"
+                          // Case 2 (Scenarios B, C): Some files not primed -> "Continue priming your data"
+                          // Case 3 (Scenario D): All files primed -> "Priming Complete"
+                          // While loading, default to "Initialize"
+                          if (scenarioData.scenario === 'loading' || scenarioData.scenario === 'A') {
+                            return 'Initialize';
+                          } else if (scenarioData.scenario === 'D') {
+                            return 'Priming Complete';
+                          } else {
+                            return 'Continue priming your data';
+                          }
+                        }
+                        
+                        // For non-landing cards, use moleculeTitle or atom title
                         return card.moleculeTitle
                           ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                           : (Array.isArray(card.atoms) && card.atoms.length > 0)
@@ -6055,33 +6221,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     ) : (
                       <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                         {card.atoms.map((atom) => (
+                          <React.Fragment key={atom.id}>
                           <AtomBox
-                            key={`${atom.id}-expanded`}
                             className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                           >
-                            {/* Atom Header */}
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="flex items-center space-x-2">
-                                <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
-                              </div>
-                              {/* <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                                }}
-                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4 text-gray-400" />
-                            </button> */}
-                            </div>
-
-                            {/* Atom Content */}
+                            {/* Atom Content - No duplicate header, card header already shows it */}
                             <div className="w-full flex-1 overflow-visible">
                               {atom.atomId === 'text-box' ? (
                                 <TextBoxEditor textId={atom.id} />
-                              ) : atom.atomId === 'data-upload-validate' ? (
-                                <DataUploadValidateAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-upload' ? (
+                                <DataUploadAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-validate' ? (
+                                <DataValidateAtom atomId={atom.id} />
                               ) : atom.atomId === 'feature-overview' ? (
                                 <FeatureOverviewAtom atomId={atom.id} />
                               ) : atom.atomId === 'clustering' ? (
@@ -6128,6 +6279,25 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'landing-screen' ? (
+                                <div className="w-full h-full">
+                                  <LandingScreenAtom 
+                                    atomId={atom.id} 
+                                    cardId={card.id}
+                                    onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                    onAddNewCard={() => {
+                                      // Find the landing card's position and add new card right after it
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      // Find landing card by checking for landing-screen atom
+                                      const landingCardIndex = arr.findIndex(c => 
+                                        c.atoms?.some(a => a.atomId === 'landing-screen')
+                                      );
+                                      // If landing card found, add after it; otherwise add at end
+                                      const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                      addNewCard(undefined, insertPosition);
+                                    }}
+                                  />
+                                </div>
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
@@ -6139,6 +6309,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               )}
                             </div>
                           </AtomBox>
+                          {/* Inline Guided Flow - Renders below atom when active */}
+                          {renderInlineGuidedFlow(atom)}
+                        </React.Fragment>
                         ))}
                       </div>
                     );
@@ -6185,11 +6358,30 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           {/* Layout Cards Container */}
           <div data-lab-cards-container="true" className="p-2 space-y-6 w-full">
             {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
-              const cardTitle = card.moleculeTitle
+              // Check if this is a landing card
+              const isLandingCard = card.atoms?.some(atom => atom.atomId === 'landing-screen');
+              
+              // For landing cards, use scenario-based title
+              let cardTitle: string;
+              if (isLandingCard) {
+                // Case 1 (Scenario A): No files -> "Initialize"
+                // Case 2 (Scenarios B, C): Some files not primed -> "Continue priming your data"
+                // Case 3 (Scenario D): All files primed -> "Priming Complete"
+                // While loading, default to "Initialize"
+                if (scenarioData.scenario === 'loading' || scenarioData.scenario === 'A') {
+                  cardTitle = 'Initialize';
+                } else if (scenarioData.scenario === 'D') {
+                  cardTitle = 'Priming Complete';
+                } else {
+                  cardTitle = 'Continue priming your data';
+                }
+              } else {
+                cardTitle = card.moleculeTitle
                 ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                 : (Array.isArray(card.atoms) && card.atoms.length > 0)
                   ? card.atoms[0].title
                   : 'Card';
+              }
 
               // Check if someone is editing this card
               const editor = cardEditors?.get(card.id);
@@ -6199,7 +6391,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 <React.Fragment key={card.id}>
                   <Card
                     data-card-id={card.id}
-            className={`relative w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+            className={`relative w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col ${
+              // Allow landing card to extend when guided mode is active
+              isLandingCard && globalGuidedModeEnabled && activeGuidedFlows[card.atoms?.find(a => a.atomId === 'landing-screen')?.id || ''] 
+                ? 'overflow-visible' 
+                : 'overflow-hidden'
+            } ${
               dragOver === card.id
                         ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                         : isBeingEdited
@@ -6256,6 +6453,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     className="transition-transform hover:scale-110"
                   />
                 ) : null}
+                        {!isLandingCard && (
+                          <>
                         <button
                           onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                           className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
@@ -6286,8 +6485,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 >
                   <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                         </button>
+                          </>
+                        )}
                       </div>
                       <div className="flex items-center space-x-1.5">
+                        {!isLandingCard && (
                         <button
                           onClick={e => {
                             e.stopPropagation();
@@ -6298,6 +6500,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         >
                           <Trash2 className="w-3.5 h-3.5 text-gray-400" />
                         </button>
+                        )}
                         <button
                           onClick={e => {
                             e.stopPropagation();
@@ -6346,8 +6549,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                             }`}
                         >
                           {card.atoms.map((atom) => (
+                            <React.Fragment key={atom.id}>
                             <AtomBox
-                              key={atom.id}
                               className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                               onClick={(e) => handleAtomClick(e, atom.id)}
                             >
@@ -6394,74 +6597,98 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 </button>
                       </div> */}
 
-                      {/* Atom Content */}
-                      {atom.atomId === 'text-box' ? (
-                        <TextBoxEditor textId={atom.id} />
-                      ) : atom.atomId === 'data-upload-validate' ? (
-                        <DataUploadValidateAtom atomId={atom.id} />
-                      ) : atom.atomId === 'feature-overview' ? (
-                        <FeatureOverviewAtom atomId={atom.id} />
-                      ) : atom.atomId === 'clustering' ? (
-                        <ClusteringAtom atomId={atom.id} />
-                      ) : atom.atomId === 'explore' ? (
-                        <ExploreAtom atomId={atom.id} />
-                      ) : atom.atomId === 'chart-maker' ? (
-                        <ChartMakerAtom atomId={atom.id} />
-                      ) : atom.atomId === 'pivot-table' ? (
-                        <PivotTableAtom atomId={atom.id} />
-                      ) : atom.atomId === 'unpivot' ? (
-                        <UnpivotAtom atomId={atom.id} />
-                      ) : atom.atomId === 'concat' ? (
-                        <ConcatAtom atomId={atom.id} />
-                      ) : atom.atomId === 'merge' ? (
-                        <MergeAtom atomId={atom.id} />
-                      ) : atom.atomId === 'column-classifier' ? (
-                        <ColumnClassifierAtom atomId={atom.id} />
-                      ) : atom.atomId === 'dataframe-operations' ? (
-                        <DataFrameOperationsAtom atomId={atom.id} />
-                      ) : atom.atomId === 'table' ? (
-                        <TableAtom atomId={atom.id} />
-                      ) : atom.atomId === 'create-column' ? (
-                        <CreateColumnAtom atomId={atom.id} />
-                      ) : atom.atomId === 'groupby-wtg-avg' ? (
-                        <GroupByAtom atomId={atom.id} />
-                      ) : atom.atomId === 'build-model-feature-based' ? (
-                        <BuildModelFeatureBasedAtom atomId={atom.id} />
-                      ) : atom.atomId === 'scenario-planner' ? (
-                        <ScenarioPlannerAtom atomId={atom.id} />
+                              {/* Atom Content */}
+                              {atom.atomId === 'text-box' ? (
+                                <TextBoxEditor textId={atom.id} />
+                              ) : atom.atomId === 'data-upload' ? (
+                                <DataUploadAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-validate' ? (
+                                <DataValidateAtom atomId={atom.id} />
+                              ) : atom.atomId === 'feature-overview' ? (
+                                <FeatureOverviewAtom atomId={atom.id} />
+                              ) : atom.atomId === 'clustering' ? (
+                                <ClusteringAtom atomId={atom.id} />
+                              ) : atom.atomId === 'explore' ? (
+                                <ExploreAtom atomId={atom.id} />
+                              ) : atom.atomId === 'chart-maker' ? (
+                                <ChartMakerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'pivot-table' ? (
+                                <PivotTableAtom atomId={atom.id} />
+                              ) : atom.atomId === 'unpivot' ? (
+                                <UnpivotAtom atomId={atom.id} />
+                              ) : atom.atomId === 'concat' ? (
+                                <ConcatAtom atomId={atom.id} />
+                              ) : atom.atomId === 'merge' ? (
+                                <MergeAtom atomId={atom.id} />
+                              ) : atom.atomId === 'column-classifier' ? (
+                                <ColumnClassifierAtom atomId={atom.id} />
+                              ) : atom.atomId === 'dataframe-operations' ? (
+                                <DataFrameOperationsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'table' ? (
+                                <TableAtom atomId={atom.id} />
+                              ) : atom.atomId === 'create-column' ? (
+                                <CreateColumnAtom atomId={atom.id} />
+                              ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                <GroupByAtom atomId={atom.id} />
+                              ) : atom.atomId === 'build-model-feature-based' ? (
+                                <BuildModelFeatureBasedAtom atomId={atom.id} />
+                              ) : atom.atomId === 'scenario-planner' ? (
+                                <ScenarioPlannerAtom atomId={atom.id} />
                       ) : atom.atomId === 'kpi-dashboard' ? (
                         <KPIDashboardAtom atomId={atom.id} />
-                      ) : atom.atomId === 'select-models-feature' ? (
-                        <SelectModelsFeatureAtom atomId={atom.id} />
-                      ) : atom.atomId === 'evaluate-models-feature' ? (
-                        <EvaluateModelsFeatureAtom atomId={atom.id} />
-                      ) : atom.atomId === 'scope-selector' ? (
-                        <ScopeSelectorAtom atomId={atom.id} />
-                      ) : atom.atomId === 'correlation' ? (
-                        <CorrelationAtom atomId={atom.id} />
-                      ) : atom.atomId === 'auto-regressive-models' ? (
-                        <AutoRegressiveModelsAtom atomId={atom.id} />
-                      ) : atom.atomId === 'select-models-auto-regressive' ? (
-                        <SelectModelsAutoRegressiveAtom atomId={atom.id} />
-                      ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
-                        <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
-                      ) : (
-                        <div>
-                          <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
-                          <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
-                          <p className="text-xs text-gray-500">
-                            Configure this atom for your application
-                          </p>
+                              ) : atom.atomId === 'select-models-feature' ? (
+                                <SelectModelsFeatureAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-feature' ? (
+                                <EvaluateModelsFeatureAtom atomId={atom.id} />
+                              ) : atom.atomId === 'scope-selector' ? (
+                                <ScopeSelectorAtom atomId={atom.id} />
+                              ) : atom.atomId === 'correlation' ? (
+                                <CorrelationAtom atomId={atom.id} />
+                              ) : atom.atomId === 'auto-regressive-models' ? (
+                                <AutoRegressiveModelsAtom atomId={atom.id} />
+                              ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'landing-screen' ? (
+                                <div className="w-full h-full">
+                                  <LandingScreenAtom 
+                                    atomId={atom.id} 
+                                    cardId={card.id}
+                                    onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                    onAddNewCard={() => {
+                                      // Find the landing card's position and add new card right after it
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      // Find landing card by checking for landing-screen atom
+                                      const landingCardIndex = arr.findIndex(c => 
+                                        c.atoms?.some(a => a.atomId === 'landing-screen')
+                                      );
+                                      // If landing card found, add after it; otherwise add at end
+                                      const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                      addNewCard(undefined, insertPosition);
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div>
+                                  <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
+                                  <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
+                                  <p className="text-xs text-gray-500">
+                                    Configure this atom for your application
+                                  </p>
+                                </div>
+                              )}
+                            </AtomBox>
+                    {/* Inline Guided Flow - Renders below atom when active */}
+                    {renderInlineGuidedFlow(atom)}
+                  </React.Fragment>
+                          ))}
                         </div>
                       )}
-                    </AtomBox>
-                  ))}
-                </div>
-              )}
-              {renderCardTextBox(card)}
-              {renderAppendedVariables(card)}
-            </div>
-          </Card>
+          {renderCardTextBox(card)}
+                      {renderAppendedVariables(card)}
+                    </div>
+                  </Card>
                   {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
                     <div className="flex justify-center my-4">
                       <button
@@ -6488,7 +6715,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               );
             })}
 
-            {/* Add New Card Button */}
+            {/* Add New Card Button - Show at end if there are cards (including landing card) */}
+            {Array.isArray(layoutCards) && layoutCards.length > 0 && (
             <div className="flex justify-center">
               <button
                 onClick={() => addNewCard()}
@@ -6508,6 +6736,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 </span>
               </button>
             </div>
+            )}
           </div>
         </div>
 
@@ -6515,7 +6744,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         {expandedCard &&
           createPortal(
             <div
-              className="fixed inset-0 z-40 pointer-events-none"
+              className="fixed inset-0 z-[60] pointer-events-none"
               role="dialog"
               aria-modal="true"
             >
@@ -6531,6 +6760,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                       {(() => {
                         const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
                         if (!card) return 'Card';
+                        
+                        // Check if this is a landing card - use scenario-based title (same logic as minimized view)
+                        const isLandingCard = card.atoms?.some(atom => atom.atomId === 'landing-screen');
+                        if (isLandingCard) {
+                          // Case 1 (Scenario A): No files -> "Initialize"
+                          // Case 2 (Scenarios B, C): Some files not primed -> "Continue priming your data"
+                          // Case 3 (Scenario D): All files primed -> "Priming Complete"
+                          // While loading, default to "Initialize"
+                          if (scenarioData.scenario === 'loading' || scenarioData.scenario === 'A') {
+                            return 'Initialize';
+                          } else if (scenarioData.scenario === 'D') {
+                            return 'Priming Complete';
+                          } else {
+                            return 'Continue priming your data';
+                          }
+                        }
+                        
+                        // For non-landing cards, use moleculeTitle or atom title
                         return card.moleculeTitle
                           ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                           : (Array.isArray(card.atoms) && card.atoms.length > 0)
@@ -6567,33 +6814,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     ) : (
                       <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                         {card.atoms.map((atom) => (
+                          <React.Fragment key={atom.id}>
                           <AtomBox
-                            key={`${atom.id}-expanded`}
                             className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                           >
-                            {/* Atom Header */}
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="flex items-center space-x-2">
-                                <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
-                              </div>
-                          {/* <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                                }}
-                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4 text-gray-400" />
-                          </button> */}
-                            </div>
-
-                            {/* Atom Content */}
+                            {/* Atom Content - No duplicate header, card header already shows it */}
                             <div className="w-full flex-1 overflow-visible">
                               {atom.atomId === 'text-box' ? (
                                 <TextBoxEditor textId={atom.id} />
-                              ) : atom.atomId === 'data-upload-validate' ? (
-                                <DataUploadValidateAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-upload' ? (
+                                <DataUploadAtom atomId={atom.id} />
+                              ) : atom.atomId === 'data-validate' ? (
+                                <DataValidateAtom atomId={atom.id} />
                               ) : atom.atomId === 'feature-overview' ? (
                                 <FeatureOverviewAtom atomId={atom.id} />
                               ) : atom.atomId === 'clustering' ? (
@@ -6640,6 +6872,25 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'landing-screen' ? (
+                                <div className="w-full h-full">
+                                  <LandingScreenAtom 
+                                    atomId={atom.id} 
+                                    cardId={card.id}
+                                    onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                    onAddNewCard={() => {
+                                      // Find the landing card's position and add new card right after it
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      // Find landing card by checking for landing-screen atom
+                                      const landingCardIndex = arr.findIndex(c => 
+                                        c.atoms?.some(a => a.atomId === 'landing-screen')
+                                      );
+                                      // If landing card found, add after it; otherwise add at end
+                                      const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                      addNewCard(undefined, insertPosition);
+                                    }}
+                                  />
+                                </div>
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
@@ -6651,6 +6902,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               )}
                             </div>
                           </AtomBox>
+                          {/* Inline Guided Flow - Renders below atom when active */}
+                          {renderInlineGuidedFlow(atom)}
+                        </React.Fragment>
                         ))}
                       </div>
                     );

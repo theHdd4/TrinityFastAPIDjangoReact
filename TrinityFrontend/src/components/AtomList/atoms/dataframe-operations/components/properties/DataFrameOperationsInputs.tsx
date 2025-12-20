@@ -2,10 +2,26 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API } from '@/lib/api';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 interface Frame { object_name: string; arrow_name: string }
 
-const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect }: any) => {
+interface DataFrameOperationsInputsProps {
+  data: any;
+  settings: any;
+  selectedFile: string;
+  onFileSelect: (fileId: string) => void;
+  onSettingsChange?: (settings: Partial<any>) => void;
+}
+
+const DataFrameOperationsInputs: React.FC<DataFrameOperationsInputsProps> = ({ 
+  data, 
+  settings, 
+  selectedFile, 
+  onFileSelect,
+  onSettingsChange 
+}) => {
   const [frames, setFrames] = useState<Frame[]>([]);
   const [selectedFrame, setSelectedFrame] = useState<Frame | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,6 +150,17 @@ const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect 
           </SelectContent>
         </Select>
         {error && <div className="text-red-600 text-xs p-2">{error}</div>}
+        
+        {/* Data Summary Toggle */}
+        {onSettingsChange && (
+          <div className="flex items-center justify-between pt-4 border-t mt-4">
+            <Label className="text-xs">Show Data Summary</Label>
+            <Switch
+              checked={settings?.showDataSummary || false}
+              onCheckedChange={(checked) => onSettingsChange({ showDataSummary: checked })}
+            />
+          </div>
+        )}
       </Card>
     </div>
   );

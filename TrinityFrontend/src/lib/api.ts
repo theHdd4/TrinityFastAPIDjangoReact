@@ -176,9 +176,17 @@ export const SIGNUPS_API =
   normalizeUrl(import.meta.env.VITE_SIGNUPS_API) ||
   `${backendOrigin}${djangoPrefix}/signups`;
 
+export const UPLOAD_API =
+  normalizeUrl(import.meta.env.VITE_UPLOAD_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload`;
+
 export const VALIDATE_API =
   normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
-  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-validate`;
+
+export const DATAFRAME_VALIDATION_API =
+  normalizeUrl(import.meta.env.VITE_DATAFRAME_VALIDATION_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/dataframe-validation`;
 
 export const EXHIBITION_API =
   normalizeUrl(import.meta.env.VITE_EXHIBITION_API) ||
@@ -229,6 +237,9 @@ export const CREATECOLUMN_API =
 
 export const GROUPBY_API =
   import.meta.env.VITE_GROUPBY_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/groupby`;
+
+export const CARDINALITY_VIEW_API =
+  import.meta.env.VITE_CARDINALITY_VIEW_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/cardinality-view`;
 
 let aiBase = normalizeUrl(import.meta.env.VITE_TRINITY_AI_API);
 if (!aiBase) {

@@ -1774,7 +1774,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     setMessages(prev => [...prev, progressMessage]);
     
     try {
-      // Load available files before sending (so backend can skip data-upload-validate)
+      // Load available files before sending (so backend can skip data-validate)
       const fileNames = await loadAvailableFiles();
       console.log('📂 Loaded files for workflow:', fileNames);
       

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -186,28 +187,20 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
         {error && (
           <div className="text-red-600 text-xs p-2">{error}</div>
         )}
-      </Card>
 
-      {/* Card 2: Show Cardinality View (only for load mode) */}
-      {settings.mode === 'load' && settings.sourceFile && (
-        <Card className="p-4 space-y-3">
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="cardinality-toggle"
+        {/* Show Data Summary Toggle - Only when data source is selected (chartmaker pattern) */}
+        {settings.mode === 'load' && settings.sourceFile && (
+          <div className="flex items-center justify-between pt-4 border-t mt-4">
+            <Label className="text-xs">Show Data Summary</Label>
+            <Switch
               checked={settings.showCardinalityView || false}
               onCheckedChange={(checked) => {
-                updateSettings(atomId, { showCardinalityView: !!checked });
+                updateSettings(atomId, { showCardinalityView: checked });
               }}
             />
-            <Label
-              htmlFor="cardinality-toggle"
-              className="text-sm font-medium text-gray-700 cursor-pointer"
-            >
-              Show Cardinality View
-            </Label>
           </div>
-        </Card>
-      )}
+        )}
+      </Card>
 
       {/* Card 3: Create Blank Table */}
       <Card className="p-4 space-y-3">
