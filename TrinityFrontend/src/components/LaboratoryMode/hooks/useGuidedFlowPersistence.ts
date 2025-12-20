@@ -153,7 +153,16 @@ export function useGuidedFlowPersistence() {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) {
+      if (res.ok) {
+        // Dispatch events immediately after successful approval to update UI
+        // Use fileName as objectName since that's the key used in status checks
+        window.dispatchEvent(new CustomEvent('force-refresh-priming-status', {
+          detail: { objectName: fileName, isPrimed: true }
+        }));
+        window.dispatchEvent(new CustomEvent('priming-status-changed', {
+          detail: { objectName: fileName, filePath: fileName, status: { isApproved: true } }
+        }));
+      } else {
         console.warn('Failed to mark file as primed', await res.text());
       }
     } catch (err) {

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useGuidedUploadFlow, type UploadStage, type GuidedUploadFlowState } from './useGuidedUploadFlow';
 import { U0FileUpload } from './stages/U0FileUpload';
 import { U1StructuralScan } from './stages/U1StructuralScan';
@@ -8,7 +9,7 @@ import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
 import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
 import { U5MissingValues } from './stages/U5MissingValues';
 import { U6FinalPreview } from './stages/U6FinalPreview';
-import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Maximize2, Minimize2, X } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -563,6 +564,9 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   
   // Track if current stage is collapsed
   const [isCurrentStageCollapsed, setIsCurrentStageCollapsed] = useState(false);
+  
+  // Track which stage is maximized (null if none)
+  const [maximizedStage, setMaximizedStage] = useState<UploadStage | null>(null);
 
   // Handle when user makes changes on an expanded completed stage
   const handleCompletedStageChange = useCallback((stage: UploadStage) => {
@@ -694,56 +698,94 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
       >
         {/* Stage Header */}
         {isCompleted ? (
-          <button
-            onClick={() => toggleCompletedStage(stage)}
-            className={`flex items-center justify-between px-4 py-3 border-b border-gray-100 ${headerBg} hover:bg-gray-100 transition-colors cursor-pointer w-full text-left`}
-          >
-            <div className="flex items-center gap-2">
+          <div className={`flex items-center justify-between px-4 py-3 border-b border-gray-100 ${headerBg} hover:bg-gray-100 transition-colors w-full`}>
+            <button
+              onClick={() => toggleCompletedStage(stage)}
+              className="flex items-center gap-2 flex-1 text-left"
+            >
               {statusIcon}
               <h3 className={`text-sm font-semibold ${headerTextColor}`}>
                 {STAGE_TITLES[stage]}
               </h3>
               <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">Completed</span>
-            </div>
-            {isExpanded ? (
-              <ChevronUp className="w-4 h-4 text-gray-500" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-gray-500" />
-            )}
-          </button>
-        ) : (
-          <button
-            onClick={isCurrent ? toggleCurrentStage : undefined}
-            className={`flex items-center justify-between px-4 py-3 border-b border-gray-100 ${headerBg} flex-shrink-0 w-full text-left transition-colors ${
-              isCurrent ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
-            }`}
-          >
-            <div className="flex items-center gap-2 relative">
-              {/* Blue line inside - positioned on the left of the content */}
-              {isCurrent && (
-                <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#458EE2] rounded-r" />
-              )}
-              <div className={`flex items-center gap-2 ${isCurrent ? 'pl-3' : ''}`}>
-                {statusIcon}
-                <h3 className={`text-sm font-semibold ${headerTextColor}`}>
-                  {STAGE_TITLES[stage]}
-                </h3>
-                {isCurrent && (
-                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Current</span>
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMaximizedStage(maximizedStage === stage ? null : stage);
+                }}
+                className="p-1.5 hover:bg-gray-200 rounded transition-colors"
+                title={maximizedStage === stage ? "Exit Fullscreen" : "Maximize Stage"}
+              >
+                {maximizedStage === stage ? (
+                  <Minimize2 className="w-4 h-4 text-gray-600" />
+                ) : (
+                  <Maximize2 className="w-4 h-4 text-gray-600" />
                 )}
-                {isUpcoming && (
-                  <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Upcoming</span>
-                )}
-              </div>
-            </div>
-            {isCurrent && (
-              isExpanded ? (
+              </button>
+              {isExpanded ? (
                 <ChevronUp className="w-4 h-4 text-gray-500" />
               ) : (
                 <ChevronDown className="w-4 h-4 text-gray-500" />
-              )
-            )}
-          </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className={`flex items-center justify-between px-4 py-3 border-b border-gray-100 ${headerBg} flex-shrink-0 w-full transition-colors ${
+            isCurrent ? 'hover:bg-gray-100' : ''
+          }`}>
+            <button
+              onClick={isCurrent ? toggleCurrentStage : undefined}
+              className={`flex items-center gap-2 relative flex-1 text-left ${
+                isCurrent ? 'cursor-pointer' : 'cursor-default'
+              }`}
+            >
+              <div className="flex items-center gap-2 relative">
+                {/* Blue line inside - positioned on the left of the content */}
+                {isCurrent && (
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#458EE2] rounded-r" />
+                )}
+                <div className={`flex items-center gap-2 ${isCurrent ? 'pl-3' : ''}`}>
+                  {statusIcon}
+                  <h3 className={`text-sm font-semibold ${headerTextColor}`}>
+                    {STAGE_TITLES[stage]}
+                  </h3>
+                  {isCurrent && (
+                    <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Current</span>
+                  )}
+                  {isUpcoming && (
+                    <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Upcoming</span>
+                  )}
+                </div>
+              </div>
+            </button>
+            <div className="flex items-center gap-2">
+              {(isCurrent || isCompleted) && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMaximizedStage(maximizedStage === stage ? null : stage);
+                  }}
+                  className="p-1.5 hover:bg-gray-200 rounded transition-colors"
+                  title={maximizedStage === stage ? "Exit Fullscreen" : "Maximize Stage"}
+                >
+                  {maximizedStage === stage ? (
+                    <Minimize2 className="w-4 h-4 text-gray-600" />
+                  ) : (
+                    <Maximize2 className="w-4 h-4 text-gray-600" />
+                  )}
+                </button>
+              )}
+              {isCurrent && (
+                isExpanded ? (
+                  <ChevronUp className="w-4 h-4 text-gray-500" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                )
+              )}
+            </div>
+          </div>
         )}
 
         {/* Stage Content - Only show if current or expanded */}
@@ -1002,11 +1044,97 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     isCurrentStageCollapsed,
   ]);
 
+  // Helper function to render stage content for maximized view
+  const renderMaximizedStageContent = useCallback((stage: UploadStage) => {
+    const StageComponent = STAGE_COMPONENTS[stage];
+    
+    return (
+      <div className="p-8">
+        {stage === 'U1' ? (
+          <StageComponent 
+            flow={flow} 
+            onNext={() => {}} 
+            onBack={() => {}}
+            onRestart={handleRestart}
+            onCancel={() => {}}
+            isMaximized={true}
+          />
+        ) : stage === 'U2' ? (
+          <StageComponent 
+            flow={flow} 
+            onNext={() => {}} 
+            onBack={() => {}}
+            onRestart={handleRestart}
+            onCancel={() => {}}
+            onRegisterContinueHandler={() => {}}
+            onRegisterContinueDisabled={() => () => false}
+            isMaximized={true}
+          />
+        ) : stage === 'U6' ? (
+          <StageComponent 
+            flow={flow} 
+            onNext={() => {}} 
+            onBack={() => {}}
+            onGoToStage={goToStage}
+            isMaximized={true}
+          />
+        ) : (
+          <StageComponent 
+            flow={flow} 
+            onNext={() => {}} 
+            onBack={() => {}}
+            isMaximized={true}
+          />
+        )}
+      </div>
+    );
+  }, [flow, handleRestart, goToStage]);
+
   return (
-    <div className="w-full mt-2 flex flex-col">
-      {/* Render only visible stages (U1-U6) - U0 is handled by atom */}
-      {VISIBLE_STAGES.map(stage => renderStageItem(stage))}
-    </div>
+    <>
+      <div className="w-full mt-2 flex flex-col">
+        {/* Render only visible stages (U1-U6) - U0 is handled by atom */}
+        {VISIBLE_STAGES.map(stage => renderStageItem(stage))}
+      </div>
+      
+      {/* Maximized Stage Dialog */}
+      {maximizedStage && (
+        <Dialog open={!!maximizedStage} onOpenChange={(open) => !open && setMaximizedStage(null)}>
+          <DialogContent 
+            className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 overflow-hidden"
+            hideCloseButton
+          >
+            <DialogHeader className="px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <DialogTitle className="text-lg font-semibold text-gray-900">
+                    {STAGE_TITLES[maximizedStage]}
+                  </DialogTitle>
+                  {maximizedStage === state.currentStage && (
+                    <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Current</span>
+                  )}
+                  {isStageCompleted(maximizedStage, state.currentStage) && (
+                    <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">Completed</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setMaximizedStage(null)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Close Fullscreen"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+            </DialogHeader>
+            
+            {/* Maximized Content */}
+            <div className="flex-1 overflow-auto">
+              {renderMaximizedStageContent(maximizedStage)}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 };
 

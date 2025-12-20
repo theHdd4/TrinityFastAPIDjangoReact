@@ -24,6 +24,7 @@ interface U2UnderstandingFilesProps {
   onCancel?: () => void;
   onRegisterContinueHandler?: (handler: () => void) => void;
   onRegisterContinueDisabled?: (getDisabled: () => boolean) => void;
+  isMaximized?: boolean;
 }
 
 interface FilePreviewRow {
@@ -54,7 +55,8 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
   onRestart,
   onCancel,
   onRegisterContinueHandler,
-  onRegisterContinueDisabled
+  onRegisterContinueDisabled,
+  isMaximized = false
 }) => {
   const { state, setHeaderSelection, updateFileSheetSelection, updateUploadedFilePath } = flow;
   const { uploadedFiles, headerSelections, selectedFileIndex: savedSelectedIndex } = state;
@@ -610,7 +612,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                   <div 
                     className="overflow-x-auto" 
                     style={{ 
-                      maxHeight: '8.75rem',
+                      maxHeight: isMaximized ? 'calc(100vh - 300px)' : '8.75rem',
                       overflowY: 'auto',
                       scrollbarGutter: 'stable'
                     }}

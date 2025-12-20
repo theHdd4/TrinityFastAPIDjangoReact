@@ -2185,8 +2185,10 @@ async def save_dataframes(
                     batched_kwargs = CSV_READ_KWARGS.copy()
                     batched_kwargs["schema"] = schema
                     batched_kwargs["truncate_ragged_lines"] = False
+                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                 else:
                     batched_kwargs = CSV_READ_KWARGS.copy()
+                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                 
                 reader = pl.read_csv_batched(
                     csv_path, batch_size=1_000_000, **batched_kwargs
@@ -2228,7 +2230,10 @@ async def save_dataframes(
                 data_bytes = fileobj.read()
                 # Use pl.read_csv with CSV_READ_KWARGS for proper dtype inference
                 # This matches the old routes behavior and preserves numeric types
-                df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
+                # Add ignore_errors to handle mixed dtype columns (e.g., "allpacksize" in numeric column)
+                read_kwargs = CSV_READ_KWARGS.copy()
+                read_kwargs["ignore_errors"] = True  # Convert unparseable values to null instead of failing
+                df_pl = pl.read_csv(io.BytesIO(data_bytes), **read_kwargs)
                 df_pl = data_upload_service._normalize_column_names(df_pl)
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)

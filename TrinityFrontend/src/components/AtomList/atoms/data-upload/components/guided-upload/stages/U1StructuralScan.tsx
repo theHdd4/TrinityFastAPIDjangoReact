@@ -12,6 +12,7 @@ interface U1StructuralScanProps {
   onBack: () => void;
   onRestart?: () => void;
   onCancel?: () => void;
+  isMaximized?: boolean;
 }
 
 export const U1StructuralScan: React.FC<U1StructuralScanProps> = ({
@@ -20,6 +21,7 @@ export const U1StructuralScan: React.FC<U1StructuralScanProps> = ({
   onBack,
   onRestart,
   onCancel,
+  isMaximized = false,
 }) => {
   const { state, updateFileSheetSelection, setSelectedFileIndex } = flow;
   const { uploadedFiles, selectedFileIndex: savedSelectedIndex } = state;

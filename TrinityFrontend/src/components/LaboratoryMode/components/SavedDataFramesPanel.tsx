@@ -183,11 +183,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [excelFolders, setExcelFolders] = useState<ExcelFolder[]>([]);
   const [prefix, setPrefix] = useState('');
   const [filePrimingStatus, setFilePrimingStatus] = useState<Record<string, {
-    isPrimed: boolean;
-    isInProgress: boolean;
-    currentStage?: string;
-    completedSteps?: string[];
-    missingSteps?: string[];
+    isApproved: boolean;  // Simple boolean: true = green (approved), false = red (not approved)
   }>>({});
   const [openDirs, setOpenDirs] = useState<Record<string, boolean>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
@@ -1601,11 +1597,16 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           if (fileName) {
             await markFileAsPrimed(fileName);
             // Dispatch events to trigger UI refresh in both panels
+            // Use object_name as the key for status updates
+            const objectName = processingTarget.object_name;
             window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-              detail: { filePath: processingTarget.object_name, fileName: fileName } 
+              detail: { filePath: objectName, fileName: fileName, objectName: objectName } 
             }));
             window.dispatchEvent(new CustomEvent('priming-status-changed', { 
-              detail: { filePath: processingTarget.object_name, fileName: fileName } 
+              detail: { objectName: objectName, filePath: objectName, fileName: fileName, status: { isApproved: true } } 
+            }));
+            window.dispatchEvent(new CustomEvent('force-refresh-priming-status', { 
+              detail: { objectName: objectName, isPrimed: true } 
             }));
           }
         } else {
@@ -1741,47 +1742,44 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       }
     };
     
-    // Listen for immediate priming status updates (for instant green status after approval)
+    // Listen for immediate approval status updates (for instant green status after approval)
     const handleForceRefreshPrimingStatus = (event: any) => {
       if (!cancelled && event.detail) {
         const { objectName, isPrimed } = event.detail;
         console.log('[SavedDataFramesPanel] force-refresh-priming-status event received:', { objectName, isPrimed });
         
-        // Immediately update the status for this specific file
+        // Immediately update the status for this specific file (works for both regular files and sheets in folders)
+        // Simple boolean: isApproved = isPrimed
         setFilePrimingStatus(prev => ({
           ...prev,
           [objectName]: {
-            isPrimed: isPrimed === true,
-            isInProgress: false,
-            currentStage: isPrimed ? 'U7' : undefined,
-            completedSteps: isPrimed ? ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'] : [],
-            missingSteps: isPrimed ? [] : ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'],
+            isApproved: isPrimed === true,
           }
         }));
         
-        // Also trigger a full refresh to ensure consistency
-        setReloadToken(prev => prev + 1);
+        // Don't trigger full refresh immediately - it would overwrite the status before backend updates
+        // The dataframe-saved event will trigger a refresh after a delay, giving backend time to update
       }
     };
     
     // Listen for priming-status-changed events with status info
     const handlePrimingStatusChanged = (event: any) => {
       if (!cancelled && event.detail) {
-        const { objectName, filePath, status } = event.detail;
-        const targetObjectName = objectName || filePath;
+        const { objectName, filePath, fileName, status } = event.detail;
+        // Try objectName first, then filePath, then fileName (object_name is the key used in status checks)
+        const targetObjectName = objectName || filePath || fileName;
         
-        if (targetObjectName && status) {
-          console.log('[SavedDataFramesPanel] priming-status-changed event with status:', { targetObjectName, status });
+        if (targetObjectName) {
+          console.log('[SavedDataFramesPanel] priming-status-changed event with status:', { targetObjectName, status, eventDetail: event.detail });
           
           // Immediately update the status for this specific file
+          // If status is provided, use it; otherwise default to approved (since event means approval just happened)
+          const isApproved = status?.isApproved === true || status?.isPrimed === true || (!status || Object.keys(status).length === 0);
+          
           setFilePrimingStatus(prev => ({
             ...prev,
             [targetObjectName]: {
-              isPrimed: status.isPrimed === true,
-              isInProgress: status.isInProgress === false,
-              currentStage: status.currentStage || (status.isPrimed ? 'U7' : undefined),
-              completedSteps: status.completedSteps || (status.isPrimed ? ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'] : []),
-              missingSteps: status.missingSteps || (status.isPrimed ? [] : ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7']),
+              isApproved,
             }
           }));
         }
@@ -1973,15 +1971,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             setContextMenu(null);
             setRenameTarget(null);
             
-            // Check workbook metadata and priming status for files
+            // Check workbook metadata and approval status for files
             const checkFileMetadata = async () => {
               const metadataChecks: Record<string, boolean> = {};
-              const primingStatusChecks: Record<string, {
-                isPrimed: boolean;
-                isInProgress: boolean;
-                currentStage?: string;
-                completedSteps?: string[];
-                missingSteps?: string[];
+              const approvalStatusChecks: Record<string, {
+                isApproved: boolean;
               }> = {};
               
               for (const f of filtered) {
@@ -2009,7 +2003,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   metadataChecks[f.object_name] = false;
                 }
                 
-                // Check priming status
+                // Check approval status - simple check: is file approved (primed flag exists)?
                 try {
                   const projectContext = getActiveProjectContext();
                   if (projectContext) {
@@ -2025,90 +2019,74 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                       { credentials: 'include' }
                     );
 
-                    let isPrimed = false;
-                    let currentStage: string | undefined;
-                    let completedSteps: string[] = [];
-                    let missingSteps: string[] = [];
-                    let isInProgressFromBackend = false;
-
+                    let isApproved = false;
                     if (primingRes.ok) {
                       const primingData = await primingRes.json();
-                      isPrimed = primingData?.completed === true || primingData?.is_primed === true;
-                      currentStage = primingData?.current_stage;
-                      completedSteps = Array.isArray(primingData?.completed_steps) ? primingData.completed_steps : [];
-                      missingSteps = Array.isArray(primingData?.missing_steps) ? primingData.missing_steps : [];
-                      // Use backend's is_in_progress value directly
-                      isInProgressFromBackend = primingData?.is_in_progress === true;
+                      // Simple check: if primed flag exists, file is approved
+                      isApproved = primingData?.is_primed === true;
                     }
 
-                    // Also check classifier config
-                    let hasClassifierConfig = false;
-                    try {
-                      const configQueryParams = new URLSearchParams({
-                        client_name: projectContext.client_name || '',
-                        app_name: projectContext.app_name || '',
-                        project_name: projectContext.project_name || '',
-                        file_name: f.object_name,
-                        bypass_cache: 'true',
-                      }).toString();
-
-                      const configRes = await fetch(
-                        `${CLASSIFIER_API}/get_config?${configQueryParams}`,
-                        { credentials: 'include' }
-                      );
-
-                      if (configRes.ok) {
-                        const configData = await configRes.json();
-                        if (configData?.data) {
-                          const hasIdentifiers = Array.isArray(configData.data.identifiers) && configData.data.identifiers.length > 0;
-                          const hasMeasures = Array.isArray(configData.data.measures) && configData.data.measures.length > 0;
-                          hasClassifierConfig = hasIdentifiers || hasMeasures;
-                          // If classifier config exists, U4 (column names) and U5 (data types) are likely done
-                          if (hasClassifierConfig && !completedSteps.includes('U4')) {
-                            completedSteps.push('U4', 'U5');
-                          }
-                        }
-                      }
-                    } catch (err) {
-                      console.warn('Failed to check classifier config for priming status', err);
-                    }
-
-                    // File is primed only if all 7 steps completed AND has classifier config
-                    const allStepsCompleted = completedSteps.includes('U7') || (completedSteps.length >= 7 && currentStage === 'U7');
-                    isPrimed = allStepsCompleted && hasClassifierConfig;
-
-                    // Recalculate missing steps
-                    const allSteps = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
-                    missingSteps = allSteps.filter(s => !completedSteps.includes(s));
-
-                    // Use backend's is_in_progress value directly
-                    // Backend logic: Red (U0/U1), Yellow (U2-U6), Green (U7)
-                    // If backend didn't provide is_in_progress, calculate it: U2-U6 are in progress
-                    const isInProgress = isInProgressFromBackend || 
-                      (currentStage && currentStage !== 'U7' && currentStage !== 'U0' && currentStage !== 'U1' && !isPrimed);
-
-                    primingStatusChecks[f.object_name] = {
-                      isPrimed,
-                      isInProgress: !!isInProgress,
-                      currentStage,
-                      completedSteps,
-                      missingSteps,
+                    approvalStatusChecks[f.object_name] = {
+                      isApproved,
                     };
                   }
                 } catch (err) {
-                  console.warn('Failed to check priming status for', f.object_name, err);
-                  primingStatusChecks[f.object_name] = {
-                    isPrimed: false,
-                    isInProgress: false,
-                    completedSteps: [],
-                    missingSteps: ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'],
+                  console.warn('Failed to check approval status for', f.object_name, err);
+                  // Default to not approved (red) when status check fails
+                  approvalStatusChecks[f.object_name] = {
+                    isApproved: false,
                   };
+                }
+              }
+              
+              // CRITICAL: Also check approval status for sheets in Excel folders
+              // This ensures sheets in folders get proper status updates and turn green
+              for (const folder of excelFoldersData) {
+                if (Array.isArray(folder.sheets)) {
+                  for (const sheet of folder.sheets) {
+                    if (!sheet.object_name) continue;
+                    
+                    // Check approval status for this sheet - simple check: is sheet approved (primed flag exists)?
+                    try {
+                      const projectContext = getActiveProjectContext();
+                      if (projectContext) {
+                        const queryParams = new URLSearchParams({
+                          client_name: projectContext.client_name || '',
+                          app_name: projectContext.app_name || '',
+                          project_name: projectContext.project_name || '',
+                          file_name: sheet.object_name, // Use sheet's full object_name with folder path
+                        }).toString();
+
+                        const primingRes = await fetch(
+                          `${VALIDATE_API}/check-priming-status?${queryParams}`,
+                          { credentials: 'include' }
+                        );
+
+                        let isApproved = false;
+                        if (primingRes.ok) {
+                          const primingData = await primingRes.json();
+                          // Simple check: if primed flag exists, sheet is approved
+                          isApproved = primingData?.is_primed === true;
+                        }
+
+                        approvalStatusChecks[sheet.object_name] = {
+                          isApproved,
+                        };
+                      }
+                    } catch (err) {
+                      console.warn('Failed to check approval status for sheet', sheet.object_name, err);
+                      // Default to not approved (red) when status check fails
+                      approvalStatusChecks[sheet.object_name] = {
+                        isApproved: false,
+                      };
+                    }
+                  }
                 }
               }
               
               if (!cancelled) {
                 setHasMultipleSheetsByFile(metadataChecks);
-                setFilePrimingStatus(primingStatusChecks);
+                setFilePrimingStatus(approvalStatusChecks);
               }
             };
             void checkFileMetadata();
@@ -2238,11 +2216,16 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         // Mark file as primed
         if (fileName) {
           await markFileAsPrimed(fileName);
+          // Use object_name as the key for status updates
+          const objectName = frame.object_name;
           window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-            detail: { filePath: frame.object_name, fileName: fileName } 
+            detail: { filePath: objectName, fileName: fileName, objectName: objectName } 
           }));
           window.dispatchEvent(new CustomEvent('priming-status-changed', { 
-            detail: { filePath: frame.object_name, fileName: fileName } 
+            detail: { objectName: objectName, filePath: objectName, fileName: fileName, status: { isApproved: true } } 
+          }));
+          window.dispatchEvent(new CustomEvent('force-refresh-priming-status', { 
+            detail: { objectName: objectName, isPrimed: true } 
           }));
         }
         toast({ 
@@ -2801,35 +2784,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     return stepNames[step] || step;
   };
 
-  // Helper function to generate priming status tooltip content
+  // Helper function to generate approval status tooltip content
   const getPrimingStatusTooltip = (status: {
-    isPrimed?: boolean;
-    isInProgress?: boolean;
-    currentStage?: string;
-    completedSteps?: string[];
-    missingSteps?: string[];
+    isApproved?: boolean;
   }): string => {
-    if (status.isPrimed) {
-      return '✅ Fully primed - All 7 steps completed';
-    }
-    
-    const allSteps = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
-    const completed = status.completedSteps || [];
-    const missing = status.missingSteps || allSteps.filter(s => !completed.includes(s));
-    
-    if (missing.length === 0) {
-      return '✅ All steps completed';
-    }
-    
-    const completedNames = completed.map(getStepName).join(', ');
-    const missingNames = missing.map(getStepName).join(', ');
-    
-    let tooltip = `📊 Data Priming Status:\n\n`;
-    tooltip += `✅ Completed: ${completedNames || 'None'}\n\n`;
-    tooltip += `❌ Missing: ${missingNames}\n\n`;
-    tooltip += `Click the wrench icon to complete missing steps.`;
-    
-    return tooltip;
+    return status.isApproved 
+      ? '✅ Approved - Ready for use'
+      : '❌ Not approved - Click equalizer icon to approve';
   };
 
   const renderNode = (node: TreeNode, level = 0): React.ReactNode => {
@@ -2897,10 +2858,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                 });
                               }}
                               className={`text-xs hover:underline text-left flex-1 truncate overflow-hidden text-ellipsis whitespace-nowrap flex items-center gap-1 ${
-                                sheetStatus?.isPrimed
+                                sheetStatus?.isApproved
                                   ? 'text-green-600 font-medium'
-                                  : sheetStatus?.isInProgress
-                                  ? 'text-yellow-600 font-medium'
                                   : 'text-red-600 font-medium'
                               }`}
                             >
@@ -2917,10 +2876,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                         {sheetStatus && (
                           <div
                             className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                              sheetStatus.isPrimed
+                              sheetStatus.isApproved
                                 ? 'bg-green-500'
-                                : sheetStatus.isInProgress
-                                ? 'bg-yellow-500'
                                 : 'bg-red-500'
                             }`}
                           />
@@ -2935,7 +2892,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                       />
                       <SlidersHorizontal
                         className={`w-3.5 h-3.5 cursor-pointer ${
-                          !sheetStatus?.isPrimed 
+                          !sheetStatus?.isApproved 
                             ? 'equalizer-blink-unprimed' 
                             : 'text-gray-400'
                         }`}
@@ -2946,74 +2903,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                           last_modified: sheet.last_modified,
                           size: sheet.size
                         })}
-                        title={!sheetStatus?.isPrimed ? "Click to prime this file" : "Process columns"}
+                        title={!sheetStatus?.isApproved ? "Click to approve this file" : "Process columns"}
                       />
-                      <Wrench
-                        className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-[#458EE2]"
-                        onClick={async () => {
-                          // Find or create a data-upload atom
-                          const atomId = findOrCreateDataUploadAtom();
-                          
-                          // Check priming status to determine initial stage
-                          const projectContext = getActiveProjectContext();
-                          // Default to U1 (Scan step) for files uploaded directly from Saved DataFrames
-                          let startStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7' = 'U1';
-                          
-                          if (projectContext) {
-                            try {
-                              const queryParams = new URLSearchParams({
-                                client_name: projectContext.client_name || '',
-                                app_name: projectContext.app_name || '',
-                                project_name: projectContext.project_name || '',
-                                file_name: sheet.object_name,
-                              }).toString();
-
-                              const primingCheckRes = await fetch(
-                                `${VALIDATE_API}/check-priming-status?${queryParams}`,
-                                { credentials: 'include' }
-                              );
-
-                              if (primingCheckRes.ok) {
-                                const primingData = await primingCheckRes.json();
-                                const currentStage = primingData?.current_stage;
-                                const isInProgress = primingData?.is_in_progress;
-                                const isPrimed = primingData?.is_primed;
-                                
-                                // If file is fully primed, start at U1 to allow re-processing
-                                if (isPrimed) {
-                                  startStage = 'U1';
-                                }
-                                // If file is in progress (partially primed), continue from current stage
-                                else if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
-                                  startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
-                                }
-                                // If file has started but not in progress (U0 or U1), start at U1
-                                else if (currentStage === 'U0' || currentStage === 'U1') {
-                                  startStage = 'U1';
-                                }
-                                // Default: file uploaded directly, start at U1 (Scan step)
-                                else {
-                                  startStage = 'U1';
-                                }
-                              }
-                            } catch (err) {
-                              console.warn('Failed to check priming status', err);
-                              // On error, default to U1 (Scan step)
-                              startStage = 'U1';
-                            }
-                          }
-
-                          // Start guided flow inline in canvas area
-                          setActiveGuidedFlow(atomId, startStage, {
-                            initialFile: {
-                              name: sheet.arrow_name || sheet.csv_name || sheet.sheet_name,
-                              path: sheet.object_name,
-                              size: sheet.size || 0,
-                            }
-                          });
-                        }}
-                        title="Open guided flow"
-                      />
+                      {/* Wrench icon removed - not in use */}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button
@@ -3091,10 +2983,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                       onClick={() => handleOpen(f.object_name)}
                       onContextMenu={(e) => handleContextMenu(e, f)}
                       className={`text-xs hover:underline text-left flex-1 truncate overflow-hidden text-ellipsis whitespace-nowrap ${
-                        status?.isPrimed
+                        status?.isApproved
                           ? 'text-green-600 font-medium'
-                          : status?.isInProgress
-                          ? 'text-yellow-600 font-medium'
                           : 'text-red-600 font-medium'
                       }`}
                     >
@@ -3115,10 +3005,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   <TooltipTrigger asChild>
                     <div
                       className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                        status?.isPrimed
+                        status?.isApproved
                           ? 'bg-green-500'
-                          : status?.isInProgress
-                          ? 'bg-yellow-500'
                           : 'bg-red-500'
                       }`}
                     />
@@ -3150,79 +3038,14 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             />
             <SlidersHorizontal
               className={`w-3.5 h-3.5 cursor-pointer ${
-                !status?.isPrimed 
+                !status?.isApproved 
                   ? 'equalizer-blink-unprimed' 
                   : 'text-gray-400'
               }`}
               onClick={() => setModeSelectionTarget(f)}
-              title={!status?.isPrimed ? "Click to prime this file" : "Process columns"}
+              title={!status?.isApproved ? "Click to approve this file" : "Process columns"}
             />
-            <Wrench
-              className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-[#458EE2]"
-              onClick={async () => {
-                // Find or create a data-upload atom
-                const atomId = findOrCreateDataUploadAtom();
-                
-                // Check priming status to determine initial stage
-                const projectContext = getActiveProjectContext();
-                // Default to U1 (Scan step) for files uploaded directly from Saved DataFrames
-                let startStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7' = 'U1';
-                
-                if (projectContext) {
-                  try {
-                    const queryParams = new URLSearchParams({
-                      client_name: projectContext.client_name || '',
-                      app_name: projectContext.app_name || '',
-                      project_name: projectContext.project_name || '',
-                      file_name: f.object_name,
-                    }).toString();
-
-                    const primingCheckRes = await fetch(
-                      `${VALIDATE_API}/check-priming-status?${queryParams}`,
-                      { credentials: 'include' }
-                    );
-
-                    if (primingCheckRes.ok) {
-                      const primingData = await primingCheckRes.json();
-                      const currentStage = primingData?.current_stage;
-                      const isInProgress = primingData?.is_in_progress;
-                      const isPrimed = primingData?.is_primed;
-                      
-                      // If file is fully primed, start at U1 to allow re-processing
-                      if (isPrimed) {
-                        startStage = 'U1';
-                      }
-                      // If file is in progress (partially primed), continue from current stage
-                      else if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
-                        startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
-                      }
-                      // If file has started but not in progress (U0 or U1), start at U1
-                      else if (currentStage === 'U0' || currentStage === 'U1') {
-                        startStage = 'U1';
-                      }
-                      // Default: file uploaded directly, start at U1 (Scan step)
-                      else {
-                        startStage = 'U1';
-                      }
-                    }
-                  } catch (err) {
-                    console.warn('Failed to check priming status for wrench icon', err);
-                    // On error, default to U1 (Scan step)
-                    startStage = 'U1';
-                  }
-                }
-                
-                // Start guided flow inline in canvas area
-                setActiveGuidedFlow(atomId, startStage, {
-                  initialFile: {
-                    name: f.arrow_name || f.csv_name || f.object_name,
-                    path: f.object_name,
-                    size: f.size || 0,
-                  }
-                });
-              }}
-              title="Guided upload flow with rule-based checking"
-            />
+            {/* Wrench icon removed - not in use */}
             {hasMultipleSheetsByFile[f.object_name] && (
               <Layers
                 className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
@@ -3776,77 +3599,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 <SlidersHorizontal className="w-4 h-4" />
                 <span>View properties</span>
               </button>
-              <button
-                onClick={async () => {
-                  if (!contextMenu?.frame) return;
-                  
-                  // Find or create a data-upload atom
-                  const atomId = findOrCreateDataUploadAtom();
-                  
-                  // Check priming status to determine initial stage
-                  const projectContext = getActiveProjectContext();
-                  // Default to U1 (Scan step) for files uploaded directly from Saved DataFrames
-                  let startStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7' = 'U1';
-                  
-                  if (projectContext) {
-                    try {
-                      const queryParams = new URLSearchParams({
-                        client_name: projectContext.client_name || '',
-                        app_name: projectContext.app_name || '',
-                        project_name: projectContext.project_name || '',
-                        file_name: contextMenu.frame.object_name,
-                      }).toString();
-
-                      const primingCheckRes = await fetch(
-                        `${VALIDATE_API}/check-priming-status?${queryParams}`,
-                        { credentials: 'include' }
-                      );
-
-                      if (primingCheckRes.ok) {
-                        const primingData = await primingCheckRes.json();
-                        const currentStage = primingData?.current_stage;
-                        const isInProgress = primingData?.is_in_progress;
-                        const isPrimed = primingData?.is_primed;
-                        
-                        // If file is fully primed, start at U1 to allow re-processing
-                        if (isPrimed) {
-                          startStage = 'U1';
-                        }
-                        // If file is in progress (partially primed), continue from current stage
-                        else if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
-                          startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
-                        }
-                        // If file has started but not in progress (U0 or U1), start at U1
-                        else if (currentStage === 'U0' || currentStage === 'U1') {
-                          startStage = 'U1';
-                        }
-                        // Default: file uploaded directly, start at U1 (Scan step)
-                        else {
-                          startStage = 'U1';
-                        }
-                      }
-                    } catch (err) {
-                      console.warn('Failed to check priming status for dropdown wrench icon', err);
-                      // On error, default to U1 (Scan step)
-                      startStage = 'U1';
-                    }
-                  }
-                  
-                  // Start guided flow inline in canvas area
-                  setActiveGuidedFlow(atomId, startStage, {
-                    initialFile: {
-                      name: contextMenu.frame.arrow_name || contextMenu.frame.csv_name || contextMenu.frame.object_name,
-                      path: contextMenu.frame.object_name,
-                      size: contextMenu.frame.size || 0,
-                    }
-                  });
-                  setContextMenu(null);
-                }}
-                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
-              >
-                <Wrench className="w-4 h-4" />
-                <span>Process columns</span>
-              </button>
+              {/* Process columns button removed - wrench icon not in use */}
               {contextMenu.frame && hasMultipleSheetsByFile[contextMenu.frame.object_name] && (
                 <button
                   onClick={() => handleContextMenuAction('changeSheet')}

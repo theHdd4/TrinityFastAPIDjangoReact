@@ -13,3 +13,4 @@ export function truncateFileName(fileName: string | null | undefined, maxLength:
   
   return fileName.substring(0, maxLength) + '...';
 }
+

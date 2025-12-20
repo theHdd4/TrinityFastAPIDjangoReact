@@ -11,6 +11,7 @@ interface U4ReviewDataTypesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
   onNext: () => void;
   onBack: () => void;
+  isMaximized?: boolean;
 }
 
 interface ColumnTypeInfo {
@@ -163,7 +164,7 @@ function classifyColumnRole(columnName: string, columnType: string, dtype: strin
   return 'identifier';
 }
 
-export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNext, onBack }) => {
+export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNext, onBack, isMaximized = false }) => {
   const { state, setDataTypeSelections } = flow;
   const { uploadedFiles, columnNameEdits, dataTypeSelections, selectedFileIndex } = state;
 
@@ -661,7 +662,7 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
           <div 
             className="overflow-x-auto" 
             style={{ 
-              maxHeight: '8.75rem',
+              maxHeight: isMaximized ? 'calc(100vh - 300px)' : '8.75rem',
               overflowY: 'auto',
               scrollbarGutter: 'stable'
             }}

@@ -175,12 +175,21 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
       fetchPrimingStats();
       setTimeout(() => fetchPrimingStats(), 500);
     };
+    const handleDataframeDeleted = () => {
+      // Fetch immediately when file is deleted to update status text
+      fetchPrimingStats();
+      // Also fetch after a short delay to ensure backend has updated
+      setTimeout(() => fetchPrimingStats(), 300);
+      setTimeout(() => fetchPrimingStats(), 700);
+    };
     
     window.addEventListener('dataframe-saved', handleDataframeSaved);
     window.addEventListener('priming-status-changed', handlePrimingStatusChange);
+    window.addEventListener('dataframe-deleted', handleDataframeDeleted);
     return () => {
       window.removeEventListener('dataframe-saved', handleDataframeSaved);
       window.removeEventListener('priming-status-changed', handlePrimingStatusChange);
+      window.removeEventListener('dataframe-deleted', handleDataframeDeleted);
     };
   }, []);
 

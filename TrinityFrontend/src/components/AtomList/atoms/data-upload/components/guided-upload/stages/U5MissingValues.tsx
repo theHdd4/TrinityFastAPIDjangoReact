@@ -11,6 +11,7 @@ interface U5MissingValuesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
   onNext: () => void;
   onBack: () => void;
+  isMaximized?: boolean;
 }
 
 interface ColumnMissingInfo {
@@ -147,7 +148,7 @@ function getMissingColor(missingPercent: number): string {
   return 'bg-red-500'; // Red
 }
 
-export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, onBack }) => {
+export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, onBack, isMaximized = false }) => {
   const { state, setMissingValueStrategies } = flow;
   const { uploadedFiles, dataTypeSelections, missingValueStrategies, selectedFileIndex, columnNameEdits } = state;
   const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
@@ -763,7 +764,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
           <div 
             className="overflow-x-auto" 
             style={{ 
-              maxHeight: '8.75rem',
+              maxHeight: isMaximized ? 'calc(100vh - 300px)' : '8.75rem',
               overflowY: 'auto',
               scrollbarGutter: 'stable'
             }}

@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { UPLOAD_API } from '@/lib/api';
+import { UPLOAD_API, VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
 import { getActiveProjectContext } from '@/utils/projectEnv';
@@ -21,6 +21,7 @@ interface U6FinalPreviewProps {
   onNext: () => void;
   onBack: () => void;
   onGoToStage?: (stage: 'U5' | 'U4' | 'U3') => void;
+  isMaximized?: boolean;
 }
 
 interface ProcessingColumnConfig {
@@ -40,7 +41,7 @@ interface ProcessingColumnConfig {
   classification?: 'identifiers' | 'measures' | 'unclassified';
 }
 
-export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, onBack }) => {
+export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, onBack, isMaximized = false }) => {
   const { state, setColumnNameEdits, setDataTypeSelections, setMissingValueStrategies } = flow;
   const { uploadedFiles, selectedFileIndex, columnNameEdits, dataTypeSelections, missingValueStrategies } = state;
   const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
@@ -341,312 +342,124 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
 
     setSaving(true);
     setError('');
-    
+
     try {
-      // Step 1: Update state with any changes made in U6
-      const edits = columns.map(col => ({
-        originalName: col.name,
-        editedName: col.newName,
-        keep: !col.dropColumn,
-      }));
-      setColumnNameEdits(currentFile.name, edits);
-
-      const dataTypes = columns
-        .filter(col => !col.dropColumn)
+      // Build instructions array exactly like Direct Review mode does
+      const instructions = columns
         .map(col => {
-          const updateType = col.selectedDtype === 'int64' ? 'int' :
-                            col.selectedDtype === 'float64' ? 'float' :
-                            col.selectedDtype === 'datetime64' ? 'datetime' :
-                            col.selectedDtype === 'bool' ? 'boolean' : 'string';
-          return {
-            columnName: col.newName,
-            updateType,
-            columnRole: col.classification === 'identifiers' ? 'identifier' as const :
-                       col.classification === 'measures' ? 'measure' as const : 'identifier' as const,
-            format: col.selectedDtype === 'datetime64' ? col.datetimeFormat : undefined,
-          };
+          const instruction: Record<string, any> = { column: col.name };
+          if (col.dropColumn) {
+            instruction.drop_column = true;
+            return instruction;
+          }
+          const trimmedNewName = col.newName?.trim();
+          if (trimmedNewName && trimmedNewName !== col.name) {
+            instruction.new_name = trimmedNewName;
+          }
+          if (col.selectedDtype && col.selectedDtype !== col.originalDtype) {
+            instruction.dtype = col.selectedDtype;
+            if (col.selectedDtype === 'datetime64' && col.datetimeFormat) {
+              instruction.datetime_format = col.datetimeFormat;
+            }
+          }
+          if (col.missingStrategy && col.missingStrategy !== 'none') {
+            instruction.missing_strategy = col.missingStrategy;
+            if (col.missingStrategy === 'custom') {
+              instruction.custom_value = col.missingCustomValue || '';
+            }
+          }
+          return instruction;
+        })
+        .filter(inst => Object.keys(inst).length > 1);
+
+      // Extract identifiers and measures exactly like Direct Review mode does
+      const identifiers = columns
+        .filter(c => !c.dropColumn && c.classification === 'identifiers')
+        .map(c => c.newName || c.name); // Use newName if renamed
+      const measures = columns
+        .filter(c => !c.dropColumn && c.classification === 'measures')
+        .map(c => c.newName || c.name); // Use newName if renamed
+
+      const hasProcessingChanges = instructions.length > 0;
+      const canSaveClassifications = columns.length > 0;
+
+      if (!hasProcessingChanges && !canSaveClassifications) {
+        setError('No changes detected. Adjust at least one column before saving.');
+        setSaving(false);
+        return;
+      }
+
+      // Process dataframe if there are changes (exactly like Direct Review mode)
+      if (hasProcessingChanges) {
+        const res = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            object_name: currentFile.path, // Use original path - file will be overwritten in-place
+            instructions,
+          }),
         });
-      setDataTypeSelections(currentFile.name, dataTypes);
 
-      const strategies = columns
-        .filter(col => !col.dropColumn && col.missingStrategy !== 'none')
-        .map(col => ({
-          columnName: col.newName,
-          strategy: col.missingStrategy as any,
-          value: col.missingStrategy === 'custom' ? col.missingCustomValue : undefined,
-        }));
-      setMissingValueStrategies(currentFile.name, strategies);
-
-      // Step 2: Apply all transformations from U1-U5 (including any changes from U6)
-      // Build mapping from edited name back to original name for dtype/missing value strategies
-      const editedToOriginalMap = new Map<string, string>();
-      edits.forEach(edit => {
-        if (edit.keep !== false) {
-          editedToOriginalMap.set(edit.editedName, edit.originalName);
-        }
-      });
-
-      const columnsToDrop: string[] = [];
-      edits.forEach(edit => {
-        if (edit.keep === false) {
-          columnsToDrop.push(edit.originalName);
-        }
-      });
-      
-      const columnRenames: Record<string, string> = {};
-      edits.forEach(edit => {
-        if (edit.keep !== false && edit.editedName && edit.editedName !== edit.originalName) {
-          columnRenames[edit.originalName] = edit.editedName;
-        }
-      });
-      
-      // dtypeChanges and missingValueStrategies need to use edited names (after rename)
-      // because backend applies: drops -> renames -> dtype changes -> missing value strategies
-      const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
-      dataTypes.forEach(dt => {
-        const userSelectedType = dt.updateType;
-        // dt.columnName is already the edited name (from U3)
-        const columnNameForDtype = dt.columnName;
-        if (userSelectedType) {
-          if ((userSelectedType === 'date' || userSelectedType === 'datetime') && dt.format) {
-            dtypeChanges[columnNameForDtype] = { dtype: 'datetime64', format: dt.format };
-          } else {
-            const backendType = userSelectedType === 'number' ? 'float64' : 
-                               userSelectedType === 'int' ? 'int64' :
-                               userSelectedType === 'float' ? 'float64' :
-                               userSelectedType === 'category' ? 'object' :
-                               userSelectedType === 'string' ? 'object' :
-                               userSelectedType === 'date' ? 'datetime64' :
-                               userSelectedType === 'datetime' ? 'datetime64' :
-                               userSelectedType === 'boolean' ? 'bool' :
-                               userSelectedType;
-            dtypeChanges[columnNameForDtype] = backendType;
-          }
-        }
-      });
-      
-      // missingValueStrategies also use edited names (after rename)
-      const missingValueStrategiesPayload: Record<string, { strategy: string; value?: string | number }> = {};
-      strategies.forEach(s => {
-        if (s.strategy !== 'none') {
-          // s.columnName is already the edited name (from U3)
-          const strategyConfig: { strategy: string; value?: string | number } = {
-            strategy: s.strategy,
-          };
-          if (s.strategy === 'custom' && s.value !== undefined) {
-            strategyConfig.value = s.value;
-          }
-          missingValueStrategiesPayload[s.columnName] = strategyConfig;
-        }
-      });
-
-      // Apply transformations if there are any changes
-      if (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategiesPayload).length > 0) {
-        try {
-          console.log('U6 Approve: Applying final transformations:', { 
-            columnsToDrop, 
-            columnRenames, 
-            dtypeChanges, 
-            missingValueStrategiesPayload 
-          });
-          
-          const transformRes = await fetch(`${UPLOAD_API}/apply-data-transformations`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              file_path: currentFile.path,
-              columns_to_drop: columnsToDrop,
-              column_renames: columnRenames,
-              dtype_changes: dtypeChanges,
-              missing_value_strategies: missingValueStrategiesPayload,
-            }),
-          });
-          
-          if (!transformRes.ok) {
-            console.warn('U6: Failed to apply transformations:', await transformRes.text());
-          } else {
-            console.log('U6: Transformations applied successfully');
-          }
-        } catch (transformError) {
-          console.error('U6: Error applying transformations:', transformError);
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          const detail = data?.detail || (typeof data === 'string' ? data : '');
+          throw new Error(detail || 'Failed to process dataframe');
         }
       }
 
-      // Step 3: Finalize the primed file
+      // Save classification config (exactly like Direct Review mode)
       const projectContext = getActiveProjectContext();
       if (projectContext) {
-        try {
-          console.log('U6 Approve: Finalizing primed file:', currentFile.path || currentFile.name);
-          
-          const columnClassifications = dataTypes.map(dt => ({
-            columnName: dt.columnName,
-            columnRole: dt.columnRole || 'identifier',
-          }));
-          
-          console.log('U6 Approve: Sending column classifications:', columnClassifications);
-          
-          // Extract sheet name if this is a sheet file (format: "fileName (sheetName)")
-          let selectedSheet: string | undefined = undefined;
-          let baseFileName = currentFile.name;
-          let useFolderStructure = false;
-          
-          if (currentFile.selectedSheet) {
-            selectedSheet = currentFile.selectedSheet;
-            // Extract base file name (remove sheet suffix)
-            const sheetMatch = currentFile.name.match(/^(.+?)\s*\(([^)]+)\)$/);
-            if (sheetMatch) {
-              baseFileName = sheetMatch[1];
-            }
+        const stored = localStorage.getItem('current-project');
+        const envStr = localStorage.getItem('env');
+        const project = stored ? JSON.parse(stored) : {};
+        const env = envStr ? JSON.parse(envStr) : {};
+        const fileName = currentFile.path || '';
+
+        const payload: Record<string, any> = {
+          project_id: project.id || null,
+          client_name: env.CLIENT_NAME || '',
+          app_name: env.APP_NAME || '',
+          project_name: env.PROJECT_NAME || '',
+          identifiers,
+          measures,
+          dimensions: {},
+        };
+        if (fileName) {
+          payload.file_name = fileName;
+        }
+
+        const saveRes = await fetch(`${CLASSIFIER_API}/save_config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          credentials: 'include',
+        });
+
+        if (saveRes.ok) {
+          // Mark file as primed (exactly like Direct Review mode)
+          if (fileName) {
+            await markFileAsPrimed(fileName);
+            window.dispatchEvent(
+              new CustomEvent('dataframe-saved', {
+                detail: { filePath: currentFile.path, fileName: fileName },
+              })
+            );
+            window.dispatchEvent(
+              new CustomEvent('priming-status-changed', {
+                detail: { filePath: currentFile.path, fileName: fileName },
+              })
+            );
+            window.dispatchEvent(
+              new CustomEvent('force-refresh-priming-status', {
+                detail: { objectName: currentFile.path, isPrimed: true },
+              })
+            );
           }
-          
-          // Check if this is part of a multi-sheet Excel file (should use folder structure)
-          // Method 1: Check totalSheets property
-          if (currentFile.totalSheets && currentFile.totalSheets > 1) {
-            useFolderStructure = true;
-          } 
-          // Method 2: Check sheetNames array
-          else if (currentFile.sheetNames && Array.isArray(currentFile.sheetNames) && currentFile.sheetNames.length > 1) {
-            useFolderStructure = true;
-          } 
-          // Method 3: Check if there are other files with the same base name (indicates multi-sheet)
-          else if (selectedSheet || (currentFile.name.includes('(') && currentFile.name.includes(')'))) {
-            // Extract base name from current file
-            const baseNameMatch = currentFile.name.match(/^(.+?)\s*\(/);
-            const currentBaseName = baseNameMatch ? baseNameMatch[1] : currentFile.name.replace(/\.[^.]+$/, '');
-            
-            // Check if there are other files in uploadedFiles with the same base name
-            const filesWithSameBase = uploadedFiles.filter(f => {
-              if (f.name === currentFile.name) return false; // Exclude current file
-              const otherBaseMatch = f.name.match(/^(.+?)\s*\(/);
-              const otherBaseName = otherBaseMatch ? otherBaseMatch[1] : f.name.replace(/\.[^.]+$/, '');
-              return otherBaseName === currentBaseName;
-            });
-            
-            if (filesWithSameBase.length > 0) {
-              useFolderStructure = true;
-            }
-          }
-          
-          const finalizePayload: any = {
-            file_path: currentFile.path,
-            file_name: currentFile.name,
-            client_name: projectContext.client_name || '',
-            app_name: projectContext.app_name || '',
-            project_name: projectContext.project_name || '',
-            validator_atom_id: atomId,
-            column_classifications: columnClassifications,
-          };
-          
-          // Add selectedSheet if this is a sheet file
-          if (selectedSheet) {
-            finalizePayload.selected_sheet = selectedSheet;
-          }
-          
-          // Add use_folder_structure flag if this is a multi-sheet Excel file
-          if (useFolderStructure) {
-            finalizePayload.use_folder_structure = true;
-            // Also pass the base file name for folder naming
-            finalizePayload.base_file_name = baseFileName;
-          }
-          
-          const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify(finalizePayload),
-          });
-          
-          if (finalizeRes.ok) {
-            const result = await finalizeRes.json();
-            console.log('U6 Approve: File finalized successfully:', result);
-            
-            // Use saved_path (saved object name) from backend response - this is the actual saved file identifier
-            const savedObjectName = result.saved_path || currentFile.path;
-            const savedFileName = result.saved_path ? getFileName(result.saved_path) : currentFile.name;
-            
-            // Mark file as primed using the saved object name (not the original file name)
-            // This ensures sheets are correctly identified
-            await markFileAsPrimed(savedObjectName);
-            
-            // Dispatch events immediately BEFORE closing panel to ensure UI updates
-            // Use saved object name for proper file identification
-            const eventDetail = { 
-              filePath: savedObjectName, 
-              fileName: savedFileName,
-              isPrimed: true, // Explicitly mark as primed for immediate UI update
-              objectName: savedObjectName // Add object name for status lookup
-            };
-            
-            // Dispatch immediately (synchronously) with primed status
-            window.dispatchEvent(new CustomEvent('dataframe-saved', { detail: eventDetail }));
-            window.dispatchEvent(new CustomEvent('priming-status-changed', { 
-              detail: { ...eventDetail, status: { isPrimed: true, isInProgress: false, currentStage: 'U7' } }
-            }));
-            
-            // Force immediate status update in SavedDataFramesPanel by dispatching a refresh event
-            window.dispatchEvent(new CustomEvent('force-refresh-priming-status', { 
-              detail: { objectName: savedObjectName, isPrimed: true }
-            }));
-            
-            // Use requestAnimationFrame to ensure events are processed before closing
-            requestAnimationFrame(() => {
-              // Dispatch again to ensure all listeners catch it
-              window.dispatchEvent(new CustomEvent('dataframe-saved', { detail: eventDetail }));
-              window.dispatchEvent(new CustomEvent('priming-status-changed', { 
-                detail: { ...eventDetail, status: { isPrimed: true, isInProgress: false, currentStage: 'U7' } }
-              }));
-              
-              // Dispatch again with small delays to ensure UI updates
-              setTimeout(() => {
-                window.dispatchEvent(new CustomEvent('dataframe-saved', { detail: eventDetail }));
-                window.dispatchEvent(new CustomEvent('priming-status-changed', { 
-                  detail: { ...eventDetail, status: { isPrimed: true, isInProgress: false, currentStage: 'U7' } }
-                }));
-                window.dispatchEvent(new CustomEvent('force-refresh-priming-status', { 
-                  detail: { objectName: savedObjectName, isPrimed: true }
-                }));
-              }, 50);
-              
-              setTimeout(() => {
-                window.dispatchEvent(new CustomEvent('dataframe-saved', { detail: eventDetail }));
-                window.dispatchEvent(new CustomEvent('priming-status-changed', { 
-                  detail: { ...eventDetail, status: { isPrimed: true, isInProgress: false, currentStage: 'U7' } }
-                }));
-                window.dispatchEvent(new CustomEvent('force-refresh-priming-status', { 
-                  detail: { objectName: savedObjectName, isPrimed: true }
-                }));
-              }, 200);
-            });
-            
-            // Step 4: Close guided mode immediately after dispatching events
-            // Use setTimeout to ensure events are processed first
-            setTimeout(() => {
-              try {
-                console.log('U6 Approve: Closing guided mode');
-                setGlobalGuidedMode(false);
-                removeActiveGuidedFlow(atomId);
-              } catch (closeError) {
-                console.error('U6 Approve: Error closing guided mode:', closeError);
-              }
-              
-              // Step 5: Call onNext to complete the flow and close panel
-              onNext();
-            }, 100);
-          } else {
-            const errorText = await finalizeRes.text();
-            console.warn('U6 Approve: Failed to finalize file:', errorText);
-            // Fallback: try to mark as primed with current file identifier
-            // For sheets, use the file name which includes sheet info
-            const fileIdentifier = currentFile.path || currentFile.name;
-            await markFileAsPrimed(fileIdentifier);
-            const eventDetail = { filePath: currentFile.path, fileName: currentFile.name };
-            window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
-            setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
-            }, 100);
-            
-            // Close guided mode even on error
+
+          // Close guided mode
+          setTimeout(() => {
             try {
               setGlobalGuidedMode(false);
               removeActiveGuidedFlow(atomId);
@@ -654,37 +467,10 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
               console.error('U6 Approve: Error closing guided mode:', closeError);
             }
             onNext();
-          }
-        } catch (finalizeError) {
-          console.error('U6 Approve: Error finalizing file:', finalizeError);
-          // Fallback: try to mark as primed with current file identifier
-          // For sheets, use the file name which includes sheet info
-          const fileIdentifier = currentFile.path || currentFile.name;
-          await markFileAsPrimed(fileIdentifier);
-          const eventDetail = { filePath: currentFile.path, fileName: currentFile.name };
-          window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('priming-status-changed', { detail: eventDetail }));
           }, 100);
-          
-          // Close guided mode even on error
-          try {
-            setGlobalGuidedMode(false);
-            removeActiveGuidedFlow(atomId);
-          } catch (closeError) {
-            console.error('U6 Approve: Error closing guided mode:', closeError);
-          }
-          onNext();
+        } else {
+          throw new Error('Failed to save configuration');
         }
-      } else {
-        // No project context - still close guided mode
-        try {
-          setGlobalGuidedMode(false);
-          removeActiveGuidedFlow(atomId);
-        } catch (closeError) {
-          console.error('U6 Approve: Error closing guided mode:', closeError);
-        }
-        onNext();
       }
     } catch (err: any) {
       console.error('U6 Approve: Error:', err);
@@ -751,44 +537,44 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
                 <col style={{ width: '100px' }} />
                 <col style={{ width: '70px' }} />
               </colgroup>
-              <thead className="sticky top-0 z-10 bg-gray-50">
-                <tr className="bg-gray-50" style={{ height: '1.75rem' }}>
-                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+              <thead className="sticky top-0 z-10 bg-gradient-to-r from-blue-50 to-blue-100">
+                <tr className="bg-gradient-to-r from-blue-50 to-blue-100" style={{ height: '1.75rem' }}>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
                     <div className="truncate">
                       Column Name
                     </div>
                   </th>
-                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
                     <div className="truncate">
                       Rename
                     </div>
                   </th>
-                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
                     <div className="truncate">
                       Current Type
                     </div>
                   </th>
-                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
                     <div className="truncate">
                       Change Type
                     </div>
                   </th>
-                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
                     <div className="truncate">
                       Missing
                     </div>
                   </th>
-                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
                     <div className="truncate">
                       Strategy
                     </div>
                   </th>
-                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
                     <div className="truncate">
                       Classification
                     </div>
                   </th>
-                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
                     <div className="truncate">
                       Drop
                     </div>

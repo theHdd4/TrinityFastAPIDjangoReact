@@ -14,6 +14,7 @@ interface U3ReviewColumnNamesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
   onNext: () => void;
   onBack: () => void;
+  isMaximized?: boolean;
 }
 
 interface ColumnInfo {
@@ -68,7 +69,7 @@ function generateRuleBasedSuggestion(columnName: string): { cleaned: string; rea
   return { cleaned, reason };
 }
 
-export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, onNext, onBack }) => {
+export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, onNext, onBack, isMaximized = false }) => {
   const { state, setColumnNameEdits } = flow;
   const { uploadedFiles, columnNameEdits, selectedFileIndex } = state;
   const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
@@ -497,7 +498,7 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
           <div 
             className="overflow-x-auto" 
             style={{ 
-              maxHeight: '8.75rem',
+              maxHeight: isMaximized ? 'calc(100vh - 300px)' : '8.75rem',
               overflowY: 'auto',
               scrollbarGutter: 'stable'
             }}

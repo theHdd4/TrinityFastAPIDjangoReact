@@ -6278,6 +6278,23 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'landing-screen' ? (
+                                <LandingScreenAtom 
+                                  atomId={atom.id} 
+                                  cardId={card.id}
+                                  onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                  onAddNewCard={() => {
+                                    // Find the landing card's position and add new card right after it
+                                    const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                    // Find landing card by checking for landing-screen atom
+                                    const landingCardIndex = arr.findIndex(c => 
+                                      c.atoms?.some(a => a.atomId === 'landing-screen')
+                                    );
+                                    // If landing card found, add after it; otherwise add at end
+                                    const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                    addNewCard(undefined, insertPosition);
+                                  }}
+                                />
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
@@ -6849,6 +6866,23 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'landing-screen' ? (
+                                <LandingScreenAtom 
+                                  atomId={atom.id} 
+                                  cardId={card.id}
+                                  onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                  onAddNewCard={() => {
+                                    // Find the landing card's position and add new card right after it
+                                    const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                    // Find landing card by checking for landing-screen atom
+                                    const landingCardIndex = arr.findIndex(c => 
+                                      c.atoms?.some(a => a.atomId === 'landing-screen')
+                                    );
+                                    // If landing card found, add after it; otherwise add at end
+                                    const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                    addNewCard(undefined, insertPosition);
+                                  }}
+                                />
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
