@@ -2215,19 +2215,19 @@ const WorkflowMode = () => {
   // This performs the same sync logic as handleRenderWorkflow but without navigation
   const syncWorkflowToLaboratory = useCallback(async (): Promise<boolean> => {
     try {
-      console.log('🔄 [SYNC] Starting Workflow to Laboratory sync...');
-      console.log('🔄 [SYNC] Canvas molecules:', canvasMolecules.length, 'Standalone cards:', standaloneCards.length);
+      // console.log('🔄 [SYNC] Starting Workflow to Laboratory sync...');
+      // console.log('🔄 [SYNC] Canvas molecules:', canvasMolecules.length, 'Standalone cards:', standaloneCards.length);
       
       // Check if all molecules have at least one atom (only active molecules)
       const moleculesWithAtoms = canvasMolecules.filter(mol => mol.isActive !== false && mol.atoms && mol.atoms.length > 0);
       
       if (moleculesWithAtoms.length === 0) {
-        console.warn('⚠️ [SYNC] No molecules with atoms - skipping Laboratory sync');
-        console.warn('⚠️ [SYNC] This is normal if you haven\'t assigned atoms to molecules yet');
+        // console.warn('⚠️ [SYNC] No molecules with atoms - skipping Laboratory sync');
+        // console.warn('⚠️ [SYNC] This is normal if you haven\'t assigned atoms to molecules yet');
         return false; // Skip sync if no molecules with atoms
       }
       
-      console.log('🔄 [SYNC] Found', moleculesWithAtoms.length, 'molecules with atoms, proceeding with sync...');
+      // console.log('🔄 [SYNC] Found', moleculesWithAtoms.length, 'molecules with atoms, proceeding with sync...');
 
       // Function to convert atom names to atom IDs for Laboratory mode
       const convertAtomNameToId = (atomName: string) => {
@@ -2827,7 +2827,7 @@ const WorkflowMode = () => {
       });
       localStorage.setItem('workflow-molecules', JSON.stringify(workflowMoleculesForLab));
 
-      console.log('✅ Laboratory configuration synced successfully');
+      // console.log('✅ Laboratory configuration synced successfully');
       return true;
     } catch (error) {
       console.error('❌ Error syncing to Laboratory:', error);
@@ -2866,7 +2866,7 @@ const WorkflowMode = () => {
         const app_name = env.APP_NAME || 'default_app';
         const project_name = env.PROJECT_NAME || 'default_project';
         
-        console.log('🔍 [AUTOSAVE] Saving workflow with:', { client_name, app_name, project_name });
+        // console.log('🔍 [AUTOSAVE] Saving workflow with:', { client_name, app_name, project_name });
 
         // Save workflow configuration
         const response = await fetch(`${MOLECULES_API}/workflow/save`, {
@@ -2888,21 +2888,21 @@ const WorkflowMode = () => {
         });
 
         if (response.ok) {
-          console.log('✅ [AUTOSAVE] Workflow configuration saved successfully');
+          // console.log('✅ [AUTOSAVE] Workflow configuration saved successfully');
           
           // CRITICAL: Always sync to Laboratory Mode during autosave
           // This ensures Laboratory Mode stays in sync with Workflow Mode changes
-          console.log('🔄 [AUTOSAVE] Syncing to Laboratory Mode...');
+          // console.log('🔄 [AUTOSAVE] Syncing to Laboratory Mode...');
           try {
             const syncSuccess = await syncWorkflowToLaboratory();
             
-            if (syncSuccess) {
-              console.log('✅ [AUTOSAVE] Workflow synced to Laboratory Mode successfully');
-            } else {
-              console.warn('⚠️ [AUTOSAVE] Workflow saved but Laboratory sync skipped (no molecules with atoms)');
-              // This is okay - sync is skipped when there are no molecules with atoms
-              // The workflow structure is still saved, and sync will happen when atoms are added
-            }
+            // if (syncSuccess) {
+            //   console.log('✅ [AUTOSAVE] Workflow synced to Laboratory Mode successfully');
+            // } else {
+            //   console.warn('⚠️ [AUTOSAVE] Workflow saved but Laboratory sync skipped (no molecules with atoms)');
+            // }
+            // This is okay - sync is skipped when there are no molecules with atoms
+            // The workflow structure is still saved, and sync will happen when atoms are added
           } catch (syncError) {
             console.error('❌ [AUTOSAVE] Error during Laboratory sync:', syncError);
             // Don't fail autosave if sync fails - workflow is still saved
@@ -2958,7 +2958,7 @@ const WorkflowMode = () => {
         const result = await response.json();
         
         // FIX: Also sync to Laboratory Mode when saving
-        console.log('🔄 Syncing to Laboratory Mode...');
+        // console.log('🔄 Syncing to Laboratory Mode...');
         const syncSuccess = await syncWorkflowToLaboratory();
         
         toast({

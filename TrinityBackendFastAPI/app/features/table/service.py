@@ -887,17 +887,22 @@ async def save_change_log(
         db = client[MONGO_DB]
         coll = db["table_changes"]
         
-        await coll.insert_one({
+        change_doc = {
             "table_id": table_id,
             "atom_id": atom_id,
             "change_type": change_type,
             "change_data": change_data,
             "timestamp": datetime.utcnow(),
             "applied": False
-        })
+        }
+        result = await coll.insert_one(change_doc)
         
         await client.close()
-        logger.debug(f"📝 [CHANGE] Logged {change_type} for session {table_id}")
+        logger.info(
+            f"✅ [CHANGE] Logged {change_type} for session {table_id}, "
+            f"atom_id={atom_id}, inserted_id={result.inserted_id}, "
+            f"change_data={change_data}"
+        )
         return True
     except Exception as e:
         logger.error(f"❌ [CHANGE] Failed to log change for {table_id}: {e}")
@@ -941,6 +946,12 @@ async def get_change_log(table_id: str, applied: Optional[bool] = None) -> List[
                 "timestamp": change.get("timestamp").isoformat() if change.get("timestamp") else None,
                 "applied": change.get("applied", False),
             })
+        
+        logger.info(
+            f"🔍 [CHANGE] Retrieved {len(result)} changes for table_id='{table_id}', "
+            f"applied={applied}, query={query}, "
+            f"change_types={[c.get('change_type') for c in result]}"
+        )
         
         return result
     except Exception as e:
