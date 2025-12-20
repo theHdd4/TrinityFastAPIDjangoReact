@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown, MoreVertical, Filter, Eye, EyeOff, Minus } from 'lucide-react';
+import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowLeft, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown, MoreVertical, Filter, Eye, EyeOff, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -18,6 +18,7 @@ import { ElementType } from './ElementDropdown';
 import ElementRenderer from './ElementRenderer';
 import ChartElement from './ChartElement';
 import TableElement from './TableElement';
+import ElementMenuDropdown from './ElementMenuDropdown';
 import { TextBoxToolbar } from '@/components/LaboratoryMode/components/CanvasArea/text-box/TextBoxToolbar';
 import { TEXT_STYLE_OPTIONS, getTextStyleProperties } from '@/components/LaboratoryMode/components/CanvasArea/text-box/constants';
 import type { TextStylePreset } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
@@ -441,6 +442,20 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     }
   };
 
+  // Redistribute widths evenly when boxes are deleted
+  // Grid uses 12 columns, so distribute evenly: 1 box = 12, 2 boxes = 6 each, 3 boxes = 4 each, 4 boxes = 3 each
+  const redistributeBoxWidths = (boxes: LayoutBox[]): LayoutBox[] => {
+    if (boxes.length === 0) return boxes;
+    
+    const totalColumns = 12;
+    const widthPerBox = Math.floor(totalColumns / boxes.length);
+    
+    return boxes.map(box => ({
+      ...box,
+      width: widthPerBox
+    }));
+  };
+
   const getFilledCount = (layout: Layout) => 
     layout.boxes.filter(b => b.elementType).length;
 
@@ -602,6 +617,100 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     setLayouts(layouts.filter(layout => layout.id !== layoutId));
   };
 
+  const handleDeleteBox = (layoutId: string, boxId: string) => {
+    setLayouts((currentLayouts) => {
+      const updatedLayouts = currentLayouts.map(layout => {
+        if (layout.id === layoutId) {
+          const updatedBoxes = layout.boxes.filter(box => box.id !== boxId);
+          // If no boxes left, remove the entire layout
+          if (updatedBoxes.length === 0) {
+            return null; // Will be filtered out
+          }
+          // Redistribute widths evenly to fill available space
+          const redistributedBoxes = redistributeBoxWidths(updatedBoxes);
+          return {
+            ...layout,
+            boxes: redistributedBoxes
+          };
+        }
+        return layout;
+      }).filter(layout => layout !== null) as Layout[];
+      return updatedLayouts;
+    });
+    
+    // Clear selection if deleted box was selected
+    const selectedBoxIds = settings.selectedBoxIds || [];
+    if (selectedBoxIds.includes(boxId)) {
+      const updatedSelectedBoxIds = selectedBoxIds.filter(id => id !== boxId);
+      onSettingsChange({ 
+        selectedBoxIds: updatedSelectedBoxIds.length > 0 ? updatedSelectedBoxIds : undefined,
+        selectedBoxId: settings.selectedBoxId === boxId ? undefined : settings.selectedBoxId
+      });
+    }
+  };
+
+  const handleDeleteSelectedBoxes = () => {
+    const selectedBoxIds = settings.selectedBoxIds || [];
+    if (selectedBoxIds.length === 0) return;
+
+    setLayouts((currentLayouts) => {
+      const updatedLayouts = currentLayouts.map(layout => {
+        const updatedBoxes = layout.boxes.filter(box => !selectedBoxIds.includes(box.id));
+        // If no boxes left, remove the entire layout
+        if (updatedBoxes.length === 0) {
+          return null; // Will be filtered out
+        }
+        // Redistribute widths evenly to fill available space
+        const redistributedBoxes = redistributeBoxWidths(updatedBoxes);
+        return {
+          ...layout,
+          boxes: redistributedBoxes
+        };
+      }).filter(layout => layout !== null) as Layout[];
+      return updatedLayouts;
+    });
+    
+    // Clear selection
+    onSettingsChange({ 
+      selectedBoxIds: undefined,
+      selectedBoxId: undefined
+    });
+  };
+
+  const handleAddElement = (layoutId: string, boxId: string, position: 'left' | 'right') => {
+    setLayouts((currentLayouts) => {
+      return currentLayouts.map(layout => {
+        if (layout.id === layoutId) {
+          const boxIndex = layout.boxes.findIndex(box => box.id === boxId);
+          if (boxIndex === -1) return layout;
+
+          const defaultWidth = getDefaultWidth(layout.type);
+          const newBox: LayoutBox = {
+            id: `box-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            elementType: undefined,
+            width: defaultWidth
+          };
+
+          const newBoxes = [...layout.boxes];
+          if (position === 'left') {
+            newBoxes.splice(boxIndex, 0, newBox);
+          } else {
+            newBoxes.splice(boxIndex + 1, 0, newBox);
+          }
+
+          // Redistribute widths evenly after adding new box
+          const redistributedBoxes = redistributeBoxWidths(newBoxes);
+          
+          return {
+            ...layout,
+            boxes: redistributedBoxes
+          };
+        }
+        return layout;
+      });
+    });
+  };
+
   const handleLayoutHeightChange = (layoutId: string, newHeight: number) => {
     const clampedHeight = Math.max(120, Math.min(800, newHeight));
     setLayouts(layouts.map(layout => 
@@ -631,8 +740,47 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     document.body.style.userSelect = 'none';
   };
 
+  // Helper function to format active global filters
+  const getFormattedGlobalFilters = (): string | null => {
+    const globalFilters = settings.globalFilters || {};
+    const enabledIdentifiers = settings.enabledGlobalFilterIdentifiers || [];
+    
+    // Get active filter values in the order of enabled identifiers
+    const activeFilterValues: string[] = [];
+    
+    // If enabled identifiers exist, use them to preserve order
+    if (enabledIdentifiers.length > 0) {
+      enabledIdentifiers.forEach(identifier => {
+        const filterConfig = globalFilters[identifier];
+        if (filterConfig && typeof filterConfig === 'object' && 'values' in filterConfig && Array.isArray(filterConfig.values) && filterConfig.values.length > 0) {
+          // Join multiple values with comma, then add to the list
+          activeFilterValues.push(filterConfig.values.join(', '));
+        }
+      });
+    } else {
+      // If no enabled identifiers, use all active filters
+      Object.entries(globalFilters).forEach(([identifier, filterConfig]) => {
+        if (filterConfig && typeof filterConfig === 'object' && 'values' in filterConfig && Array.isArray(filterConfig.values) && filterConfig.values.length > 0) {
+          activeFilterValues.push(filterConfig.values.join(', '));
+        }
+      });
+    }
+    
+    // Return null if no active filters, otherwise join with pipe
+    return activeFilterValues.length > 0 ? activeFilterValues.join(' | ') : null;
+  };
+
+  // Check if first element is a text box
+  const isFirstElementTextBox = (): boolean => {
+    if (layouts.length === 0) return false;
+    const firstLayout = layouts[0];
+    if (!firstLayout.boxes || firstLayout.boxes.length === 0) return false;
+    const firstBox = firstLayout.boxes[0];
+    return firstBox.elementType === 'text-box';
+  };
+
   return (
-    <div className="h-full w-full overflow-y-auto p-8 bg-gradient-to-br from-background via-muted/5 to-background" style={{ minWidth: 0, minHeight: 0 }}>
+    <div className="h-full w-full overflow-y-auto p-8 bg-gradient-to-br from-background via-muted/5 to-background relative" style={{ minWidth: 0, minHeight: 0 }}>
       <div className="w-full space-y-6" style={{ minWidth: 0, width: '100%' }}>
         {/* Empty State */}
         {layouts.length === 0 && (
@@ -670,9 +818,41 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
           </div>
         )}
 
+        {/* Common Delete Icon for Multi-Selection */}
+        {settings.selectedBoxIds && settings.selectedBoxIds.length > 1 && (
+          <div className="fixed top-4 right-4 z-50">
+            <button
+              onClick={handleDeleteSelectedBoxes}
+              className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-lg transition-all duration-200 hover:shadow-xl"
+              title={`Delete ${settings.selectedBoxIds.length} selected boxes`}
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="font-medium">Delete {settings.selectedBoxIds.length} Selected</span>
+            </button>
+          </div>
+        )}
+
+        {/* Global Filters Display - Top Right (when first element is not a text box) */}
+        {layouts.length > 0 && !isFirstElementTextBox() && getFormattedGlobalFilters() && (
+          <div className="absolute top-8 right-8 z-40">
+            <div 
+              className="text-gray-600"
+              style={{
+                fontSize: '22px',
+                fontFamily: 'DM Sans, sans-serif',
+                fontWeight: 'bold',
+                letterSpacing: '-0.01em',
+                lineHeight: '1.2'
+              }}
+            >
+              {getFormattedGlobalFilters()}
+            </div>
+          </div>
+        )}
+
         {/* Layout Rows */}
         {layouts.length > 0 && (
-          <div className="space-y-4" style={{ paddingTop: '80px' }}>
+          <div className="space-y-4" style={{ paddingTop: '16px' }}>
             {layouts.map((layout, rowIndex) => (
               <div
                 key={layout.id}
@@ -696,7 +876,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
 
                   {/* Row Content */}
                   <div className="grid grid-cols-12 gap-2" style={{ height: 'calc(100% - 8px)', overflow: 'visible', minWidth: 0, width: '100%' }}>
-                    {layout.boxes.map((box) => (
+                    {layout.boxes.map((box, boxIndex) => (
                       <ElementBox
                         key={box.id}
                         box={box}
@@ -713,6 +893,11 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                         onSettingsChange={onSettingsChange}
                         data={data}
                         atomId={atomId}
+                        onDeleteBox={handleDeleteBox}
+                        onAddElement={handleAddElement}
+                        boxesInRow={layout.boxes.length}
+                        isFirstElement={rowIndex === 0 && boxIndex === 0}
+                        formattedGlobalFilters={getFormattedGlobalFilters()}
                       />
                     ))}
                   </div>
@@ -798,6 +983,11 @@ interface ElementBoxProps {
   onSettingsChange: (settings: Partial<KPIDashboardSettings>) => void;
   data: KPIDashboardData | null;
   atomId: string; // CRITICAL: Required for TableElement to work correctly
+  onDeleteBox: (layoutId: string, boxId: string) => void;
+  onAddElement: (layoutId: string, boxId: string, position: 'left' | 'right') => void;
+  boxesInRow: number; // Number of boxes in the current row
+  isFirstElement?: boolean; // Whether this is the first element on the dashboard
+  formattedGlobalFilters?: string | null; // Formatted global filters string
 }
 
 const ElementBox: React.FC<ElementBoxProps> = ({ 
@@ -810,12 +1000,59 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   onSelectElement, 
   onTextBoxUpdate,
   variables = [],
+  isFirstElement = false,
+  formattedGlobalFilters = null,
   defaultValueFormat = 'none',
   settings,
   onSettingsChange,
   data,
-  atomId
+  atomId,
+  onDeleteBox,
+  onAddElement,
+  boxesInRow
 }) => {
+  // Multi-selection handler
+  const handleBoxClick = (e: React.MouseEvent) => {
+    // Don't handle selection if clicking on buttons or inputs
+    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) {
+      return;
+    }
+
+    const selectedBoxIds = settings.selectedBoxIds || [];
+    
+    if (e.ctrlKey || e.metaKey) {
+      // Multi-select mode
+      e.stopPropagation();
+      if (selectedBoxIds.includes(boxId)) {
+        // Deselect
+        const updated = selectedBoxIds.filter(id => id !== boxId);
+        onSettingsChange({ 
+          selectedBoxIds: updated.length > 0 ? updated : undefined,
+          selectedBoxId: settings.selectedBoxId === boxId ? undefined : settings.selectedBoxId
+        });
+      } else {
+        // Add to selection
+        onSettingsChange({ 
+          selectedBoxIds: [...selectedBoxIds, boxId],
+          selectedBoxId: boxId
+        });
+      }
+    } else {
+      // Single select
+      e.stopPropagation();
+      onSettingsChange({ 
+        selectedBoxId: boxId,
+        selectedBoxIds: undefined
+      });
+    }
+  };
+
+  // Check if this box is selected
+  const isSelected = settings.selectedBoxId === boxId;
+  const isMultiSelected = settings.selectedBoxIds?.includes(boxId) || false;
+  const selectionClass = isMultiSelected || isSelected 
+    ? 'ring-2 ring-blue-500 ring-offset-2 bg-blue-50/30' 
+    : '';
   const [isEditMode, setIsEditMode] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showTextBoxToolbar, setShowTextBoxToolbar] = useState(false);
@@ -1607,12 +1844,24 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       if (box.isTextSaved) {
         return (
           <div 
-            className="relative group/box" 
-            style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
+            className={`relative group/box ${selectionClass}`}
+            style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' }}
             onDoubleClick={handleEdit}
-            title="Double-click to edit"
+            onClick={handleBoxClick}
+            title="Double-click to edit, Ctrl+Click to multi-select"
           >
-            <div className="relative w-full h-full rounded-xl overflow-hidden bg-white">
+            {/* Three-dots menu - visible on hover */}
+            <ElementMenuDropdown
+              elementTypes={elementTypes}
+              onElementChange={handleElementChange}
+              boxId={boxId}
+              layoutId={layoutId}
+              onDeleteBox={onDeleteBox}
+              onAddElement={onAddElement}
+              selectedBoxIds={settings.selectedBoxIds}
+              boxesInRow={boxesInRow}
+            />
+            <div className="relative w-full flex-1 rounded-xl overflow-hidden bg-white">
               {/* Display formatted text only - no borders, no headers */}
               <div 
                 className="w-full h-full p-4 overflow-auto cursor-pointer hover:bg-gray-50/50 transition-colors"
@@ -1633,6 +1882,23 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                 dangerouslySetInnerHTML={{ __html: box.text || 'No text entered' }}
               />
             </div>
+            {/* Global Filters Display - Below Text Box on Right (when first element) */}
+            {isFirstElement && formattedGlobalFilters && (
+              <div className="w-full flex justify-end mt-2 pr-4">
+                <div 
+                  className="text-gray-600"
+                  style={{
+                    fontSize: '22px',
+                    fontFamily: 'DM Sans, sans-serif',
+                    fontWeight: 'bold',
+                    letterSpacing: '-0.01em',
+                    lineHeight: '1.2'
+                  }}
+                >
+                  {formattedGlobalFilters}
+                </div>
+              </div>
+            )}
           </div>
         );
       }
@@ -1733,9 +1999,21 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       
       return (
         <div 
-          className="relative group/box" 
-          style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
+          className={`relative group/box ${selectionClass}`}
+          onClick={handleBoxClick} 
+          style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' }}
         >
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
           {/* Toolbar - visible only when text box is focused */}
           {showTextBoxToolbar && (
             <div className="absolute left-0 right-0 flex items-center gap-2 bg-white rounded-lg shadow-2xl p-2 border border-gray-200" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
@@ -1792,7 +2070,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           )}
           
           {/* Text box ONLY - no border, completely separate from toolbar */}
-          <div className="w-full h-full rounded-xl overflow-hidden bg-white relative">
+          <div className="w-full flex-1 rounded-xl overflow-hidden bg-white relative">
             {/* Custom formatted placeholder - only showing Header and Sub-Header styles */}
             {(!box.text || box.text === '') && (
               <div className="absolute inset-0 p-4 pointer-events-none">
@@ -1882,6 +2160,23 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               suppressContentEditableWarning
             />
           </div>
+          {/* Global Filters Display - Below Text Box on Right (when first element) */}
+          {isFirstElement && formattedGlobalFilters && (
+            <div className="w-full flex justify-end mt-2 pr-4">
+              <div 
+                className="text-gray-600"
+                style={{
+                  fontSize: '22px',
+                  fontFamily: 'DM Sans, sans-serif',
+                  fontWeight: 'bold',
+                  letterSpacing: '-0.01em',
+                  lineHeight: '1.2'
+                }}
+              >
+                {formattedGlobalFilters}
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -2059,7 +2354,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       if (isInsightsSaved) {
         return (
           <div 
-            className="relative group/box" 
+            className={`relative group/box ${selectionClass}`}
+          onClick={handleBoxClick} 
             style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
             onDoubleClick={handleEditInsights}
             title="Double-click to edit"
@@ -2108,6 +2404,17 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           className="relative group/box flex flex-col gap-3" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
 
           {/* Toolbar - visible only when content is focused */}
           {showInsightsToolbar && (
@@ -2193,44 +2500,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
           {/* Insights Panel Card */}
           <div className="relative w-full flex-1" style={{ minHeight: 0 }}>
-            {/* Three-dots menu - visible on hover */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  onClick={(e) => e.stopPropagation()}
-                  className="absolute top-2 right-2 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center"
-                  title="More options"
-                >
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
-                    Change Element
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="w-48">
-                    {elementTypes.map((element) => {
-                      const Icon = element.icon;
-                      return (
-                        <DropdownMenuItem
-                          key={element.value}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleElementChange(element.value);
-                          }}
-                          className="flex items-center gap-2"
-                        >
-                          <Icon className="w-4 h-4" />
-                          <span>{element.label}</span>
-                        </DropdownMenuItem>
-                      );
-                    })}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
             <div 
               className="w-full h-full rounded-xl overflow-hidden p-6 shadow-lg border-2 border-blue-300"
               style={{
@@ -2683,7 +2952,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       if (isBlock1Saved && isBlock2Saved) {
         return (
           <div 
-            className="relative group/box" 
+            className={`relative group/box ${selectionClass}`}
+          onClick={handleBoxClick} 
             style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
             onDoubleClick={() => {
               handleEditBlock1();
@@ -2691,6 +2961,17 @@ const ElementBox: React.FC<ElementBoxProps> = ({
             }}
             title="Double-click to edit"
           >
+            {/* Three-dots menu - visible on hover */}
+            <ElementMenuDropdown
+              elementTypes={elementTypes}
+              onElementChange={handleElementChange}
+              boxId={boxId}
+              layoutId={layoutId}
+              onDeleteBox={onDeleteBox}
+              onAddElement={onAddElement}
+              selectedBoxIds={settings.selectedBoxIds}
+              boxesInRow={boxesInRow}
+            />
             <div className="flex gap-4 h-full">
               {/* Box 1 - Key Drivers */}
               <div 
@@ -2764,6 +3045,17 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           className="relative group/box flex flex-col gap-3" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
           {/* Toolbars for both boxes */}
           {showInteractiveBlock1Toolbar && (
             <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
@@ -2927,12 +3219,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           <div className="flex gap-4 h-full">
             {/* Box 1 - Key Drivers */}
             <div className="relative flex-1" style={{ minHeight: 0 }}>
-              <button
-                onClick={handleDoubleClick}
-                className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-green-600 hover:bg-green-50 transition-colors"
-              >
-                Change
-              </button>
               <div 
                 className="w-full h-full rounded-xl overflow-hidden p-6 shadow-lg border-2 border-green-300"
                 style={{ background: block1Background }}
@@ -3122,12 +3408,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
             {/* Box 2 - Opportunities/Actions */}
             <div className="relative flex-1" style={{ minHeight: 0 }}>
-              <button
-                onClick={handleDoubleClick}
-                className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-yellow-600 hover:bg-yellow-50 transition-colors"
-              >
-                Change
-              </button>
               <div 
                 className="w-full h-full rounded-xl overflow-hidden p-6 shadow-lg border-2 border-yellow-300"
                 style={{ background: block2Background }}
@@ -3380,46 +3660,21 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Single container with both Question and Answer sections (always editable)
       return (
         <div 
-          className="relative group/box" 
+          className={`relative group/box ${selectionClass}`}
+          onClick={handleBoxClick} 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
           {/* Three-dots menu - visible on hover */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                onClick={(e) => e.stopPropagation()}
-                className="absolute top-2 right-2 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center"
-                title="More options"
-              >
-                <MoreVertical className="w-4 h-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
-                  Change Element
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-48">
-                  {elementTypes.map((element) => {
-                    const Icon = element.icon;
-                    return (
-                      <DropdownMenuItem
-                        key={element.value}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleElementChange(element.value);
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <Icon className="w-4 h-4" />
-                        <span>{element.label}</span>
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
 
           {/* Toolbar - only show when a field is active */}
           {activeQAField && (
@@ -3987,6 +4242,17 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           className="relative group/box flex flex-col gap-3" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
           {/* Toolbar */}
           {showInsightsToolbar && (
             <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
@@ -4182,9 +4448,85 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       const metricLabel = hasVariable 
         ? (box.metricLabel || box.variableName || 'BRAND VALUE')
         : 'Please select a variable to show its metric value..';
-      const metricValue = hasVariable 
+      
+      // Check if variable matches current global filters
+      let metricValue = hasVariable 
         ? (box.metricValue || box.value || '0')
         : '';
+      
+      // If variable exists, check if it matches current global filters
+      // Only check if element interaction is 'apply' (default) - ignore 'ignore' and 'not-apply' modes
+      const elementInteraction = settings.elementInteractions?.[boxId] || 'apply';
+      if (hasVariable && (box.variableNameKey || box.variableName) && elementInteraction === 'apply') {
+        const variableKey = box.variableNameKey || box.variableName || '';
+        const globalFilters = settings.globalFilters || {};
+        const enabledIdentifiers = settings.enabledGlobalFilterIdentifiers || [];
+        
+        // Parse identifiers from variable key
+        const parseIdentifiersFromKey = (vKey: string): Record<string, string> => {
+          const parts = vKey.split('_');
+          const identifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
+          const vIdentifiers: Record<string, string> = {};
+          
+          let i = 2; // Skip first 2 parts (measure and aggregation)
+          while (i < parts.length) {
+            const key = parts[i]?.toLowerCase();
+            if (identifierTypes.includes(key) && i + 1 < parts.length) {
+              let val = parts[i + 1];
+              let nextIndex = i + 2;
+              
+              while (nextIndex < parts.length) {
+                const nextPart = parts[nextIndex]?.toLowerCase();
+                if (!identifierTypes.includes(nextPart)) {
+                  val += '_' + parts[nextIndex];
+                  nextIndex++;
+                } else {
+                  break;
+                }
+              }
+              
+              vIdentifiers[key] = val;
+              i = nextIndex;
+            } else {
+              i++;
+            }
+          }
+          
+          return vIdentifiers;
+        };
+        
+        const variableIdentifiers = parseIdentifiersFromKey(variableKey);
+        
+        // Check if variable matches all active global filters
+        // Only check enabled identifiers (or all if none are enabled)
+        const identifiersToCheck = enabledIdentifiers.length > 0 
+          ? enabledIdentifiers.map(id => id.toLowerCase())
+          : Object.keys(globalFilters).map(id => id.toLowerCase());
+        
+        // Check if any active global filter doesn't match the variable
+        let variableMatchesFilters = true;
+        
+        for (const identifier of identifiersToCheck) {
+          const filterConfig = globalFilters[identifier];
+          if (filterConfig && filterConfig.values && filterConfig.values.length > 0 && !filterConfig.values.includes('__all__')) {
+            // This identifier has an active global filter
+            const filterValue = filterConfig.values[0];
+            const variableValue = variableIdentifiers[identifier];
+            
+            // If variable doesn't have this identifier or value doesn't match, it's invalid
+            if (!variableValue || variableValue !== filterValue) {
+              variableMatchesFilters = false;
+              break;
+            }
+          }
+        }
+        
+        // If variable doesn't match filters, show "-"
+        if (!variableMatchesFilters) {
+          metricValue = '-';
+        }
+      }
+      
       const metricUnit = box.metricUnit || '';
       const changeValue = box.changeValue || 0;
       const changeType = box.changeType || 'positive';
@@ -4321,8 +4663,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) {
           return;
         }
-        e.stopPropagation();
-        onSettingsChange({ selectedBoxId: boxId });
+        // Use the common multi-selection handler
+        handleBoxClick(e);
       };
 
       // Find matching variable based on selected filters
@@ -4388,7 +4730,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
       return (
         <div 
-          className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
+          className={`relative group/box ${selectionClass}`}
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleMetricCardClick}
         >
@@ -4503,6 +4845,46 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                   </DropdownMenuSub>
                 </>
               )}
+              <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Element
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-48">
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddElement(layoutId, boxId, 'left');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Add to the Left</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddElement(layoutId, boxId, 'right');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                    <span>Add to the Right</span>
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteBox(layoutId, boxId);
+                }}
+                className="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -4889,8 +5271,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         if ((e.target as HTMLElement).closest('.resize-handle')) {
           return;
         }
-        e.stopPropagation();
-        onSettingsChange({ selectedBoxId: boxId });
+        // Use the common multi-selection handler
+        handleBoxClick(e);
       };
 
       const handleImageResizeStart = (e: React.MouseEvent) => {
@@ -4909,17 +5291,21 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
       return (
         <div 
-          className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
+          className={`relative group/box ${selectionClass}`}
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleImageClick}
         >
-          {/* Change button - visible on hover */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-purple-600 hover:bg-purple-50 transition-opacity opacity-0 group-hover/box:opacity-100"
-          >
-            Change
-          </button>
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
 
           <div className="relative w-full h-full rounded-xl overflow-hidden border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-purple-100/50 shadow-md hover:shadow-lg transition-all">
             {imageUrl && imageUrl.trim() !== '' ? (
@@ -5006,6 +5392,19 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Calculate height based on box dimensions - use layout height minus padding
       // Calculate box height: layout height minus padding (about 20px total)
       const boxHeight = Math.max(150, layoutHeight - 20);
+
+      // Handle chart config changes (for series settings, theme, etc.)
+      const handleChartConfigChange = (updatedConfig: any) => {
+        const updatedLayouts = settings.layouts?.map(layout => ({
+          ...layout,
+          boxes: layout.boxes.map(box =>
+            box.id === boxId
+              ? { ...box, chartConfig: updatedConfig }
+              : box
+          )
+        }));
+        onSettingsChange({ layouts: updatedLayouts });
+      };
 
       // Handle note changes for the chart - store notes per filter combination
       const handleNoteChange = (note: string, noteHtml?: string, noteFormatting?: any, filterKey?: string) => {
@@ -5148,47 +5547,21 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
       return (
         <div 
-          className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
+          className={`relative group/box ${selectionClass}`}
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleChartClick}
         >
           {/* Three-dots menu - visible on hover */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                onClick={(e) => e.stopPropagation()}
-                className="absolute top-2 right-2 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center"
-                title="More options"
-              >
-                <MoreVertical className="w-4 h-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
-                  Change Element
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-48">
-                  {elementTypes.map((element) => {
-                    const Icon = element.icon;
-                    return (
-                      <DropdownMenuItem
-                        key={element.value}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleElementChange(element.value);
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <Icon className="w-4 h-4" />
-                        <span>{element.label}</span>
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
 
           {/* Edit Interactions Controls - visible when Edit Interactions mode is enabled */}
           {settings.editInteractionsMode && (
@@ -5249,6 +5622,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               width={undefined}
               height={boxHeight}
               onNoteChange={handleNoteChange}
+              onChartConfigChange={handleChartConfigChange}
+              // fileId is optional - ChartElement will handle chart type changes without it if needed
             />
             
             {/* Filter Display - positioned between title and chart, on the left */}
@@ -5458,8 +5833,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         if ((e.target as HTMLElement).closest('button')) {
           return;
         }
-        e.stopPropagation();
-        onSettingsChange({ selectedBoxId: boxId });
+        // Use the common multi-selection handler
+        handleBoxClick(e);
       };
 
       // Parse tableSettings if it's a string (from MongoDB)
@@ -5501,17 +5876,21 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
       return (
         <div 
-          className={`relative group/box ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}
+          className={`relative group/box ${selectionClass}`}
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleTableClick}
         >
-          {/* Change button - visible on hover */}
-          <button
-            onClick={handleDoubleClick}
-            className="absolute -top-2 -right-2 z-20 px-3 py-1 bg-white rounded-full shadow-md border border-gray-200 text-xs font-medium text-yellow-600 hover:bg-yellow-50 transition-opacity opacity-0 group-hover/box:opacity-100"
-          >
-            Change
-          </button>
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
 
           {/* Edit Interactions Controls - visible when Edit Interactions mode is enabled */}
           {settings.editInteractionsMode && (
@@ -5583,7 +5962,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
     // For other element types, show the standard renderer
     return (
       <div 
-        className="relative group/box cursor-pointer" 
+        className={`relative group/box cursor-pointer ${selectionClass}`}
+        onClick={handleBoxClick} 
         style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         onDoubleClick={handleDoubleClick}
         title="Double-click to change element"
@@ -5608,7 +5988,11 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
   // Otherwise, show the dropdown (either no element or in edit mode)
   return (
-    <div className="relative group/box" style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}>
+    <div 
+      className={`relative group/box ${selectionClass}`} 
+      style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
+      onClick={handleBoxClick}
+    >
       {/* Ambient glow for selected elements */}
       {box.elementType && (
         <div className="absolute -inset-1 bg-gradient-to-br from-yellow-100/50 to-yellow-50/30 rounded-xl blur-lg opacity-0 group-hover/box:opacity-100 transition-opacity duration-300" />

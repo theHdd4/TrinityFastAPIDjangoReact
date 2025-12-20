@@ -7,12 +7,18 @@ import { TextBoxToolbar } from '@/components/LaboratoryMode/components/CanvasAre
 import { DEFAULT_CHART_NOTE_FORMATTING } from '@/components/AtomList/atoms/chart-maker/components/rich-text-note/types';
 import type { TextAlignOption } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
 import { TEXT_STYLE_PRESETS } from '@/components/LaboratoryMode/components/CanvasArea/text-box/constants';
+// Import chart maker utilities
+import { buildTracesForAPI, mergeTraceFilters, migrateLegacyChart } from '@/components/AtomList/atoms/chart-maker/utils/traceUtils';
+import { chartMakerApi } from '@/components/AtomList/atoms/chart-maker/services/chartMakerApi';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface ChartElementProps {
   chartConfig?: ChartMakerConfig;
   width?: number;
   height?: number;
   onNoteChange?: (note: string, noteHtml?: string, noteFormatting?: any, filterKey?: string) => void;
+  onChartConfigChange?: (updatedConfig: ChartMakerConfig) => void; // Optional callback to notify parent of config changes
+  fileId?: string; // Optional file ID for chart regeneration
 }
 
 // Helper function to generate a filter key from chart filters
@@ -30,36 +36,121 @@ const generateFilterKey = (filters?: Record<string, string[]>): string => {
   return sortedEntries.join('|');
 };
 
+// Chart settings interface (for local state management)
+interface ChartSettings {
+  theme?: string;
+  showGrid?: boolean;
+  showLegend?: boolean;
+  showDataLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
+  sortOrder?: 'asc' | 'desc' | null;
+  sortColumn?: string;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
+  customTitle?: string;
+  customXAxisLabel?: string;
+  customYAxisLabel?: string;
+  chartType?: string;
+}
+
 const ChartElement: React.FC<ChartElementProps> = ({ 
   chartConfig, 
   width, 
   height = 300,
-  onNoteChange
+  onNoteChange,
+  onChartConfigChange,
+  fileId
 }) => {
-  // If no chart config or chart not rendered, show placeholder
-  if (!chartConfig || !chartConfig.chartRendered || !chartConfig.chartConfig) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full p-4 space-y-3">
-        <BarChart3 className="w-8 h-8 text-blue-500" />
-        <p className="text-sm font-medium text-foreground">Chart</p>
-        <p className="text-xs text-muted-foreground text-center px-4">
-          Configure and render a chart in the Charts tab to visualize data
-        </p>
-      </div>
-    );
-  }
+  // ALL HOOKS MUST BE CALLED FIRST - before any conditional returns
+  const isMobile = useIsMobile();
+  
+  // Get saved chart configuration from rendered chart config (safe access)
+  const renderedChartConfig = chartConfig?.chartConfig;
+  
+  // Initialize chart settings from rendered chart config
+  const [chartSettings, setChartSettings] = useState<ChartSettings>(() => {
+    if (!renderedChartConfig || !chartConfig) {
+      return {
+        theme: undefined,
+        showGrid: undefined,
+        showLegend: undefined,
+        showDataLabels: undefined,
+        showXAxisLabels: undefined,
+        showYAxisLabels: undefined,
+        sortOrder: null,
+        sortColumn: undefined,
+        seriesSettings: undefined,
+        customTitle: undefined,
+        customXAxisLabel: undefined,
+        customYAxisLabel: undefined,
+        chartType: undefined,
+      };
+    }
+    return {
+      theme: renderedChartConfig.theme,
+      showGrid: renderedChartConfig.showGrid,
+      showLegend: renderedChartConfig.showLegend,
+      showDataLabels: renderedChartConfig.showDataLabels,
+      showXAxisLabels: renderedChartConfig.showXAxisLabels,
+      showYAxisLabels: renderedChartConfig.showYAxisLabels,
+      sortOrder: renderedChartConfig.sortOrder || null,
+      sortColumn: renderedChartConfig.sortColumn,
+      seriesSettings: renderedChartConfig.seriesSettings,
+      customTitle: chartConfig.title,
+      customXAxisLabel: renderedChartConfig.customXAxisLabel,
+      customYAxisLabel: renderedChartConfig.customYAxisLabel,
+      chartType: chartConfig.type,
+    };
+  });
+
+  // Update chart settings when chartConfig changes
+  useEffect(() => {
+    if (renderedChartConfig && chartConfig) {
+      setChartSettings({
+        theme: renderedChartConfig.theme,
+        showGrid: renderedChartConfig.showGrid,
+        showLegend: renderedChartConfig.showLegend,
+        showDataLabels: renderedChartConfig.showDataLabels,
+        showXAxisLabels: renderedChartConfig.showXAxisLabels,
+        showYAxisLabels: renderedChartConfig.showYAxisLabels,
+        sortOrder: renderedChartConfig.sortOrder || null,
+        sortColumn: renderedChartConfig.sortColumn,
+        seriesSettings: renderedChartConfig.seriesSettings,
+        customTitle: chartConfig.title,
+        customXAxisLabel: renderedChartConfig.customXAxisLabel,
+        customYAxisLabel: renderedChartConfig.customYAxisLabel,
+        chartType: chartConfig.type,
+      });
+    }
+  }, [renderedChartConfig, chartConfig?.title, chartConfig?.type]);
+
+  // Helper to update chart config in parent
+  const updateChartConfig = useCallback((updates: Partial<ChartMakerConfig>) => {
+    if (!chartConfig || !onChartConfigChange) return;
+    
+    const updatedConfig = {
+      ...chartConfig,
+      ...updates,
+      chartConfig: {
+        ...chartConfig.chartConfig,
+        ...(updates.chartConfig || {}),
+      },
+    };
+    
+    onChartConfigChange(updatedConfig);
+  }, [chartConfig, onChartConfigChange]);
 
   // Get chart data from rendered chart config
   const chartData = useMemo(() => {
-    if (!chartConfig.chartConfig || !chartConfig.chartConfig.data) {
+    if (!chartConfig?.chartConfig || !chartConfig.chartConfig.data) {
       return [];
     }
     return chartConfig.chartConfig.data;
-  }, [chartConfig.chartConfig]);
+  }, [chartConfig?.chartConfig]);
 
   // Convert chart type from laboratory format to RechartsChartRenderer format
   const chartType = useMemo(() => {
-    const type = chartConfig.type || 'line';
+    const type = chartSettings.chartType || chartConfig?.type || 'line';
     const typeMap: Record<string, 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart'> = {
       'bar': 'bar_chart',
       'line': 'line_chart',
@@ -69,106 +160,16 @@ const ChartElement: React.FC<ChartElementProps> = ({
       'stacked_bar': 'stacked_bar_chart',
     };
     return typeMap[type] || 'line_chart';
-  }, [chartConfig.type]);
+  }, [chartSettings.chartType, chartConfig?.type]);
 
-  // Determine yFields for dual axis support
-  let yFields: string[] | undefined = undefined;
-  let yAxisLabels: string[] | undefined = undefined;
-
-  // PRIORITY: If secondYAxis exists, use dual-axis mode
-  if (chartConfig.secondYAxis) {
-    const yAxis = chartConfig.yAxis ? String(chartConfig.yAxis).trim() : '';
-    const secondYAxis = String(chartConfig.secondYAxis).trim();
-    
-    if (yAxis && secondYAxis) {
-      yFields = [yAxis, secondYAxis];
-      yAxisLabels = [yAxis, secondYAxis];
-    }
-  }
-  // Use traces if explicitly in advanced mode AND secondYAxis is NOT set
-  else if (chartConfig.isAdvancedMode && chartConfig.traces && chartConfig.traces.length > 0) {
-    yFields = chartConfig.traces.map((t: any) => t.dataKey || t.yAxis);
-    yAxisLabels = chartConfig.traces.map((t: any) => t.name || t.dataKey || t.yAxis);
-  }
-
-  // Determine if we should force single axis rendering
-  const shouldForceSingleAxis = chartConfig.dualAxisMode === 'single' && chartConfig.secondYAxis && String(chartConfig.secondYAxis || '').trim().length > 0;
-
-  if (!chartData || chartData.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full p-4 space-y-3">
-        <BarChart3 className="w-8 h-8 text-blue-500" />
-        <p className="text-sm font-medium text-foreground">No Chart Data</p>
-        <p className="text-xs text-muted-foreground text-center px-4">
-          Chart data is not available. Please import a chart with data.
-        </p>
-      </div>
-    );
-  }
-
-  // Get saved chart configuration from rendered chart config
-  const renderedChartConfig = chartConfig.chartConfig;
-  
-  // Map yFields to actual column names in the data
-  let mappedYFields = yFields;
-  if (yFields && yFields.length > 1 && chartData.length > 0) {
-    const firstRow = chartData[0];
-    const dataKeys = firstRow ? Object.keys(firstRow) : [];
-    
-    mappedYFields = yFields.map((yField) => {
-      if (dataKeys.includes(yField)) {
-        return yField;
-      }
-      const matchingKey = dataKeys.find(key => key.startsWith(yField + '_') || key === yField);
-      if (matchingKey) {
-        return matchingKey;
-      }
-      return yField;
-    });
-  }
-  
-  const finalYFields = mappedYFields || yFields;
-  const finalYField = finalYFields && finalYFields.length > 0 ? finalYFields[0] : chartConfig.yAxis;
-  
-  const rendererProps = {
-    type: chartType,
-    data: chartData,
-    xField: chartConfig.xAxis,
-    yField: finalYField,
-    yFields: finalYFields,
-    title: chartConfig.title,
-    xAxisLabel: chartConfig.xAxis,
-    yAxisLabel: chartConfig.yAxis,
-    yAxisLabels: yAxisLabels,
-    legendField: chartConfig.legendField && chartConfig.legendField !== 'aggregate' ? chartConfig.legendField : undefined,
-    colors: renderedChartConfig?.colors || ['#3b82f6', '#8b5cf6', '#10b981', '#f97316', '#ef4444'],
-    width: 0, // Use 0 to make chart responsive to container width
-    height: height,
-    theme: renderedChartConfig?.theme,
-    showLegend: renderedChartConfig?.showLegend,
-    showXAxisLabels: renderedChartConfig?.showXAxisLabels,
-    showYAxisLabels: renderedChartConfig?.showYAxisLabels,
-    showDataLabels: renderedChartConfig?.showDataLabels,
-    showGrid: renderedChartConfig?.showGrid,
-    sortOrder: renderedChartConfig?.sortOrder || null,
-    sortColumn: renderedChartConfig?.sortColumn,
-    enableScroll: renderedChartConfig?.enableScroll,
-    chartsPerRow: renderedChartConfig?.chartsPerRow,
-    forceSingleAxis: shouldForceSingleAxis,
-    seriesSettings: renderedChartConfig?.seriesSettings,
-    showNote: false, // Note box is rendered in ChartElement, not RechartsChartRenderer
-  };
-
-  const showNote = chartConfig.showNote || false;
-  
   // Generate filter key from current filters
   const currentFilterKey = useMemo(() => {
-    return generateFilterKey(chartConfig.filters);
-  }, [chartConfig.filters]);
+    return generateFilterKey(chartConfig?.filters);
+  }, [chartConfig?.filters]);
   
   // Get notesByFilter structure (initialize if needed)
   const notesByFilter = useMemo(() => {
-    return (chartConfig as any).notesByFilter || {};
+    return (chartConfig as any)?.notesByFilter || {};
   }, [chartConfig]);
   
   // Get note for current filter combination
@@ -218,12 +219,213 @@ const ChartElement: React.FC<ChartElementProps> = ({
       setLocalNoteState(null);
     }
   }, [currentFilterKey, editingNote]);
-  
+
+  // Frontend-only callbacks (update local state and chart config) - must be before early returns
+  const handleThemeChange = useCallback((theme: string) => {
+    setChartSettings(prev => ({ ...prev, theme }));
+    // Defer update to avoid render issues and use current state
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          chartConfig: {
+            ...chartConfig.chartConfig,
+            theme,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
+  const handleGridToggle = useCallback((enabled: boolean) => {
+    setChartSettings(prev => ({ ...prev, showGrid: enabled }));
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          chartConfig: {
+            ...chartConfig.chartConfig,
+            showGrid: enabled,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
+  const handleLegendToggle = useCallback((enabled: boolean) => {
+    setChartSettings(prev => ({ ...prev, showLegend: enabled }));
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          chartConfig: {
+            ...chartConfig.chartConfig,
+            showLegend: enabled,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
+  const handleDataLabelsToggle = useCallback((enabled: boolean) => {
+    setChartSettings(prev => ({ ...prev, showDataLabels: enabled }));
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          chartConfig: {
+            ...chartConfig.chartConfig,
+            showDataLabels: enabled,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
+  const handleXAxisLabelsToggle = useCallback((enabled: boolean) => {
+    setChartSettings(prev => ({ ...prev, showXAxisLabels: enabled }));
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          chartConfig: {
+            ...chartConfig.chartConfig,
+            showXAxisLabels: enabled,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
+  const handleYAxisLabelsToggle = useCallback((enabled: boolean) => {
+    setChartSettings(prev => ({ ...prev, showYAxisLabels: enabled }));
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          chartConfig: {
+            ...chartConfig.chartConfig,
+            showYAxisLabels: enabled,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
+  const handleSortChange = useCallback((order: 'asc' | 'desc' | null) => {
+    setChartSettings(prev => ({ ...prev, sortOrder: order }));
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          chartConfig: {
+            ...chartConfig.chartConfig,
+            sortOrder: order,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
+  const handleSeriesSettingsChange = useCallback((settings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+    // Update local state immediately for UI responsiveness
+    setChartSettings(prev => ({ ...prev, seriesSettings: settings }));
+    
+    // Defer the update to avoid updating during render and ensure it happens after any blur events
+    setTimeout(() => {
+      if (chartConfig && onChartConfigChange) {
+        // Use current chartConfig to ensure we have the latest state
+        const currentChartConfig = chartConfig.chartConfig || {};
+        updateChartConfig({
+          chartConfig: {
+            ...currentChartConfig,
+            seriesSettings: settings,
+          },
+        });
+      }
+    }, 100); // Slightly longer delay to ensure Apply button click completes
+  }, [chartConfig, updateChartConfig, onChartConfigChange]);
+
+  const handleTitleChange = useCallback((title: string) => {
+    setChartSettings(prev => ({ ...prev, customTitle: title }));
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          title,
+          chartConfig: {
+            ...chartConfig.chartConfig,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
+  // Backend-required callback (chart type change) - requires API call
+  const handleChartTypeChange = useCallback(async (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart') => {
+    if (!chartConfig || !fileId) {
+      console.warn('Chart type change requires fileId - skipping backend regeneration');
+      // Still update local state
+      const mappedType = newType === 'stacked_bar_chart' ? 'stacked_bar' : newType.replace('_chart', '') as any;
+      setChartSettings(prev => ({ ...prev, chartType: mappedType }));
+      if (chartConfig) {
+        updateChartConfig({
+          type: mappedType,
+        });
+      }
+      return;
+    }
+
+    // Map RechartsChartRenderer type to ChartMakerConfig type
+    const mappedType = newType === 'stacked_bar_chart' ? 'stacked_bar' : newType.replace('_chart', '') as any;
+
+    try {
+      // Build chart configuration with new type
+      const chartConfigForAPI: any = {
+        id: chartConfig.id || 'chart-1',
+        title: chartSettings.customTitle || chartConfig.title || 'Chart',
+        type: mappedType,
+        xAxis: chartConfig.xAxis || '',
+        yAxis: chartConfig.yAxis || '',
+        secondYAxis: chartConfig.secondYAxis,
+        dualAxisMode: chartConfig.dualAxisMode,
+        filters: chartConfig.filters || {},
+        aggregation: chartConfig.aggregation || 'sum',
+        legendField: chartConfig.legendField,
+        isAdvancedMode: chartConfig.isAdvancedMode || false,
+        traces: chartConfig.traces || [],
+      };
+
+      const migratedChart = migrateLegacyChart(chartConfigForAPI);
+      const traces = buildTracesForAPI(migratedChart);
+      const legacyFilters = migratedChart.isAdvancedMode ? {} : mergeTraceFilters(migratedChart);
+
+      const chartRequest = {
+        file_id: fileId,
+        chart_type: mappedType === 'stacked_bar' ? 'bar' : mappedType,
+        traces: traces,
+        title: chartSettings.customTitle || chartConfig.title || 'Chart',
+        filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : chartConfig.filters || {},
+      };
+
+      const chartResponse = await chartMakerApi.generateChart(chartRequest);
+
+      // Update chart config with new data
+      updateChartConfig({
+        type: mappedType,
+        chartConfig: chartResponse.chart_config,
+        chartRendered: true,
+      });
+
+      // Update chart type in settings
+      setChartSettings(prev => ({ ...prev, chartType: mappedType }));
+    } catch (error) {
+      console.error('Failed to change chart type:', error);
+      // Fallback: still update local state
+      setChartSettings(prev => ({ ...prev, chartType: mappedType }));
+      updateChartConfig({
+        type: mappedType,
+      });
+    }
+  }, [chartConfig, fileId, chartSettings.customTitle, chartSettings.chartType, updateChartConfig]);
+
   // Handle note input change - update LOCAL state only (no store update = no lag)
   const handleNoteChange = useCallback((value: string, html?: string) => {
     setLocalNoteState({ value, html });
   }, []);
-  
+
   // Handle note commit - save to store on blur/commit
   const handleNoteCommit = useCallback((value: string, html: string) => {
     const formatting = getNoteFormatting();
@@ -423,16 +625,133 @@ const ChartElement: React.FC<ChartElementProps> = ({
       strikethrough: preset.strikethrough,
     });
   }, [hasNoteEditorSelection, runNoteEditorCommand, syncNoteHtmlAfterFormatting, handleNoteFormattingChange]);
-  
+
   // Initialize local state when starting to edit
   useEffect(() => {
-    if (editingNote && !localNoteState) {
+    if (editingNote && !localNoteState && chartConfig) {
       setLocalNoteState({
         value: chartConfig.note || '',
         html: (chartConfig as any).noteHtml
       });
     }
   }, [editingNote, chartConfig, localNoteState]);
+
+  // NOW WE CAN DO CONDITIONAL CHECKS AND EARLY RETURNS
+  // If no chart config or chart not rendered, show placeholder
+  if (!chartConfig || !chartConfig.chartRendered || !chartConfig.chartConfig) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-4 space-y-3">
+        <BarChart3 className="w-8 h-8 text-blue-500" />
+        <p className="text-sm font-medium text-foreground">Chart</p>
+        <p className="text-xs text-muted-foreground text-center px-4">
+          Configure and render a chart in the Charts tab to visualize data
+        </p>
+      </div>
+    );
+  }
+
+  // Determine yFields for dual axis support
+  let yFields: string[] | undefined = undefined;
+  let yAxisLabels: string[] | undefined = undefined;
+
+  // PRIORITY: If secondYAxis exists, use dual-axis mode
+  if (chartConfig.secondYAxis) {
+    const yAxis = chartConfig.yAxis ? String(chartConfig.yAxis).trim() : '';
+    const secondYAxis = String(chartConfig.secondYAxis).trim();
+    
+    if (yAxis && secondYAxis) {
+      yFields = [yAxis, secondYAxis];
+      yAxisLabels = [yAxis, secondYAxis];
+    }
+  }
+  // Use traces if explicitly in advanced mode AND secondYAxis is NOT set
+  else if (chartConfig.isAdvancedMode && chartConfig.traces && chartConfig.traces.length > 0) {
+    yFields = chartConfig.traces.map((t: any) => t.dataKey || t.yAxis);
+    yAxisLabels = chartConfig.traces.map((t: any) => t.name || t.dataKey || t.yAxis);
+  }
+
+  // Determine if we should force single axis rendering
+  const shouldForceSingleAxis = chartConfig.dualAxisMode === 'single' && chartConfig.secondYAxis && String(chartConfig.secondYAxis || '').trim().length > 0;
+
+  if (!chartData || chartData.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-4 space-y-3">
+        <BarChart3 className="w-8 h-8 text-blue-500" />
+        <p className="text-sm font-medium text-foreground">No Chart Data</p>
+        <p className="text-xs text-muted-foreground text-center px-4">
+          Chart data is not available. Please import a chart with data.
+        </p>
+      </div>
+    );
+  }
+  
+  // Map yFields to actual column names in the data
+  let mappedYFields = yFields;
+  if (yFields && yFields.length > 1 && chartData.length > 0) {
+    const firstRow = chartData[0];
+    const dataKeys = firstRow ? Object.keys(firstRow) : [];
+    
+    mappedYFields = yFields.map((yField) => {
+      if (dataKeys.includes(yField)) {
+        return yField;
+      }
+      const matchingKey = dataKeys.find(key => key.startsWith(yField + '_') || key === yField);
+      if (matchingKey) {
+        return matchingKey;
+      }
+      return yField;
+    });
+  }
+  
+  const finalYFields = mappedYFields || yFields;
+  const finalYField = finalYFields && finalYFields.length > 0 ? finalYFields[0] : chartConfig.yAxis;
+
+  const rendererProps = {
+    type: chartType,
+    data: chartData,
+    xField: chartConfig.xAxis,
+    yField: finalYField,
+    yFields: finalYFields,
+    title: chartSettings.customTitle || chartConfig.title,
+    xAxisLabel: chartConfig.xAxis,
+    yAxisLabel: chartConfig.yAxis,
+    yAxisLabels: yAxisLabels,
+    legendField: chartConfig.legendField && chartConfig.legendField !== 'aggregate' ? chartConfig.legendField : undefined,
+    colors: renderedChartConfig?.colors || ['#3b82f6', '#8b5cf6', '#10b981', '#f97316', '#ef4444'],
+    width: 0, // Use 0 to make chart responsive to container width
+    height: height,
+    theme: chartSettings.theme !== undefined ? chartSettings.theme : renderedChartConfig?.theme,
+    showLegend: chartSettings.showLegend !== undefined ? chartSettings.showLegend : renderedChartConfig?.showLegend,
+    showXAxisLabels: chartSettings.showXAxisLabels !== undefined ? chartSettings.showXAxisLabels : renderedChartConfig?.showXAxisLabels,
+    showYAxisLabels: chartSettings.showYAxisLabels !== undefined ? chartSettings.showYAxisLabels : renderedChartConfig?.showYAxisLabels,
+    showDataLabels: chartSettings.showDataLabels !== undefined ? chartSettings.showDataLabels : renderedChartConfig?.showDataLabels,
+    showGrid: chartSettings.showGrid !== undefined ? chartSettings.showGrid : renderedChartConfig?.showGrid,
+    sortOrder: chartSettings.sortOrder !== undefined ? chartSettings.sortOrder : (renderedChartConfig?.sortOrder || null),
+    sortColumn: chartSettings.sortColumn || renderedChartConfig?.sortColumn,
+    enableScroll: renderedChartConfig?.enableScroll,
+    chartsPerRow: renderedChartConfig?.chartsPerRow,
+    forceSingleAxis: shouldForceSingleAxis,
+    seriesSettings: chartSettings.seriesSettings !== undefined 
+      ? { ...(renderedChartConfig?.seriesSettings || {}), ...chartSettings.seriesSettings }
+      : renderedChartConfig?.seriesSettings,
+    customXAxisLabel: chartSettings.customXAxisLabel,
+    customYAxisLabel: chartSettings.customYAxisLabel,
+    isMobile: isMobile,
+    showNote: false, // Note box is rendered in ChartElement, not RechartsChartRenderer
+    // Callbacks for context menu
+    onThemeChange: handleThemeChange,
+    onGridToggle: handleGridToggle,
+    onLegendToggle: handleLegendToggle,
+    onDataLabelsToggle: handleDataLabelsToggle,
+    onXAxisLabelsToggle: handleXAxisLabelsToggle,
+    onYAxisLabelsToggle: handleYAxisLabelsToggle,
+    onSortChange: handleSortChange,
+    onSeriesSettingsChange: handleSeriesSettingsChange,
+    onChartTypeChange: handleChartTypeChange,
+    onTitleChange: handleTitleChange,
+  };
+
+  const showNote = chartConfig?.showNote || false;
   
   return (
     <div className={`w-full h-full flex flex-col`} style={{ maxHeight: '100%', maxWidth: '100%', padding: '8px', minWidth: 0, minHeight: 0 }}>

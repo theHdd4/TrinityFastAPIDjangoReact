@@ -3072,6 +3072,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }) => {
       const inputRef = useRef<HTMLInputElement>(null);
       const isPickerOpenRef = useRef(false);
+      const applyClickedRef = useRef(false); // Track if Apply button was clicked
       const [localColor, setLocalColor] = useState(initialColor);
       const [showApply, setShowApply] = useState(false);
       
@@ -3085,15 +3086,27 @@ const RechartsChartRenderer: React.FC<Props> = ({
         }
       }, [initialColor]);
       
-      const handleApply = () => {
+      const handleApply = (e?: React.MouseEvent) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        applyClickedRef.current = true; // Mark that Apply was clicked
         isPickerOpenRef.current = false;
         setShowApply(false);
         onColorChange(localColor);
-        inputRef.current?.blur();
+        // Small delay before blurring to ensure callback completes
+        setTimeout(() => {
+          inputRef.current?.blur();
+          // Reset flag after a short delay
+          setTimeout(() => {
+            applyClickedRef.current = false;
+          }, 100);
+        }, 50);
       };
       
       return (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <input
             ref={inputRef}
             type="color"
@@ -3104,24 +3117,36 @@ const RechartsChartRenderer: React.FC<Props> = ({
             onFocus={() => {
               isPickerOpenRef.current = true;
               setShowApply(true);
+              applyClickedRef.current = false; // Reset flag when focusing
             }}
             onBlur={(e) => {
               // Delay to allow Apply button click to register
               setTimeout(() => {
+                // Don't run blur handler if Apply button was clicked
+                if (applyClickedRef.current) {
+                  return;
+                }
                 if (isPickerOpenRef.current) {
                   isPickerOpenRef.current = false;
                   setShowApply(false);
                   onColorChange(e.target.value);
                 }
-              }, 150);
+              }, 200); // Increased delay to ensure Apply click registers
             }}
             className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+            onClick={(e) => e.stopPropagation()}
           />
           {showApply && (
             <button
               onMouseDown={(e) => {
                 e.preventDefault();
-                handleApply();
+                e.stopPropagation();
+                handleApply(e);
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleApply(e);
               }}
               className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
             >
@@ -3185,6 +3210,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
           width: '400px',
           maxHeight: '500px',
           overflowY: 'auto'
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
         }}
       >
         <div className="px-2 py-2 text-sm font-semibold text-gray-700 mb-3 flex items-center justify-between gap-2">

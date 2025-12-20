@@ -41,6 +41,7 @@ export interface KPIDashboardSettings {
   insights: string;
   layouts?: Layout[]; // Store layouts in settings
   selectedBoxId?: string; // ID of the currently selected box for per-element settings
+  selectedBoxIds?: string[]; // IDs of multiple selected boxes for multi-selection
   globalFilters?: Record<string, {
     values: string[];
   }>; // Global filters automatically apply to all elements
