@@ -65,7 +65,6 @@ class CeleryTaskClient:
     def _execute_callable(self, dotted_path: str, args: List[Any], kwargs: Dict[str, Any]) -> Any:
         import logging
         logger = logging.getLogger(__name__)
-        logger.info("TASK_QUEUE: Executing callable: %s with args=%s, kwargs=%s", dotted_path, args, kwargs)
         callable_obj = import_callable(dotted_path)
         logger.info("TASK_QUEUE: Callable imported successfully, executing...")
         result = callable_obj(*args, **kwargs)

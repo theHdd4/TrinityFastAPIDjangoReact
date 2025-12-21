@@ -14,7 +14,6 @@ from minio.error import S3Error
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
-from app.core.mongo import build_host_mongo_uri
 
 logger = logging.getLogger(__name__)
 
@@ -35,23 +34,41 @@ minio_client = Minio(
 )
 
 # MongoDB configuration
-MONGO_URI = os.getenv("MONGO_URI", build_host_mongo_uri())
+# Use MONGO_URI from environment (set in docker-compose.yml: mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin)
+MONGO_URI = os.getenv(
+    "MONGO_URI",
+    "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
+)
 MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
+
+# Extract MongoDB credentials for explicit authentication (required for Motor async client)
+_MONGO_USERNAME = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER") or "root"
+_MONGO_PASSWORD = os.getenv("MONGO_PASSWORD") or "rootpass"
+_MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
+
+def _get_mongo_host_port():
+    """Extract host and port from MONGO_URI."""
+    from urllib.parse import urlparse
+    parsed = urlparse(MONGO_URI)
+    host = parsed.hostname or "mongo"
+    port = parsed.port or 27017
+    return host, port
 
 # Draft save queue for debounced saves
 _draft_save_queue: Dict[str, asyncio.Task] = {}
 
 
-def load_table_from_minio(object_name: str) -> Tuple[pl.DataFrame, Optional[Dict[str, Dict[str, Dict[str, str]]]]]:
+def load_table_from_minio(object_name: str) -> Tuple[pl.DataFrame, Optional[Dict[str, Dict[str, Dict[str, str]]]], Optional[Dict[str, Any]]]:
     """
-    Load a DataFrame from MinIO using Arrow format and extract conditional formatting styles from metadata.
+    Load a DataFrame from MinIO using Arrow format and extract conditional formatting styles and table metadata.
     
     Args:
         object_name: Full path to the object in MinIO
         
     Returns:
-        Tuple of (Polars DataFrame, conditional_format_styles)
+        Tuple of (Polars DataFrame, conditional_format_styles, table_metadata)
         - conditional_format_styles: Style map or None if not present
+        - table_metadata: Table metadata (formatting, design, layout) or None if not present
         
     Raises:
         Exception: If file cannot be loaded
@@ -73,21 +90,33 @@ def load_table_from_minio(object_name: str) -> Tuple[pl.DataFrame, Optional[Dict
         
         # Extract conditional formatting styles from metadata
         conditional_format_styles = None
+        table_metadata = None
         metadata = table.schema.metadata
-        if metadata and b'conditional_formatting' in metadata:
-            try:
-                styles_json = metadata[b'conditional_formatting'].decode('utf-8')
-                conditional_format_styles = json.loads(styles_json)
-                logger.info(f"🎨 [TABLE] Loaded conditional formatting styles for {len(conditional_format_styles)} rows")
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                logger.warning(f"⚠️ [TABLE] Failed to parse conditional formatting metadata: {e}")
+        if metadata:
+            # Extract conditional formatting styles
+            if b'conditional_formatting' in metadata:
+                try:
+                    styles_json = metadata[b'conditional_formatting'].decode('utf-8')
+                    conditional_format_styles = json.loads(styles_json)
+                    logger.info(f"🎨 [TABLE] Loaded conditional formatting styles for {len(conditional_format_styles)} rows")
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.warning(f"⚠️ [TABLE] Failed to parse conditional formatting metadata: {e}")
+            
+            # Extract table metadata (formatting, design, layout)
+            if b'table_metadata' in metadata:
+                try:
+                    metadata_json = metadata[b'table_metadata'].decode('utf-8')
+                    table_metadata = json.loads(metadata_json)
+                    logger.info(f"📋 [TABLE] Loaded table metadata (formatting, design, layout)")
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.warning(f"⚠️ [TABLE] Failed to parse table metadata: {e}")
         
         # Convert to Polars DataFrame
         df = pl.from_arrow(table)
         logger.info(f"✅ [TABLE] Loaded DataFrame: {df.shape[0]} rows, {df.shape[1]} columns")
         logger.info(f"📋 [TABLE] Columns: {df.columns}")
         
-        return df, conditional_format_styles
+        return df, conditional_format_styles, table_metadata
         
     except Exception as e:
         logger.error(f"❌ [TABLE] Failed to load table: {e}")
@@ -103,9 +132,13 @@ def apply_table_settings(df: pl.DataFrame, settings: Dict[str, Any]) -> pl.DataF
         settings: Dictionary containing table settings
         
     Returns:
-        Processed DataFrame
+        Processed DataFrame with __original_row_index__ column added
     """
     logger.info(f"🔧 [TABLE] Applying settings to DataFrame")
+    
+    # CRITICAL FIX: Add original row index BEFORE filtering
+    # This allows frontend to map visible rows to actual rows in the full dataset
+    df = df.with_row_count("__original_row_index__")
     
     # Apply filters
     filters = settings.get("filters", {})
@@ -138,16 +171,36 @@ def apply_table_settings(df: pl.DataFrame, settings: Dict[str, Any]) -> pl.DataF
                         df = df.filter(pl.col(column) <= max_val)
                     # If both are None, don't filter (show all)
                 else:
-                    # String array filter (multi-select)
+                    # Multi-select filter (could be numeric or string values)
+                    # Check if all values are numeric (except for "(blank)")
+                    non_blank_values = [v for v in filter_value if v != '(blank)']
+                    all_numeric = all(isinstance(v, (int, float)) for v in non_blank_values)
+                    
                     # Handle "(blank)" special case
                     if '(blank)' in filter_value:
                         # Filter for blank values OR selected values
                         blank_filter = (pl.col(column).is_null()) | (pl.col(column) == '') | (pl.col(column).cast(pl.Utf8).str.strip_chars() == '')
-                        value_filter = pl.col(column).is_in([v for v in filter_value if v != '(blank)'])
-                        df = df.filter(blank_filter | value_filter)
+                        
+                        if non_blank_values:
+                            # Convert numeric values to appropriate type for the column if needed
+                            if all_numeric:
+                                # For numeric columns, use numeric values directly
+                                value_filter = pl.col(column).is_in(non_blank_values)
+                            else:
+                                # For string columns, convert to string
+                                value_filter = pl.col(column).is_in([str(v) for v in non_blank_values])
+                            df = df.filter(blank_filter | value_filter)
+                        else:
+                            # Only blank values selected
+                            df = df.filter(blank_filter)
                     else:
-                        # Regular multi-select filter
-                        df = df.filter(pl.col(column).is_in(filter_value))
+                        # Regular multi-select filter (no blanks)
+                        if all_numeric:
+                            # Numeric multi-select filter
+                            df = df.filter(pl.col(column).is_in(filter_value))
+                        else:
+                            # String multi-select filter
+                            df = df.filter(pl.col(column).is_in([str(v) for v in filter_value]))
             elif isinstance(filter_value, dict) and 'min' in filter_value and 'max' in filter_value:
                 # Range filter object
                 min_val = filter_value.get('min')
@@ -173,23 +226,27 @@ def apply_table_settings(df: pl.DataFrame, settings: Dict[str, Any]) -> pl.DataF
                 descending = direction == "desc"
                 df = df.sort(column, descending=descending)
     
-    # Select visible columns
+    # Select visible columns (but keep __original_row_index__)
     visible_columns = settings.get("visible_columns")
     if visible_columns:
-        # Ensure all visible columns exist
+        # Ensure all visible columns exist, plus keep __original_row_index__
         valid_columns = [col for col in visible_columns if col in df.columns]
         if valid_columns:
             logger.info(f"👁️ [TABLE] Selecting visible columns: {valid_columns}")
-            df = df.select(valid_columns)
+            # Keep __original_row_index__ even if not in visible_columns
+            columns_to_select = ["__original_row_index__"] + valid_columns
+            df = df.select(columns_to_select)
     
-    # Reorder columns if specified
+    # Reorder columns if specified (but keep __original_row_index__)
     column_order = settings.get("column_order")
     if column_order:
         # Filter to only existing columns
         valid_order = [col for col in column_order if col in df.columns]
-        if valid_order and len(valid_order) == len(df.columns):
+        if valid_order and len(valid_order) == len([c for c in df.columns if c != "__original_row_index__"]):
             logger.info(f"🔄 [TABLE] Reordering columns")
-            df = df.select(valid_order)
+            # Keep __original_row_index__ first, then reordered columns
+            columns_to_select = ["__original_row_index__"] + valid_order
+            df = df.select(columns_to_select)
     
     logger.info(f"✅ [TABLE] Settings applied: {df.shape[0]} rows, {df.shape[1]} columns")
     return df
@@ -198,15 +255,17 @@ def apply_table_settings(df: pl.DataFrame, settings: Dict[str, Any]) -> pl.DataF
 def save_table_to_minio(
     df: pl.DataFrame, 
     object_name: str,
-    conditional_format_styles: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None
+    conditional_format_styles: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
+    table_metadata: Optional[Dict[str, Any]] = None
 ) -> str:
     """
-    Save a DataFrame to MinIO in Arrow format with optional conditional formatting styles in metadata.
+    Save a DataFrame to MinIO in Arrow format with optional conditional formatting styles and table metadata.
     
     Args:
         df: DataFrame to save
         object_name: Full path where to save in MinIO
         conditional_format_styles: Optional style map to store in Arrow metadata
+        table_metadata: Optional table metadata (formatting, design, layout) to store in Arrow metadata
         
     Returns:
         Object name of saved file
@@ -225,26 +284,33 @@ def save_table_to_minio(
         # Convert Polars DataFrame to PyArrow Table
         table = df.to_arrow()
         
-        # If styles provided, add to Arrow schema metadata
+        # Get existing metadata (if any)
+        metadata = table.schema.metadata or {}
+        
+        # Add conditional formatting styles to metadata if provided
         if conditional_format_styles:
             try:
                 # Convert styles dict to JSON string
                 styles_json = json.dumps(conditional_format_styles)
-                
-                # Get existing metadata (if any)
-                metadata = table.schema.metadata or {}
-                
-                # Add conditional formatting styles to metadata
                 metadata[b'conditional_formatting'] = styles_json.encode('utf-8')
-                
-                # Recreate table with new metadata
-                table = table.replace_schema_metadata(metadata)
-                
                 logger.info(f"🎨 [TABLE] Added conditional formatting styles to metadata ({len(styles_json)} bytes)")
                 logger.info(f"🎨 [TABLE] Formatting applied to {len(conditional_format_styles)} rows")
             except Exception as e:
                 logger.warning(f"⚠️ [TABLE] Failed to add conditional formatting metadata: {e}")
-                # Continue without metadata if there's an error
+        
+        # Add table metadata (formatting, design, layout) if provided
+        if table_metadata:
+            try:
+                # Convert metadata dict to JSON string
+                metadata_json = json.dumps(table_metadata)
+                metadata[b'table_metadata'] = metadata_json.encode('utf-8')
+                logger.info(f"📋 [TABLE] Added table metadata to Arrow file ({len(metadata_json)} bytes)")
+            except Exception as e:
+                logger.warning(f"⚠️ [TABLE] Failed to add table metadata: {e}")
+        
+        # Recreate table with updated metadata
+        if metadata:
+            table = table.replace_schema_metadata(metadata)
         
         # Write Arrow file with metadata
         buffer = pa.BufferOutputStream()
@@ -317,15 +383,18 @@ def dataframe_to_response(df: pl.DataFrame, table_id: str,
     Returns:
         Dictionary in TableResponse format
     """
-    # Limit rows for initial response (pagination handled separately)
-    preview_df = df.head(100)
+    # Return all rows - frontend handles pagination (15 rows per page)
+    # This ensures filter components have access to all unique values from entire dataset
+    
+    # CRITICAL FIX: Exclude __original_row_index__ from columns list (but keep it in rows for frontend mapping)
+    columns = [col for col in df.columns if col != "__original_row_index__"]
     
     response = {
         "table_id": table_id,
-        "columns": df.columns,
-        "rows": preview_df.to_dicts(),
+        "columns": columns,  # Exclude __original_row_index__ from visible columns
+        "rows": df.to_dicts(),  # Return all rows with __original_row_index__ included for mapping
         "row_count": len(df),
-        "column_types": get_column_types(df)
+        "column_types": get_column_types(df.select(columns))  # Only get types for visible columns
     }
     
     if object_name:
@@ -681,6 +750,18 @@ def evaluate_conditional_formatting(
 # MongoDB Session Storage Functions
 # ============================================================================
 
+def _get_async_mongo_client():
+    """Get an AsyncIOMotorClient with proper authentication."""
+    host, port = _get_mongo_host_port()
+    return AsyncIOMotorClient(
+        f"mongodb://{host}:{port}",
+        username=_MONGO_USERNAME,
+        password=_MONGO_PASSWORD,
+        authSource=_MONGO_AUTH_DB,
+        serverSelectionTimeoutMS=5000,
+    )
+
+
 async def save_session_metadata(
     table_id: str,
     atom_id: str,
@@ -688,7 +769,8 @@ async def save_session_metadata(
     object_name: str,
     has_unsaved_changes: bool = False,
     draft_object_name: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    table_metadata: Optional[Dict[str, Any]] = None
 ) -> bool:
     """
     Save session metadata to MongoDB.
@@ -701,12 +783,13 @@ async def save_session_metadata(
         has_unsaved_changes: Whether there are unsaved changes
         draft_object_name: Path to draft file in MinIO (if exists)
         metadata: Additional metadata (row_count, column_count, size_bytes)
+        table_metadata: Table metadata (formatting, design, layout settings)
         
     Returns:
         True if successful, False otherwise
     """
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_sessions"]
         
@@ -725,6 +808,9 @@ async def save_session_metadata(
         if metadata:
             update_doc["metadata"] = metadata
         
+        if table_metadata:
+            update_doc["table_metadata"] = table_metadata
+        
         await coll.update_one(
             {"_id": table_id},
             {
@@ -737,7 +823,9 @@ async def save_session_metadata(
         )
         
         logger.info(f"💾 [SESSION] Saved metadata for session {table_id}")
-        await client.close()
+        if table_metadata:
+            logger.info(f"📋 [SESSION] Saved table metadata (formatting, design, layout)")
+        client.close()  # close() is not a coroutine in Motor
         return True
     except Exception as e:
         logger.error(f"❌ [SESSION] Failed to save metadata for {table_id}: {e}")
@@ -753,14 +841,15 @@ async def get_session_metadata(table_id: str) -> Optional[Dict[str, Any]]:
         
     Returns:
         Session metadata dict or None if not found
+        Includes table_metadata field if present
     """
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_sessions"]
         
         doc = await coll.find_one({"_id": table_id})
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         
         if doc:
             # Convert ObjectId to string and datetime to ISO format
@@ -775,6 +864,7 @@ async def get_session_metadata(table_id: str) -> Optional[Dict[str, Any]]:
                 "last_modified": doc.get("last_modified").isoformat() if doc.get("last_modified") else None,
                 "last_accessed": doc.get("last_accessed").isoformat() if doc.get("last_accessed") else None,
                 "metadata": doc.get("metadata", {}),
+                "table_metadata": doc.get("table_metadata"),  # Table metadata (formatting, design, layout)
             }
             return result
         return None
@@ -786,7 +876,7 @@ async def get_session_metadata(table_id: str) -> Optional[Dict[str, Any]]:
 async def update_session_access_time(table_id: str) -> bool:
     """Update last_accessed timestamp for a session."""
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_sessions"]
         
@@ -795,7 +885,7 @@ async def update_session_access_time(table_id: str) -> bool:
             {"$set": {"last_accessed": datetime.utcnow()}}
         )
         
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         return True
     except Exception as e:
         logger.error(f"❌ [SESSION] Failed to update access time for {table_id}: {e}")
@@ -821,21 +911,26 @@ async def save_change_log(
         True if successful, False otherwise
     """
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_changes"]
         
-        await coll.insert_one({
+        change_doc = {
             "table_id": table_id,
             "atom_id": atom_id,
             "change_type": change_type,
             "change_data": change_data,
             "timestamp": datetime.utcnow(),
             "applied": False
-        })
+        }
+        result = await coll.insert_one(change_doc)
         
-        await client.close()
-        logger.debug(f"📝 [CHANGE] Logged {change_type} for session {table_id}")
+        client.close()  # close() is not a coroutine in Motor
+        logger.info(
+            f"✅ [CHANGE] Logged {change_type} for session {table_id}, "
+            f"atom_id={atom_id}, inserted_id={result.inserted_id}, "
+            f"change_data={change_data}"
+        )
         return True
     except Exception as e:
         logger.error(f"❌ [CHANGE] Failed to log change for {table_id}: {e}")
@@ -854,7 +949,7 @@ async def get_change_log(table_id: str, applied: Optional[bool] = None) -> List[
         List of change documents
     """
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_changes"]
         
@@ -865,7 +960,7 @@ async def get_change_log(table_id: str, applied: Optional[bool] = None) -> List[
         cursor = coll.find(query).sort("timestamp", 1)
         changes = await cursor.to_list(length=1000)  # Limit to 1000 changes
         
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         
         # Convert ObjectId and datetime
         result = []
@@ -880,6 +975,12 @@ async def get_change_log(table_id: str, applied: Optional[bool] = None) -> List[
                 "applied": change.get("applied", False),
             })
         
+        logger.info(
+            f"🔍 [CHANGE] Retrieved {len(result)} changes for table_id='{table_id}', "
+            f"applied={applied}, query={query}, "
+            f"change_types={[c.get('change_type') for c in result]}"
+        )
+        
         return result
     except Exception as e:
         logger.error(f"❌ [CHANGE] Failed to get change log for {table_id}: {e}")
@@ -889,7 +990,7 @@ async def get_change_log(table_id: str, applied: Optional[bool] = None) -> List[
 async def mark_changes_applied(table_id: str) -> bool:
     """Mark all changes for a session as applied (after save)."""
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_changes"]
         
@@ -898,7 +999,7 @@ async def mark_changes_applied(table_id: str) -> bool:
             {"$set": {"applied": True}}
         )
         
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         logger.info(f"✅ [CHANGE] Marked changes as applied for session {table_id}")
         return True
     except Exception as e:
@@ -1030,7 +1131,7 @@ async def clear_draft(table_id: str) -> bool:
                 logger.warning(f"⚠️ [DRAFT] Failed to delete draft file: {e}")
         
         # Update MongoDB metadata
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_sessions"]
         
@@ -1050,7 +1151,7 @@ async def clear_draft(table_id: str) -> bool:
         # Mark changes as applied
         await mark_changes_applied(table_id)
         
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         logger.info(f"✅ [DRAFT] Cleared draft for session {table_id}")
         return True
     except Exception as e:

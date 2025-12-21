@@ -243,6 +243,8 @@ const VariableTab: React.FC<VariableTabProps> = ({
         });
         // Refresh saved variables
         await fetchSavedVariables();
+        // Trigger refresh in other components (e.g., KPIDashboardCanvas)
+        updateMetricsInputs({ variablesRefreshTrigger: Date.now() });
       } else {
         throw new Error(result.error || 'Failed to save variables');
       }
@@ -347,7 +349,9 @@ const VariableTab: React.FC<VariableTabProps> = ({
             description: `Successfully saved ${result.newVariables?.length || validAssignments.length} constant variable(s).`,
           });
           // Refresh saved variables
-          fetchSavedVariables();
+          await fetchSavedVariables();
+          // Trigger refresh in other components (e.g., KPIDashboardCanvas)
+          updateMetricsInputs({ variablesRefreshTrigger: Date.now() });
         } else if (result.existingVariables && result.existingVariables.length > 0) {
           // Show confirmation dialog for overwriting
           setExistingVariables(result.existingVariables);
@@ -473,6 +477,8 @@ const VariableTab: React.FC<VariableTabProps> = ({
         });
         // Refresh saved variables after successful save
         await fetchSavedVariables();
+        // Trigger refresh in other components (e.g., KPIDashboardCanvas)
+        updateMetricsInputs({ variablesRefreshTrigger: Date.now() });
       } else if (result.existingVariables && result.existingVariables.length > 0) {
         // Show confirmation dialog for overwriting
         setExistingVariables(result.existingVariables);

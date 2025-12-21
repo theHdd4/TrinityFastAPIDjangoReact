@@ -1,30 +1,30 @@
 from __future__ import annotations
-
+ 
 import hashlib
 import json
 import logging
 import os
 from typing import Any, Dict, Iterable
-
+ 
 from django.conf import settings
 from django.utils import timezone
 from pymongo import MongoClient
-
+ 
 from .models import Project, RegistryEnvironment
-
+ 
 logger = logging.getLogger(__name__)
-
-
+ 
+ 
 def _get_env_ids(project: Project) -> tuple[str, str, str]:
     """Fetch client/app/project IDs using RegistryEnvironment fallback."""
     client_name = os.environ.get("CLIENT_NAME", "")
     app_name = os.environ.get("APP_NAME", project.app.slug if project.app else "")
     project_name = project.name
-
+ 
     client_id = os.environ.get("CLIENT_ID", "")
     app_id = os.environ.get("APP_ID", "")
     project_id = os.environ.get("PROJECT_ID", "")
-
+ 
     try:
         env = RegistryEnvironment.objects.get(
             client_name=client_name,
@@ -37,10 +37,10 @@ def _get_env_ids(project: Project) -> tuple[str, str, str]:
         project_id = envvars.get("PROJECT_ID", project_id)
     except RegistryEnvironment.DoesNotExist:
         pass
-
+ 
     return client_id, app_id, project_id
-
-
+ 
+ 
 def save_atom_list_configuration(
     project: Project, mode: str, cards: Iterable[Dict[str, Any]] | None
 ) -> None:
@@ -51,15 +51,15 @@ def save_atom_list_configuration(
             getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
         )
         db = mc["trinity_db"]
-        coll = db["django_atom_list_configuration"]
-
+        coll = db["atom_list_configuration"]
+ 
         # Drop legacy collection from previous `trinity_prod` database if it exists
         try:
             legacy_db = mc["trinity_prod"]
-            legacy_db.drop_collection("django_atom_list_configuration")
+            legacy_db.drop_collection("atom_list_configuration")
         except Exception:  # pragma: no cover - best effort cleanup
             pass
-
+ 
         coll.delete_many(
             {
                 "client_id": client_id,
@@ -68,7 +68,7 @@ def save_atom_list_configuration(
                 "mode": mode,
             }
         )
-
+ 
         timestamp = timezone.now()
         docs = []
         for canvas_pos, card in enumerate(cards or []):
@@ -89,6 +89,60 @@ def save_atom_list_configuration(
                     atom_settings = {
                         k: v for k, v in atom_settings.items() if k not in {"tableData", "data"}
                     }
+                if atom.get("atomId") == "table":
+                    # Strip tableData (rows) - data should be in MinIO, not MongoDB
+                    atom_settings = {
+                        k: v for k, v in atom_settings.items() if k not in {"tableData", "data"}
+                    }
+                if atom.get("atomId") == "kpi-dashboard":
+                    # Strip table row data from nested structure: layouts[].boxes[].tableSettings.tableData.rows
+                    # Data should be in MinIO, not MongoDB (same pattern as dataframe-operations and table)
+                    def remove_table_rows_from_kpi_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+                        """Recursively remove table row data from KPI dashboard settings."""
+                        if not isinstance(settings, dict):
+                            return settings
+                        
+                        cleaned = {}
+                        for key, value in settings.items():
+                            if key == "layouts" and isinstance(value, list):
+                                # Process layouts array
+                                cleaned_layouts = []
+                                for layout in value:
+                                    if not isinstance(layout, dict):
+                                        cleaned_layouts.append(layout)
+                                        continue
+                                    
+                                    cleaned_layout = layout.copy()
+                                    if "boxes" in layout and isinstance(layout["boxes"], list):
+                                        # Process boxes array
+                                        cleaned_boxes = []
+                                        for box in layout["boxes"]:
+                                            if not isinstance(box, dict):
+                                                cleaned_boxes.append(box)
+                                                continue
+                                            
+                                            cleaned_box = box.copy()
+                                            if "tableSettings" in box and isinstance(box["tableSettings"], dict):
+                                                table_settings = box["tableSettings"].copy()
+                                                if "tableData" in table_settings and isinstance(table_settings["tableData"], dict):
+                                                    # Remove rows from tableData, keep metadata
+                                                    table_data = table_settings["tableData"].copy()
+                                                    if "rows" in table_data:
+                                                        # Remove rows, keep columns, row_count, etc.
+                                                        table_data.pop("rows", None)
+                                                        # Mark that rows are stored in MinIO
+                                                        table_data["rows_stored_in_minio"] = True
+                                                    table_settings["tableData"] = table_data
+                                                cleaned_box["tableSettings"] = table_settings
+                                            cleaned_boxes.append(cleaned_box)
+                                        cleaned_layout["boxes"] = cleaned_boxes
+                                    cleaned_layouts.append(cleaned_layout)
+                                cleaned[key] = cleaned_layouts
+                            else:
+                                cleaned[key] = value
+                        return cleaned
+                    
+                    atom_settings = remove_table_rows_from_kpi_settings(atom_settings)
                 version_hash = hashlib.sha256(
                     json.dumps(atom_settings, sort_keys=True).encode()
                 ).hexdigest()
@@ -128,13 +182,13 @@ def save_atom_list_configuration(
             coll.insert_many(docs)
     except Exception as exc:  # pragma: no cover - logging only
         logger.error("Failed to save atom configuration: %s", exc)
-
-
+ 
+ 
 def load_atom_list_configuration(
     project: Project, mode: str
 ) -> Dict[str, Any] | None:
     """Return atom configuration for a project/mode from MongoDB.
-
+ 
     Reconstructs the layout cards and atom order as previously persisted by
     :func:`save_atom_list_configuration`.
     """
@@ -143,7 +197,7 @@ def load_atom_list_configuration(
         mc = MongoClient(
             getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
         )
-        coll = mc["trinity_db"]["django_atom_list_configuration"]
+        coll = mc["trinity_db"]["atom_list_configuration"]
         cursor = coll.find(
             {
                 "client_id": client_id,
@@ -153,7 +207,7 @@ def load_atom_list_configuration(
                 "isDeleted": {"$ne": True},
             }
         ).sort([("canvas_position", 1), ("atom_positions", 1)])
-
+ 
         cards: Dict[int, Dict[str, Any]] = {}
         for doc in cursor:
             cpos = doc.get("canvas_position", 0)
@@ -163,7 +217,6 @@ def load_atom_list_configuration(
             card_order = doc.get("order")
             after_molecule_id = doc.get("after_molecule_id")
             before_molecule_id = doc.get("before_molecule_id")
-            
             card = cards.setdefault(
                 cpos,
                 {
@@ -185,7 +238,6 @@ def load_atom_list_configuration(
                 card["afterMoleculeId"] = after_molecule_id
             if before_molecule_id is not None:
                 card["beforeMoleculeId"] = before_molecule_id
-                
             atom_slug = doc.get("atom_name")
             atom_title = doc.get("atom_title") or atom_slug
             card["atoms"].append(
@@ -196,10 +248,10 @@ def load_atom_list_configuration(
                     "settings": doc.get("atom_configs", {}),
                 }
             )
-
+ 
         if not cards:
             return None
-
+ 
         ordered_cards = [cards[i] for i in sorted(cards)]
         return {"cards": ordered_cards}
     except Exception as exc:  # pragma: no cover - logging only

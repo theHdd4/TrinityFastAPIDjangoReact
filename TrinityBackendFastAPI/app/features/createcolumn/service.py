@@ -25,14 +25,21 @@ from .deps import (
     redis_client,
     redis_classifier_config,
 )
+from app.core.mongo import build_host_mongo_uri
 
 
 logger = logging.getLogger("app.features.createcolumn.service")
 
+# MongoDB Configuration
+# Use MONGO_URI from environment (set in docker-compose.yml: mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin)
+# Allow override via CREATECOLUMN_MONGO_URI
 MONGO_URI = os.getenv(
     "CREATECOLUMN_MONGO_URI",
-    os.getenv("MONGO_URI", "mongodb://mongo:27017"),
+    os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin")
 )
+
+# Database name for createandtransform_configs collection
+# Note: URI may point to trinity_dev, but we can access trinity_db database
 MONGO_DB = os.getenv("CREATECOLUMN_MONGO_DB", os.getenv("MONGO_DB", "trinity_db"))
 
 _mongo_client: Optional[MongoClient] = None
@@ -41,7 +48,45 @@ _mongo_client: Optional[MongoClient] = None
 def _get_mongo_client() -> MongoClient:
     global _mongo_client
     if _mongo_client is None:
-        _mongo_client = MongoClient(MONGO_URI)
+        # Use MONGO_URI from environment (set in docker-compose.yml)
+        # URI format: mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin
+        try:
+            # Extract credentials from environment or use defaults
+            # Pass explicit auth parameters to ensure proper authentication (same pattern as molecule/database.py)
+            mongo_username = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER") or "root"
+            mongo_password = os.getenv("MONGO_PASSWORD") or "rootpass"
+            mongo_auth_db = os.getenv("MONGO_AUTH_DB", "admin")
+            
+            # Extract host and port from MONGO_URI
+            # Parse: mongodb://user:pass@host:port/db?options
+            from urllib.parse import urlparse
+            parsed = urlparse(MONGO_URI)
+            host = parsed.hostname or "mongo"
+            port = parsed.port or 27017
+            base_uri = f"mongodb://{host}:{port}"
+            
+            # Create client with explicit auth parameters (required for proper authentication)
+            _mongo_client = MongoClient(
+                base_uri,
+                username=mongo_username,
+                password=mongo_password,
+                authSource=mongo_auth_db,
+                serverSelectionTimeoutMS=5000,
+            )
+            # Test connection on admin database
+            _mongo_client.admin.command('ping')
+            # Also test access to trinity_db to ensure authentication works
+            _mongo_client[MONGO_DB].command('ping')
+            logger.info(f"✅ [MONGO] Connected to MongoDB (database: {MONGO_DB})")
+        except Exception as e:
+            logger.error(f"❌ [MONGO] Failed to connect to MongoDB: {e}")
+            # Sanitize URI for logging
+            uri_safe = MONGO_URI
+            if '@' in MONGO_URI:
+                parts = MONGO_URI.split('@')
+                uri_safe = f"mongodb://***:***@{parts[1]}"
+            logger.error(f"❌ [MONGO] URI: {uri_safe}")
+            raise
     return _mongo_client
 
 
@@ -86,48 +131,161 @@ def _resolve_full_object_path(object_name: str, object_prefix: str) -> str:
     return object_name
 
 
+def _normalize_saved_file_path(path: str) -> str:
+    """
+    Normalize file path for consistent storage and matching.
+    Removes leading/trailing slashes, converts to lowercase, and removes create-data/ prefix.
+    """
+    if not path:
+        return ""
+    normalized = path.strip().lower().strip("/")
+    # Remove create-data/ or create_data/ prefix for matching
+    normalized = normalized.replace("create-data/", "").replace("create_data/", "")
+    return normalized
+
+
 def _store_create_config(document_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    client = _get_mongo_client()
-    collection = client[MONGO_DB]["createandtransform_configs"]
+    """
+    Store or update file configuration in MongoDB.
+    
+    Key behavior:
+    - If a file entry with the same saved_file already exists, MERGE operations
+    - This ensures rename operations are combined with created column operations
+    - Prevents duplicate file entries while preserving all operation history
+    """
+    try:
+        client = _get_mongo_client()
+        collection = client[MONGO_DB]["createandtransform_configs"]
 
-    existing = collection.find_one({"_id": document_id})
-    payload = dict(payload)
-    payload.setdefault("saved_at", datetime.utcnow())
+        existing = collection.find_one({"_id": document_id})
+        payload = dict(payload)
+        payload.setdefault("saved_at", datetime.utcnow())
 
-    if existing:
-        updated = dict(existing)
-        updated["updated_at"] = datetime.utcnow()
-        files = list(updated.get("files", []))
-        files.append(payload)
-        updated["files"] = files
-        collection.replace_one({"_id": document_id}, updated)
-        operation = "updated"
-    else:
-        document = {
-            "_id": document_id,
-            "operation_type": "createcolumn",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
-            "files": [payload],
-        }
-        document.update(
-            {
-                "client_name": payload.get("client_name", ""),
-                "app_name": payload.get("app_name", ""),
-                "project_name": payload.get("project_name", ""),
-                "user_id": payload.get("user_id", ""),
-                "project_id": payload.get("project_id"),
+        # Log rename operations being stored
+        operations = payload.get("operations", [])
+        rename_ops = [op for op in operations if op.get("operation_type") == "rename"]
+        if rename_ops:
+            # Build rename operations summary for logging
+            rename_summary = []
+            for op in rename_ops:
+                cols = op.get('columns', [])
+                old_name = cols[0] if cols else '?'
+                new_name = op.get('rename', '?')
+                rename_summary.append(f"{old_name}->{new_name}")
+            
+            # logger.info(
+            #     f"💾 [STORE-CONFIG] Storing {len(rename_ops)} rename operation(s) for document_id='{document_id}': "
+            #     f"{rename_summary}"
+            # )
+
+        if existing:
+            updated = dict(existing)
+            updated["updated_at"] = datetime.utcnow()
+            files = list(updated.get("files", []))
+            
+            # Get the saved_file from payload and normalize for matching
+            payload_saved_file = payload.get("saved_file", "")
+            payload_saved_file_normalized = _normalize_saved_file_path(payload_saved_file)
+            
+            # DEBUG: Log all existing file entries for comparison
+            logger.info(
+                f"🔍 [STORE-CONFIG] Looking for match: payload_saved_file='{payload_saved_file}' "
+                f"-> normalized='{payload_saved_file_normalized}'"
+            )
+            logger.info(
+                f"🔍 [STORE-CONFIG] Existing files ({len(files)} total): "
+                f"{[(f.get('saved_file', ''), _normalize_saved_file_path(f.get('saved_file', ''))) for f in files[:5]]}"
+            )
+            
+            # Find existing entry for this file (by normalized saved_file)
+            existing_idx = None
+            if payload_saved_file_normalized:
+                for idx, f in enumerate(files):
+                    existing_saved_file = f.get("saved_file", "")
+                    existing_saved_file_normalized = _normalize_saved_file_path(existing_saved_file)
+                    logger.info(
+                        f"🔍 [STORE-CONFIG] Comparing idx={idx}: "
+                        f"existing='{existing_saved_file}' -> normalized='{existing_saved_file_normalized}' "
+                        f"vs payload_normalized='{payload_saved_file_normalized}' "
+                        f"match={existing_saved_file_normalized == payload_saved_file_normalized}"
+                    )
+                    if existing_saved_file_normalized == payload_saved_file_normalized:
+                        existing_idx = idx
+                        # logger.info(f"✅ [STORE-CONFIG] Found match at idx={idx}")
+                        break
+            
+            if existing_idx is not None:
+                # MERGE: Combine operations from existing entry with new operations
+                existing_entry = files[existing_idx]
+                existing_ops = existing_entry.get("operations", [])
+                new_ops = payload.get("operations", [])
+                
+                # Merge operations: existing + new (preserves order, new ops appended)
+                merged_ops = list(existing_ops) + list(new_ops)
+                
+                logger.info(
+                    f"🔄 [STORE-CONFIG] Merging operations for file '{payload_saved_file}': "
+                    f"existing={len(existing_ops)} ops, new={len(new_ops)} ops, merged={len(merged_ops)} ops"
+                )
+                
+                # Update payload with merged operations
+                payload["operations"] = merged_ops
+                
+                # Preserve original input_file if it exists (for lineage)
+                if existing_entry.get("input_file") and not payload.get("input_file"):
+                    payload["input_file"] = existing_entry["input_file"]
+                
+                # Replace the existing entry with the merged one
+                files[existing_idx] = payload
+                operation = "merged"
+                logger.info(
+                    f"✅ [CREATE-SAVE] Merged operations into existing file entry: "
+                    f"document_id='{document_id}', saved_file='{payload_saved_file}', "
+                    f"total_ops={len(merged_ops)}"
+                )
+            else:
+                # No existing entry for this file - append new entry
+                files.append(payload)
+                operation = "appended"
+                logger.info(
+                    f"✅ [CREATE-SAVE] Appended new file entry: "
+                    f"document_id='{document_id}', saved_file='{payload_saved_file}', "
+                    f"total_files={len(files)}"
+                )
+            
+            updated["files"] = files
+            collection.replace_one({"_id": document_id}, updated)
+            logger.info(f"✅ [CREATE-SAVE] Updated MongoDB document: {document_id} (now has {len(files)} file entries)")
+        else:
+            document = {
+                "_id": document_id,
+                "operation_type": "createcolumn",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "files": [payload],
             }
-        )
-        collection.insert_one(document)
-        operation = "inserted"
+            document.update(
+                {
+                    "client_name": payload.get("client_name", ""),
+                    "app_name": payload.get("app_name", ""),
+                    "project_name": payload.get("project_name", ""),
+                    "user_id": payload.get("user_id", ""),
+                    "project_id": payload.get("project_id"),
+                }
+            )
+            collection.insert_one(document)
+            operation = "inserted"
+            logger.info(f"✅ [CREATE-SAVE] Inserted MongoDB document: {document_id}")
 
-    return {
-        "status": "success",
-        "mongo_id": document_id,
-        "operation": operation,
-        "collection": "createandtransform_configs",
-    }
+        return {
+            "status": "success",
+            "mongo_id": document_id,
+            "operation": operation,
+            "collection": "createandtransform_configs",
+        }
+    except Exception as e:
+        logger.error(f"❌ [CREATE-SAVE] MongoDB operation failed: {e}", exc_info=True)
+        raise
 
 
 def fetch_create_results_task(
@@ -345,10 +503,17 @@ def perform_createcolumn_task(
             if not date_col:
                 raise ValueError("Date column not found for STL outlier detection")
 
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
+
             def stl_outlier_func(subdf: pd.DataFrame) -> pd.DataFrame:
                 working = subdf.copy()
-                working[date_col] = pd.to_datetime(working[date_col], errors="coerce")
-                working = working.sort_values(by=date_col)
+                working = working.sort_values(by=temp_date_col)
                 new_col = rename_val or "is_outlier"
                 working[new_col] = 0
                 if len(working) < 14:
@@ -363,6 +528,11 @@ def perform_createcolumn_task(
                 return working
 
             df = group_apply(df, stl_outlier_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
+            
             new_cols_total.append(rename_val or "is_outlier")
         elif op == "dummy":
             for col in columns:
@@ -852,32 +1022,64 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for STL operations")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
+            
             period_param = form_payload.get(f"{op}_{op_idx}_period")
             if period_param is not None:
                 period = int(period_param)
                 if period < 2:
                     raise ValueError("Period must be at least 2")
             else:
-                date_series = df[date_col].sort_values().drop_duplicates()
+                # Try to auto-detect period from date frequency
+                date_series = df[temp_date_col].sort_values().drop_duplicates()
                 diffs = date_series.diff().dropna()
+                
                 if diffs.empty:
-                    raise ValueError("Unable to detect frequency from the date column")
-                mode_diff = diffs.mode()[0]
-                mode_days = mode_diff.total_seconds() / (24 * 3600)
-                if 0.9 <= mode_days <= 1.1:
-                    period = 7
-                elif 6 <= mode_days <= 8:
-                    period = 52
-                elif 25 <= mode_days <= 35:
+                    # If no differences can be calculated, use default period
+                    # Default to 12 (monthly seasonality) as a safe default
                     period = 12
-                elif 85 <= mode_days <= 95:
-                    period = 4
-                elif 350 <= mode_days <= 380:
-                    period = 1
+                    logger.warning("Unable to detect frequency from date column, using default period=12. Please specify period parameter if this is incorrect.")
                 else:
-                    raise ValueError("Unsupported or custom frequency for STL decomposition")
+                    mode_diff = diffs.mode()[0]
+                    mode_days = mode_diff.total_seconds() / (24 * 3600)
+                    # More flexible frequency detection with wider ranges
+                    if 0.5 <= mode_days <= 1.5:
+                        # Daily data - use weekly seasonality (7)
+                        period = 7
+                    elif 5 <= mode_days <= 9:
+                        # Weekly data - use yearly seasonality (52 weeks)
+                        period = 52
+                    elif 20 <= mode_days <= 40:
+                        # Monthly data - use yearly seasonality (12 months)
+                        period = 12
+                    elif 80 <= mode_days <= 100:
+                        # Quarterly data - use yearly seasonality (4 quarters)
+                        period = 4
+                    elif 300 <= mode_days <= 400:
+                        # Yearly data - no seasonality
+                        period = 1
+                    else:
+                        # Fallback: try to infer period from number of unique dates
+                        # If we have at least 2 years of data, use yearly seasonality
+                        # Otherwise, use a default based on data length
+                        unique_dates = len(date_series)
+                        if unique_dates >= 104:  # At least 2 years of weekly data
+                            period = 52
+                        elif unique_dates >= 24:  # At least 2 years of monthly data
+                            period = 12
+                        elif unique_dates >= 8:  # At least 2 years of quarterly data
+                            period = 4
+                        else:
+                            # Default to monthly seasonality (12) for small datasets
+                            period = 12
+                        logger.warning(f"Could not auto-detect frequency from date differences (mode={mode_days:.2f} days), using inferred period={period}. Please specify period parameter if this is incorrect.")
 
             def stl_transform(subdf: pd.DataFrame) -> pd.DataFrame:
                 for col in columns:
@@ -895,6 +1097,11 @@ def perform_createcolumn_task(
                 return subdf
 
             df = group_apply(df, stl_transform)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
+            
             for col in columns:
                 if op == "detrend":
                     new_cols_total.append(rename_val or f"{col}_detrended")
@@ -927,8 +1134,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for lag operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             param = form_payload.get(f"{op}_{op_idx}_param")
             if param is None:
@@ -944,6 +1157,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, lag_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -953,8 +1170,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for lead operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             param = form_payload.get(f"{op}_{op_idx}_param")
             if param is None:
@@ -970,6 +1193,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, lead_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -979,8 +1206,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for diff operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             param = form_payload.get(f"{op}_{op_idx}_param")
             if param is None:
@@ -997,6 +1230,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, diff_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1006,8 +1243,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for growth_rate operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             # Parse parameters - can be JSON string or simple period number
             param = form_payload.get(f"{op}_{op_idx}_param")
@@ -1068,9 +1311,9 @@ def perform_createcolumn_task(
                         # Frequency-based growth rate (e.g., this month vs last month, this year vs last year)
                         freq_code = freq_map[frequency.lower()]
                         
-                        # Create period labels (e.g., '2024-01' for monthly, '2024' for yearly)
-                        subdf_copy = subdf[[date_col, col]].copy()
-                        subdf_copy['period'] = subdf_copy[date_col].dt.to_period(freq_code)
+                        # Create period labels using temporary date column (e.g., '2024-01' for monthly, '2024' for yearly)
+                        subdf_copy = subdf[[temp_date_col, col]].copy()
+                        subdf_copy['period'] = subdf_copy[temp_date_col].dt.to_period(freq_code)
                         
                         # Aggregate values within each period (using mean as default aggregation)
                         # This handles cases where there are multiple rows per period
@@ -1133,6 +1376,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, growth_rate_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1142,8 +1389,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError(f"No date column found for {op} operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             param = form_payload.get(f"{op}_{op_idx}_param")
             if param is None:
@@ -1169,6 +1422,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, rolling_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1185,8 +1442,14 @@ def perform_createcolumn_task(
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
                 raise ValueError("No date column found for cumulative_sum operation")
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df.sort_values(by=date_col, inplace=True)
+            
+            # Store original date column values to restore later
+            original_date_values = df[date_col].copy()
+            
+            # Create temporary datetime column for calculations (don't modify original)
+            temp_date_col = f"__temp_{date_col}__"
+            df[temp_date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df.sort_values(by=temp_date_col, inplace=True)
             
             def cumulative_sum_func(subdf: pd.DataFrame) -> pd.DataFrame:
                 for col in columns:
@@ -1195,6 +1458,10 @@ def perform_createcolumn_task(
                 return subdf
             
             df = group_apply(df, cumulative_sum_func)
+            
+            # Restore original date column values and remove temporary column
+            df[date_col] = original_date_values
+            df.drop(columns=[temp_date_col], inplace=True)
             if rename_val:
                 new_cols_total.append(rename_val)
             else:
@@ -1527,8 +1794,6 @@ def perform_createcolumn_task(
             columns = resolved_columns
             
             # Get parameters from form_payload - support multiple metric columns
-            import json
-            
             metric_cols_param = form_payload.get(f"{op}_{op_idx}_metric_cols")
             
             # Parse JSON array of metric columns (new format) or fall back to single metric_col (backward compatibility)
@@ -1718,8 +1983,6 @@ def perform_createcolumn_task(
             columns = resolved_columns
             
             # Get parameters from form_payload - support multiple metric columns
-            import json
-            
             metric_cols_param = form_payload.get(f"{op}_{op_idx}_metric_cols")
             
             # Parse JSON array of metric columns (new format) or fall back to single metric_col (backward compatibility)
@@ -1855,8 +2118,6 @@ def perform_createcolumn_task(
             columns = resolved_columns
             
             # Get parameters from form_payload - support multiple metric columns
-            import json
-            
             metric_cols_param = form_payload.get(f"{op}_{op_idx}_metric_cols")
             
             # Parse JSON array of metric columns (new format) or fall back to single metric_col (backward compatibility)
@@ -2056,7 +2317,19 @@ def save_dataframe_task(
             raise ValueError("filename is required when overwriting original file")
         if not filename.endswith('.arrow'):
             filename = f"{filename}.arrow"
-        final_filename = filename
+        # CRITICAL FIX: When overwriting, filename might be just the name or full path
+        # If it's just the name, we need to construct the full path using object_prefix
+        # This ensures MongoDB stores the full path that matches what the table atom loads
+        if '/' not in filename:
+            # Just filename, need to add prefix
+            prefix = object_prefix or ""
+            if prefix and not prefix.endswith('/'):
+                prefix = f"{prefix}/"
+            final_filename = f"{prefix}{filename}" if prefix else filename
+        else:
+            # Already has full path
+            final_filename = filename
+        logger.info(f"💾 [CREATE-SAVE] Overwriting file: final_filename='{final_filename}', original filename='{filename}', prefix='{object_prefix}'")
         message = "Original file updated successfully"
     else:
         if not filename:
@@ -2089,11 +2362,27 @@ def save_dataframe_task(
                 operation_payload = {"raw": operation_details}
         else:
             operation_payload = dict(operation_details)
+        
+        # Get original columns from input file if available
+        original_columns = []
+        input_file = operation_payload.get("input_file")
+        if input_file:
+            try:
+                # Try to load the input file to get original columns
+                input_df = get_minio_df(MINIO_BUCKET, input_file)
+                original_columns = list(input_df.columns)
+                logger.info(f"📋 [CREATE-SAVE] Original columns from input file: {len(original_columns)} columns")
+            except Exception as e:
+                logger.warning(f"⚠️ [CREATE-SAVE] Could not load input file to get original columns: {e}")
+                # If we can't load, we'll leave original_columns empty
+                # The metadata lookup will still work, just won't distinguish original vs created
+        
         operation_payload.update(
             {
-                "saved_file": final_filename,
+                "saved_file": final_filename,  # CRITICAL: Store full path for proper matching
                 "file_shape": df.shape,
                 "file_columns": list(df.columns),
+                "original_columns": original_columns,  # NEW: Store original columns
                 "client_name": client_name,
                 "app_name": app_name,
                 "project_name": project_name,
@@ -2101,6 +2390,7 @@ def save_dataframe_task(
                 "project_id": project_id,
             }
         )
+        logger.info(f"💾 [CREATE-SAVE] Saving to MongoDB with saved_file='{final_filename}'")
         try:
             mongo_save_result = _store_create_config(document_id, operation_payload)
         except Exception as exc:
@@ -2230,15 +2520,602 @@ def classification_task(
     }
 
 
+def generate_column_formula(
+    operation_type: str,
+    input_columns: List[str],
+    parameters: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Generate human-readable formula for a column operation.
+    
+    Examples:
+        - add: ["colA", "colB"] -> "colA + colB"
+        - subtract: ["colA", "colB"] -> "colA - colB"
+        - exponential: ["colC"], {"exponent": 2} -> "exponential(colC, 2)"
+        - lag: ["colD"], {"period": 1} -> "lag(colD, 1)"
+    """
+    if not input_columns:
+        return f"{operation_type}()"
+    
+    # Defensive: historically we store `param` in Mongo and it may be:
+    # - a dict (preferred)
+    # - a JSON-like string / scalar (legacy or UI-provided)
+    # If it's not a dict, treat it as an unstructured value so formula generation
+    # never crashes and wipes metadata for an entire file.
+    if parameters is None:
+        params: Dict[str, Any] = {}
+    elif isinstance(parameters, dict):
+        params = parameters
+    else:
+        params = {"value": parameters}
+    
+    # Map operation types to formula templates
+    if operation_type == "add":
+        return " + ".join(input_columns)
+    elif operation_type == "subtract":
+        if len(input_columns) >= 2:
+            return f"{input_columns[0]} - {input_columns[1]}"
+        return f"subtract({', '.join(input_columns)})"
+    elif operation_type == "multiply":
+        return " × ".join(input_columns)
+    elif operation_type == "divide":
+        if len(input_columns) >= 2:
+            return f"{input_columns[0]} ÷ {input_columns[1]}"
+        return f"divide({', '.join(input_columns)})"
+    elif operation_type == "exponential":
+        exponent = params.get("exponent", params.get("exponent_value", 2))
+        return f"exponential({input_columns[0]}, {exponent})"
+    elif operation_type == "log":
+        return f"log({input_columns[0]})"
+    elif operation_type == "sqrt":
+        return f"sqrt({input_columns[0]})"
+    elif operation_type == "lag":
+        period = params.get("period", params.get("lag_period", 1))
+        return f"lag({input_columns[0]}, {period})"
+    elif operation_type == "lead":
+        period = params.get("period", params.get("lead_period", 1))
+        return f"lead({input_columns[0]}, {period})"
+    elif operation_type == "datetime":
+        # Check for datetime conversion parameters
+        if params.get("to_year"):
+            return f"datetime({input_columns[0]}, to_year)"
+        elif params.get("to_month"):
+            return f"datetime({input_columns[0]}, to_month)"
+        elif params.get("to_day"):
+            return f"datetime({input_columns[0]}, to_day)"
+        elif params.get("to_quarter"):
+            return f"datetime({input_columns[0]}, to_quarter)"
+        else:
+            return f"datetime({input_columns[0]})"
+    elif operation_type == "contribution":
+        return f"(Group Sum / Overall Sum) × 100"
+    elif operation_type == "cumsum":
+        return f"cumsum({input_columns[0]})"
+    elif operation_type == "cumprod":
+        return f"cumprod({input_columns[0]})"
+    elif operation_type == "pct_change":
+        # pct_change in this codebase is a 2-column operation; keep a stable display.
+        if len(input_columns) >= 2:
+            return f"pct_change({input_columns[0]}, {input_columns[1]})"
+        # Legacy/edge: fall back to a 1-col representation, optionally using param.
+        period = params.get("period", params.get("value", 1))
+        return f"pct_change({input_columns[0]}, {period})"
+    else:
+        # Generic fallback
+        param_str = ""
+        if params:
+            param_parts = [f"{k}={v}" for k, v in params.items()]
+            param_str = f", {', '.join(param_parts)}"
+        return f"{operation_type}({', '.join(input_columns)}{param_str})"
+
+
+def get_column_metadata_for_file(
+    *,
+    object_name: str,
+    client_name: str,
+    app_name: str,
+    project_name: str,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Retrieve column creation metadata for a given file.
+    
+    Returns:
+        Dict mapping column_name -> {
+            "is_created": bool,
+            "operation_type": str | None,
+            "input_columns": List[str] | None,
+            "parameters": Dict | None,
+            "formula": str | None,
+            "created_column_name": str | None
+        }
+    """
+    try:
+        # Use sync MongoDB client
+        client = _get_mongo_client()
+        collection = client[MONGO_DB]["createandtransform_configs"]
+        
+        document_id = f"{client_name}/{app_name}/{project_name}"
+        config = collection.find_one({"_id": document_id})
+        
+        if not config:
+            return {}
+        
+        # Find configuration where saved_file matches object_name
+        # Note: object_name might be a full path, saved_file might be relative or vice versa
+        files = config.get("files", [])
+        matching_file_configs: List[Dict[str, Any]] = []
+
+        # ---------------------------------------------------------------------
+        # Helpers
+        #
+        # We support three matching strategies (existing behavior):
+        # - normalized full path match
+        # - filename match (path differs)
+        # - "cleaned" match (remove create-data/ prefix differences)
+        #
+        # For Save (overwrite): multiple entries can exist for the same saved_file,
+        # so we merge all matching entries.
+        #
+        # For Save As: we treat `input_file` as a parent pointer and walk lineage,
+        # unioning created columns from ancestors so created columns persist across
+        # Save As hops (File1 -> File2 -> File3).
+        # ---------------------------------------------------------------------
+
+        def _normalize_path(path: str) -> str:
+            return (path or "").strip().lower().strip("/")
+
+        def _filename(path: str) -> str:
+            p = (path or "").strip()
+            if "/" in p:
+                return p.split("/")[-1].lower().strip()
+            return p.lower().strip()
+
+        def _clean_prefix(path: str) -> str:
+            return _normalize_path(path).replace("create-data/", "").replace("create_data/", "")
+
+        def _logical_match(saved_file: str, target_object_name: str) -> bool:
+            a_norm = _normalize_path(saved_file)
+            b_norm = _normalize_path(target_object_name)
+            if a_norm and a_norm == b_norm:
+                return True
+            a_file = _filename(saved_file)
+            b_file = _filename(target_object_name)
+            if a_file and a_file == b_file:
+                return True
+            a_clean = _clean_prefix(saved_file)
+            b_clean = _clean_prefix(target_object_name)
+            return bool(a_clean and a_clean == b_clean)
+
+        def _find_matching_file_configs(target_object_name: str) -> List[Tuple[int, Dict[str, Any]]]:
+            matches: List[Tuple[int, Dict[str, Any]]] = []
+            for idx, file_config in enumerate(files):
+                saved_file = file_config.get("saved_file", "")
+                if _logical_match(saved_file, target_object_name):
+                    matches.append((idx, file_config))
+            return matches
+        
+        # logger.info(f"🔍 [COLUMN-METADATA] Looking for file: {object_name}")
+        # logger.info(f"🔍 [COLUMN-METADATA] Total files in config: {len(files)}")
+        # logger.info(f"🔍 [COLUMN-METADATA] Available saved_file paths: {[f.get('saved_file', '') for f in files[:5]]}")
+        
+        # Resolve all matching entries for this object_name (overwrite support).
+        initial_matches = _find_matching_file_configs(object_name)
+        matching_file_configs = [fc for _, fc in initial_matches]
+        
+        logger.info(
+            f"🔍 [COLUMN-METADATA] Found {len(matching_file_configs)} matching file config(s) for: {object_name}"
+        )
+        
+        if not matching_file_configs:
+            logger.warning(f"⚠️ [COLUMN-METADATA] No matching file config found for: {object_name}")
+            logger.warning(f"⚠️ [COLUMN-METADATA] Available files ({len(files)} total): {[f.get('saved_file', '') for f in files[:10]]}")
+            return {}
+        
+        # Log details of matching entries
+        for idx, fc in enumerate(matching_file_configs):
+            logger.info(
+                f"🔍 [COLUMN-METADATA] Matching entry {idx}: saved_file='{fc.get('saved_file', '')}', "
+                f"operations_count={len(fc.get('operations', []))}, "
+                f"operation_types={[op.get('operation_type', 'unknown') for op in fc.get('operations', [])[:5]]}"
+            )
+        
+        # ---------------------------------------------------------------------
+        # Build lineage-aware created-column map
+        #
+        # - Overwrite: merge all matching entries for the same saved_file/object_name.
+        # - Save As: walk up `input_file` chain and union created columns from ancestors.
+        #   Closest descendant wins if a column name appears multiple times.
+        # - Rename aliasing: if a created column is later renamed, attach metadata
+        #   to the renamed column name by following rename operations in this same
+        #   lineage (supports A->B->C; descendant rename wins; loop protected).
+        # ---------------------------------------------------------------------
+        created_operation_by_col: Dict[str, Dict[str, Any]] = {}
+        rename_map_by_old: Dict[str, str] = {}  # normalized old -> normalized new
+
+        visited: set[str] = set()
+        current_object = object_name
+
+        while True:
+            current_key = _clean_prefix(current_object)
+            if not current_key:
+                break
+            if current_key in visited:
+                logger.warning(f"⚠️ [COLUMN-METADATA] Lineage cycle detected at '{current_object}' (key='{current_key}'); stopping traversal")
+                break
+            visited.add(current_key)
+
+            matches = _find_matching_file_configs(current_object)
+            if not matches:
+                logger.info(
+                    f"🧭 [COLUMN-METADATA] No Mongo file entries matched for '{current_object}' "
+                    f"(chain_key='{current_key}'); stopping lineage traversal"
+                )
+                break
+
+            logger.info(
+                f"🧭 [COLUMN-METADATA] Hop match: object='{current_object}' "
+                f"matched_entries={len(matches)} idxs={[i for i, _ in matches]}"
+            )
+
+            # Merge operations for this hop (overwrite support).
+            hop_ops: List[Dict[str, Any]] = []
+            for _, fc in matches:
+                ops = fc.get("operations", [])
+                if isinstance(ops, list) and ops:
+                    hop_ops.extend([op for op in ops if isinstance(op, dict)])
+
+            # Build a hop-local created map where later saves win (files[] is append-only).
+            hop_created: Dict[str, Dict[str, Any]] = {}
+            hop_rename: Dict[str, str] = {}
+            
+            # Log all operations in this hop for debugging
+            logger.info(
+                f"🔍 [COLUMN-METADATA] Hop operations ({len(hop_ops)} total): "
+                f"{[op.get('operation_type', 'unknown') for op in hop_ops]}"
+            )
+            # CRITICAL DEBUG: Log detailed operation info for rename debugging
+            rename_ops_in_hop = [op for op in hop_ops if op.get('operation_type') == 'rename']
+            created_ops_in_hop = [op for op in hop_ops if op.get('operation_type') != 'rename' and op.get('created_column_name')]
+            if rename_ops_in_hop:
+                logger.info(
+                    f"🔁 [COLUMN-METADATA] Found {len(rename_ops_in_hop)} rename operation(s) in this hop: "
+                    f"{[(op.get('columns'), op.get('rename')) for op in rename_ops_in_hop]}"
+                )
+            if created_ops_in_hop:
+                logger.info(
+                    f"🔍 [COLUMN-METADATA] Found {len(created_ops_in_hop)} created column operation(s) in this hop: "
+                    f"{[op.get('created_column_name') for op in created_ops_in_hop]}"
+                )
+            
+            # First pass: Process rename operations to build rename map
+            for op_idx, operation in enumerate(hop_ops):
+                op_type = (operation.get("operation_type") or "").strip()
+                if op_type == "rename":
+                    cols = operation.get("columns", [])
+                    rename_val = operation.get("rename")
+                    logger.info(
+                        f"🔁 [COLUMN-METADATA] Processing rename operation {op_idx}: columns={cols}, rename={rename_val}"
+                    )
+                    if isinstance(cols, list) and cols:
+                        old_cols = [str(c).strip() for c in cols if c]
+                        old_norms = [c.lower().strip() for c in old_cols if c]
+
+                        if isinstance(rename_val, dict):
+                            # Dict form: {"0": "newA", "1": "newB"}
+                            for i, old_norm in enumerate(old_norms):
+                                new_name = rename_val.get(str(i))
+                                if isinstance(new_name, str) and new_name.strip():
+                                    hop_rename[old_norm] = new_name.strip().lower()
+                                    logger.info(
+                                        f"🔁 [COLUMN-METADATA] Added rename mapping: '{old_norm}' -> '{new_name.strip().lower()}'"
+                                    )
+                        elif isinstance(rename_val, str) and rename_val.strip():
+                            rename_str = rename_val.strip()
+                            if len(old_norms) == 1:
+                                hop_rename[old_norms[0]] = rename_str.lower()
+                                logger.info(
+                                    f"🔁 [COLUMN-METADATA] Added rename mapping: '{old_norms[0]}' -> '{rename_str.lower()}'"
+                                )
+                            else:
+                                # Multi-column rename: comma-separated maps 1:1; else follow backend base_i convention.
+                                if "," in rename_str:
+                                    parts = [p.strip() for p in rename_str.split(",")]
+                                    for i, old_norm in enumerate(old_norms):
+                                        if i < len(parts) and parts[i]:
+                                            hop_rename[old_norm] = parts[i].lower()
+                                            logger.info(
+                                                f"🔁 [COLUMN-METADATA] Added rename mapping: '{old_norm}' -> '{parts[i].lower()}'"
+                                            )
+                                else:
+                                    for i, old_norm in enumerate(old_norms):
+                                        new_name_value = f"{rename_str}_{i}".lower()
+                                        hop_rename[old_norm] = new_name_value
+                                        logger.info(
+                                            f"🔁 [COLUMN-METADATA] Added rename mapping: '{old_norm}' -> '{new_name_value}'"
+                                        )
+                    else:
+                        logger.warning(
+                            f"⚠️ [COLUMN-METADATA] Rename operation {op_idx} has invalid columns: {cols}"
+                        )
+            
+            # Second pass: Process created columns (skip rename operations)
+            for op_idx, operation in enumerate(hop_ops):
+                op_type = (operation.get("operation_type") or "").strip()
+
+                # Skip rename operations (already processed in first pass)
+                if op_type == "rename":
+                    continue
+
+                created_column_name = operation.get("created_column_name")
+                if not created_column_name:
+                    logger.warning(f"⚠️ [COLUMN-METADATA] Operation {op_idx} missing 'created_column_name': {operation}")
+                    continue
+                col_key = str(created_column_name).lower().strip()
+                if not col_key:
+                    continue
+                hop_created[col_key] = operation
+
+            if hop_rename:
+                logger.info(
+                    f"🔁 [COLUMN-METADATA] Hop rename map extracted ({len(hop_rename)}): "
+                    f"{list(hop_rename.items())[:10]}"
+                )
+            else:
+                # This is the key debug signal for your current scenario:
+                # if you renamed a column via Table atom and it isn't stored into createandtransform_configs,
+                # we will not see any rename operations here.
+                logger.info(
+                    f"🔁 [COLUMN-METADATA] Hop rename map extracted: 0 "
+                    f"(no operation_type=='rename' found in stored operations for this hop)"
+                )
+
+            # Merge into global map with descendant precedence:
+            # For overwrite (same saved_file), later entries win (files[] is append-only).
+            # For Save As (different saved_file), descendant wins.
+            for col_key, operation in hop_created.items():
+                if col_key not in created_operation_by_col:
+                    created_operation_by_col[col_key] = operation
+                # For overwrite: allow later operations to override (latest wins)
+                elif current_object == object_name:  # Same file = overwrite
+                    created_operation_by_col[col_key] = operation
+                    logger.info(
+                        f"🔄 [COLUMN-METADATA] Overwriting created column '{col_key}' "
+                        f"(overwrite: same saved_file)"
+                    )
+            for old_key, new_key in hop_rename.items():
+                if old_key and new_key:
+                    if old_key not in rename_map_by_old:
+                        rename_map_by_old[old_key] = new_key
+                    # For overwrite: allow later renames to override (latest wins)
+                    elif current_object == object_name:  # Same file = overwrite
+                        old_new = rename_map_by_old[old_key]
+                        rename_map_by_old[old_key] = new_key
+                        logger.info(
+                            f"🔄 [COLUMN-METADATA] Overwriting rename mapping '{old_key}': "
+                            f"'{old_new}' -> '{new_key}' (overwrite: same saved_file)"
+                        )
+
+            # Determine parent pointer (Save As lineage):
+            # choose the latest matching entry for current_object, then follow its input_file.
+            latest_idx, latest_fc = max(matches, key=lambda x: x[0])
+            parent = latest_fc.get("input_file") or ""
+            logger.info(
+                f"🧭 [COLUMN-METADATA] Hop parent pointer: latest_idx={latest_idx} "
+                f"saved_file='{latest_fc.get('saved_file', '')}' input_file='{parent}'"
+            )
+
+            if not parent:
+                break
+
+            # Stop if input_file points back to the same logical file (overwrite/self).
+            if _logical_match(parent, current_object):
+                break
+
+            current_object = str(parent)
+
+        if not created_operation_by_col:
+            return {}
+
+        def _resolve_rename_chain(name: str) -> str:
+            """
+            Follow rename chains using rename_map_by_old (A->B->C), stop on loops.
+            We intentionally do not require existence here; cardinality will only
+            attach metadata to columns that exist in the dataframe.
+            """
+            current = (name or "").lower().strip()
+            if not current:
+                return current
+            seen: set[str] = set()
+            while True:
+                if current in seen:
+                    return current  # cycle
+                seen.add(current)
+                nxt = rename_map_by_old.get(current)
+                if not nxt:
+                    return current
+                nxt_norm = nxt.lower().strip()
+                if not nxt_norm or nxt_norm == current:
+                    return current
+                current = nxt_norm
+        
+        # Get original columns from input_file
+        # Prefer original columns from the earliest matching entry for the requested file,
+        # but keep behavior backward compatible if not present.
+        original_columns = set()
+        try:
+            earliest = matching_file_configs[0]
+            original_columns_list = earliest.get("original_columns", [])
+            if original_columns_list:
+                original_columns = set(col.lower().strip() for col in original_columns_list)
+        except Exception:
+            original_columns = set()
+        
+        # Build column metadata map
+        column_metadata: Dict[str, Dict[str, Any]] = {}
+        
+        logger.info(
+            f"🔍 [COLUMN-METADATA] Lineage resolved: {len(created_operation_by_col)} created columns "
+            f"from {len(visited)} file(s) in chain"
+        )
+        logger.info(
+            f"🔁 [COLUMN-METADATA] Final rename map size: {len(rename_map_by_old)} "
+            f"sample={list(rename_map_by_old.items())[:10]}"
+        )
+        logger.info(
+            f"🔍 [COLUMN-METADATA] Created columns before rename resolution: {list(created_operation_by_col.keys())}"
+        )
+        
+        # CRITICAL DEBUG: Log if we have created columns but no rename map (or vice versa)
+        if created_operation_by_col and not rename_map_by_old:
+            logger.warning(
+                f"⚠️ [COLUMN-METADATA] Found {len(created_operation_by_col)} created columns "
+                f"but NO rename mappings. This is normal if no renames occurred."
+            )
+        elif rename_map_by_old and not created_operation_by_col:
+            logger.warning(
+                f"⚠️ [COLUMN-METADATA] Found {len(rename_map_by_old)} rename mappings "
+                f"but NO created columns. This suggests a data inconsistency."
+            )
+        elif created_operation_by_col and rename_map_by_old:
+            # Check if any created columns match rename map keys
+            created_keys = set(created_operation_by_col.keys())
+            rename_keys = set(rename_map_by_old.keys())
+            matching = created_keys & rename_keys
+            if matching:
+                logger.info(
+                    f"✅ [COLUMN-METADATA] Found {len(matching)} created columns that match rename map keys: {list(matching)}"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ [COLUMN-METADATA] Created columns {list(created_keys)} do NOT match "
+                    f"rename map keys {list(rename_keys)}. This may indicate a normalization mismatch!"
+                )
+
+        for col_key, operation in created_operation_by_col.items():
+            created_column_name = operation.get("created_column_name") or col_key
+            normalized_name = str(created_column_name).lower().strip()
+            
+            # Log before resolution
+            logger.info(
+                f"🔍 [COLUMN-METADATA] Processing created column: original_key='{col_key}', "
+                f"created_column_name='{created_column_name}', normalized='{normalized_name}'"
+            )
+            
+            resolved_name = _resolve_rename_chain(normalized_name)
+            
+            # Enhanced logging for rename resolution
+            if resolved_name != normalized_name:
+                logger.info(
+                    f"✅ [COLUMN-METADATA] Resolved rename chain: '{normalized_name}' -> '{resolved_name}' "
+                    f"(operation_type={operation.get('operation_type')})"
+                )
+            elif normalized_name in rename_map_by_old:
+                # This shouldn't happen if resolution worked, but log it for debugging
+                logger.warning(
+                    f"⚠️ [COLUMN-METADATA] Created column '{normalized_name}' exists in rename map "
+                    f"but resolution didn't change it. Map entry: '{normalized_name}' -> '{rename_map_by_old[normalized_name]}'"
+                )
+            else:
+                logger.info(
+                    f"ℹ️ [COLUMN-METADATA] Created column '{normalized_name}' has no rename mapping "
+                    f"(will use original name)"
+                )
+
+            operation_type = operation.get("operation_type", "")
+            input_columns = operation.get("columns", [])
+            parameters = operation.get("param")
+            is_transformed = operation.get("is_transformed", False)
+
+            formula = generate_column_formula(operation_type, input_columns, parameters)
+            
+            # Determine is_created: if is_transformed is True, then is_created is False
+            # Otherwise, is_created is True (default behavior for backward compatibility)
+            is_created = not is_transformed
+
+            # Prefer closest descendant on conflicts: if a descendant already attached
+            # metadata to the resolved name, do not override it with an ancestor op.
+            target_key = resolved_name or normalized_name
+            
+            if target_key in column_metadata:
+                logger.info(
+                    f"ℹ️ [COLUMN-METADATA] Skipping duplicate metadata for '{target_key}' "
+                    f"(already exists from descendant)"
+                )
+                continue
+
+            logger.info(
+                f"✅ [COLUMN-METADATA] Attaching metadata to column '{target_key}' "
+                f"(resolved from '{normalized_name}')"
+            )
+
+            column_metadata[target_key] = {
+                "is_created": is_created,
+                "is_transformed": is_transformed,
+                "operation_type": operation_type,
+                "input_columns": input_columns,
+                "parameters": parameters if parameters else None,
+                "formula": formula,
+                "created_column_name": created_column_name,
+            }
+        
+        # Debug: Log all created column names
+        # logger.info(f"📋 [COLUMN-METADATA] All created columns (normalized, after rename resolution): {list(column_metadata.keys())}")
+        
+        # Log detailed info for each column with metadata
+        # for col_name, meta in column_metadata.items():
+        #     logger.info(
+        #         f"📋 [COLUMN-METADATA] Column '{col_name}': is_created={meta.get('is_created')}, "
+        #         f"operation_type={meta.get('operation_type')}, formula={meta.get('formula')}"
+        #     )
+        
+        # logger.info(f"📊 [COLUMN-METADATA] Total columns with metadata: {len(column_metadata)}")
+        return column_metadata
+        
+    except Exception as e:
+        logger.warning(f"⚠️ [COLUMN-METADATA] Failed to get column metadata: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+
+
 def cardinality_task(
     *,
     bucket_name: str,
     object_name: str,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Dict[str, Any]:
+    logger.info(f"🔍 [CARDINALITY] Starting cardinality task for: {object_name}")
+    logger.info(f"🔍 [CARDINALITY] Metadata params: client={client_name}, app={app_name}, project={project_name}")
+    
     dataframe = get_minio_df(bucket_name, object_name)
     dataframe.columns = dataframe.columns.str.strip().str.lower()
+    logger.info(f"📊 [CARDINALITY] DataFrame columns (normalized): {list(dataframe.columns)}")
 
     cardinality_data: List[Dict[str, Any]] = []
+    
+    # Get column metadata if client/app/project provided
+    column_metadata = {}
+    if client_name and app_name and project_name:
+        try:
+            logger.info(f"🔍 [CARDINALITY] Fetching column metadata...")
+            column_metadata = get_column_metadata_for_file(
+                object_name=object_name,
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            )
+            logger.info(f"✅ [CARDINALITY] Retrieved {len(column_metadata)} columns with metadata")
+            logger.info(f"📋 [CARDINALITY] Metadata keys: {list(column_metadata.keys())}")
+        except Exception as e:
+            logger.warning(f"⚠️ [CARDINALITY] Failed to get column metadata: {e}")
+            import traceback
+            logger.warning(f"⚠️ [CARDINALITY] Traceback: {traceback.format_exc()}")
+            # Continue without metadata (backward compatible)
+    else:
+        logger.warning(f"⚠️ [CARDINALITY] Missing metadata params - skipping metadata lookup")
+    
     for col in dataframe.columns:
         series = dataframe[col].dropna()
         try:
@@ -2252,14 +3129,43 @@ def cardinality_task(
             return str(value)
 
         safe_values = [_serialize(v) for v in values]
-        cardinality_data.append(
-            {
-                "column": col,
-                "data_type": str(dataframe[col].dtype),
-                "unique_count": int(len(values)),
-                "unique_values": safe_values,
+        
+        col_info = {
+            "column": col,
+            "data_type": str(dataframe[col].dtype),
+            "unique_count": int(len(values)),
+            "unique_values": safe_values,
+        }
+        
+        # Add metadata if available
+        normalized_col = col.lower().strip()
+        if normalized_col in column_metadata:
+            col_info["metadata"] = column_metadata[normalized_col]
+            logger.info(f"✅ [CARDINALITY] Added metadata for column '{col}' (normalized: '{normalized_col}'): is_created={col_info['metadata'].get('is_created')}, formula={col_info['metadata'].get('formula')}")
+        else:
+            # Original column (not created via operations)
+            col_info["metadata"] = {
+                "is_created": False,
+                "operation_type": None,
+                "formula": None,
             }
-        )
+            # Enhanced debug: Log if this column might be a renamed column we're looking for
+            # Check common rename patterns (renametrial, volumesales1, etc.)
+            if normalized_col in ["renametrial", "volumesales1", "salesvalue_plus_volume"] or "rename" in normalized_col:
+                logger.warning(f"⚠️ [CARDINALITY] Column '{col}' (normalized: '{normalized_col}') NOT found in column_metadata!")
+                logger.warning(f"⚠️ [CARDINALITY] Available metadata keys: {list(column_metadata.keys())}")
+                logger.warning(f"⚠️ [CARDINALITY] Total metadata entries: {len(column_metadata)}")
+                logger.warning(f"⚠️ [CARDINALITY] This column might be a renamed column that wasn't resolved correctly")
+            elif normalized_col in ["d1", "d2", "d3", "d4", "d5", "d6", "av1", "av2", "av3", "av4", "av5", "av6", "ev1", "ev2", "ev3", "ev4", "ev5", "ev6"]:
+                logger.debug(f"📝 [CARDINALITY] Column '{col}' (normalized: '{normalized_col}') not in metadata - likely original column")
+            else:
+                logger.debug(f"📝 [CARDINALITY] Column '{col}' is original (no metadata)")
+        
+        cardinality_data.append(col_info)
+    
+    # Debug: Count columns with metadata
+    columns_with_metadata = [c for c in cardinality_data if c.get("metadata", {}).get("is_created")]
+    logger.info(f"📊 [CARDINALITY] Final result: {len(cardinality_data)} total columns, {len(columns_with_metadata)} with is_created=True")
 
     return {"status": "SUCCESS", "cardinality": cardinality_data}
 

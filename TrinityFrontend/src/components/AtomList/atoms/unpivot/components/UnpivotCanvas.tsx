@@ -79,9 +79,6 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [filterSelections, setFilterSelections] = useState<Record<string, string[]>>({});
-  // Track pending filter selections (before Apply is clicked) and context menu state per column
-  const [pendingFilterSelections, setPendingFilterSelections] = useState<Record<string, string[]>>({});
-  const [contextMenuOpen, setContextMenuOpen] = useState<Record<string, boolean>>({});
 
   // Cardinality view state
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
@@ -210,10 +207,7 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
 
   const TableFilterMenu = ({ column }: { column: string }) => {
     const uniqueValues = getUniqueColumnValuesForFilter(column);
-    // Use pending selections if available, otherwise use current applied selections
-    const currentPending = pendingFilterSelections[column];
-    const currentApplied = filterSelections[column] || [];
-    const currentSelections = currentPending !== undefined ? currentPending : currentApplied;
+    const currentSelections = filterSelections[column] || [];
     
     const allSelected = uniqueValues.length > 0 && uniqueValues.every(value => 
       Array.isArray(currentSelections) && currentSelections.includes(value)
@@ -230,11 +224,17 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
               onMouseDown={e => e.stopPropagation()}
               onChange={e => {
                 const allValues = uniqueValues || [];
-                // Update pending selections (not applied yet)
-                setPendingFilterSelections(prev => ({
-                  ...prev,
-                  [column]: e.target.checked ? allValues : []
-                }));
+                if (e.target.checked) {
+                  setFilterSelections(prev => ({
+                    ...prev,
+                    [column]: allValues
+                  }));
+                } else {
+                  setFilterSelections(prev => ({
+                    ...prev,
+                    [column]: []
+                  }));
+                }
               }}
               style={{ accentColor: '#222' }}
             />
@@ -253,10 +253,10 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
               onMouseDown={e => e.stopPropagation()}
               onChange={e => {
                 const newSelections = e.target.checked
-                  ? [...(currentSelections || []), value]
-                  : (currentSelections || []).filter(v => v !== value);
-                // Update pending selections (not applied yet)
-                setPendingFilterSelections(prev => ({
+                  ? [...currentSelections, value]
+                  : currentSelections.filter(v => v !== value);
+                // Update local selections without applying
+                setFilterSelections(prev => ({
                   ...prev,
                   [column]: newSelections
                 }));
@@ -274,19 +274,8 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
             onClick={e => {
               e.preventDefault();
               e.stopPropagation();
-              // Apply the pending selections
-              const selections = pendingFilterSelections[column] !== undefined 
-                ? pendingFilterSelections[column] 
-                : (filterSelections[column] || []);
+              const selections = filterSelections[column] || [];
               handleFilterSelectionsChange(column, selections);
-              // Clear pending selections for this column
-              setPendingFilterSelections(prev => {
-                const newPending = { ...prev };
-                delete newPending[column];
-                return newPending;
-              });
-              // Close the context menu
-              setContextMenuOpen(prev => ({ ...prev, [column]: false }));
             }}
           >Apply</button>
           <button
@@ -294,15 +283,12 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
             onClick={e => {
               e.preventDefault();
               e.stopPropagation();
-              // Clear both applied and pending filters
               clearColumnFilter(column);
-              setPendingFilterSelections(prev => {
-                const newPending = { ...prev };
-                delete newPending[column];
-                return newPending;
+              setFilterSelections(prev => {
+                const newFilters = { ...prev };
+                delete newFilters[column];
+                return newFilters;
               });
-              // Close the context menu
-              setContextMenuOpen(prev => ({ ...prev, [column]: false }));
             }}
           >Clear</button>
         </div>
@@ -313,20 +299,9 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
   const renderHeaderWithSortFilter = (column: string) => {
     const sorting = sortConfig?.column === column ? sortConfig.direction : null;
     const hasFilter = filterSelections[column] && filterSelections[column].length > 0;
-    const isOpen = contextMenuOpen[column] || false;
 
     return (
-      <ContextMenu open={isOpen} onOpenChange={(open) => {
-        setContextMenuOpen(prev => ({ ...prev, [column]: open }));
-        // Initialize pending selections with current applied selections when opening (only if not already set)
-        if (open && pendingFilterSelections[column] === undefined) {
-          setPendingFilterSelections(prev => ({
-            ...prev,
-            [column]: filterSelections[column] || []
-          }));
-        }
-        // Don't clear pending selections when menu closes - keep them for next time
-      }}>
+      <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className="flex items-center gap-1 cursor-pointer">
             {column}
@@ -341,16 +316,10 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
               <ArrowUp className="w-4 h-4 mr-2" /> Sort
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-              <ContextMenuItem onClick={() => {
-                handleSort(column, 'asc');
-                setContextMenuOpen(prev => ({ ...prev, [column]: false }));
-              }}>
+              <ContextMenuItem onClick={() => handleSort(column, 'asc')}>
                 <ArrowUp className="w-4 h-4 mr-2" /> Sort Ascending
               </ContextMenuItem>
-              <ContextMenuItem onClick={() => {
-                handleSort(column, 'desc');
-                setContextMenuOpen(prev => ({ ...prev, [column]: false }));
-              }}>
+              <ContextMenuItem onClick={() => handleSort(column, 'desc')}>
                 <ArrowDown className="w-4 h-4 mr-2" /> Sort Descending
               </ContextMenuItem>
             </ContextMenuSubContent>
@@ -358,10 +327,7 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
           {sorting && (
             <>
               <ContextMenuSeparator />
-              <ContextMenuItem onClick={() => {
-                setSortConfig(null);
-                setContextMenuOpen(prev => ({ ...prev, [column]: false }));
-              }}>
+              <ContextMenuItem onClick={() => setSortConfig(null)}>
                 Clear Sort
               </ContextMenuItem>
             </>
@@ -378,15 +344,7 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
           {hasFilter && (
             <>
               <ContextMenuSeparator />
-              <ContextMenuItem onClick={() => {
-                clearColumnFilter(column);
-                setPendingFilterSelections(prev => {
-                  const newPending = { ...prev };
-                  delete newPending[column];
-                  return newPending;
-                });
-                setContextMenuOpen(prev => ({ ...prev, [column]: false }));
-              }}>
+              <ContextMenuItem onClick={() => clearColumnFilter(column)}>
                 Clear Filter
               </ContextMenuItem>
             </>
@@ -414,13 +372,7 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
     try {
       const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(data.datasetPath)}`;
       const res = await fetch(url);
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => '');
-        throw new Error(errorText || `Failed to fetch cardinality (${res.status})`);
-      }
-      const data_result = await res.json().catch((err) => {
-        throw new Error(`Failed to parse cardinality response: ${err.message}`);
-      });
+      const data_result = await res.json();
       
       if (data_result.status === 'SUCCESS' && data_result.cardinality) {
         setCardinalityData(data_result.cardinality);
@@ -741,8 +693,8 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
               defaultMinimized={true}
               borderColor="border-blue-500"
               customHeader={{
-                title: "Cardinality View",
-                subtitle: "Click Here to View Data",
+                title: "Data Summary",
+                subtitle: "Data in detail",
                 subtitleClickable: !!data.datasetPath && !!atomId,
                 onSubtitleClick: handleViewDataClick
               }}

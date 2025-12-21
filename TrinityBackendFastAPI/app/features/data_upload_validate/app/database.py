@@ -45,10 +45,10 @@ try:
     
     # Test connection
     mongo_client.admin.command('ping')
-    print(f"✅ Connected to MongoDB at {MONGODB_URL}")
+    print(f"[OK] Connected to MongoDB at {MONGODB_URL}")
     
 except Exception as e:
-    print(f"❌ MongoDB connection failed: {e}")
+    print(f"[ERROR] MongoDB connection failed: {e}")
     mongo_client = None
     db = None
     trinity_db = None
@@ -80,7 +80,7 @@ def save_validator_atom_to_mongo(validator_atom_id: str, validator_data: dict):
             document,
             upsert=True
         )
-        print(f"📦 Stored in {COLLECTIONS['VALIDATOR_ATOMS']}: {document}")
+        print(f"[STORED] Stored in {COLLECTIONS['VALIDATOR_ATOMS']}: {document}")
         
         return {
             "status": "success", 
@@ -105,7 +105,7 @@ def save_validation_log_to_mongo(validation_data: dict):
         }
         
         result = db[COLLECTIONS["VALIDATION_LOGS"]].insert_one(document)
-        print(f"📦 Stored in {COLLECTIONS['VALIDATION_LOGS']}: {document}")
+        print(f"[STORED] Stored in {COLLECTIONS['VALIDATION_LOGS']}: {document}")
 
         return {
             "status": "success",
@@ -179,7 +179,7 @@ def update_validator_atom_in_mongo(validator_atom_id: str, update_data: dict):
                 }
             }
         )
-        print(f"📦 Stored in {COLLECTIONS['VALIDATOR_ATOMS']}: {update_data}")
+        print(f"[STORED] Stored in {COLLECTIONS['VALIDATOR_ATOMS']}: {update_data}")
         
         if result.matched_count == 0:
             return {"status": "error", "error": "Validator atom not found"}
@@ -231,7 +231,7 @@ def save_business_dimensions_to_mongo(validator_atom_id: str, file_key: str, dim
             document,
             upsert=True
         )
-        print(f"📦 Stored in {COLLECTIONS['BUSINESS_DIMENSIONS']}: {document}")
+        print(f"[STORED] Stored in {COLLECTIONS['BUSINESS_DIMENSIONS']}: {document}")
         
         return {
             "status": "success", 
@@ -268,7 +268,7 @@ def update_business_dimensions_assignments_in_mongo(validator_atom_id: str, file
     try:
         document_id = f"{validator_atom_id}_{file_key}_dimensions"
         
-        # ✅ SIMPLER APPROACH: Get document, modify, and replace
+            # SIMPLER APPROACH: Get document, modify, and replace
         existing_doc = db[COLLECTIONS["BUSINESS_DIMENSIONS"]].find_one({"_id": document_id})
         
         if not existing_doc:
@@ -308,7 +308,7 @@ def update_business_dimensions_assignments_in_mongo(validator_atom_id: str, file
 
 
 
-# ✅ UPDATE: save_validation_config_to_mongo function in app/database.py
+# UPDATE: save_validation_config_to_mongo function in app/database.py
 def save_validation_config_to_mongo(validator_atom_id: str, file_key: str, config_data: dict):
     """Save validation config to MongoDB with optional column frequencies"""
     if not check_mongodb_connection():
@@ -317,7 +317,7 @@ def save_validation_config_to_mongo(validator_atom_id: str, file_key: str, confi
     try:
         document_id = f"{validator_atom_id}_{file_key}_validation_config"
         
-        # ✅ UPDATED: Include column_frequencies in document
+            # UPDATED: Include column_frequencies in document
         document = {
             "_id": document_id,
             "validator_atom_id": validator_atom_id,
@@ -327,10 +327,10 @@ def save_validation_config_to_mongo(validator_atom_id: str, file_key: str, confi
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
             "column_conditions": config_data.get("column_conditions", {}),
-            "column_frequencies": config_data.get("column_frequencies", {}),  # ✅ ADD THIS
+            "column_frequencies": config_data.get("column_frequencies", {}),  # ADD THIS
             "total_conditions": sum(len(cond_list) for cond_list in config_data.get("column_conditions", {}).values()),
             "columns_with_conditions": list(config_data.get("column_conditions", {}).keys()),
-            "columns_with_frequencies": list(config_data.get("column_frequencies", {}).keys())  # ✅ ADD THIS
+            "columns_with_frequencies": list(config_data.get("column_frequencies", {}).keys())  # ADD THIS
         }
         
         result = db[COLLECTIONS["VALIDATION_CONFIG"]].replace_one(
@@ -338,7 +338,7 @@ def save_validation_config_to_mongo(validator_atom_id: str, file_key: str, confi
             document,
             upsert=True
         )
-        print(f"📦 Stored in {COLLECTIONS['VALIDATION_CONFIG']}: {document}")
+        print(f"[STORED] Stored in {COLLECTIONS['VALIDATION_CONFIG']}: {document}")
         
         return {
             "status": "success", 
@@ -387,7 +387,7 @@ def save_validation_units_to_mongo(validator_atom_id: str, file_key: str, units:
         result = db[COLLECTIONS["VALIDATION_UNITS"]].replace_one(
             {"_id": document_id}, document, upsert=True
         )
-        print(f"📦 Stored in {COLLECTIONS['VALIDATION_UNITS']}: {document}")
+        print(f"[STORED] Stored in {COLLECTIONS['VALIDATION_UNITS']}: {document}")
 
         return {
             "status": "success",
@@ -449,7 +449,7 @@ def log_operation_to_mongo(
         }
 
         result = trinity_db[COLLECTIONS["OPERATION_LOGS"]].insert_one(document)
-        print(f"📦 Stored in {COLLECTIONS['OPERATION_LOGS']}: {document}")
+        print(f"[STORED] Stored in {COLLECTIONS['OPERATION_LOGS']}: {document}")
 
         return {
             "status": "success",

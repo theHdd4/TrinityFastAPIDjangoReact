@@ -54,6 +54,7 @@ const API_BASE = ACCOUNTS_API;
 interface App {
   id: number;
   name: string;
+  usecase_id?: number;
 }
 
 const Users = () => {
@@ -122,12 +123,10 @@ const Users = () => {
 
   const loadTenantApps = async () => {
     try {
-      const res = await fetch(`${TENANTS_API}/tenants/`, { credentials: 'include' });
+      const res = await fetch(`${TENANTS_API}/tenants/current`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
-        if (data.length > 0) {
-          setTenantAppIds(data[0].allowed_apps || []);
-        }
+        setTenantAppIds(data.allowed_apps || []);
       }
     } catch {
       /* ignore */
@@ -575,7 +574,7 @@ const Users = () => {
                   </label>
                   <div className="w-full max-h-[200px] overflow-y-auto border border-gray-200 rounded-md p-3 space-y-2 bg-white">
                     {apps
-                      .filter((a) => tenantAppIds.includes(a.id))
+                      .filter((a) => !a.usecase_id || tenantAppIds.includes(a.usecase_id))
                       .map((a) => (
                         <label
                           key={a.id}

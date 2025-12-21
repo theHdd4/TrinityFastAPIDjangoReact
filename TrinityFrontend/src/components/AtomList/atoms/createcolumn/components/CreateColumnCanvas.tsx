@@ -9,12 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { SingleSelectDropdown } from '@/templates/dropdown';
 import { Badge } from '@/components/ui/badge';
 import { Save, Eye, Calculator, Trash2, Plus, ChevronUp, ChevronDown, AlertCircle } from 'lucide-react';
-import Table from "@/templates/tables/table";
-import createColumn from "../index";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
-import { ArrowUp, ArrowDown, FilterIcon } from 'lucide-react';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DataSummaryView } from '@/components/shared/DataSummaryView';
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
@@ -239,15 +234,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const [showCatSelector, setShowCatSelector] = useState(false);
   const [identifiersCollapsed, setIdentifiersCollapsed] = useState(false);
 
-  // Cardinality View state
-  const [cardinalityData, setCardinalityData] = useState<any[]>([]);
-  const [cardinalityLoading, setCardinalityLoading] = useState(false);
-  const [cardinalityError, setCardinalityError] = useState<string | null>(null);
-  
-  // Sorting and filtering state for Cardinality View
-  const [sortColumn, setSortColumn] = useState<string>('unique_count');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  // Legacy cardinality view state removed - now using DataSummaryView
   
   // Pagination state for results
   const [currentPage, setCurrentPage] = useState(1);
@@ -662,8 +649,10 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const handleSaveDataFrame = () => {
     if (preview.length === 0) return;
     
-    // Generate default filename
-    const defaultFilename = `createcolumn_${atom?.settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+    // Generate default filename (remove file extension before timestamp)
+    const sourceFile = atom?.settings?.dataSource?.split('/')?.pop() || 'data';
+    const filenameWithoutExt = sourceFile.includes('.') ? sourceFile.substring(0, sourceFile.lastIndexOf('.')) : sourceFile;
+    const defaultFilename = `createcolumn_${filenameWithoutExt}_${Date.now()}`;
     setSaveFileName(defaultFilename);
     setShowSaveModal(true);
   };
@@ -931,9 +920,34 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     setCardinalityError(null);
     
     try {
-      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(resolvedObjectName)}`;
+      // Build URL with metadata parameters
+      const params = new URLSearchParams({
+        object_name: resolvedObjectName,
+      });
+      
+      // Add metadata parameters if available
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          if (env.CLIENT_NAME) params.append('client_name', env.CLIENT_NAME);
+          if (env.APP_NAME) params.append('app_name', env.APP_NAME);
+          if (env.PROJECT_NAME) params.append('project_name', env.PROJECT_NAME);
+        } catch (e) {
+          console.warn('Failed to parse env for cardinality metadata:', e);
+        }
+      }
+      
+      const url = `${CREATECOLUMN_API}/cardinality?${params.toString()}`;
       const res = await fetch(url);
-      const data = await res.json();
+      const payload = await res.json();
+      
+      if (!res.ok) {
+        const detail = typeof payload?.detail === 'string' ? payload.detail : res.statusText;
+        throw new Error(detail || 'Failed to fetch cardinality data');
+      }
+      
+      const data = (await resolveTaskResponse(payload)) || {};
       
       if (data.status === 'SUCCESS' && data.cardinality) {
         setCardinalityData(data.cardinality);
@@ -947,163 +961,9 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     }
   };
 
-  // Cardinality filtering and sorting logic
-  const displayedCardinality = React.useMemo(() => {
-    let filtered = Array.isArray(cardinalityData) ? cardinalityData : [];
+  // Legacy cardinality filtering and sorting functions removed - now using DataSummaryView
 
-    // Filter out columns with unique_count = 0 (only exclude zero values)
-    filtered = filtered.filter(c => c.unique_count > 0);
-
-    // Apply column filters
-    Object.entries(columnFilters).forEach(([column, values]) => {
-      if (Array.isArray(values) && values.length > 0) {
-        filtered = filtered.filter(item => {
-          const itemValue = item[column];
-          return values.some(value => 
-            String(itemValue).toLowerCase().includes(String(value).toLowerCase())
-          );
-        });
-      }
-    });
-
-    // Apply sorting
-    if (sortColumn) {
-      filtered.sort((a, b) => {
-        const aVal = a[sortColumn];
-        const bVal = b[sortColumn];
-        
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
-          return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
-        }
-        
-        const aStr = String(aVal).toLowerCase();
-        const bStr = String(bVal).toLowerCase();
-        return sortDirection === 'asc' 
-          ? aStr.localeCompare(bStr)
-          : bStr.localeCompare(aStr);
-      });
-    }
-
-    return filtered;
-  }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
-
-  // Sorting and filtering functions
-  const handleSort = (column: string, direction: 'asc' | 'desc') => {
-    setSortColumn(column);
-    setSortDirection(direction);
-  };
-
-  const handleColumnFilter = (column: string, values: string[]) => {
-    setColumnFilters(prev => ({
-      ...prev,
-      [column]: values
-    }));
-  };
-
-  const clearColumnFilter = (column: string) => {
-    setColumnFilters(prev => {
-      const newFilters = { ...prev };
-      delete newFilters[column];
-      return newFilters;
-    });
-  };
-
-  const getUniqueColumnValues = (column: string): string[] => {
-    let filteredData = Array.isArray(cardinalityData) ? cardinalityData : [];
-    
-    // Apply other active filters to get context-aware unique values
-    Object.entries(columnFilters).forEach(([filterColumn, values]) => {
-      if (filterColumn !== column && Array.isArray(values) && values.length > 0) {
-        filteredData = filteredData.filter(item => {
-          const itemValue = item[filterColumn];
-          return values.some(value => 
-            String(itemValue).toLowerCase().includes(String(value).toLowerCase())
-          );
-        });
-      }
-    });
-
-    // Filter out columns with unique_count = 0
-    filteredData = filteredData.filter(c => c.unique_count > 0);
-
-    const uniqueValues = [...new Set(filteredData.map(item => String(item[column])))];
-    return uniqueValues.sort();
-  };
-
-  const FilterMenu = ({ column }: { column: string }) => {
-    const [temp, setTemp] = useState<string[]>([]);
-    const [selectAll, setSelectAll] = useState(false);
-    const uniqueValues = getUniqueColumnValues(column);
-    const currentFilters = columnFilters[column] || [];
-
-    React.useEffect(() => {
-      setTemp(currentFilters);
-      setSelectAll(currentFilters.length === uniqueValues.length && uniqueValues.length > 0);
-    }, [currentFilters, uniqueValues.length]);
-
-    const handleSelectAll = () => {
-      if (selectAll) {
-        setTemp([]);
-        setSelectAll(false);
-      } else {
-        setTemp(uniqueValues);
-        setSelectAll(true);
-      }
-    };
-
-    const apply = () => {
-      handleColumnFilter(column, temp);
-    };
-
-    const cancel = () => {
-      setTemp(currentFilters);
-      setSelectAll(currentFilters.length === uniqueValues.length && uniqueValues.length > 0);
-    };
-
-    return (
-      <div className="p-3 max-h-64 overflow-y-auto">
-        <div className="flex items-center justify-between mb-2">
-          <Checkbox
-            checked={selectAll}
-            onCheckedChange={handleSelectAll}
-          />
-          <span className="text-sm font-medium">Select All</span>
-        </div>
-        <div className="space-y-1 mb-3">
-          {uniqueValues.map(value => (
-            <div key={value} className="flex items-center space-x-2">
-              <Checkbox
-                checked={temp.includes(value)}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    setTemp([...temp, value]);
-                  } else {
-                    setTemp(temp.filter(v => v !== value));
-                  }
-                }}
-              />
-              <span className="text-sm">{value}</span>
-            </div>
-          ))}
-        </div>
-        <div className="flex space-x-2">
-          <Button size="sm" onClick={apply} className="flex-1">
-            Apply
-          </Button>
-          <Button size="sm" variant="outline" onClick={cancel} className="flex-1">
-            Cancel
-          </Button>
-        </div>
-      </div>
-    );
-  };
-
-  // Fetch cardinality data on mount or when dataSource changes
-  React.useEffect(() => {
-    if (atom?.settings?.dataSource) {
-      fetchCardinalityData();
-    }
-  }, [atom?.settings?.dataSource]);
+  // Legacy cardinality fetch removed - now using DataSummaryView
 
   // Filtering and sorting logic for results (applied to whole dataset)
   const allFilteredResults = React.useMemo(() => {
@@ -1295,209 +1155,17 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
 
   return (
     <div className="space-y-6 h-full">
-      {/* Cardinality View - Show immediately after dataset input */}
-      {atom?.settings?.dataSource && (
-        <div className="space-y-4">
-          {cardinalityLoading && (
-            <div className="flex items-center justify-center p-8">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto mb-2"></div>
-                <span className="text-green-600">Loading cardinality data...</span>
-              </div>
-            </div>
-          )}
-          
-          {cardinalityError && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-md">
-              <p className="text-red-600 text-sm">Error loading cardinality data: {cardinalityError}</p>
-            </div>
-          )}
-          
-          {!cardinalityLoading && !cardinalityError && displayedCardinality.length > 0 && (
-            <Table
-              headers={[
-                <ContextMenu key="Column">
-                  <ContextMenuTrigger asChild>
-                    <div className="flex items-center gap-1 cursor-pointer">
-                      Column
-                      {sortColumn === 'column' && (
-                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                      )}
-                    </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                        <ContextMenuItem onClick={() => handleSort('column', 'asc')}>
-                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                        </ContextMenuItem>
-                        <ContextMenuItem onClick={() => handleSort('column', 'desc')}>
-                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                        </ContextMenuItem>
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    <ContextMenuSeparator />
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                        <FilterMenu column="column" />
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    {columnFilters['column']?.length > 0 && (
-                      <>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => clearColumnFilter('column')}>
-                          Clear Filter
-                        </ContextMenuItem>
-                      </>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>,
-                <ContextMenu key="Data type">
-                  <ContextMenuTrigger asChild>
-                    <div className="flex items-center gap-1 cursor-pointer">
-                      Data type
-                      {sortColumn === 'data_type' && (
-                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                      )}
-                    </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                        <ContextMenuItem onClick={() => handleSort('data_type', 'asc')}>
-                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                        </ContextMenuItem>
-                        <ContextMenuItem onClick={() => handleSort('data_type', 'desc')}>
-                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                        </ContextMenuItem>
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    <ContextMenuSeparator />
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                        <FilterMenu column="data_type" />
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    {columnFilters['data_type']?.length > 0 && (
-                      <>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => clearColumnFilter('data_type')}>
-                          Clear Filter
-                        </ContextMenuItem>
-                      </>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>,
-                <ContextMenu key="Unique count">
-                  <ContextMenuTrigger asChild>
-                    <div className="flex items-center gap-1 cursor-pointer">
-                      Unique count
-                      {sortColumn === 'unique_count' && (
-                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                      )}
-                    </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                        <ContextMenuItem onClick={() => handleSort('unique_count', 'asc')}>
-                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                        </ContextMenuItem>
-                        <ContextMenuItem onClick={() => handleSort('unique_count', 'desc')}>
-                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                        </ContextMenuItem>
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    <ContextMenuSeparator />
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                        <FilterMenu column="unique_count" />
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    {columnFilters['unique_count']?.length > 0 && (
-                      <>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => clearColumnFilter('unique_count')}>
-                          Clear Filter
-                        </ContextMenuItem>
-                      </>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>,
-                "Sample values"
-              ]}
-              colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
-              bodyClassName="max-h-[484px] overflow-y-auto"
-              defaultMinimized={true}
-              borderColor={`border-${createColumn.color.replace('bg-', '')}`}
-              customHeader={{
-                title: "Data Summary",
-                subtitle: "Data in detail",
-                subtitleClickable: !!inputFileName && !!atomId,
-                onSubtitleClick: handleViewDataClick
-              }}
-            >
-              {displayedCardinality.map((col, index) => (
-                <tr key={index} className="table-row">
-                  <td className="table-cell">{col.column || col.Column || ''}</td>
-                  <td className="table-cell">{col.data_type || col.Data_Type || ''}</td>
-                  <td className="table-cell">{col.unique_count || col.Unique_Count || 0}</td>
-                  <td className="table-cell">
-                    <div className="flex flex-wrap items-center gap-1">
-                      {Array.isArray(col.unique_values) && col.unique_values.length > 0 ? (
-                        <>
-                          {col.unique_values.slice(0, 2).map((val: any, i: number) => (
-                            <span
-                              key={i}
-                              className="inline-block bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs mr-1 mb-1"
-                            >
-                              {String(val)}
-                            </span>
-                          ))}
-                          {col.unique_values.length > 2 && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
-                                  <Plus className="w-3 h-3" />
-                                  {col.unique_values.length - 2} more
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
-                                {col.unique_values
-                                  .slice(2)
-                                  .map((val: any) => String(val))
-                                  .join(', ')}
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </Table>
-          )}
+      {/* Data Summary - Unified component with metadata support */}
+      {atom?.settings?.dataSource && atom?.settings?.showDataSummary && (
+        <div className="border-b border-slate-200 px-5 py-4">
+          <DataSummaryView
+            objectName={resolvedDataSource}
+            atomId={atomId}
+            title="Data Summary"
+            subtitle="Data in detail"
+            subtitleClickable={!!inputFileName && !!atomId}
+            onSubtitleClick={handleViewDataClick}
+          />
         </div>
       )}
 

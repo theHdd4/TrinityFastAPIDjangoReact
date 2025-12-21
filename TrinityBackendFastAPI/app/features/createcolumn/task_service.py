@@ -6,7 +6,7 @@ These helpers mirror the dataframe_operations service layer so routes can
 delegate heavy work to workers while keeping submission metadata consistent.
 """
 
-from typing import Any, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple
 
 from app.core.task_queue import TaskSubmission, celery_task_client
 
@@ -134,14 +134,52 @@ def submit_classification_task(
     )
 
 
-def submit_cardinality_task(*, bucket_name: str, object_name: str) -> TaskSubmission:
+def submit_cardinality_task(
+    *, 
+    bucket_name: str, 
+    object_name: str,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> TaskSubmission:
+    kwargs = {
+        "bucket_name": bucket_name,
+        "object_name": object_name,
+    }
+    if client_name:
+        kwargs["client_name"] = client_name
+    if app_name:
+        kwargs["app_name"] = app_name
+    if project_name:
+        kwargs["project_name"] = project_name
+    
     return celery_task_client.submit_callable(
         name="createcolumn.cardinality",
         dotted_path="app.features.createcolumn.service.cardinality_task",
-        kwargs={"bucket_name": bucket_name, "object_name": object_name},
+        kwargs=kwargs,
         metadata={
             "atom": "createcolumn",
             "operation": "cardinality",
+            "object_name": object_name,
+        },
+    )
+
+
+def submit_columns_with_missing_values_task(
+    *,
+    bucket_name: str,
+    object_name: str,
+) -> TaskSubmission:
+    return celery_task_client.submit_callable(
+        name="createcolumn.columns_with_missing_values",
+        dotted_path="app.features.createcolumn.service.columns_with_missing_values_task",
+        kwargs={
+            "bucket_name": bucket_name,
+            "object_name": object_name,
+        },
+        metadata={
+            "atom": "createcolumn",
+            "operation": "columns_with_missing_values",
             "object_name": object_name,
         },
     )
@@ -154,4 +192,5 @@ __all__ = [
     "submit_cached_dataframe_task",
     "submit_classification_task",
     "submit_cardinality_task",
+    "submit_columns_with_missing_values_task",
 ]

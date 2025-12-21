@@ -1,0 +1,255 @@
+import React, { useId, useState } from 'react';
+import { FileText, Upload, Trash2, Sparkles } from 'lucide-react';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import FileDataPreview from './FileDataPreview';
+import { GuidedUploadFlow } from '../guided-upload';
+
+interface FileRow {
+  name: string;
+  type: string;
+  size: string;
+  status: string;
+}
+
+interface UploadSectionProps {
+  uploadedFiles: { name: string; path: string; size: number }[];
+  files: FileRow[];
+  validationResults: Record<string, string>;
+  validationDetails: Record<string, any[]>;
+  openValidatedFile: string | null;
+  setOpenValidatedFile: (f: string | null) => void;
+  fileAssignments: Record<string, string>;
+  onAssignmentChange: (fileName: string, value: string) => void;
+  onDrop: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: (e: React.DragEvent) => void;
+  onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onValidateFiles: () => void;
+  onSaveDataFrames: () => void;
+  saveEnabled: boolean;
+  isDragOver: boolean;
+  requiredOptions: string[];
+  onDeleteFile: (name: string) => void;
+  saveStatus: Record<string, string>;
+  disabled?: boolean;
+  /** When true, disable the validate button */
+  disableValidation?: boolean;
+  /** When true, hide the heading and instruction text */
+  useMasterFile?: boolean;
+  onDataChanges?: (changes: {
+    dtypeChanges: Record<string, Record<string, string | { dtype: string; format: string }>>;
+    missingValueStrategies: Record<string, Record<string, { strategy: string; value?: string }>>;
+  }) => void;
+  filesWithAppliedChanges?: Set<string>;
+  initialDtypeChanges?: Record<string, Record<string, string | { dtype: string; format: string }>>;
+  initialMissingValueStrategies?: Record<string, Record<string, { strategy: string; value?: string }>>;
+  initialFilesMetadata?: Record<string, any>;
+  onMetadataChange?: (metadata: Record<string, any>) => void;
+  savedDataframes?: Array<{ object_name: string; csv_name: string; arrow_name?: string }>;
+  isLoadingSavedDataframes?: boolean;
+  onSelectSavedDataframe?: (objectName: string) => void;
+  filePathMap?: Record<string, string>;
+  filesFromSavedDataframes?: Set<string>;
+  onRefreshSavedDataframes?: () => void;
+}
+
+const UploadSection: React.FC<UploadSectionProps> = ({
+  uploadedFiles,
+  files,
+  validationResults,
+  validationDetails,
+  openValidatedFile,
+  setOpenValidatedFile,
+  fileAssignments,
+  onAssignmentChange,
+  onDrop,
+  onDragOver,
+  onDragLeave,
+  onFileSelect,
+  onValidateFiles,
+  onSaveDataFrames,
+  saveEnabled,
+  isDragOver,
+  requiredOptions,
+  onDeleteFile,
+  saveStatus,
+  disabled = false,
+  disableValidation = false,
+  useMasterFile = false,
+  onDataChanges,
+  filesWithAppliedChanges = new Set(),
+  initialDtypeChanges = {},
+  initialMissingValueStrategies = {},
+  initialFilesMetadata = {},
+  onMetadataChange,
+  savedDataframes = [],
+  isLoadingSavedDataframes = false,
+  onSelectSavedDataframe,
+  filePathMap = {},
+  filesFromSavedDataframes = new Set(),
+  onRefreshSavedDataframes
+}) => {
+  const inputId = useId();
+  const [selectedSavedDataframe, setSelectedSavedDataframe] = useState<string>('');
+  const [isSelectOpen, setIsSelectOpen] = useState(false);
+  const [isGuidedFlowOpen, setIsGuidedFlowOpen] = useState(false);
+
+  const handleSavedDataframeChange = (value: string) => {
+    if (value && onSelectSavedDataframe) {
+      onSelectSavedDataframe(value);
+      setSelectedSavedDataframe(''); // Reset after selection
+    }
+  };
+  
+  // Refresh saved dataframes when the Select dropdown is opened
+  // This ensures we always get the latest data from the API
+  const handleSelectOpenChange = (open: boolean) => {
+    setIsSelectOpen(open);
+    // When opening, trigger a refresh to get latest data from API
+    if (open && onRefreshSavedDataframes) {
+      onRefreshSavedDataframes();
+    }
+  };
+
+  return (
+    <>
+      <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white">
+      <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
+      <div className={useMasterFile && onSelectSavedDataframe ? "" : ""}>
+        {/* Saved Dataframes Selector - Only show when validation steps are enabled */}
+        {useMasterFile && onSelectSavedDataframe && (() => {
+        const availableDataframes = savedDataframes.filter((frame) => {
+          // Filter out files that are already in the canvas
+          // Extract filename and normalize (handle spaces converted to underscores)
+          const rawFileName = frame.csv_name.split('/').pop() || frame.object_name.split('/').pop() || '';
+          const normalizedFileName = rawFileName.replace(/\s+/g, '_');
+          
+          // Check if file exists by name or by object_name path
+          return !uploadedFiles.some((f) => {
+            const normalizedUploadedName = f.name.replace(/\s+/g, '_');
+            return f.name === rawFileName || 
+                   f.name === normalizedFileName || 
+                   normalizedUploadedName === normalizedFileName ||
+                   f.path === frame.object_name;
+          });
+        });
+        
+        return (
+          <div className="border rounded-lg p-4 bg-gray-50">
+            <label className="text-sm font-medium text-gray-700 block mb-2">
+              Select from Saved Dataframes
+            </label>
+            {availableDataframes.length === 0 && !isLoadingSavedDataframes ? (
+              <div className="text-sm text-gray-500 py-2">
+                {savedDataframes.length === 0 
+                  ? 'No saved dataframes available' 
+                  : 'All saved dataframes are already in the canvas'}
+              </div>
+            ) : (
+            <Select
+              value={selectedSavedDataframe}
+              disabled={disabled || isLoadingSavedDataframes}
+              onValueChange={handleSavedDataframeChange}
+              onOpenChange={handleSelectOpenChange}
+            >
+              <SelectTrigger className="bg-white">
+                <SelectValue placeholder={isLoadingSavedDataframes ? 'Loading saved dataframes...' : 'Choose a saved dataframe...'} />
+              </SelectTrigger>
+              <SelectContent className="max-h-64">
+                {availableDataframes.map((frame) => (
+                  <SelectItem key={frame.object_name} value={frame.object_name}>
+                    {frame.csv_name.split('/').pop() || frame.object_name.split('/').pop()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            )}
+          </div>
+        );
+      })()}
+
+        {/* UPLOAD SECTION COMMENTED OUT - Select from Saved Dataframes takes full space
+        <div className={useMasterFile && onSelectSavedDataframe ? "flex-1" : ""}>
+          <div
+            className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 ${files.length > 0 ? 'p-2' : 'p-8'} ${disabled ? 'opacity-50 cursor-not-allowed' : isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`}
+            onDrop={disabled ? undefined : onDrop}
+            onDragOver={disabled ? undefined : onDragOver}
+            onDragLeave={disabled ? undefined : onDragLeave}
+          >
+            <div className={files.length > 0 ? "mb-0" : "mb-6"}>
+              <p className={`font-medium text-gray-900 ${files.length > 0 ? 'text-xs mb-2' : 'text-sm mb-4'}`}>{isDragOver ? 'Drop files here' : 'Click here to upload your file(s)'}</p>
+              <label htmlFor={inputId} className="cursor-pointer">
+                <div className={`mx-auto rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl transform hover:scale-105 transition-transform duration-300 ${files.length > 0 ? 'w-10 h-10 mb-1' : 'w-16 h-16 mb-2'}`}>
+                  <Upload className={`text-white drop-shadow-lg ${files.length > 0 ? 'w-5 h-5' : 'w-8 h-8'}`} />
+                </div>
+              </label>
+            </div>
+            <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={onFileSelect} className="hidden" id={inputId} disabled={disabled} />
+             {files.length === 0 && !useMasterFile && (
+               <>
+                 <h3 className="text-3xl font-bold text-gray-900 mb-3 mt-6 bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">
+                   Upload and Validate Operation
+                 </h3>
+                 <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">To ensure your data meets format requirements, go to Properties section and upload Master file for validation</p>
+               </>
+             )}
+          </div>
+        </div>
+        */}
+      </div>
+      
+      {/* Data Preview & Configuration Section */}
+      <FileDataPreview 
+        uploadedFiles={useMasterFile ? uploadedFiles.filter(f => filesFromSavedDataframes.has(f.name)) : uploadedFiles} 
+        onDataChanges={onDataChanges}
+        onDeleteFile={onDeleteFile}
+        useMasterFile={useMasterFile}
+        validationResults={validationResults}
+        validationDetails={validationDetails}
+        fileAssignments={fileAssignments}
+        onAssignmentChange={onAssignmentChange}
+        requiredOptions={requiredOptions}
+        filesWithAppliedChanges={filesWithAppliedChanges}
+        initialDtypeChanges={initialDtypeChanges}
+        initialMissingValueStrategies={initialMissingValueStrategies}
+        initialFilesMetadata={initialFilesMetadata}
+        onMetadataChange={onMetadataChange}
+        filePathMap={filePathMap}
+      />
+      
+      {uploadedFiles.length > 0 && !disableValidation && (
+        <Button className="w-full mt-4" onClick={onValidateFiles}>
+          Validate Files
+        </Button>
+      )}
+      
+      {/* Guided Upload Flow Button */}
+      {!useMasterFile && (
+        <Button
+          className="w-full mt-4 bg-[#458EE2] hover:bg-[#3a7bc7] text-white flex items-center justify-center gap-2"
+          onClick={() => setIsGuidedFlowOpen(true)}
+        >
+          <Sparkles className="w-4 h-4" />
+          Start Guided Upload Flow
+        </Button>
+      )}
+    </div>
+    </Card>
+    
+    {/* Guided Upload Flow Modal */}
+    <GuidedUploadFlow
+      open={isGuidedFlowOpen}
+      onOpenChange={setIsGuidedFlowOpen}
+      onComplete={(result) => {
+        // TODO: Handle completion - integrate with existing upload flow
+        console.log('Guided upload completed:', result);
+        setIsGuidedFlowOpen(false);
+      }}
+    />
+    </>
+  );
+};
+
+export default UploadSection;

@@ -12,7 +12,8 @@ class Command(BaseCommand):
         
         # List of working atoms provided by user (these are the actual atom_ids from populate command)
         working_atom_ids = [
-            'data-upload-validate',
+            'data-upload',
+            'data-validate',
             'column-classifier', 
             'dataframe-operations',
             'merge',
@@ -32,6 +33,7 @@ class Command(BaseCommand):
             'clustering',  # Added missing clustering atom
             'pivot-table',
             'unpivot',
+            'kpi-dashboard',  # KPI Dashboard atom
             'table'  # Table atom - display and manipulate data in table format
         ]
         

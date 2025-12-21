@@ -13,7 +13,8 @@ class Command(BaseCommand):
         # Data from atomCategories.ts - all atoms from the frontend
         atoms_data = [
             # Data Sources
-            {'atom_id': 'data-upload-validate', 'name': 'Data Upload Validate', 'description': 'Validate and process uploaded data files', 'category': 'Data Sources'},
+            {'atom_id': 'data-upload', 'name': 'Data Upload', 'description': 'Upload, clean, and prime your data files with guided workflow', 'category': 'Data Sources'},
+            {'atom_id': 'data-validate', 'name': 'Data Validate', 'description': 'Validate data with automatic type detection and quality checks', 'category': 'Data Sources'},
             {'atom_id': 'csv-import', 'name': 'CSV Import', 'description': 'Import data from CSV files', 'category': 'Data Sources'},
             {'atom_id': 'json-import', 'name': 'JSON Import', 'description': 'Import data from JSON files', 'category': 'Data Sources'},
             {'atom_id': 'database-connect', 'name': 'Database Connect', 'description': 'Connect to external databases', 'category': 'Data Sources'},
@@ -64,20 +65,26 @@ class Command(BaseCommand):
             {'atom_id': 'base-price-estimator', 'name': 'Base Price Estimator', 'description': 'Estimate base prices for products', 'category': 'Business Intelligence'},
             {'atom_id': 'promo-estimator', 'name': 'Promo Estimator', 'description': 'Estimate promotional effects', 'category': 'Business Intelligence'},
             {'atom_id': 'pivot-table', 'name': 'Pivot Table', 'description': 'Create interactive pivot table summaries', 'category': 'Business Intelligence'},
-            {'atom_id': 'unpivot', 'name': 'Unpivot', 'description': 'Transform wide datasets into long format by unpivoting columns into rows', 'category': 'Business Intelligence'}
+            {'atom_id': 'unpivot', 'name': 'Unpivot', 'description': 'Transform wide datasets into long format by unpivoting columns into rows', 'category': 'Business Intelligence'},
+            {'atom_id': 'kpi-dashboard', 'name': 'KPI Dashboard', 'description': 'Display key performance indicators with metrics, trends, and insights', 'category': 'Business Intelligence', 'tags': ['kpi', 'dashboard', 'metrics', 'insights', 'analytics'], 'color': 'bg-emerald-500'}
         ]
 
         created_count = 0
         updated_count = 0
 
         for atom_data in atoms_data:
+            defaults = {
+                'name': atom_data['name'],
+                'description': atom_data['description'],
+                'category': atom_data['category'],
+                'tags': atom_data.get('tags', []),
+                'color': atom_data.get('color', ''),
+                'available_atoms': True  # Set all atoms as available by default
+            }
+            
             atom, created = TrinityV1Atom.objects.get_or_create(
                 atom_id=atom_data['atom_id'],
-                defaults={
-                    'name': atom_data['name'],
-                    'description': atom_data['description'],
-                    'category': atom_data['category']
-                }
+                defaults=defaults
             )
             
             if created:
@@ -90,6 +97,9 @@ class Command(BaseCommand):
                 atom.name = atom_data['name']
                 atom.description = atom_data['description']
                 atom.category = atom_data['category']
+                atom.tags = atom_data.get('tags', atom.tags or [])
+                atom.color = atom_data.get('color', atom.color or '')
+                atom.available_atoms = True  # Ensure it's marked as available
                 atom.save()
                 updated_count += 1
                 self.stdout.write(

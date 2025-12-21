@@ -1,4 +1,5 @@
 export type TextAlignOption = 'left' | 'center' | 'right';
+export type TextStyleOption = 'header' | 'sub-header' | 'paragraph';
 
 export interface TextBoxFormatting {
   text: string;
@@ -10,6 +11,7 @@ export interface TextBoxFormatting {
   strikethrough: boolean;
   align: TextAlignOption;
   color: string;
+  textStyle?: TextStyleOption;
 }
 
 export interface TextStylePreset {

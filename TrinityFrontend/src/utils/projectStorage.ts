@@ -95,7 +95,7 @@ function stripCards(cards: any[]): any[] {
         };
       }
 
-      if (atom.atomId === 'data-upload-validate' && atom.settings) {
+      if (atom.atomId === 'data-validate' && atom.settings) {
         const {
           uploadedFiles = [],
           fileMappings = {},
@@ -136,7 +136,11 @@ function stripCards(cards: any[]): any[] {
 export function sanitizeLabConfig(config: any): any {
   const clone = JSON.parse(JSON.stringify(config || {}));
   if (Array.isArray(clone.cards)) {
-    clone.cards = stripCards(clone.cards);
+    // Filter out landing cards before sanitizing
+    const cardsWithoutLanding = clone.cards.filter((card: any) => 
+      !card.atoms?.some((atom: any) => atom.atomId === 'landing-screen')
+    );
+    clone.cards = stripCards(cardsWithoutLanding);
   }
   return clone;
 }

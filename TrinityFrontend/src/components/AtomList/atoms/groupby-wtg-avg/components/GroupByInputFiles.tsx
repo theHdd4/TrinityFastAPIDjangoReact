@@ -6,6 +6,7 @@ import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 const normalizeColumnName = (value: string | undefined | null) => {
   if (!value || typeof value !== 'string') return '';
@@ -128,6 +129,12 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
       const projectName = pathParts[2] ?? ''
 
       // Always request identifiers/measures using client/app/project context
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.canvas_position ?? 0;
+      
       const formData = new FormData();
       formData.append('bucket_name', 'trinity');
       formData.append('object_names', file_key);
@@ -135,6 +142,9 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
       formData.append('app_name', appName);
       formData.append('project_name', projectName);
       formData.append('file_key', file_key);
+      formData.append('validator_atom_id', atomId); // Add atom ID for pipeline tracking
+      formData.append('card_id', cardId); // Add card ID for pipeline tracking
+      formData.append('canvas_position', canvasPosition.toString()); // Add canvas position for pipeline tracking
       try {
         const resp = await fetch(`${GROUPBY_API}/init`, { method: 'POST', body: formData });
         console.log('[GroupBy] /init status', resp.status);
@@ -238,23 +248,19 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
             ))}
           </SelectContent>
         </Select>
-      </Card>
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            id="cardinality-toggle"
-            checked={settings.showCardinalityView || false}
-            onCheckedChange={(checked) => {
-              updateSettings(atomId, { showCardinalityView: !!checked });
-            }}
-          />
-          <Label
-            htmlFor="cardinality-toggle"
-            className="text-sm font-medium text-gray-700 cursor-pointer"
-          >
-            Show Cardinality View
-          </Label>
-        </div>
+
+        {/* Show Data Summary Toggle - Only when data source is selected (chartmaker pattern) */}
+        {settings.dataSource && (
+          <div className="flex items-center justify-between pt-4 border-t mt-4">
+            <Label className="text-xs">Show Data Summary</Label>
+            <Switch
+              checked={settings.showDataSummary || false}
+              onCheckedChange={(checked) => {
+                updateSettings(atomId, { showDataSummary: !!checked });
+              }}
+            />
+          </div>
+        )}
       </Card>
       {false && identifiers.length > 0 && (
         <Card className="p-4 space-y-3 bg-gradient-to-br from-blue-50 to-blue-100">

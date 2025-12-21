@@ -22,9 +22,14 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, Conte
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Table from '@/templates/tables/table';
 import { MultiSelectDropdown } from '@/templates/dropdown';
-import { CHART_MAKER_API } from '@/lib/api';
+// DataSummaryView now uses CARDINALITY_VIEW_API internally (no imports needed)
+import { DataSummaryView } from '@/components/shared/DataSummaryView';
 import { useToast } from '@/hooks/use-toast';
-import { Input } from '@/components/ui/input';
+import ChartNoteEditor from './rich-text-note/ChartNoteEditor';
+import { TextBoxToolbar } from '@/components/LaboratoryMode/components/CanvasArea/text-box/TextBoxToolbar';
+import { DEFAULT_CHART_NOTE_FORMATTING } from './rich-text-note/types';
+import type { TextAlignOption } from '@/components/LaboratoryMode/components/CanvasArea/text-box/types';
+import { TEXT_STYLE_PRESETS } from '@/components/LaboratoryMode/components/CanvasArea/text-box/constants';
 
 // FilterMenu component moved outside to prevent recreation on every render
 const FilterMenu = ({ 
@@ -113,17 +118,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
 
   // Chart sort order state
   const [chartSortOrder, setChartSortOrder] = useState<Record<string, 'asc' | 'desc' | null>>({});
-
-  // Cardinality View state
-  const [cardinalityData, setCardinalityData] = useState<any[]>([]);
-  const [cardinalityLoading, setCardinalityLoading] = useState(false);
-  const [cardinalityError, setCardinalityError] = useState<string | null>(null);
-  const [originalFileName, setOriginalFileName] = useState<string | null>(null);
-  
-  // Sorting and filtering state for Cardinality View
-  const [sortColumn, setSortColumn] = useState<string>('unique_count');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   
   // Filter collapse state for each chart (chartId -> boolean)
   const [filtersCollapsed, setFiltersCollapsed] = useState<Record<string, boolean>>({});
@@ -146,159 +140,297 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   // Container ref for responsive layout
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Handle note input change - save directly to chart config
-  const handleNoteChange = (chartId: string, value: string) => {
+  // State for rich text note editing
+  const [editingNoteChartId, setEditingNoteChartId] = useState<string | null>(null);
+  const [showNoteToolbar, setShowNoteToolbar] = useState(false);
+  
+  // Local state for note editing - prevents lag by not saving on every keystroke
+  const [localNoteState, setLocalNoteState] = useState<Record<string, { value: string; html?: string }>>({});
+
+  // Handle note input change - update LOCAL state only (no store update = no lag)
+  const handleNoteChange = (chartId: string, value: string, html?: string) => {
+    // Only update local state - don't call updateSettings to prevent lag
+    setLocalNoteState(prev => ({
+      ...prev,
+      [chartId]: { value, html }
+    }));
+  };
+
+  // Handle note commit - save to store on blur/commit
+  const handleNoteCommit = (chartId: string, value: string, html: string) => {
+    // Now save to store - this only happens on blur/commit, not every keystroke
     const chart = charts.find(c => c.id === chartId);
     if (chart) {
       const updatedCharts = charts.map(c =>
-        c.id === chartId ? { ...c, note: value } : c
+        c.id === chartId ? { ...c, note: value, noteHtml: html } : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    }
+    
+    // Clear local state for this chart
+    setLocalNoteState(prev => {
+      const next = { ...prev };
+      delete next[chartId];
+      return next;
+    });
+    
+    setEditingNoteChartId(null);
+    setShowNoteToolbar(false);
+  };
+
+  // Handle note cancel - discard local changes
+  const handleNoteCancel = (chartId: string) => {
+    // Clear local state without saving
+    setLocalNoteState(prev => {
+      const next = { ...prev };
+      delete next[chartId];
+      return next;
+    });
+    
+    setEditingNoteChartId(null);
+    setShowNoteToolbar(false);
+  };
+
+  // Get current note value - use local state if editing, otherwise use persisted state
+  const getNoteValue = (chartId: string) => {
+    if (editingNoteChartId === chartId && localNoteState[chartId]) {
+      return localNoteState[chartId].value;
+    }
+    const chart = charts.find(c => c.id === chartId);
+    return chart?.note || '';
+  };
+
+  // Get current note HTML - use local state if editing, otherwise use persisted state
+  const getNoteHtml = (chartId: string) => {
+    if (editingNoteChartId === chartId && localNoteState[chartId]) {
+      return localNoteState[chartId].html;
+    }
+    const chart = charts.find(c => c.id === chartId);
+    return chart?.noteHtml;
+  };
+
+  // Get current note formatting for a chart
+  const getNoteFormatting = (chartId: string) => {
+    const chart = charts.find(c => c.id === chartId);
+    return chart?.noteFormatting || DEFAULT_CHART_NOTE_FORMATTING;
+  };
+
+  // Handle note formatting change - map to TextBoxToolbar format
+  // Also capture updated HTML from editor if it's currently being edited
+  const handleNoteFormattingChange = (chartId: string, updates: {
+    fontFamily?: string;
+    fontSize?: number;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strikethrough?: boolean;
+    textColor?: string;
+    backgroundColor?: string;
+    textAlign?: 'left' | 'center' | 'right';
+  }) => {
+    const chart = charts.find(c => c.id === chartId);
+    if (chart) {
+      const currentFormatting = chart.noteFormatting || DEFAULT_CHART_NOTE_FORMATTING;
+      
+      // If editor is active, capture current HTML to preserve formatting applied via execCommand
+      let updatedHtml = chart.noteHtml;
+      if (editingNoteChartId === chartId) {
+        const editorElement = document.querySelector('[data-chart-note-editor="true"]') as HTMLElement;
+        if (editorElement) {
+          updatedHtml = editorElement.innerHTML;
+          // Also update local state with the new HTML
+          setLocalNoteState(prev => {
+            const current = prev[chartId];
+            if (current) {
+              return {
+                ...prev,
+                [chartId]: {
+                  ...current,
+                  html: updatedHtml
+                }
+              };
+            }
+            return prev;
+          });
+        }
+      }
+      
+      // Save formatting to store immediately (formatting changes are less frequent than typing)
+      const updatedCharts = charts.map(c =>
+        c.id === chartId 
+          ? { 
+              ...c, 
+              noteFormatting: { 
+                ...currentFormatting,
+                ...updates
+              },
+              // Update HTML if editor is active to preserve formatting
+              ...(updatedHtml && updatedHtml !== c.noteHtml ? { noteHtml: updatedHtml } : {})
+            } 
+          : c
       );
       updateSettings(atomId, { charts: updatedCharts });
     }
   };
 
-  // Handle note input keydown - save and blur on Enter
-  const handleNoteKeyDown = (chartId: string, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      // Blur the input to trigger save and remove focus
-      e.currentTarget.blur();
-    }
+  // Helper to check if editor has selection
+  const hasNoteEditorSelection = (chartId: string): boolean => {
+    if (editingNoteChartId !== chartId) return false;
+    const editorElement = document.querySelector('[data-chart-note-editor="true"]') as HTMLElement;
+    if (!editorElement) return false;
+    const selection = window.getSelection();
+    return !!(selection && selection.rangeCount > 0 && !selection.isCollapsed);
   };
 
-  // Fetch cardinality data when data is available
-  useEffect(() => {
-    if (typedData && typedData.file_id && dataSource) {
-      fetchCardinalityData();
-    }
-  }, [typedData?.file_id, dataSource]);
-
-  // Fetch cardinality data function
-  const fetchCardinalityData = async () => {
-    if (!typedData?.file_id) return;
+  // Helper to run execCommand on note editor
+  const runNoteEditorCommand = (chartId: string, command: string, value?: string): boolean => {
+    if (editingNoteChartId !== chartId) return false;
+    const editorElement = document.querySelector('[data-chart-note-editor="true"]') as HTMLElement;
+    if (!editorElement) return false;
     
-    setCardinalityLoading(true);
-    setCardinalityError(null);
-    
+    editorElement.focus();
     try {
-      // Use dataSource (original Arrow filename) if available, otherwise fall back to file_id
-      // This allows the backend to reload from the saved file even if in-memory storage is cleared
-      const objectName = dataSource || typedData.file_id;
-      const url = `${CHART_MAKER_API}/column_summary?object_name=${encodeURIComponent(objectName)}`;
-      const response = await fetch(url);
-      if (response.ok) {
-        const summary = await response.json();
-        const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
-        
-        // Transform the data to match the cardinality format expected by the table
-        const cardinalityFormatted = summaryData.map((col: any) => ({
-          column: col.column,
-          data_type: col.data_type,
-          unique_count: col.unique_count,
-          unique_values: col.unique_values || []
-        }));
-        
-        setCardinalityData(cardinalityFormatted);
-        setOriginalFileName(summary.original_name || typedData.file_id);
-      } else {
-        const errorText = await response.text();
-        setCardinalityError(`Failed to fetch cardinality data: ${response.status} - ${errorText}`);
-      }
-    } catch (e: any) {
-      setCardinalityError(e.message || 'Error fetching cardinality data');
-    } finally {
-      setCardinalityLoading(false);
+      return document.execCommand(command, false, value);
+    } catch (e) {
+      return false;
     }
   };
 
-  // Cardinality filtering and sorting logic
-  const displayedCardinality = React.useMemo(() => {
-    let filtered = Array.isArray(cardinalityData) ? cardinalityData : [];
-
-    // Filter out columns with unique_count = 0 (only exclude zero values)
-    filtered = filtered.filter(c => c.unique_count > 0);
-
-    // Apply column filters
-    Object.entries(columnFilters).forEach(([column, filterValues]) => {
-      if (filterValues && filterValues.length > 0) {
-        filtered = filtered.filter(row => {
-          const cellValue = String(row[column.toLowerCase()] || '');
-          return filterValues.includes(cellValue);
-        });
-      }
-    });
-
-    // Apply sorting
-    if (sortColumn) {
-      filtered = [...filtered].sort((a, b) => {
-        const aVal = a[sortColumn.toLowerCase()];
-        const bVal = b[sortColumn.toLowerCase()];
-        if (aVal === bVal) return 0;
-        let comparison = 0;
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
-          comparison = aVal - bVal;
-        } else {
-          comparison = String(aVal).localeCompare(String(bVal));
+  // Sync HTML after formatting command - ensures HTML is captured after execCommand
+  const syncNoteHtmlAfterFormatting = (chartId: string) => {
+    if (editingNoteChartId === chartId) {
+      setTimeout(() => {
+        const editorElement = document.querySelector('[data-chart-note-editor="true"]') as HTMLElement;
+        if (editorElement) {
+          const updatedHtml = editorElement.innerHTML;
+          const chart = charts.find(c => c.id === chartId);
+          if (chart && updatedHtml !== chart.noteHtml) {
+            const updatedCharts = charts.map(c =>
+              c.id === chartId ? { ...c, noteHtml: updatedHtml } : c
+            );
+            updateSettings(atomId, { charts: updatedCharts });
+          }
         }
-        return sortDirection === 'desc' ? -comparison : comparison;
-      });
-    }
-
-    return filtered;
-  }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
-
-  const getUniqueColumnValues = (column: string): string[] => {
-    if (!Array.isArray(cardinalityData) || cardinalityData.length === 0) return [];
-    
-    // Get the currently filtered data (before applying the current column's filter)
-    let filteredData = Array.isArray(cardinalityData) ? cardinalityData : [];
-
-    // Filter out columns with unique_count = 0 (only exclude zero values)
-    filteredData = filteredData.filter(c => c.unique_count > 0);
-
-    // Apply all other column filters except the current one
-    Object.entries(columnFilters).forEach(([col, filterValues]) => {
-      if (col !== column && filterValues && filterValues.length > 0) {
-        filteredData = filteredData.filter(row => {
-          const cellValue = String(row[col.toLowerCase()] || '');
-          return filterValues.includes(cellValue);
-        });
-      }
-    });
-
-    // Get unique values from the filtered data
-    const values = filteredData.map(row => String(row[column.toLowerCase()] || '')).filter(Boolean);
-    return Array.from(new Set(values)).sort();
-  };
-
-  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
-    if (sortColumn === column) {
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortColumn('');
-        setSortDirection('asc');
-      }
-    } else {
-      setSortColumn(column);
-      setSortDirection(direction || 'asc');
+      }, 0);
     }
   };
 
-  const handleColumnFilter = (column: string, values: string[]) => {
-    setColumnFilters(prev => ({
-      ...prev,
-      [column]: values
-    }));
+  // TextBoxToolbar handlers for chart notes - apply via execCommand when possible
+  const handleNoteFontFamilyChange = (chartId: string, font: string) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'fontName', font);
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { fontFamily: font });
   };
 
-  const clearColumnFilter = (column: string) => {
-    setColumnFilters(prev => {
-      const cpy = { ...prev };
-      delete cpy[column];
-      return cpy;
+  const handleNoteIncreaseFontSize = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newSize = Math.min(formatting.fontSize + 1, 72);
+    // Note: execCommand fontSize uses 1-7 scale, so we apply via CSS instead
+    handleNoteFormattingChange(chartId, { fontSize: newSize });
+  };
+
+  const handleNoteDecreaseFontSize = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newSize = Math.max(formatting.fontSize - 1, 8);
+    handleNoteFormattingChange(chartId, { fontSize: newSize });
+  };
+
+  const handleNoteToggleBold = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newBold = !formatting.bold;
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'bold');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { bold: newBold });
+  };
+
+  const handleNoteToggleItalic = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newItalic = !formatting.italic;
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'italic');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { italic: newItalic });
+  };
+
+  const handleNoteToggleUnderline = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newUnderline = !formatting.underline;
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'underline');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { underline: newUnderline });
+  };
+
+  const handleNoteToggleStrikethrough = (chartId: string) => {
+    const formatting = getNoteFormatting(chartId);
+    const newStrikethrough = !formatting.strikethrough;
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'strikeThrough');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { strikethrough: newStrikethrough });
+  };
+
+  const handleNoteAlign = (chartId: string, align: TextAlignOption) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      const command = align === 'center' ? 'justifyCenter' : align === 'right' ? 'justifyRight' : 'justifyLeft';
+      runNoteEditorCommand(chartId, command);
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { textAlign: align });
+  };
+
+  const handleNoteColorChange = (chartId: string, color: string) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'foreColor', color);
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { textColor: color });
+  };
+
+  const handleNoteBackgroundColorChange = (chartId: string, color: string) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      runNoteEditorCommand(chartId, 'backColor', color) || runNoteEditorCommand(chartId, 'hiliteColor', color);
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, { backgroundColor: color });
+  };
+
+  const handleNoteApplyTextStyle = (chartId: string, preset: typeof TEXT_STYLE_PRESETS[number]) => {
+    const hasSelection = hasNoteEditorSelection(chartId);
+    if (hasSelection) {
+      if (preset.bold) runNoteEditorCommand(chartId, 'bold');
+      if (preset.italic) runNoteEditorCommand(chartId, 'italic');
+      if (preset.underline) runNoteEditorCommand(chartId, 'underline');
+      if (preset.strikethrough) runNoteEditorCommand(chartId, 'strikeThrough');
+      syncNoteHtmlAfterFormatting(chartId);
+    }
+    handleNoteFormattingChange(chartId, {
+      fontSize: preset.fontSize,
+      bold: preset.bold ?? false,
+      italic: preset.italic ?? false,
+      underline: preset.underline ?? false,
+      strikethrough: preset.strikethrough ?? false,
     });
   };
+
+
+
+
   
   // Add new charts based on layout configuration
   const addChart = () => {
@@ -958,11 +1090,25 @@ const renderChart = (
       updateSettings(atomId, { charts: updatedCharts });
     },
     onTitleChange: (newTitle: string) => {
-      const updatedCharts = charts.map(c => 
-        c.id === chart.id 
-          ? { ...c, title: newTitle }
-          : c
-      );
+      // 🔧 CRITICAL FIX: Get fresh charts from store to avoid stale state and prevent duplicates
+      const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+      const currentSettings = (currentAtom?.settings as any) || {};
+      const currentCharts = currentSettings.charts || charts;
+      
+      // Find the exact chart by ID to ensure we're updating the right one
+      const chartIndex = currentCharts.findIndex(c => c.id === chart.id);
+      if (chartIndex === -1) {
+        console.warn('⚠️ [TITLE-CHANGE] Chart not found, skipping title update', { chartId: chart.id });
+        return;
+      }
+      
+      // Update by index to prevent duplicates
+      const updatedCharts = [...currentCharts];
+      updatedCharts[chartIndex] = {
+        ...currentCharts[chartIndex], // Preserve all properties
+        title: newTitle // Only update title
+      };
+      
       updateSettings(atomId, { charts: updatedCharts });
     },
     forceSingleAxis: chart.dualAxisMode === 'single',
@@ -1027,221 +1173,23 @@ const renderChart = (
       </div>
       
       <div className="relative z-10 p-6 overflow-hidden">
-        {/* Cardinality View */}
-        {cardinalityLoading ? (
-          <div className="p-4 text-blue-600">Loading cardinality data...</div>
-        ) : cardinalityError ? (
-          <div className="p-4 text-red-600">{cardinalityError}</div>
-        ) : cardinalityData && cardinalityData.length > 0 ? (
-          <Table
-              headers={[
-                <ContextMenu key="Column">
-                  <ContextMenuTrigger asChild>
-                    <div className="flex items-center gap-1 cursor-pointer">
-                      Column
-                      {sortColumn === 'column' && (
-                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                      )}
-                    </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                        <ContextMenuItem onClick={() => handleSort('column', 'asc')}>
-                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                        </ContextMenuItem>
-                        <ContextMenuItem onClick={() => handleSort('column', 'desc')}>
-                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                        </ContextMenuItem>
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    <ContextMenuSeparator />
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                        <FilterMenu 
-                          column="column" 
-                          uniqueValues={getUniqueColumnValues("column")}
-                          current={columnFilters["column"] || []}
-                          onColumnFilter={handleColumnFilter}
-                        />
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    {columnFilters['column']?.length > 0 && (
-                      <>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => clearColumnFilter('column')}>
-                          Clear Filter
-                        </ContextMenuItem>
-                      </>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>,
-                <ContextMenu key="Data type">
-                  <ContextMenuTrigger asChild>
-                    <div className="flex items-center gap-1 cursor-pointer">
-                      Data type
-                      {sortColumn === 'data_type' && (
-                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                      )}
-                    </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                        <ContextMenuItem onClick={() => handleSort('data_type', 'asc')}>
-                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                        </ContextMenuItem>
-                        <ContextMenuItem onClick={() => handleSort('data_type', 'desc')}>
-                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                        </ContextMenuItem>
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    <ContextMenuSeparator />
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                        <FilterMenu 
-                          column="data_type" 
-                          uniqueValues={getUniqueColumnValues("data_type")}
-                          current={columnFilters["data_type"] || []}
-                          onColumnFilter={handleColumnFilter}
-                        />
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    {columnFilters['data_type']?.length > 0 && (
-                      <>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => clearColumnFilter('data_type')}>
-                          Clear Filter
-                        </ContextMenuItem>
-                      </>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>,
-                <ContextMenu key="Unique count">
-                  <ContextMenuTrigger asChild>
-                    <div className="flex items-center gap-1 cursor-pointer">
-                      Unique count
-                      {sortColumn === 'unique_count' && (
-                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                      )}
-                    </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                        <ContextMenuItem onClick={() => handleSort('unique_count', 'asc')}>
-                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                        </ContextMenuItem>
-                        <ContextMenuItem onClick={() => handleSort('unique_count', 'desc')}>
-                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                        </ContextMenuItem>
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    <ContextMenuSeparator />
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger className="flex items-center">
-                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                        <FilterMenu 
-                          column="unique_count" 
-                          uniqueValues={getUniqueColumnValues("unique_count")}
-                          current={columnFilters["unique_count"] || []}
-                          onColumnFilter={handleColumnFilter}
-                        />
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                    {columnFilters['unique_count']?.length > 0 && (
-                      <>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => clearColumnFilter('unique_count')}>
-                          Clear Filter
-                        </ContextMenuItem>
-                      </>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>,
-                "Sample values"
-              ]}
-              colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
-              bodyClassName="max-h-[484px] overflow-y-auto"
-              defaultMinimized={true}
-              borderColor="border-pink-500"
-              customHeader={{
-                title: "Data Summary",
-                subtitle: "Data in detail",
-                subtitleClickable: !!originalFileName,
-                onSubtitleClick: () => {
-                  if (originalFileName) {
-                    window.open(`/dataframe?name=${encodeURIComponent(originalFileName)}`, '_blank');
-                  }
-                }
-              }}
-            >
-              {displayedCardinality.map((col, index) => (
-                <tr key={index} className="table-row">
-                  <td className="table-cell">{col.column || col.Column || ''}</td>
-                  <td className="table-cell">{col.data_type || col['Data type'] || ''}</td>
-                  <td className="table-cell">{col.unique_count || col['Unique count'] || 0}</td>
-                  <td className="table-cell">
-                    {col.unique_values ? (
-                      <div className="flex flex-wrap items-center gap-1">
-                        {Array.isArray(col.unique_values) ? (
-                          <>
-                            {col.unique_values.slice(0, 2).map((val: any, i: number) => (
-                              <Badge
-                                key={i}
-                                className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
-                              >
-                                {String(val)}
-                              </Badge>
-                            ))}
-                            {col.unique_values.length > 2 && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
-                                    <Plus className="w-3 h-3" />
-                                    {col.unique_values.length - 2}
-                                  </span>
-                                </TooltipTrigger>
-                                <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
-                                  {col.unique_values
-                                    .slice(2)
-                                    .map(val => String(val))
-                                    .join(', ')}
-                                </TooltipContent>
-                              </Tooltip>
-                            )}
-                          </>
-                        ) : (
-                          <Badge className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50">
-                            {String(col.unique_values)}
-                          </Badge>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-gray-500 italic">No samples</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </Table>
-        ) : null}
+        {/* Data Summary - Unified component with metadata support */}
+        {dataSource && (atom?.settings as any)?.showDataSummary && (
+          <DataSummaryView
+            objectName={dataSource}
+            atomId={atomId}
+            title="Data Summary"
+            subtitle="Data in detail"
+            subtitleClickable={!!dataSource}
+            onSubtitleClick={() => {
+              if (dataSource) {
+                window.open(`/dataframe?name=${encodeURIComponent(dataSource)}`, '_blank');
+              }
+            }}
+          />
+        )}
+
+        {/* Legacy cardinality view removed - using DataSummaryView instead */}
 
         {/* Instructional text for exhibition */}
         <div className="mt-6 text-center">
@@ -1581,7 +1529,7 @@ const renderChart = (
                           );
                         } else {
                           // Simple mode: Original filter controls
-                          if (Object.keys(chart.filters).length === 0) return null;
+                          if (!chart.filters || Object.keys(chart.filters).length === 0) return null;
                           
                           const isCollapsed = filtersCollapsed[chart.id] || false;
                           
@@ -1653,14 +1601,84 @@ const renderChart = (
                          {renderChart(chart, index)}
                        </div>
                        {chart.showNote && (
-                         <Input
-                           placeholder="Add note"
-                           value={chart.note || ''}
-                           onChange={(e) => handleNoteChange(chart.id, e.target.value)}
-                           onKeyDown={(e) => handleNoteKeyDown(chart.id, e)}
-                           className="mt-2 w-full text-sm flex-shrink-0"
+                         <div 
+                           className="mt-2 w-full flex-shrink-0 relative" 
                            onClick={(e) => e.stopPropagation()}
-                         />
+                           onFocusCapture={() => {
+                             if (editingNoteChartId === chart.id) {
+                               setShowNoteToolbar(true);
+                             }
+                           }}
+                           onBlurCapture={(e) => {
+                             const relatedTarget = e.relatedTarget as HTMLElement;
+                             // Don't hide toolbar if focus is moving to toolbar
+                             if (relatedTarget && (
+                               relatedTarget.closest('[data-text-toolbar-root]') ||
+                               relatedTarget.closest('[role="popover"]') ||
+                               relatedTarget.closest('[data-radix-popover-content]')
+                             )) {
+                               return;
+                             }
+                             // Delay to allow toolbar interactions
+                             setTimeout(() => {
+                               if (!document.activeElement?.closest('[data-text-toolbar-root]') &&
+                                   !document.activeElement?.closest('[data-chart-note-editor="true"]')) {
+                                 setShowNoteToolbar(false);
+                               }
+                             }, 200);
+                           }}
+                         >
+                           {showNoteToolbar && editingNoteChartId === chart.id && (
+                             <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full mb-2">
+                               <TextBoxToolbar
+                                 fontFamily={chart.noteFormatting?.fontFamily || DEFAULT_CHART_NOTE_FORMATTING.fontFamily}
+                                 onFontFamilyChange={(font) => handleNoteFontFamilyChange(chart.id, font)}
+                                 fontSize={chart.noteFormatting?.fontSize || DEFAULT_CHART_NOTE_FORMATTING.fontSize}
+                                 onIncreaseFontSize={() => handleNoteIncreaseFontSize(chart.id)}
+                                 onDecreaseFontSize={() => handleNoteDecreaseFontSize(chart.id)}
+                                 onApplyTextStyle={(preset) => handleNoteApplyTextStyle(chart.id, preset)}
+                                 bold={chart.noteFormatting?.bold || false}
+                                 italic={chart.noteFormatting?.italic || false}
+                                 underline={chart.noteFormatting?.underline || false}
+                                 strikethrough={chart.noteFormatting?.strikethrough || false}
+                                 onToggleBold={() => handleNoteToggleBold(chart.id)}
+                                 onToggleItalic={() => handleNoteToggleItalic(chart.id)}
+                                 onToggleUnderline={() => handleNoteToggleUnderline(chart.id)}
+                                 onToggleStrikethrough={() => handleNoteToggleStrikethrough(chart.id)}
+                                 align={(chart.noteFormatting?.textAlign || 'left') as TextAlignOption}
+                                 onAlign={(align) => handleNoteAlign(chart.id, align)}
+                                 color={chart.noteFormatting?.textColor || DEFAULT_CHART_NOTE_FORMATTING.textColor}
+                                 onColorChange={(color) => handleNoteColorChange(chart.id, color)}
+                                 backgroundColor={chart.noteFormatting?.backgroundColor || DEFAULT_CHART_NOTE_FORMATTING.backgroundColor}
+                                 onBackgroundColorChange={(color) => handleNoteBackgroundColorChange(chart.id, color)}
+                               />
+                             </div>
+                           )}
+                           <ChartNoteEditor
+                             value={getNoteValue(chart.id)}
+                             html={getNoteHtml(chart.id)}
+                             formatting={chart.noteFormatting || DEFAULT_CHART_NOTE_FORMATTING}
+                             isEditing={editingNoteChartId === chart.id}
+                             onValueChange={(value, html) => handleNoteChange(chart.id, value, html)}
+                             onCommit={(value, html) => handleNoteCommit(chart.id, value, html)}
+                             onCancel={() => handleNoteCancel(chart.id)}
+                             onFormattingChange={(formatting) => handleNoteFormattingChange(chart.id, formatting)}
+                             onClick={() => {
+                               setEditingNoteChartId(chart.id);
+                               setShowNoteToolbar(true);
+                               // Initialize local state with current note when starting to edit
+                               if (!localNoteState[chart.id]) {
+                                 setLocalNoteState(prev => ({
+                                   ...prev,
+                                   [chart.id]: {
+                                     value: chart.note || '',
+                                     html: chart.noteHtml
+                                   }
+                                 }));
+                               }
+                             }}
+                           />
+                         </div>
                        )}
                      </CardContent>
                    </Card>

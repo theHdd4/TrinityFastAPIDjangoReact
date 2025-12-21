@@ -3,8 +3,9 @@ import SettingsPanel from './SettingsPanel/';
 import SavedDataFramesPanel from './SavedDataFramesPanel';
 import HelpPanel from './HelpPanel/';
 import ExhibitionPanel from './ExhibitionPanel';
+import { GuidedWorkflowPanel } from './GuidedWorkflowPanel';
 import { TrinityAIIcon, TrinityAIPanel } from '@/components/TrinityAI';
-import { Settings, Database, HelpCircle, GalleryHorizontal, Undo2, Save, Share2, List, Play } from 'lucide-react';
+import { Settings, Database, HelpCircle, GalleryHorizontal, Undo2, Save, Share2, List, Play, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 
@@ -25,9 +26,9 @@ interface Props {
   selectedAtomId?: string;
   selectedCardId?: string;
   cardExhibited?: boolean;
-  active?: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null;
+  active?: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | 'guided' | null;
   onActiveChange?: (
-    active: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null,
+    active: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | 'guided' | null,
   ) => void;
   trinityAILayout?: 'vertical' | 'horizontal';
   isTrinityAIVisible?: boolean;
@@ -42,6 +43,9 @@ interface Props {
   onShare?: () => void;
   showFloatingNavigationList?: boolean;
   setShowFloatingNavigationList?: (show: boolean) => void;
+  // Guided workflow props
+  onCreateDataUploadAtom?: () => Promise<void>;
+  isGuidedModeEnabled?: boolean;
 }
 
 const AuxiliaryMenu: React.FC<Props> = ({
@@ -61,16 +65,18 @@ const AuxiliaryMenu: React.FC<Props> = ({
   onSave,
   onShare,
   showFloatingNavigationList = true,
-  setShowFloatingNavigationList
+  setShowFloatingNavigationList,
+  onCreateDataUploadAtom,
+  isGuidedModeEnabled = false,
 }) => {
   const [internalActive, setInternalActive] = useState<
-    'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null
+    'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | 'guided' | null
   >(null);
   const controlled = activeProp !== undefined;
   const active = controlled ? activeProp : internalActive;
 
   const setActive = (
-    value: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null,
+    value: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | 'guided' | null,
   ) => {
     if (controlled) {
       onActiveChange?.(value);
@@ -79,7 +85,14 @@ const AuxiliaryMenu: React.FC<Props> = ({
     }
   };
 
+  // Track if user has explicitly closed the guided workflow panel
+  const userClosedGuidedRef = React.useRef(false);
+  // Track if Settings was explicitly opened by user (clicking gear icon)
+  const settingsExplicitlyOpenedRef = React.useRef(false);
+  
   const openSettings = () => {
+    // Mark as explicitly opened when user clicks Settings icon
+    settingsExplicitlyOpenedRef.current = true;
     // In horizontal layout, don't close AI panel when opening settings
     if (trinityAILayout === 'horizontal') {
       setActive(active === 'settings' ? null : 'settings');
@@ -98,6 +111,53 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openHelp = () => setActive(active === 'help' ? null : 'help');
   const openExhibition = () => setActive(active === 'exhibition' ? null : 'exhibition');
   const openTrinityAI = () => setActive(active === 'trinity' ? null : 'trinity');
+  const openGuidedWorkflow = () => {
+    // When user explicitly clicks wrench icon, reset the "closed" flag
+    userClosedGuidedRef.current = false;
+    setActive(active === 'guided' ? null : 'guided');
+  };
+  
+  // Open guided workflow panel by default when guided mode is enabled
+  React.useEffect(() => {
+    if (isGuidedModeEnabled) {
+      // If Settings tries to open automatically (not explicitly), redirect to Guided Workflow
+      if (active === 'settings' && !settingsExplicitlyOpenedRef.current && !userClosedGuidedRef.current) {
+        // Use setTimeout to avoid state update conflicts
+        const timeoutId = setTimeout(() => {
+          setActive('guided');
+        }, 0);
+        return () => clearTimeout(timeoutId);
+      }
+      // If no panel is active and user hasn't explicitly closed it, open Guided Workflow
+      if (active === null && !userClosedGuidedRef.current) {
+        setActive('guided');
+      }
+    } else {
+      // Close guided panel when guided mode is disabled
+      if (active === 'guided') {
+        setActive(null);
+      }
+      userClosedGuidedRef.current = false;
+      settingsExplicitlyOpenedRef.current = false;
+    }
+  }, [isGuidedModeEnabled, active, setActive]);
+  
+  // Reset explicit flag when Settings closes
+  React.useEffect(() => {
+    if (active !== 'settings') {
+      settingsExplicitlyOpenedRef.current = false;
+    }
+  }, [active]);
+  
+  // Track when user explicitly closes the guided workflow panel
+  React.useEffect(() => {
+    if (isGuidedModeEnabled && active !== 'guided' && active !== null) {
+      // User switched to another panel, mark as closed (unless it's Settings and was explicit)
+      if (active !== 'settings' || !settingsExplicitlyOpenedRef.current) {
+        userClosedGuidedRef.current = true;
+      }
+    }
+  }, [active, isGuidedModeEnabled]);
 
   const [trinityBackgroundStatus, setTrinityBackgroundStatus] = useState<TrinityBackgroundStatus>({
     isProcessing: false,
@@ -135,6 +195,17 @@ const AuxiliaryMenu: React.FC<Props> = ({
           selectedAtomId={selectedAtomId}
           selectedCardId={selectedCardId}
           cardExhibited={cardExhibited}
+        />
+      )}
+
+      {active === 'guided' && (
+        <GuidedWorkflowPanel
+          isCollapsed={false}
+          onToggle={() => {
+            userClosedGuidedRef.current = true;
+            setActive(null);
+          }}
+          onCreateDataUploadAtom={onCreateDataUploadAtom}
         />
       )}
 
@@ -177,59 +248,103 @@ const AuxiliaryMenu: React.FC<Props> = ({
 
 
       {/* Icons Column - Always visible and stays on the right */}
+      {/* Same icons in both modes - only add opacity effect on non-clickable icons when guided mode is ON */}
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+        {/* Position 1: Trinity AI - visible but not clickable when guided mode is ON */}
+        <div className={`p-3 border-b border-gray-200 flex items-center justify-center relative ${isGuidedModeEnabled ? 'opacity-40' : ''}`}>
           <button
             onClick={() => {
-              // Toggle between collapsed and expanded, but never completely hide
-              // The panel is always visible, just minimized or expanded
-              openTrinityAI();
+              if (!isGuidedModeEnabled) {
+                openTrinityAI();
+              }
             }}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'trinity' ? 'bg-muted text-foreground' : ''
-            }`}
+            disabled={isGuidedModeEnabled}
+            className={`w-9 h-9 rounded-lg transition-all group relative flex items-center justify-center ${
+              isGuidedModeEnabled 
+                ? 'cursor-not-allowed' 
+                : 'hover:bg-muted hover:scale-105 hover:shadow-lg'
+            } ${active === 'trinity' ? 'bg-muted text-foreground' : ''}`}
             title="Trinity AI - Click to expand/collapse"
             data-trinity-ai="true"
             type="button"
           >
             <TrinityAIIcon className="text-purple-500" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Trinity AI
-            </span>
+            {!isGuidedModeEnabled && (
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+                Trinity AI
+              </span>
+            )}
           </button>
         </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+        {/* Position 2: Settings - visible but not clickable when guided mode is ON */}
+        <div className={`p-3 border-b border-gray-200 flex items-center justify-center ${isGuidedModeEnabled ? 'opacity-40' : ''}`}>
           <button
-            onClick={openSettings}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'settings' ? 'bg-muted text-foreground' : ''
-            }`}
+            onClick={() => {
+              if (!isGuidedModeEnabled) {
+                openSettings();
+              }
+            }}
+            disabled={isGuidedModeEnabled}
+            className={`w-9 h-9 rounded-lg transition-all group relative flex items-center justify-center ${
+              isGuidedModeEnabled 
+                ? 'cursor-not-allowed' 
+                : 'hover:bg-muted hover:scale-105 hover:shadow-lg'
+            } ${active === 'settings' ? 'bg-muted text-foreground' : ''}`}
             title="Settings"
             data-settings="true"
             type="button"
           >
             <Settings className="w-3.5 h-3.5" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Settings
-            </span>
+            {!isGuidedModeEnabled && (
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+                Settings
+              </span>
+            )}
           </button>
         </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+        {/* Position 3: Saved DataFrames - Always visible and clickable */}
+        <div className="p-3 border-b border-gray-200 flex items-center justify-center relative z-10 pointer-events-auto">
           <button
-            onClick={openFrames}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+            onClick={(e) => {
+              e.stopPropagation();
+              openFrames();
+            }}
+            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center z-10 pointer-events-auto ${
               active === 'frames' ? 'bg-muted text-foreground' : ''
             }`}
             title="Saved DataFrames"
             data-saved-dataframes="true"
             type="button"
           >
-            <Database className="w-3.5 h-3.5" />
+            <Database className="w-4 h-4 pointer-events-none" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Saved DataFrames
             </span>
           </button>
         </div>
+        {/* Position 4: Guided Workflow (Wrench) - Only shown when guided mode is ON */}
+        {isGuidedModeEnabled && (
+          <div className="p-3 border-b border-gray-200 flex items-center justify-center relative z-10 pointer-events-auto">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                openGuidedWorkflow();
+              }}
+              className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center z-10 pointer-events-auto ${
+                active === 'guided' ? 'bg-muted text-foreground' : ''
+              }`}
+              title="Guided Workflow"
+              data-guided-workflow="true"
+              type="button"
+            >
+              <Wrench className="w-4 h-4 pointer-events-none" />
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+                Guided Workflow
+              </span>
+            </button>
+          </div>
+        )}
+        {/* Help - Hidden (has hidden class) */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-center hidden">
           <button
             onClick={openHelp}

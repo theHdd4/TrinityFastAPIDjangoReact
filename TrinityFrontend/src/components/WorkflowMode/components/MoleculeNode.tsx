@@ -203,11 +203,11 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
     // Map atom names to their categories based on laboratory mode categories
     const atomCategoryMap: Record<string, string> = {
       // Data Sources - Blue
-      'Data Upload Validate': 'blue',
+      'Data Validate': 'blue',
       'CSV Import': 'blue', 
       'JSON Import': 'blue',
       'Database Connect': 'blue',
-      'data-upload-validate': 'blue',
+      'data-validate': 'blue',
       'csv-import': 'blue',
       'json-import': 'blue',
       'database-connect': 'blue',
@@ -412,11 +412,11 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
     // Map atom names to their categories based on laboratory mode categories
     const atomCategoryMap: Record<string, string> = {
       // Data Sources - Blue
-      'Data Upload Validate': 'blue',
+      'Data Validate': 'blue',
       'CSV Import': 'blue', 
       'JSON Import': 'blue',
       'Database Connect': 'blue',
-      'data-upload-validate': 'blue',
+      'data-validate': 'blue',
       'csv-import': 'blue',
       'json-import': 'blue',
       'database-connect': 'blue',

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
 import { atoms as allAtoms } from "@/components/AtomList/data";
 import { ClarificationRequestMessage as ClarificationRequest } from "@/types/streaming";
+import { LABORATORY_API } from "@/lib/api";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -323,6 +324,7 @@ export interface FeatureOverviewSettings {
   filterUnique?: boolean;
   isLoading?: boolean;
   loadingMessage?: string;
+  showDataSummary?: boolean;
   loadingStatus?: string;
   exhibitionSelections?: FeatureOverviewExhibitionSelection[];
 }
@@ -359,6 +361,7 @@ export interface ConcatSettings {
   performConcat: boolean;
   concatResults?: any;
   concatId?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
@@ -399,6 +402,7 @@ export interface CorrelationSettings {
     selectFilter: string;
     uploadedFile?: string;
     filterDimensions?: Record<string, string[]>;
+    saveFiltered?: boolean; // Whether to save filtered data to MinIO (default: false)
   };
   // Enhanced visualization options
   visualizationOptions?: {
@@ -451,6 +455,8 @@ export interface CorrelationSettings {
   // Note functionality (matching ChartMaker pattern)
   note?: string;
   showNote?: boolean;
+  // Data Summary functionality
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
@@ -496,7 +502,8 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   columnValuesLoading: false,
   columnValuesError: undefined,
   note: '',
-  showNote: false
+  showNote: false,
+  showDataSummary: false
 };
 
 export interface ColumnClassifierColumn {
@@ -528,6 +535,7 @@ export interface ColumnClassifierSettings {
   isLoading?: boolean;
   loadingMessage?: string;
   loadingStatus?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -559,6 +567,7 @@ export interface DataFrameOperationsSettings {
   selectedFile?: string;
   tableData?: any;
   data?: any;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings = {
@@ -572,6 +581,7 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   selectedFile: '',
   tableData: undefined,
   data: undefined,
+  showDataSummary: false,
 };
 
 export interface ChartData {
@@ -680,6 +690,7 @@ export interface ChartMakerSettings {
   };
   error?: string;
   exhibitionSelections?: ChartMakerExhibitionSelection[];
+  showDataSummary?: boolean;
 }
 
 export interface SelectModelsFeatureSettings {
@@ -840,6 +851,7 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   },
   error: undefined,
   exhibitionSelections: [],
+  showDataSummary: false,
 };
 
 export interface ClusteringData {
@@ -1570,6 +1582,7 @@ export interface ScopeSelectorSettings {
   }>;
   dataSource?: string;
   previewRows?: ScopeSelectorPreviewRow[];
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_SCOPE_SELECTOR_SETTINGS: ScopeSelectorSettings = {
@@ -1737,7 +1750,8 @@ export interface GroupByAtomSettings {
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
-  showCardinalityView?: boolean;
+  showCardinalityView?: boolean; // Deprecated - use showDataSummary instead
+  showDataSummary?: boolean;
   
   // GroupBy results
   groupbyResults?: {
@@ -1769,7 +1783,8 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   sortColumn: 'unique_count',
   sortDirection: 'desc',
   columnFilters: {},
-  showCardinalityView: false,
+  showCardinalityView: false, // Deprecated - use showDataSummary instead
+  showDataSummary: false,
   groupbyResults: {
     result_file: '',
     result_shape: [0, 0],
@@ -1947,6 +1962,9 @@ export interface MetricsInputSettings {
   columnOpsSelectedIdentifiers?: string[]; // Filtered identifiers (date columns removed) for display
   columnOpsSelectedIdentifiersForBackend?: string[]; // Selected identifiers for backend operations
   columnOpsIdentifiersListOpen?: boolean;
+  // Context for table atom auto-display
+  contextCardId?: string; // Card ID when metric operation is initiated
+  contextAtomId?: string; // Atom ID when metric operation is initiated
 }
 
 export const DEFAULT_METRICS_INPUT_SETTINGS: MetricsInputSettings = {
@@ -1965,6 +1983,8 @@ export const DEFAULT_METRICS_INPUT_SETTINGS: MetricsInputSettings = {
   columnOpsSelectedIdentifiers: [],
   columnOpsSelectedIdentifiersForBackend: [],
   columnOpsIdentifiersListOpen: false,
+  contextCardId: undefined,
+  contextAtomId: undefined,
 };
 
 // Mode constants
@@ -1974,7 +1994,9 @@ export type LaboratorySubMode = 'analytics' | 'dashboard';
 export const DASHBOARD_ALLOWED_ATOMS = [
   'dataframe-operations',
   'chart-maker',
-  'correlation'
+  'correlation',
+  'table',
+  'kpi-dashboard'
 ] as const;
 
 // Helper function to get allowed atoms based on mode
@@ -1995,6 +2017,19 @@ interface LaboratoryStore {
   subMode: LaboratorySubMode;
   isLaboratorySession: boolean;
   pendingClarification?: ClarificationRequest | null;
+  
+  // --- Guided Mode State ---
+  globalGuidedModeEnabled: boolean;
+  activeGuidedFlows: Record<string, any>;
+  
+  // --- Direct Review Panel State ---
+  directReviewTarget: {
+    object_name: string;
+    csv_name: string;
+    arrow_name?: string;
+    last_modified?: string;
+    size?: number;
+  } | null;
 
   // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
@@ -2025,6 +2060,39 @@ interface LaboratoryStore {
   addMetricsOperation: (operation: MetricsOperation) => void;
   updateMetricsOperation: (operationId: string, updates: Partial<MetricsOperation>) => void;
   removeMetricsOperation: (operationId: string) => void;
+
+  // --- Table Atom Auto-Display Actions ---
+  replaceAtomWithTable: (
+    cardId: string,
+    currentAtomId: string,
+    newDataframePath: string
+  ) => Promise<{ success: boolean; tableAtomId?: string; error?: string }>;
+  createCardWithTableAtom: (
+    objectName: string,
+    position?: number
+  ) => Promise<{ tableAtomId: string; cardId: string } | null>;
+  updateTableAtomWithFile: (
+    atomId: string,
+    objectName: string
+  ) => Promise<void>;
+  findCardByAtomId: (atomId: string) => LayoutCard | undefined;
+  findCardIndex: (cardId: string) => number;
+  
+  // --- Guided Mode Actions ---
+  setGlobalGuidedMode: (enabled: boolean) => void;
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => void;
+  updateGuidedFlowStage: (atomId: string, stage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7') => void;
+  isGuidedModeActiveForAtom: (atomId: string) => boolean;
+  removeActiveGuidedFlow: (atomId: string) => void;
+  
+  // --- Direct Review Panel Actions ---
+  setDirectReviewTarget: (frame: {
+    object_name: string;
+    csv_name: string;
+    arrow_name?: string;
+    last_modified?: string;
+    size?: number;
+  } | null) => void;
 }
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
@@ -2048,20 +2116,23 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     : null,
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   subMode: 'analytics',  // Default to analytics mode
+  globalGuidedModeEnabled: false,
+  activeGuidedFlows: {},
+  directReviewTarget: null,
   setCards: (cards: LayoutCard[]) => {
     const currentSubMode = get().subMode;
     
-    console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS CALLED ==========');
-    console.log('🔍 [DIAGNOSIS] setCards called:', {
-      cardsCount: cards?.length || 0,
-      subMode: currentSubMode,
-      cardAtomIds: cards?.map(c => c.atoms.map(a => a.atomId)).flat() || [],
-      timestamp: new Date().toISOString()
-    });
+    // console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS CALLED ==========');
+    // console.log('🔍 [DIAGNOSIS] setCards called:', {
+    //   cardsCount: cards?.length || 0,
+    //   subMode: currentSubMode,
+    //   cardAtomIds: cards?.map(c => c.atoms.map(a => a.atomId)).flat() || [],
+    //   timestamp: new Date().toISOString()
+    // });
     
     // FIX: Ensure cards is always an array
     if (!Array.isArray(cards)) {
-      console.error('🔍 [DIAGNOSIS] ❌ [Laboratory Store] setCards called with non-array:', cards);
+      console.error('❌ [Laboratory Store] setCards called with non-array:', cards);
       set({ cards: [] });
       return;
     }
@@ -2079,11 +2150,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       const filteredCards: LayoutCard[] = [];
       
       for (const card of cardsToSet) {
+        // CRITICAL FIX: Allow landing-screen atoms in dashboard mode for empty state
         const allowedAtoms = (card.atoms || []).filter(atom => 
-          allowedAtomIdsSet.has(atom.atomId as any)
+          allowedAtomIdsSet.has(atom.atomId as any) || atom.atomId === 'landing-screen'
         );
         
-        // CRITICAL FIX: Allow empty cards OR cards with allowed atoms
+        // CRITICAL FIX: Allow empty cards OR cards with allowed atoms (including landing-screen)
         // Empty cards must be preserved for "Add New Card" functionality in dashboard mode
         if (allowedAtoms.length > 0 || (card.atoms || []).length === 0) {
           // Keep only first allowed atom (one atom per card), or preserve empty array
@@ -2094,39 +2166,39 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
         }
       }
       
-      if (filteredCards.length !== cardsToSet.length) {
-        console.warn('🔍 [DIAGNOSIS] ⚠️ [Laboratory Store] Filtered cards in setCards (dashboard mode):', {
-          original: cardsToSet.length,
-          filtered: filteredCards.length,
-          removed: cardsToSet.length - filteredCards.length,
-          removedCards: cardsToSet.filter(card => {
-            const allowedAtoms = (card.atoms || []).filter(atom => 
-              allowedAtomIdsSet.has(atom.atomId as any)
-            );
-            return allowedAtoms.length === 0;
-          }).map(c => ({
-            id: c.id,
-            atoms: c.atoms.map(a => a.atomId)
-          }))
-        });
-      }
+      // if (filteredCards.length !== cardsToSet.length) {
+      //   console.warn('🔍 [DIAGNOSIS] ⚠️ [Laboratory Store] Filtered cards in setCards (dashboard mode):', {
+      //     original: cardsToSet.length,
+      //     filtered: filteredCards.length,
+      //     removed: cardsToSet.length - filteredCards.length,
+      //     removedCards: cardsToSet.filter(card => {
+      //       const allowedAtoms = (card.atoms || []).filter(atom => 
+      //         allowedAtomIdsSet.has(atom.atomId as any)
+      //       );
+      //       return allowedAtoms.length === 0;
+      //     }).map(c => ({
+      //       id: c.id,
+      //       atoms: c.atoms.map(a => a.atomId)
+      //     }))
+      //   });
+      // }
       cardsToSet = filteredCards;
     }
     
     const uniqueCards = dedupeCards(cardsToSet);
-    if (uniqueCards.length !== cardsToSet.length) {
-      console.warn('🔍 [DIAGNOSIS] [Laboratory Store] Deduped cards to avoid duplicates', {
-        incoming: cardsToSet.length,
-        unique: uniqueCards.length,
-      });
-    }
+    // if (uniqueCards.length !== cardsToSet.length) {
+    //   console.warn('🔍 [DIAGNOSIS] [Laboratory Store] Deduped cards to avoid duplicates', {
+    //     incoming: cardsToSet.length,
+    //     unique: uniqueCards.length,
+    //   });
+    // }
     
-    console.log('🔍 [DIAGNOSIS] Setting cards to store:', {
-      count: uniqueCards.length,
-      subMode: currentSubMode,
-      cardAtomIds: uniqueCards.map(c => c.atoms.map(a => a.atomId)).flat()
-    });
-    console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS COMPLETE ==========');
+    // console.log('🔍 [DIAGNOSIS] Setting cards to store:', {
+    //   count: uniqueCards.length,
+    //   subMode: currentSubMode,
+    //   cardAtomIds: uniqueCards.map(c => c.atoms.map(a => a.atomId)).flat()
+    // });
+    // console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS COMPLETE ==========');
     
     set({ cards: uniqueCards });
   },
@@ -2239,17 +2311,98 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       
       const updatedCards = state.cards.map((card) => ({
         ...card,
-        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) =>
-          atom.id === atomId
-            ? { 
-                ...atom, 
-                settings: { 
-                  ...(atom.settings || {}), 
-                  ...settings
-                } 
+        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) => {
+          if (atom.id !== atomId) {
+            return atom;
+          }
+          
+          // 🔧 CRITICAL FIX: Special handling for chart-maker charts array to prevent duplicates
+          const currentSettings = atom.settings || {};
+          const newSettings = { ...currentSettings, ...settings };
+          
+          // If this is a chart-maker atom and charts are being updated, merge by ID to prevent duplicates
+          if (atom.type === 'chart-maker' && settings.charts && Array.isArray(settings.charts)) {
+            const existingCharts = Array.isArray(currentSettings.charts) ? currentSettings.charts : [];
+            const newCharts = settings.charts;
+            
+            // 🔧 CRITICAL: Deduplicate and merge charts by ID
+            const chartMap = new Map<string, any>();
+            
+            // First, add all existing charts to the map
+            existingCharts.forEach((chart: any) => {
+              if (chart && chart.id) {
+                chartMap.set(chart.id, chart);
               }
-            : atom,
-        ) : [],
+            });
+            
+            // Then, update or add new charts
+            newCharts.forEach((chart: any) => {
+              if (chart && chart.id) {
+                const existingChart = chartMap.get(chart.id);
+                if (existingChart) {
+                  // Chart exists - merge the update (preserve existing properties, update with new ones)
+                  // 🔧 CRITICAL: NEVER change the chart ID - it must remain stable
+                  const mergedChart = {
+                    ...existingChart,
+                    ...chart
+                  };
+                  // Force preserve original ID in case it was accidentally changed
+                  mergedChart.id = existingChart.id;
+                  chartMap.set(chart.id, mergedChart);
+                } else {
+                  // New chart - add it (but verify ID is unique)
+                  if (chartMap.has(chart.id)) {
+                    console.warn('⚠️ [STORE] Attempted to add chart with existing ID, merging instead', {
+                      chartId: chart.id,
+                      existingChart: chartMap.get(chart.id)
+                    });
+                    // Merge with existing instead of replacing
+                    const existing = chartMap.get(chart.id)!;
+                    chartMap.set(chart.id, {
+                      ...existing,
+                      ...chart,
+                      id: existing.id // Preserve original ID
+                    });
+                  } else {
+                    chartMap.set(chart.id, chart);
+                  }
+                }
+              } else {
+                console.warn('⚠️ [STORE] Chart without ID detected, skipping', chart);
+              }
+            });
+            
+            // Convert map back to array, preserving order
+            const mergedCharts = Array.from(chartMap.values());
+            
+            // Verify no duplicates
+            const chartIds = mergedCharts.map((c: any) => c.id);
+            const uniqueIds = new Set(chartIds);
+            if (chartIds.length !== uniqueIds.size) {
+              console.error('❌ [STORE] Duplicate chart IDs detected after merge!', {
+                chartIds,
+                duplicateIds: chartIds.filter((id, index) => chartIds.indexOf(id) !== index)
+              });
+              // Remove duplicates, keeping the first occurrence
+              const seen = new Set<string>();
+              const deduplicatedCharts = mergedCharts.filter((chart: any) => {
+                if (seen.has(chart.id)) {
+                  return false;
+                }
+                seen.add(chart.id);
+                return true;
+              });
+              newSettings.charts = deduplicatedCharts;
+            } else {
+              newSettings.charts = mergedCharts;
+            }
+          }
+          
+          return {
+            ...atom,
+            settings: newSettings
+          };
+        }) : [],
       }));
       
       return { cards: updatedCards };
@@ -2366,11 +2519,345 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     }));
   },
 
+  // --- Table Atom Auto-Display Functions ---
+  findCardByAtomId: (atomId: string) => {
+    const cards = get().cards;
+    if (!Array.isArray(cards)) return undefined;
+    return cards.find(card =>
+      Array.isArray(card.atoms) && card.atoms.some(atom => atom.id === atomId)
+    );
+  },
+
+  findCardIndex: (cardId: string) => {
+    const cards = get().cards;
+    if (!Array.isArray(cards)) return -1;
+    return cards.findIndex(card => card.id === cardId);
+  },
+
+  updateTableAtomWithFile: async (atomId: string, objectName: string) => {
+    // Update atom settings to trigger auto-load
+    // We need to explicitly set sourceFile and mode, and ensure tableData is cleared
+    // so the auto-load mechanism will trigger
+    
+    const currentAtom = get().getAtom(atomId);
+    if (!currentAtom) {
+      console.error('❌ [updateTableAtomWithFile] Atom not found:', atomId);
+      return;
+    }
+    
+    const currentSettings = (currentAtom.settings as any) || {};
+    const currentSourceFile = currentSettings.sourceFile;
+    const isOverwrite = currentSourceFile === objectName; // Same file = overwrite
+    
+    // Create new settings object with tableData explicitly set to null
+    // This ensures the merged settings will have tableData: null (not undefined)
+    // Also add reloadTrigger to force useEffect to trigger even if sourceFile is same
+    const reloadTrigger = Date.now();
+    const newSettings: any = {
+      ...currentSettings,
+      sourceFile: objectName,
+      mode: 'load',
+      tableData: null,  // Explicitly set to null to clear existing data
+      reloadTrigger: reloadTrigger,  // Force reload even if sourceFile is same (for overwrite case)
+    };
+    
+    console.log('🔄 [updateTableAtomWithFile] Updating atom settings:', {
+      atomId,
+      objectName,
+      currentSourceFile,
+      isOverwrite,
+      mode: 'load',
+      tableDataCleared: true,
+      reloadTrigger: reloadTrigger,
+      hadTableData: currentSettings.tableData !== undefined && currentSettings.tableData !== null
+    });
+    
+    get().updateAtomSettings(atomId, newSettings);
+    
+    console.log('✅ [updateTableAtomWithFile] Settings updated, waiting for useEffect to trigger reload');
+  },
+
+  createCardWithTableAtom: async (objectName: string, position?: number) => {
+    try {
+      // console.log('🆕 [createCardWithTableAtom] Starting:', { objectName, position });
+      // console.log('🆕 [createCardWithTableAtom] LABORATORY_API:', LABORATORY_API);
+      
+      const response = await fetch(`${LABORATORY_API}/cards`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          atomId: 'table',
+          source: 'ai'
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ [createCardWithTableAtom] API error:', response.status, errorText);
+        throw new Error(`Failed to create card: ${response.statusText}`);
+      }
+      
+      const payload = await response.json();
+      // console.log('✅ [createCardWithTableAtom] API response:', payload);
+      
+      const tableAtomInfo = allAtoms.find(a => a.id === 'table');
+      
+      // Build atom with proper structure
+      const atomPayload = Array.isArray(payload.atoms) && payload.atoms.length > 0
+        ? payload.atoms[0]
+        : { atomId: 'table', id: `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` };
+      
+      const newTableAtom: DroppedAtom = {
+        id: atomPayload.id || `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        atomId: atomPayload.atomId || 'table',
+        title: tableAtomInfo?.title || 'Table',
+        category: tableAtomInfo?.category || 'Atom',
+        color: tableAtomInfo?.color || 'bg-teal-500',
+        source: atomPayload.source || 'ai',
+        settings: {
+          sourceFile: objectName,
+          mode: 'load',
+          // Don't set tableData - let auto-load mechanism handle it
+          visibleColumns: [],
+          columnOrder: [],
+          columnWidths: {},
+          rowHeight: 24,
+          rowHeights: {},
+          showRowNumbers: true,
+          showSummaryRow: false,
+          frozenColumns: 0,
+          filters: {},
+          sortConfig: [],
+          currentPage: 1,
+          pageSize: 15,
+        }
+      };
+      
+      // console.log('🆕 [createCardWithTableAtom] Created Table atom:', {
+      //   id: newTableAtom.id,
+      //   sourceFile: objectName
+      // });
+      
+      // Build card from API payload
+      const newCard: LayoutCard = {
+        id: payload.id,
+        atoms: [newTableAtom],
+        isExhibited: payload.isExhibited || false,
+        moleculeId: payload.molecule_id,
+        variables: []
+      };
+      
+      // Add card to store
+      const currentCards = get().cards;
+      const insertIndex = position !== undefined && position >= 0 
+        ? Math.min(position, currentCards.length)
+        : currentCards.length;
+      const updatedCards = [
+        ...currentCards.slice(0, insertIndex),
+        newCard,
+        ...currentCards.slice(insertIndex)
+      ];
+      
+      // console.log('💾 [createCardWithTableAtom] Updating cards:', {
+      //   currentCount: currentCards.length,
+      //   newCount: updatedCards.length,
+      //   insertIndex
+      // });
+      
+      set({ cards: updatedCards });
+      
+      console.log('✅ [createCardWithTableAtom] Successfully created card with Table atom:', {
+        tableAtomId: newTableAtom.id,
+        cardId: newCard.id,
+        objectName,
+        insertIndex,
+        totalCards: updatedCards.length,
+        cardIds: updatedCards.map(c => c.id)
+      });
+      return { tableAtomId: newTableAtom.id, cardId: newCard.id };
+    } catch (error) {
+      console.error('❌ [createCardWithTableAtom] Error:', error);
+      return null;
+    }
+  },
+
+  replaceAtomWithTable: async (
+    cardId: string,
+    currentAtomId: string,
+    newDataframePath: string
+  ) => {
+    const cards = get().cards;
+    if (!Array.isArray(cards)) {
+      console.error('❌ [replaceAtomWithTable] Cards array is invalid');
+      return { success: false, error: 'Cards array is invalid' };
+    }
+
+    const cardIndex = cards.findIndex(c => c.id === cardId);
+    
+    if (cardIndex === -1) {
+      console.error('❌ [replaceAtomWithTable] Card not found:', cardId);
+      return { success: false, error: 'Card not found' };
+    }
+    
+    const card = cards[cardIndex];
+    const currentAtom = Array.isArray(card.atoms) 
+      ? card.atoms.find(a => a.id === currentAtomId)
+      : undefined;
+    
+    if (!currentAtom) {
+      console.error('❌ [replaceAtomWithTable] Atom not found in card:', currentAtomId);
+      return { success: false, error: 'Atom not found in card' };
+    }
+    
+    // console.log('🔄 [replaceAtomWithTable] Processing:', {
+    //   cardId,
+    //   currentAtomId,
+    //   currentAtomType: currentAtom.atomId,
+    //   newDataframePath
+    // });
+    
+    // Check if current atom is already Table
+    if (currentAtom.atomId === 'table') {
+      // Just update the existing Table atom
+      // console.log('✅ [replaceAtomWithTable] Atom is already Table, updating file');
+      await get().updateTableAtomWithFile(currentAtomId, newDataframePath);
+      return { success: true, tableAtomId: currentAtomId };
+    }
+    
+    // Get Table atom info from registry
+    const tableAtomInfo = allAtoms.find(a => a.id === 'table');
+    if (!tableAtomInfo) {
+      console.error('❌ [replaceAtomWithTable] Table atom not found in registry');
+      return { success: false, error: 'Table atom not found in registry' };
+    }
+    
+    // Create new Table atom
+    const newTableAtomId = `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newTableAtom: DroppedAtom = {
+      id: newTableAtomId,
+      atomId: 'table',
+      title: tableAtomInfo.title || 'Table',
+      category: tableAtomInfo.category || 'Atom',
+      color: tableAtomInfo.color || 'bg-teal-500',
+      source: 'ai' as const,
+      settings: {
+        sourceFile: newDataframePath,
+        mode: 'load',
+        // Don't set tableData - let auto-load mechanism handle it
+        visibleColumns: [],
+        columnOrder: [],
+        columnWidths: {},
+        rowHeight: 24,
+        rowHeights: {},
+        showRowNumbers: true,
+        showSummaryRow: false,
+        frozenColumns: 0,
+        filters: {},
+        sortConfig: [],
+        currentPage: 1,
+        pageSize: 15,
+      }
+    };
+    
+    // console.log('🆕 [replaceAtomWithTable] Created new Table atom:', {
+    //   id: newTableAtomId,
+    //   sourceFile: newDataframePath
+    // });
+    
+    // Create new card for original atom at position cardIndex + 1
+    const newCardId = `card-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newCard: LayoutCard = {
+      id: newCardId,
+      atoms: [currentAtom], // Move original atom here
+      isExhibited: false,
+      variables: card.variables || [],
+      // Preserve molecule info if exists
+      moleculeId: card.moleculeId,
+      moleculeTitle: card.moleculeTitle,
+    };
+    
+    // Update cards array:
+    // 1. Replace atom in Card N with Table atom
+    // 2. Insert new card at position N+1
+    const updatedCards = [
+      ...cards.slice(0, cardIndex),
+      {
+        ...card,
+        atoms: [newTableAtom] // Replace with Table atom
+      },
+      newCard, // Insert at N+1
+      ...cards.slice(cardIndex + 1) // Shift rest
+    ];
+    
+    // console.log('💾 [replaceAtomWithTable] Updating cards array:', {
+    //   totalCards: updatedCards.length,
+    //   cardIndex,
+    //   newCardInsertedAt: cardIndex + 1
+    // });
+    
+    set({ cards: updatedCards });
+    
+    // console.log('✅ [replaceAtomWithTable] Successfully replaced atom');
+    return { success: true, tableAtomId: newTableAtomId };
+  },
+
+  // --- Guided Mode Actions ---
+  setGlobalGuidedMode: (enabled: boolean) => {
+    set({ globalGuidedModeEnabled: enabled });
+  },
+  
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => {
+    const currentFlows = get().activeGuidedFlows;
+    set({
+      activeGuidedFlows: {
+        ...currentFlows,
+        [atomId]: {
+          currentStage,
+          state: state || {},
+        },
+      },
+    });
+  },
+  
+  updateGuidedFlowStage: (atomId: string, stage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7') => {
+    const currentFlows = get().activeGuidedFlows;
+    if (currentFlows[atomId]) {
+      set({
+        activeGuidedFlows: {
+          ...currentFlows,
+          [atomId]: {
+            ...currentFlows[atomId],
+            currentStage: stage,
+          },
+        },
+      });
+    }
+  },
+  
+  isGuidedModeActiveForAtom: (atomId: string) => {
+    const activeFlows = get().activeGuidedFlows;
+    return !!activeFlows[atomId];
+  },
+  
+  removeActiveGuidedFlow: (atomId: string) => {
+    const currentFlows = get().activeGuidedFlows;
+    const { [atomId]: removed, ...remainingFlows } = currentFlows;
+    set({ activeGuidedFlows: remainingFlows });
+  },
+  
+  setDirectReviewTarget: (frame) => {
+    set({ directReviewTarget: frame });
+  },
+
   reset: () => {
     set({
       cards: [],
       metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
       pendingClarification: null,
+      globalGuidedModeEnabled: false,
+      activeGuidedFlows: {},
+      directReviewTarget: null,
     });
     if (typeof window !== 'undefined') {
       localStorage.removeItem('trinity_lab_pending_clarification');

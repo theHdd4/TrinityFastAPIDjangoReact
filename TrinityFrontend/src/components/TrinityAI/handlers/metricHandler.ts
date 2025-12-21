@@ -13,9 +13,10 @@ import {
   updateCardTextBox,
   addCardTextBox
 } from './utils';
-import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore, LayoutCard } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { generateAtomInsight } from './insightGenerator';
 import { resolveTaskResponse } from '@/lib/taskQueue';
+import { atoms as allAtoms } from "@/components/AtomList/data";
 
 // Helper function to safely call setMessages
 const safeSetMessages = (setMessages: any, message: Message) => {
@@ -1532,11 +1533,13 @@ export const metricHandler: AtomHandler = {
         console.log('  - basePath:', basePath);
         
         // Update atom settings
+        // Note: saveResult might have file_id or result_file depending on response structure
+        const fileId = saveResult?.file_id || saveResult?.result_file || objectName;
         updateAtomSettings(atomId, {
           operationType: 'column_ops',
           operationConfig,
           operationCompleted: true,
-          fileId: saveResult.file_id,
+          fileId: fileId,
           objectName,
           dataSource: objectName, // Use saved file as new data source
           file_key: objectName,
@@ -1583,7 +1586,8 @@ export const metricHandler: AtomHandler = {
           }
           
           // Update DataFrame Operations atom if it exists
-          if (saveResult.file_id) {
+          const fileIdForDfOps = saveResult?.file_id || saveResult?.result_file || objectName;
+          if (fileIdForDfOps) {
             try {
               const store = useLaboratoryStore.getState();
               const cards = store?.cards || [];
@@ -1596,7 +1600,7 @@ export const metricHandler: AtomHandler = {
                 dataSource: objectName,
                 selectedDataSource: objectName,
                 fileName: getFilename(objectName),
-                  fileId: saveResult.file_id
+                  fileId: fileIdForDfOps
                 });
                 try {
                   const fileLoadedMsg = createSuccessMessage('File loaded', {
@@ -1618,6 +1622,340 @@ export const metricHandler: AtomHandler = {
               console.warn('Failed to update DataFrame Operations atom:', dfOpsError);
             }
           }
+        }
+
+        // ========================================================================
+        // AUTO-DISPLAY IN TABLE ATOM
+        // ========================================================================
+        // After successful column operation save, automatically display in Table atom
+        const hasValidResult = objectName && (saveResult?.file_id || saveResult?.result_file || saveResult?.status === 'SUCCESS');
+        
+        // console.log('🎯 [Table Atom Auto-Display] Entry check:', {
+        //   hasObjectName: !!objectName,
+        //   objectName,
+        //   hasFileId: !!saveResult?.file_id,
+        //   fileId: saveResult?.file_id,
+        //   hasResultFile: !!saveResult?.result_file,
+        //   resultFile: saveResult?.result_file,
+        //   status: saveResult?.status,
+        //   hasValidResult,
+        //   fullSaveResult: saveResult
+        // });
+        
+        if (hasValidResult) {
+          try {
+            const store = useLaboratoryStore.getState();
+            const metricsInputs = store.metricsInputs;
+            
+            // Get context from metrics settings
+            const contextCardId = metricsInputs.contextCardId;
+            const contextAtomId = metricsInputs.contextAtomId;
+            
+            console.log('🎯 [Table Atom Auto-Display] Checking context:', {
+              contextCardId,
+              contextAtomId,
+              objectName,
+              hasContext: !!(contextCardId && contextAtomId),
+              allMetricsInputs: metricsInputs
+            });
+            
+            if (contextCardId && contextAtomId) {
+              // Context available - check atom type
+              const card = store.findCardByAtomId?.(contextAtomId);
+              const currentAtom = card?.atoms.find(a => a.id === contextAtomId);
+              
+              console.log('🎯 [Table Atom Auto-Display] Context found:', {
+                cardFound: !!card,
+                cardId: card?.id,
+                cardIndex: card ? store.cards.findIndex(c => c.id === card.id) : -1,
+                currentAtomType: currentAtom?.atomId,
+                currentAtomId: currentAtom?.id,
+                allCardsCount: store.cards.length,
+                allCardIds: store.cards.map(c => c.id)
+              });
+              
+              if (currentAtom?.atomId === 'table') {
+                // Update existing Table atom
+                console.log('✅ [Table Atom Auto-Display] Condition 1: Updating existing Table atom', {
+                  contextAtomId,
+                  objectName
+                });
+                await store.updateTableAtomWithFile?.(contextAtomId, objectName);
+                
+                const tableMsg = createSuccessMessage('Table updated', {
+                  message: 'The updated dataframe has been displayed in the Table atom',
+                  fileName: getFilename(objectName)
+                });
+                setMessages((prev: Message[]) => {
+                  if (!Array.isArray(prev)) return [tableMsg];
+                  return [...prev, tableMsg];
+                });
+              } else if (currentAtom) {
+                // Condition 2: Replace atom with Table, move original to next card
+                // BUT FIRST: Check if pattern already exists (Card N = Table, Card N+1 = Original atom)
+                const cardN = card;
+                const cardNIndex = store.findCardIndex?.(contextCardId) ?? -1;
+                const cards = store.cards;
+                const cardNPlus1 = cardNIndex >= 0 && cardNIndex < cards.length - 1 ? cards[cardNIndex + 1] : undefined;
+                
+                // Check pattern: Card N has Table AND Card N+1 has original atom
+                const hasTableAtN = cardN?.atoms[0]?.atomId === 'table';
+                const hasCardNPlus1 = !!cardNPlus1;
+                const hasOriginalAtomAtNPlus1 = hasCardNPlus1 && 
+                  cardNPlus1.atoms[0]?.id === contextAtomId;
+                
+                console.log('🔍 [Condition 2] Pattern check:', {
+                  cardNIndex,
+                  hasTableAtN,
+                  hasCardNPlus1,
+                  hasOriginalAtomAtNPlus1,
+                  cardNAtomType: cardN?.atoms[0]?.atomId,
+                  cardNPlus1AtomId: cardNPlus1?.atoms[0]?.id,
+                  contextAtomId
+                });
+                
+                if (hasTableAtN && hasCardNPlus1 && hasOriginalAtomAtNPlus1) {
+                  // Pattern exists - check files
+                  const tableAtN = cardN.atoms[0];
+                  const originalAtomAtNPlus1 = cardNPlus1.atoms[0];
+                  
+                  // Get source files from different possible locations
+                  const tableFile = tableAtN.settings?.sourceFile;
+                  const originalFile = originalAtomAtNPlus1.settings?.sourceFile || 
+                                     originalAtomAtNPlus1.settings?.dataSource ||
+                                     originalAtomAtNPlus1.settings?.file_key ||
+                                     originalAtomAtNPlus1.settings?.selectedDataSource;
+                  const newFile = objectName;
+                  
+                  console.log('🔍 [Condition 2] File comparison:', {
+                    tableFile,
+                    originalFile,
+                    newFile,
+                    sameFile: tableFile === originalFile && originalFile === newFile
+                  });
+                  
+                  if (tableFile === originalFile && originalFile === newFile) {
+                    // Same file → Update Table at N
+                    console.log('✅ [Condition 2] Same file detected - updating Table at N');
+                    await store.updateTableAtomWithFile?.(tableAtN.id, newFile);
+                    
+                    const tableMsg = createSuccessMessage('Table updated', {
+                      message: 'The updated dataframe has been displayed in the Table atom',
+                      fileName: getFilename(objectName)
+                    });
+                    setMessages((prev: Message[]) => {
+                      if (!Array.isArray(prev)) return [tableMsg];
+                      return [...prev, tableMsg];
+                    });
+                  } else {
+                    // Different file → Move old Table to N-1, create new Table at N
+                    console.log('🔄 [Condition 2] Different file detected - moving old Table to N-1, creating new Table at N');
+                    
+                    // Save old Table atom
+                    const oldTableAtom = { ...tableAtN };
+                    
+                    // Create new Table atom with new file
+                    const newTableAtomId = `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                    const tableAtomInfo = allAtoms.find(a => a.id === 'table');
+                    const newTableAtom: any = {
+                      id: newTableAtomId,
+                      atomId: 'table',
+                      title: tableAtomInfo?.title || 'Table',
+                      category: tableAtomInfo?.category || 'Atom',
+                      color: tableAtomInfo?.color || 'bg-teal-500',
+                      source: 'ai' as const,
+                      settings: {
+                        sourceFile: newFile,
+                        mode: 'load',
+                        visibleColumns: [],
+                        columnOrder: [],
+                        columnWidths: {},
+                        rowHeight: 24,
+                        rowHeights: {},
+                        showRowNumbers: true,
+                        showSummaryRow: false,
+                        frozenColumns: 0,
+                        filters: {},
+                        sortConfig: [],
+                        currentPage: 1,
+                        pageSize: 15,
+                      }
+                    };
+                    
+                    // Create card for old Table at N-1
+                    const oldTableCardId = `card-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                    const oldTableCard: LayoutCard = {
+                      id: oldTableCardId,
+                      atoms: [oldTableAtom],
+                      isExhibited: false,
+                      variables: cardN.variables || [],
+                      moleculeId: cardN.moleculeId,
+                      moleculeTitle: cardN.moleculeTitle,
+                    };
+                    
+                    // Update cards array: Insert old Table at N-1, replace N with new Table
+                    const updatedCards = [
+                      ...cards.slice(0, cardNIndex),
+                      oldTableCard,                        // N-1: Old Table
+                      { ...cardN, atoms: [newTableAtom] },  // N: New Table
+                      ...cards.slice(cardNIndex + 1)        // N+1 onwards (includes original atom)
+                    ];
+                    
+                    store.setCards(updatedCards);
+                    
+                    const tableMsg = createSuccessMessage('Data displayed in Table', {
+                      message: 'The updated dataframe has been displayed in a new Table atom. The previous Table has been moved to the previous card.',
+                      fileName: getFilename(objectName)
+                    });
+                    setMessages((prev: Message[]) => {
+                      if (!Array.isArray(prev)) return [tableMsg];
+                      return [...prev, tableMsg];
+                    });
+                  }
+                } else {
+                  // No pattern - use existing replacement logic
+                  console.log('🔄 [Table Atom Auto-Display] Condition 2: No pattern found, using standard replacement', {
+                    contextCardId,
+                    contextAtomId,
+                    currentAtomType: currentAtom.atomId,
+                    objectName
+                  });
+                  const result = await store.replaceAtomWithTable?.(
+                    contextCardId,
+                    contextAtomId,
+                    objectName
+                  );
+                  
+                  if (result.success && result.tableAtomId) {
+                    const tableMsg = createSuccessMessage('Data displayed in Table', {
+                      message: 'The updated dataframe has been displayed in a Table atom. The original atom has been moved to the next card.',
+                      fileName: getFilename(objectName)
+                    });
+                    setMessages((prev: Message[]) => {
+                      if (!Array.isArray(prev)) return [tableMsg];
+                      return [...prev, tableMsg];
+                    });
+                  } else {
+                    console.warn('⚠️ [Table Atom Auto-Display] Failed to replace atom:', result.error);
+                  }
+                }
+              } else {
+                console.warn('⚠️ [Table Atom Auto-Display] Atom not found in card, creating new card', {
+                  contextCardId,
+                  contextAtomId,
+                  cardFound: !!card,
+                  cardAtoms: card?.atoms.map(a => ({ id: a.id, atomId: a.atomId }))
+                });
+                // Atom not found, create new card
+                const result = await store.createCardWithTableAtom?.(objectName);
+                if (result && result.tableAtomId && result.cardId) {
+                  console.log('✅ [Table Atom Auto-Display] Created new card with Table atom (atom not found case)', {
+                    tableAtomId: result.tableAtomId,
+                    cardId: result.cardId
+                  });
+                  
+                  // Auto-set context to the newly created Table atom
+                  store.updateMetricsInputs({
+                    contextCardId: result.cardId,
+                    contextAtomId: result.tableAtomId,
+                  });
+                  
+                  console.log('✅ [Condition 3] Auto-set context (atom not found case):', {
+                    contextCardId: result.cardId,
+                    contextAtomId: result.tableAtomId
+                  });
+                  
+                  const tableMsg = createSuccessMessage('Data displayed in Table', {
+                    message: 'The updated dataframe has been displayed in a new Table atom',
+                    fileName: getFilename(objectName)
+                  });
+                  setMessages((prev: Message[]) => {
+                    if (!Array.isArray(prev)) return [tableMsg];
+                    return [...prev, tableMsg];
+                  });
+                }
+              }
+            } else {
+              // No context - create new card with Table atom
+              console.log('🆕 [Table Atom Auto-Display] Condition 3: No context, creating new card', {
+                contextCardId,
+                contextAtomId,
+                objectName
+              });
+              const result = await store.createCardWithTableAtom?.(objectName);
+              console.log('🆕 [Table Atom Auto-Display] createCardWithTableAtom result:', result);
+              
+              if (result && result.tableAtomId && result.cardId) {
+                console.log('✅ [Table Atom Auto-Display] Created new card with Table atom', {
+                  tableAtomId: result.tableAtomId,
+                  cardId: result.cardId,
+                  objectName
+                });
+                
+                // Auto-set context to the newly created Table atom (Condition 3)
+                const beforeContext = store.metricsInputs;
+                store.updateMetricsInputs({
+                  contextCardId: result.cardId,
+                  contextAtomId: result.tableAtomId,
+                });
+                
+                // Verify context was set
+                const afterContext = useLaboratoryStore.getState().metricsInputs;
+                console.log('✅ [Condition 3] Auto-set context to new Table:', {
+                  beforeContext: {
+                    contextCardId: beforeContext.contextCardId,
+                    contextAtomId: beforeContext.contextAtomId
+                  },
+                  settingContext: {
+                    contextCardId: result.cardId,
+                    contextAtomId: result.tableAtomId
+                  },
+                  afterContext: {
+                    contextCardId: afterContext.contextCardId,
+                    contextAtomId: afterContext.contextAtomId
+                  },
+                  contextSet: afterContext.contextCardId === result.cardId && afterContext.contextAtomId === result.tableAtomId
+                });
+                
+                const tableMsg = createSuccessMessage('Data displayed in Table', {
+                  message: 'The updated dataframe has been displayed in a new Table atom',
+                  fileName: getFilename(objectName)
+                });
+                setMessages((prev: Message[]) => {
+                  if (!Array.isArray(prev)) return [tableMsg];
+                  return [...prev, tableMsg];
+                });
+              } else {
+                console.warn('⚠️ [Table Atom Auto-Display] Failed to create new card');
+              }
+            }
+          } catch (tableError) {
+            console.error('❌ [Table Atom Auto-Display] Error:', tableError);
+            // Don't fail the metric operation if table display fails, but always create a card as fallback
+            try {
+              // console.log('🔄 [Table Atom Auto-Display] Attempting fallback: create new card');
+              const store = useLaboratoryStore.getState();
+              const result = await store.createCardWithTableAtom?.(objectName);
+              if (result && result.tableAtomId && result.cardId) {
+                // Auto-set context to the newly created Table atom (fallback case)
+                store.updateMetricsInputs({
+                  contextCardId: result.cardId,
+                  contextAtomId: result.tableAtomId,
+                });
+                
+                console.log('✅ [Condition 3 Fallback] Auto-set context to new Table:', {
+                  contextCardId: result.cardId,
+                  contextAtomId: result.tableAtomId
+                });
+              } else {
+                console.error('❌ [Table Atom Auto-Display] Fallback also failed');
+              }
+            } catch (fallbackError) {
+              console.error('❌ [Table Atom Auto-Display] Fallback error:', fallbackError);
+            }
+          }
+        } else {
+          console.warn('⚠️ [Table Atom Auto-Display] Skipped - missing objectName or file_id');
         }
         
         // Generate insight

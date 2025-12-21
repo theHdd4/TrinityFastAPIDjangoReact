@@ -36,10 +36,17 @@ class Command(BaseCommand):
                 'tags': ['autoregressive', 'timeseries', 'models'],
                 'color': 'bg-orange-500'
             },
-            'data-upload-validate': {
-                'description': 'Upload and validate data files',
-                'tags': ['upload', 'validation', 'data'],
+            'data-upload': {
+                'name': 'Data Upload',
+                'description': 'Upload, clean, and prime your data files with guided workflow',
+                'tags': ['upload', 'data', 'import', 'prime', 'clean'],
                 'color': 'bg-blue-500'
+            },
+            'data-validate': {
+                'name': 'Data Validate',
+                'description': 'Validate data with automatic type detection and quality checks',
+                'tags': ['validate', 'data', 'quality'],
+                'color': 'bg-green-500'
             },
             'csv-import': {
                 'description': 'Import data from CSV files',

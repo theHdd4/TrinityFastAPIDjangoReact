@@ -11,12 +11,13 @@ import { Switch } from '@/components/ui/switch';
 import { BarChart3, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database, Maximize2, ArrowUp, ArrowDown, FilterIcon, TrendingUp } from 'lucide-react';
 import { ExploreData } from '../ExploreAtom';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
-import { EXPLORE_API, TEXT_API, INSIGHT_API } from '@/lib/api';
+import { EXPLORE_API, TEXT_API, INSIGHT_API, CREATECOLUMN_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { toast } from '@/components/ui/use-toast';
 import './ExploreCanvas.css';
 import ChatBubble from '../../chart-maker/components/ChatBubble';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
+import { ColumnInfoIcon } from '../../table/components/ColumnInfoIcon';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import Table from '@/templates/tables/table';
@@ -765,11 +766,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
         
         // Transform the data to match the cardinality format expected by the table
+        // Also preserve metadata if present
         const cardinalityFormatted = summaryData.map((col: any) => ({
           column: col.column,
           data_type: col.data_type,
           unique_count: col.unique_count,
-          unique_values: col.unique_values || []
+          unique_values: col.unique_values || [],
+          metadata: col.metadata || {
+            is_created: false,
+            operation_type: undefined,
+            formula: undefined
+          }
         }));
         
         setCardinalityData(cardinalityFormatted);
@@ -3858,7 +3865,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               >
                 {displayedCardinality.map((col, index) => (
                   <tr key={index} className="table-row">
-                    <td className="table-cell">{col.column || col.Column || ''}</td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2">
+                        <span>{col.column || col.Column || ''}</span>
+                        {(col.metadata?.is_created || col.metadata?.is_transformed) && (
+                          <ColumnInfoIcon metadata={col.metadata} />
+                        )}
+                      </div>
+                    </td>
                     <td className="table-cell">{col.data_type || col['Data type'] || ''}</td>
                     <td className="table-cell">{col.unique_count || col['Unique count'] || 0}</td>
                     <td className="table-cell">

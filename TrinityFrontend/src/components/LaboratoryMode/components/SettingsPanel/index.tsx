@@ -27,7 +27,8 @@ import {
   LayoutCard,
 } from '../../store/laboratoryStore';
 
-import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
+import DataValidateProperties from '@/components/AtomList/atoms/data-validate/components/properties/DataUploadValidateProperties';
+import DataUploadProperties from '@/components/AtomList/atoms/data-upload/components/properties/DataUploadProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
 import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
 import ConcatProperties from '@/components/AtomList/atoms/concat/components/properties/ConcatProperties';
@@ -49,6 +50,7 @@ import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-mo
 import EvaluateModelsFeatureProperties from '@/components/AtomList/atoms/evaluate-models-feature/components/properties/EvaluateModelsFeatureProperties';
 import PivotTableProperties from '@/components/AtomList/atoms/pivot-table/components/PivotTableProperties';
 import { UnpivotProperties } from '@/components/AtomList/atoms/unpivot';
+import KPIDashboardProperties from '@/components/AtomList/atoms/kpi-dashboard/components/properties/KPIDashboardProperties';
 import AtomSettingsTabs from './AtomSettingsTabs';
 import CardSettingsTabs from './metricstabs/CardSettingsTabs';
 
@@ -116,16 +118,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // Initialize mainTab based on initial selection state
   const [mainTab, setMainTab] = useState<'settings' | 'metrics'>(() => {
-    // If no atom or card is selected, default to metrics
-    if (!selectedAtomId && !selectedCardId) {
-      return 'metrics';
+    // Prioritize atom selection: if atom is selected, show settings tab
+    if (selectedAtomId) {
+      return 'settings';
     }
-    // If card is selected (with or without atom), default to metrics
+    // If only card is selected (no atom), default to metrics
     if (selectedCardId) {
       return 'metrics';
     }
-    // Only atom selected (no card) - default to settings
-    return 'settings';
+    // No selection - default to metrics
+    return 'metrics';
   });
 
   const settings:
@@ -145,7 +147,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_CLUSTERING_SETTINGS }
       : atom?.atomId === 'scenario-planner'
       ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
-      : atom?.atomId === 'data-upload-validate'
+      : atom?.atomId === 'data-validate'
+      ? createDefaultDataUploadSettings()
+      : atom?.atomId === 'data-upload'
       ? createDefaultDataUploadSettings()
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
@@ -175,18 +179,19 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     // On initial mount or when selection changes
     if (isInitialMount.current || selectionChanged) {
       // Only set defaults when selection actually changes (initial selection)
-      if (selectedCardId) {
-        // When card is selected (with or without atom), default to Metrics tab
+      // Priority: selectedAtomId > selectedCardId
+      if (selectedAtomId) {
+        // Atom selected → Settings tab (prioritize atom selection)
+        setMainTab('settings');
+      } else if (selectedCardId) {
+        // Only card selected (no atom) → Metrics tab
         // Only set to 'input' if current tab is 'exhibition' (invalid state)
         if (tab === 'exhibition') {
           setTab('input');
         }
         setMainTab('metrics');
-      } else if (selectedAtomId) {
-        // Only atom selected (no card) - default to Settings tab
-        setMainTab('settings');
       } else {
-        // No card or atom selected - force to Metrics tab
+        // No card or atom selected → Metrics tab
         setMainTab('metrics');
       }
       
@@ -195,7 +200,58 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   }, [selectedAtomId, selectedCardId, tab, setTab]);
 
-
+  // Set context for metric operations (for table atom auto-display)
+  useEffect(() => {
+    // Get the atom ID - prefer selectedAtomId, otherwise get first atom from selectedCard
+    const contextAtomId = selectedAtomId || (selectedCard?.atoms && selectedCard.atoms.length > 0 
+      ? selectedCard.atoms[0].id 
+      : undefined);
+    
+    // Get card ID - prefer selectedCardId, otherwise find card containing the atom
+    const contextCardId = selectedCardId || (selectedAtomId && selectedCard
+      ? selectedCard.id
+      : undefined);
+    
+    // Get current context once at the start
+    const currentContextCardId = metricsInputs.contextCardId;
+    const currentContextAtomId = metricsInputs.contextAtomId;
+    
+    // IMPORTANT: Only update context when there's an explicit selection
+    // Don't clear context when there's no selection - this preserves auto-set context from Condition 3
+    // Context will only be cleared when user explicitly clicks empty space (handled in CanvasArea)
+    if (contextCardId && contextAtomId && mainTab === 'metrics') {
+      // Only set context when Metrics tab is active and there's a selection
+      // Check if context actually needs to change
+      const willChange = currentContextCardId !== (contextCardId || undefined) || 
+                         currentContextAtomId !== (contextAtomId || undefined);
+      
+      if (willChange) {
+        console.log('📋 [Settings Panel] Updating context (user selection):', {
+          beforeContext: {
+            contextCardId: currentContextCardId,
+            contextAtomId: currentContextAtomId
+          },
+          newContext: {
+            contextCardId: contextCardId || undefined,
+            contextAtomId: contextAtomId || undefined
+          },
+          mainTab,
+          selectedCardId,
+          selectedAtomId,
+          hasSelectedCard: !!selectedCard
+        });
+        
+        updateMetricsInputs({
+          contextCardId: contextCardId || undefined,
+          contextAtomId: contextAtomId || undefined,
+        });
+      }
+    }
+    // Note: We don't clear context when there's no selection - this allows auto-set context to persist
+    // Context will be cleared when user clicks empty space (handled in CanvasArea onClick)
+    // Remove metricsInputs from dependencies to prevent infinite loop
+    // We only want to react to selection changes, not context changes
+  }, [mainTab, selectedCardId, selectedAtomId, selectedCard, updateMetricsInputs]);
 
   return (
     <div
@@ -230,8 +286,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <TabsContent value="settings" className="flex-1 mt-0">
               {selectedAtomId ? (
                 <>
-                  {atom?.atomId === 'data-upload-validate' ? (
-                    <DataUploadValidateProperties atomId={selectedAtomId} />
+                  {atom?.atomId === 'data-validate' ? (
+                    <DataValidateProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'data-upload' ? (
+                    <DataUploadProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'feature-overview' ? (
                     <FeatureOverviewProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'groupby-wtg-avg' ? (
@@ -272,6 +330,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <ClusteringProperties atomId={selectedAtomId} />
                   ) : atom?.atomId === 'scenario-planner' ? (
                     <ScenarioPlannerProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'kpi-dashboard' ? (
+                    <KPIDashboardProperties atomId={selectedAtomId} />
                   ) : (
                     <AtomSettingsTabs
                       tab={tab}
@@ -296,6 +356,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 card={cardForMetrics}
                 tab={tab}
                 setTab={setTab}
+                onUpdateCard={updateCard}
                 onAddVariable={addCardVariable}
                 onUpdateVariable={updateCardVariable}
                 onDeleteVariable={deleteCardVariable}

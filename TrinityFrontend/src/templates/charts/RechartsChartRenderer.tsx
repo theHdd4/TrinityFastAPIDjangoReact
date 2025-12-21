@@ -200,6 +200,7 @@ interface Props {
   captureId?: string;
   forceSingleAxis?: boolean; // Force rendering multiple series on single axis instead of dual axes
   stackBars?: boolean; // Enable stacked bar chart when legendField is present
+  showNote?: boolean; // Show note box below chart
   // Series settings props for persistence
   seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>; // Per-series settings from parent
   onSeriesSettingsChange?: (settings: Record<string, { color?: string; showDataLabels?: boolean }>) => void; // Callback to update series settings
@@ -534,6 +535,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   chartsPerRow,
   captureId,
   forceSingleAxis = false,
+  showNote = false,
   stackBars = false,
   seriesSettings: propSeriesSettings, // Series settings from parent
   onSeriesSettingsChange, // Callback to update series settings
@@ -3070,6 +3072,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }) => {
       const inputRef = useRef<HTMLInputElement>(null);
       const isPickerOpenRef = useRef(false);
+      const applyClickedRef = useRef(false); // Track if Apply button was clicked
       const [localColor, setLocalColor] = useState(initialColor);
       const [showApply, setShowApply] = useState(false);
       
@@ -3083,15 +3086,27 @@ const RechartsChartRenderer: React.FC<Props> = ({
         }
       }, [initialColor]);
       
-      const handleApply = () => {
+      const handleApply = (e?: React.MouseEvent) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        applyClickedRef.current = true; // Mark that Apply was clicked
         isPickerOpenRef.current = false;
         setShowApply(false);
         onColorChange(localColor);
-        inputRef.current?.blur();
+        // Small delay before blurring to ensure callback completes
+        setTimeout(() => {
+          inputRef.current?.blur();
+          // Reset flag after a short delay
+          setTimeout(() => {
+            applyClickedRef.current = false;
+          }, 100);
+        }, 50);
       };
       
       return (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <input
             ref={inputRef}
             type="color"
@@ -3102,24 +3117,36 @@ const RechartsChartRenderer: React.FC<Props> = ({
             onFocus={() => {
               isPickerOpenRef.current = true;
               setShowApply(true);
+              applyClickedRef.current = false; // Reset flag when focusing
             }}
             onBlur={(e) => {
               // Delay to allow Apply button click to register
               setTimeout(() => {
+                // Don't run blur handler if Apply button was clicked
+                if (applyClickedRef.current) {
+                  return;
+                }
                 if (isPickerOpenRef.current) {
                   isPickerOpenRef.current = false;
                   setShowApply(false);
                   onColorChange(e.target.value);
                 }
-              }, 150);
+              }, 200); // Increased delay to ensure Apply click registers
             }}
             className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+            onClick={(e) => e.stopPropagation()}
           />
           {showApply && (
             <button
               onMouseDown={(e) => {
                 e.preventDefault();
-                handleApply();
+                e.stopPropagation();
+                handleApply(e);
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleApply(e);
               }}
               className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
             >
@@ -3183,6 +3210,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
           width: '400px',
           maxHeight: '500px',
           overflowY: 'auto'
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
         }}
       >
         <div className="px-2 py-2 text-sm font-semibold text-gray-700 mb-3 flex items-center justify-between gap-2">
@@ -5295,15 +5328,17 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
       <div
         className="w-full h-full relative flex-1 min-w-0"
-        style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%' }}
+        style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%', maxWidth: '100%', maxHeight: '100%', overflow: 'hidden' }}
       >
         <div 
-          className="w-full h-full transition-all duration-500 ease-in-out overflow-visible chart-scroll-container"
+          className="w-full h-full transition-all duration-500 ease-in-out overflow-hidden chart-scroll-container"
           style={{ 
             paddingBottom: '0px',  // Removed: handled by chart margins
             paddingTop: '0px',     // Removed: handled by chart margins
             maxWidth: '100%',
-            width: '100%'
+            width: '100%',
+            maxHeight: '100%',
+            overflow: 'hidden'
           }}
           onContextMenu={handleContextMenu}
           ref={chartRef}
@@ -5314,7 +5349,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
               minHeight: '300px',
               maxWidth: '100%',
               width: '100%',
-              overflow: 'visible',
+              maxHeight: '100%',
+              overflow: 'hidden',
               display: type === 'pie_chart' ? 'flex' : 'block',
               alignItems: type === 'pie_chart' ? 'center' : 'stretch',
               justifyContent: type === 'pie_chart' ? 'center' : 'flex-start'
@@ -5446,6 +5482,17 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Note Box */}
+        {showNote && (
+          <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <textarea
+              placeholder="Add your notes here..."
+              className="w-full min-h-[80px] p-2 text-sm border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              style={{ fontFamily: 'inherit' }}
+            />
           </div>
         )}
 

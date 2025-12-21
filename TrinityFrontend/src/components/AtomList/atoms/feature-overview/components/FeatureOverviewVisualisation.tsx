@@ -54,16 +54,23 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
     const isChecked = Boolean(checked);
     const updatedDimensions = { ...dimensionMap };
     
+    // Ensure column is lowercase for consistency with file columns
+    const columnLower = typeof column === 'string' ? column.toLowerCase() : column;
+    
     if (!updatedDimensions[dimensionName]) {
       updatedDimensions[dimensionName] = [];
     }
     
     if (isChecked) {
-      if (!updatedDimensions[dimensionName].includes(column)) {
-        updatedDimensions[dimensionName] = [...updatedDimensions[dimensionName], column];
-      }
+      // Remove any existing versions (case-insensitive) and add lowercase version
+      updatedDimensions[dimensionName] = updatedDimensions[dimensionName]
+        .filter(col => col?.toLowerCase() !== columnLower)
+        .concat([columnLower]);
     } else {
-      updatedDimensions[dimensionName] = updatedDimensions[dimensionName].filter(col => col !== column);
+      // Remove by case-insensitive comparison
+      updatedDimensions[dimensionName] = updatedDimensions[dimensionName].filter(
+        col => col?.toLowerCase() !== columnLower
+      );
     }
     
     onDimensionChange(updatedDimensions);
@@ -97,14 +104,22 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
               <div key={dimensionName} className="space-y-2">
                 <div className="text-sm font-medium text-gray-600 capitalize">{dimensionName}</div>
                 <div className="grid grid-cols-2 gap-2">
-                  {(Array.isArray(columns) ? columns : []).map(column => (
-                    <CheckboxTemplate
-                      key={`${dimensionName}-${column}`}
-                      label={column}
-                      checked={dimensionMap[dimensionName]?.includes(column) || false}
-                      onCheckedChange={val => toggleDimension(dimensionName, column, val)}
-                    />
-                  ))}
+                  {(Array.isArray(columns) ? columns : []).map(column => {
+                    // Convert column to lowercase for consistency with file columns
+                    const columnLower = typeof column === 'string' ? column.toLowerCase() : column;
+                    // Check if lowercase version is in dimensionMap (also check original case for backward compatibility)
+                    const isChecked = dimensionMap[dimensionName]?.some(
+                      col => col?.toLowerCase() === columnLower
+                    ) || false;
+                    return (
+                      <CheckboxTemplate
+                        key={`${dimensionName}-${columnLower}`}
+                        label={columnLower}
+                        checked={isChecked}
+                        onCheckedChange={val => toggleDimension(dimensionName, columnLower, val)}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             ))}

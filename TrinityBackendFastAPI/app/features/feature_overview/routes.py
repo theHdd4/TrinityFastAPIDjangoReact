@@ -72,6 +72,8 @@ from app.features.column_classifier.database import (
 import asyncio
 
 from app.core.task_queue import celery_task_client, format_task_response
+from app.features.pipeline.service import record_atom_execution
+from app.features.project_state.routes import get_atom_list_configuration
 
 
 # MinIO client initialization
@@ -99,11 +101,11 @@ def ensure_minio_bucket():
     try:
         if not minio_client.bucket_exists(MINIO_BUCKET):
             minio_client.make_bucket(MINIO_BUCKET)
-            print(f"📁 Created MinIO bucket '{MINIO_BUCKET}' for feature overview")
+            print(f"[CREATED] Created MinIO bucket '{MINIO_BUCKET}' for feature overview")
         else:
-            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview")
+            print(f"[OK] MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview")
     except Exception as e:
-        print(f"⚠️ MinIO connection error: {e}")
+        print(f"[WARNING] MinIO connection error: {e}")
 
 
 ensure_minio_bucket()
@@ -151,7 +153,7 @@ async def column_summary(object_name: str):
     )
     if not object_name.startswith(prefix):
         print(
-            f"⚠️ column_summary prefix mismatch: {object_name} (expected {prefix})"
+            f"[WARNING] column_summary prefix mismatch: {object_name} (expected {prefix})"
         )
     try:
         flight_path = get_flight_path_for_csv(object_name)
@@ -168,7 +170,7 @@ async def column_summary(object_name: str):
                 df = download_dataframe(flight_path)
             except Exception as e:
                 print(
-                    f"⚠️ column_summary flight download failed for {object_name}: {e}"
+                    f"[WARNING] column_summary flight download failed for {object_name}: {e}"
                 )
         if df is None:
             if not object_name.endswith(".arrow"):
@@ -249,7 +251,7 @@ async def column_summary(object_name: str):
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ column_summary error for {object_name}: {e}")
+        print(f"[WARNING] column_summary error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -278,7 +280,7 @@ async def cached_dataframe(object_name: str):
     )
     if not object_name.startswith(prefix):
         print(
-            f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {prefix})"
+            f"[WARNING] cached_dataframe prefix mismatch: {object_name} (expected {prefix})"
         )
     try:
         try:
@@ -286,7 +288,7 @@ async def cached_dataframe(object_name: str):
             csv_text = df.to_csv(index=False)
             return Response(csv_text, media_type="text/csv")
         except Exception as exc:
-            print(f"⚠️ flight dataframe error for {object_name}: {exc}")
+            print(f"[WARNING] flight dataframe error for {object_name}: {exc}")
 
         def _load_object() -> bytes:
             response = minio_client.get_object(MINIO_BUCKET, object_name)
@@ -327,7 +329,7 @@ async def cached_dataframe(object_name: str):
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ cached_dataframe error for {object_name}: {e}")
+        print(f"[WARNING] cached_dataframe error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -359,13 +361,13 @@ async def flight_table(object_name: str):
             print(f"🗄 restored ticket for {object_name}: {flight_path}")
     print(f"➡️ flight_table request: {object_name} path={flight_path}")
     if not flight_path:
-        print(f"⚠️ flight path not found for {object_name}; using object name")
+        print(f"[WARNING] flight path not found for {object_name}; using object name")
         flight_path = object_name
     try:
         data = download_table_bytes(flight_path)
         return Response(data, media_type="application/vnd.apache.arrow.file")
     except Exception as e:
-        print(f"⚠️ flight_table error for {object_name}: {e}")
+        print(f"[WARNING] flight_table error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -403,11 +405,11 @@ async def dimension_mapping(req: DimensionMappingRequest):
         cached_env = redis_client.get(file_env_key)
         if cached_env:
             found_file_specific = True
-            print(f"✅ found file-specific env in redis: {file_env_key}")
+            print(f"[OK] found file-specific env in redis: {file_env_key}")
     if cached_env is None:
         cached_env = redis_client.get(env_key)
         if cached_env:
-            print(f"✅ found general env in redis: {env_key}")
+            print(f"[OK] found general env in redis: {env_key}")
     if cached_env:
         try:
             env = json.loads(cached_env)
@@ -423,12 +425,12 @@ async def dimension_mapping(req: DimensionMappingRequest):
             if isinstance(identifiers, list) and len(identifiers) > 0:
                 # Create mapping from identifiers array: {"identifiers": [col1, col2, ...]}
                 mapping = {"identifiers": identifiers}
-                print(f"✅ returning identifiers from redis: {len(identifiers)} identifiers")
+                print(f"[OK] returning identifiers from redis: {len(identifiers)} identifiers")
                 return {"mapping": mapping, "config": env, "source": "env"}
             else:
-                print(f"⚠️ redis env found but no valid identifiers (got: {type(identifiers)})")
+                print(f"[WARNING] redis env found but no valid identifiers (got: {type(identifiers)})")
         except Exception as exc:  # pragma: no cover
-            print(f"⚠️ dimension_mapping env parse error: {exc}")
+            print(f"[WARNING] dimension_mapping env parse error: {exc}")
     else:
         print("🔍 env not in redis")
 
@@ -444,29 +446,29 @@ async def dimension_mapping(req: DimensionMappingRequest):
         has_measures = bool(mongo_cfg.get("measures"))
         has_dimensions = bool(mongo_cfg.get("dimensions"))
         
-        print(f"📦 MongoDB config found: has_identifiers={has_identifiers}, has_measures={has_measures}, has_dimensions={has_dimensions}")
+        print(f"[STORED] MongoDB config found: has_identifiers={has_identifiers}, has_measures={has_measures}, has_dimensions={has_dimensions}")
         
         # Return config if identifiers, measures, or dimensions exist
         if has_identifiers or has_measures or has_dimensions:
-            print("📦 loaded mapping from MongoDB")
+            print("[STORED] loaded mapping from MongoDB")
             try:
                 redis_client.setex(env_key, 3600, json.dumps(mongo_cfg, default=str))
                 if file_env_key:
                     redis_client.setex(file_env_key, 3600, json.dumps(mongo_cfg, default=str))
-                    print(f"✅ cached MongoDB config to Redis: {file_env_key}")
+                    print(f"[OK] cached MongoDB config to Redis: {file_env_key}")
             except Exception as exc:
-                print(f"⚠️ failed to cache to Redis: {exc}")
+                print(f"[WARNING] failed to cache to Redis: {exc}")
             # Create mapping from identifiers array instead of dimensions
             identifiers = mongo_cfg.get("identifiers", [])
             if isinstance(identifiers, list) and len(identifiers) > 0:
                 mapping = {"identifiers": identifiers}
-                print(f"✅ returning identifiers from MongoDB: {len(identifiers)} identifiers")
+                print(f"[OK] returning identifiers from MongoDB: {len(identifiers)} identifiers")
             else:
                 mapping = {}
-                print("⚠️ MongoDB config found but no identifiers")
+                print("[WARNING] MongoDB config found but no identifiers")
             return {"mapping": mapping, "config": mongo_cfg}
     else:
-        print("❌ no MongoDB config found")
+        print("[ERROR] no MongoDB config found")
 
     raise HTTPException(status_code=404, detail="Mapping not found")
 
@@ -480,7 +482,7 @@ def _load_polars_frame(object_name: str, flight_path: str | None = None) -> pl.D
             if pandas_df is not None:
                 return pl.from_pandas(pandas_df)
         except Exception as exc:
-            print(f"⚠️ polars load via flight failed for {flight_path}: {exc}")
+            print(f"[WARNING] polars load via flight failed for {flight_path}: {exc}")
 
     if not object_name.endswith(".arrow"):
         raise ValueError("Unsupported file format")
@@ -508,7 +510,7 @@ def _load_polars_frame(object_name: str, flight_path: str | None = None) -> pl.D
     try:
         return pl.read_ipc(io.BytesIO(content))
     except Exception as exc:
-        print(f"⚠️ polars read_ipc failed for {object_name}: {exc}")
+        print(f"[WARNING] polars read_ipc failed for {object_name}: {exc}")
         reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
         table = reader.read_all()
         pandas_df = table.to_pandas()
@@ -653,7 +655,7 @@ async def sku_stats(
         client_name=client, app_name=app, project_name=project
     )
     if not object_name.startswith(prefix):
-        print(f"⚠️ sku_stats prefix mismatch: {object_name} (expected {prefix})")
+        print(f"[WARNING] sku_stats prefix mismatch: {object_name} (expected {prefix})")
     try:
         combo = json.loads(combination)
     except Exception as e:
@@ -737,7 +739,7 @@ async def sku_stats(
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        print(f"⚠️ sku_stats error for {object_name}: {e}")
+        print(f"[WARNING] sku_stats error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -754,6 +756,10 @@ async def feature_overview_uniquecountendpoint(
     # id:str = Form(...),
     validator_atom_id: str = Form(...),
     file_key: str = Form(...),
+    card_id: str = Form(None),
+    canvas_position: int = Form(None),
+    dimensionMap: str = Form(None),  # Selected dimensions (identifiers) as JSON string
+    yAxes: str = Form(None),  # Selected numeric columns (measures) as JSON string
     results_collection=Depends(get_unique_dataframe_results_collection),
     validator_collection: AsyncIOMotorCollection = Depends(
         get_validator_atoms_collection
@@ -765,6 +771,112 @@ async def feature_overview_uniquecountendpoint(
 
     collection_name = results_collection.name
     database_name = results_collection.database.name
+
+    # Record atom execution for pipeline tracking
+    # Extract project context from environment
+    client_name = os.getenv("CLIENT_NAME", "")
+    app_name = os.getenv("APP_NAME", "")
+    project_name = os.getenv("PROJECT_NAME", "")
+    user_id = os.getenv("USER_ID", "unknown")
+    
+    # Get card_id and canvas_position from atom_list_configuration
+    card_id_from_config = None
+    canvas_position_from_config = None
+    
+    if client_name and app_name and project_name:
+        try:
+            atom_config_response = await get_atom_list_configuration(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                mode="laboratory"
+            )
+            
+            if atom_config_response.get("status") == "success":
+                cards = atom_config_response.get("cards", [])
+                for card in cards:
+                    atoms = card.get("atoms", [])
+                    for atom in atoms:
+                        if atom.get("id") == validator_atom_id:
+                            card_id_from_config = card.get("id")
+                            canvas_position_from_config = card.get("canvas_position", 0)
+                            break
+                    if card_id_from_config:
+                        break
+        except Exception as e:
+            logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
+    
+    # Prioritize atom_list_configuration as source of truth
+    if card_id_from_config:
+        final_card_id = card_id_from_config
+    elif card_id:
+        final_card_id = card_id
+    else:
+        final_card_id = validator_atom_id.split("-")[0] if "-" in validator_atom_id else validator_atom_id
+    
+    if canvas_position_from_config is not None:
+        final_canvas_position = canvas_position_from_config
+    elif canvas_position is not None:
+        final_canvas_position = canvas_position
+    else:
+        final_canvas_position = 0
+    
+    # Parse dimensionMap and yAxes from JSON strings if provided
+    dimension_map_dict = None
+    y_axes_list = None
+    try:
+        if dimensionMap:
+            dimension_map_dict = json.loads(dimensionMap)
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(f"Failed to parse dimensionMap: {e}")
+    
+    try:
+        if yAxes:
+            y_axes_list = json.loads(yAxes)
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(f"Failed to parse yAxes: {e}")
+    
+    # Build configuration
+    configuration = {
+        "bucket_name": bucket_name,
+        "object_names": list(object_names),
+        "validator_atom_id": validator_atom_id,
+        "file_key": file_key,
+        "button_clicked": "Uniquecount",
+        "click_timestamp": datetime.utcnow().isoformat()
+    }
+    
+    # Add dimensionMap and yAxes to configuration if provided
+    if dimension_map_dict:
+        configuration["dimensionMap"] = dimension_map_dict
+    if y_axes_list:
+        configuration["yAxes"] = y_axes_list
+    
+    # Build API calls (include dimensionMap and yAxes in params)
+    execution_started_at = datetime.utcnow()
+    api_call_params = configuration.copy()
+    # Ensure dimensionMap and yAxes are included in API call params
+    if dimension_map_dict:
+        api_call_params["dimensionMap"] = dimension_map_dict
+    if y_axes_list:
+        api_call_params["yAxes"] = y_axes_list
+    
+    api_calls = [
+        {
+            "endpoint": "/feature_overview/uniquecount",
+            "method": "POST",
+            "timestamp": execution_started_at,
+            "params": api_call_params,
+            "response_status": 0,
+            "response_data": None
+        }
+    ]
+    
+    # Build output files (feature_overview doesn't produce file outputs, results are in MongoDB)
+    output_files = []
+    execution_completed_at = None
+    execution_status = "pending"
+    execution_error = None
 
     submission = celery_task_client.submit_callable(
         name="feature_overview.uniquecount",
@@ -788,6 +900,54 @@ async def feature_overview_uniquecountendpoint(
         },
     )
 
+    # Try to get result if task completed synchronously
+    if submission.status == "success" and hasattr(submission, "result"):
+        try:
+            execution_completed_at = datetime.utcnow()
+            execution_status = "success"
+            
+            # Add completion API call
+            api_calls.append({
+                "endpoint": "atom_execution_complete",
+                "method": "EXECUTE",
+                "timestamp": execution_completed_at,
+                "params": configuration.copy(),
+                "response_status": 200,
+                "response_data": {
+                    "status": "SUCCESS",
+                    "task_id": submission.task_id if hasattr(submission, "task_id") else None
+                }
+            })
+        except Exception:
+            pass
+    
+    # Record execution (async, don't wait for it)
+    if client_name and app_name and project_name:
+        try:
+            await record_atom_execution(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                atom_instance_id=validator_atom_id,
+                card_id=final_card_id,
+                atom_type="feature-overview",
+                atom_title="Feature Overview",
+                input_files=list(object_names) if isinstance(object_names, list) else [object_names],
+                configuration=configuration,
+                api_calls=api_calls,
+                output_files=output_files,
+                execution_started_at=execution_started_at,
+                execution_completed_at=execution_completed_at,
+                execution_status=execution_status,
+                execution_error=execution_error,
+                user_id=user_id,
+                mode="laboratory",
+                canvas_position=final_canvas_position
+            )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record atom execution for pipeline: {e}")
+
     return format_task_response(submission)
 
 
@@ -802,6 +962,8 @@ async def feature_overview_summaryendpoint(
     create_hierarchy: bool = Form(False),
     create_summary: bool = Form(False),
     combination: str = Form(None),  # Optional specific combo
+    card_id: str = Form(None),
+    canvas_position: int = Form(None),
     results_collection=Depends(get_summary_results_collection),
     validator_collection: AsyncIOMotorCollection = Depends(
         get_validator_atoms_collection
@@ -825,6 +987,87 @@ async def feature_overview_summaryendpoint(
 
     collection_name = results_collection.name
     database_name = results_collection.database.name
+
+    # Record atom execution for pipeline tracking
+    # Extract project context from environment
+    client_name = os.getenv("CLIENT_NAME", "")
+    app_name = os.getenv("APP_NAME", "")
+    project_name = os.getenv("PROJECT_NAME", "")
+    user_id = os.getenv("USER_ID", "unknown")
+    
+    # Get card_id and canvas_position from atom_list_configuration
+    card_id_from_config = None
+    canvas_position_from_config = None
+    
+    if client_name and app_name and project_name:
+        try:
+            atom_config_response = await get_atom_list_configuration(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                mode="laboratory"
+            )
+            
+            if atom_config_response.get("status") == "success":
+                cards = atom_config_response.get("cards", [])
+                for card in cards:
+                    atoms = card.get("atoms", [])
+                    for atom in atoms:
+                        if atom.get("id") == validator_atom_id:
+                            card_id_from_config = card.get("id")
+                            canvas_position_from_config = card.get("canvas_position", 0)
+                            break
+                    if card_id_from_config:
+                        break
+        except Exception as e:
+            logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
+    
+    # Prioritize atom_list_configuration as source of truth
+    if card_id_from_config:
+        final_card_id = card_id_from_config
+    elif card_id:
+        final_card_id = card_id
+    else:
+        final_card_id = validator_atom_id.split("-")[0] if "-" in validator_atom_id else validator_atom_id
+    
+    if canvas_position_from_config is not None:
+        final_canvas_position = canvas_position_from_config
+    elif canvas_position is not None:
+        final_canvas_position = canvas_position
+    else:
+        final_canvas_position = 0
+    
+    # Build configuration
+    configuration = {
+        "bucket_name": bucket_name,
+        "object_names": list(object_names),
+        "validator_atom_id": validator_atom_id,
+        "file_key": file_key,
+        "create_hierarchy": _as_bool(create_hierarchy),
+        "create_summary": _as_bool(create_summary),
+        "combination": combination,
+        "button_clicked": "Summary",
+        "click_timestamp": datetime.utcnow().isoformat()
+    }
+    
+    # Build API calls
+    execution_started_at = datetime.utcnow()
+    api_calls = [
+        {
+            "endpoint": "/feature_overview/summary",
+            "method": "POST",
+            "timestamp": execution_started_at,
+            "params": configuration.copy(),
+            "response_status": 0,
+            "response_data": None
+        }
+    ]
+    
+    # Build output files (feature_overview doesn't produce file outputs, results are in MongoDB)
+    output_files = []
+    execution_completed_at = None
+    execution_status = "pending"
+    execution_error = None
 
     submission = celery_task_client.submit_callable(
         name="feature_overview.summary",
@@ -852,6 +1095,54 @@ async def feature_overview_summaryendpoint(
             "create_summary": _as_bool(create_summary),
         },
     )
+
+    # Try to get result if task completed synchronously
+    if submission.status == "success" and hasattr(submission, "result"):
+        try:
+            execution_completed_at = datetime.utcnow()
+            execution_status = "success"
+            
+            # Add completion API call
+            api_calls.append({
+                "endpoint": "atom_execution_complete",
+                "method": "EXECUTE",
+                "timestamp": execution_completed_at,
+                "params": configuration.copy(),
+                "response_status": 200,
+                "response_data": {
+                    "status": "SUCCESS",
+                    "task_id": submission.task_id if hasattr(submission, "task_id") else None
+                }
+            })
+        except Exception:
+            pass
+    
+    # Record execution (async, don't wait for it)
+    if client_name and app_name and project_name:
+        try:
+            await record_atom_execution(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                atom_instance_id=validator_atom_id,
+                card_id=final_card_id,
+                atom_type="feature-overview",
+                atom_title="Feature Overview",
+                input_files=list(object_names) if isinstance(object_names, list) else [object_names],
+                configuration=configuration,
+                api_calls=api_calls,
+                output_files=output_files,
+                execution_started_at=execution_started_at,
+                execution_completed_at=execution_completed_at,
+                execution_status=execution_status,
+                execution_error=execution_error,
+                user_id=user_id,
+                mode="laboratory",
+                canvas_position=final_canvas_position
+            )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record atom execution for pipeline: {e}")
 
     return format_task_response(submission)
 

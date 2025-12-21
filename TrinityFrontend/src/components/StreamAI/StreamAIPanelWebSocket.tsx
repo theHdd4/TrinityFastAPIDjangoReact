@@ -1774,7 +1774,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     setMessages(prev => [...prev, progressMessage]);
     
     try {
-      // Load available files before sending (so backend can skip data-upload-validate)
+      // Load available files before sending (so backend can skip data-validate)
       const fileNames = await loadAvailableFiles();
       console.log('📂 Loaded files for workflow:', fileNames);
       
@@ -2650,6 +2650,55 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                   status: data.loading ? 'thinking' : steps[existingIndex]?.status || 'running',
                   atom_id: data.atom_id || steps[existingIndex]?.atom_id,
                   description: thoughtMessage,
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
+          case 'atom_prompt': {
+            console.log('📝 Atom prompt event:', data);
+
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const atomId = data.atom_id || 'atom';
+            const promptDescription =
+              data.enriched_description || data.description || data.message || `Preparing prompt for ${atomId}`;
+            const progressUpdate = `\n\n📝 Preparing prompt for step ${stepNumber} (${atomId})`;
+
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: 'running',
+                  atom_id: atomId,
+                  description: promptDescription,
+                  prompt: data.prompt || data.full_prompt,
+                  full_prompt: data.full_prompt || data.prompt,
+                  enriched_description: data.enriched_description,
+                  parameters: data.parameters,
                 };
 
                 const updatedSteps = [...steps];

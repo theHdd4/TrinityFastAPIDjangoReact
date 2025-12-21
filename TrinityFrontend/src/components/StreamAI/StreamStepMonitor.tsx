@@ -9,6 +9,10 @@ interface StepStatus {
   summary?: string;
   error?: string;
   output_alias?: string;
+  prompt?: string;
+  full_prompt?: string;
+  enriched_description?: string;
+  parameters?: any;
 }
 
 interface StreamStepMonitorProps {
@@ -32,7 +36,8 @@ const StreamStepMonitor: React.FC<StreamStepMonitorProps> = ({
       'chart-maker': '📈',
       'correlation': '📉',
       'explore': '🔍',
-      'data-upload-validate': '📁'
+      'data-upload': '📤',
+      'data-validate': '✅'
     };
     return icons[atomId] || '⚡';
   };

@@ -42,7 +42,8 @@ export const WorkflowPreview: React.FC<WorkflowPreviewProps> = ({
   // Get atom icon based on type
   const getAtomIcon = (atomId: string): string => {
     const iconMap: Record<string, string> = {
-      'data-upload-validate': '📊',
+      'data-upload': '📤',
+      'data-validate': '✅',
       'feature-overview': '🔍',
       'dataframe-operations': '⚙️',
       'groupby-wtg-avg': '📈',

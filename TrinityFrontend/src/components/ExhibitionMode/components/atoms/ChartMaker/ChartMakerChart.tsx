@@ -796,7 +796,7 @@ const ChartMakerChart: React.FC<ChartMakerComponentProps> = ({ metadata, variant
 
       {/* Note section - if note exists */}
       {note && typeof note === 'string' && note.trim().length > 0 && (
-        <div className="mt-4 pt-4 border-t border-white/10">
+        <div className="mt-4">
           <div className="text-sm font-medium text-white/70 mb-2">Note:</div>
           <div className="text-sm text-white/60 whitespace-pre-wrap leading-relaxed">
             {note}

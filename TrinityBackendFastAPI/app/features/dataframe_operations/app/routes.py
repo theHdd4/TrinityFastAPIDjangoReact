@@ -850,6 +850,63 @@ async def save_dataframe(payload: SaveRequest):
         )
         logger.info(f"✅ [SAVE] Upload successful: {object_name}")
 
+        # ------------------------------------------------------------------
+        # CRITICAL FIX: For "Save As" (new file), create a lineage entry
+        # to preserve metadata from the source file.
+        # ------------------------------------------------------------------
+        if not payload.overwrite_original and session_id:
+            try:
+                # Get session metadata to find the original file
+                session_metadata = await get_session_metadata(session_id, "dataframe")
+                original_object_name = session_metadata.get("object_name") if session_metadata else None
+                
+                if original_object_name and original_object_name != object_name:
+                    # Extract client/app/project from object_name path
+                    path_parts = (object_name or "").strip("/").split("/")
+                    extracted_client = path_parts[0] if len(path_parts) > 0 else ""
+                    extracted_app = path_parts[1] if len(path_parts) > 1 else ""
+                    extracted_project = path_parts[2] if len(path_parts) > 2 else ""
+                    
+                    final_client_name = extracted_client or os.getenv("CLIENT_NAME", "")
+                    final_app_name = extracted_app or os.getenv("APP_NAME", "")
+                    final_project_name = extracted_project or os.getenv("PROJECT_NAME", "")
+                    
+                    if final_client_name and final_app_name and final_project_name:
+                        lineage_payload = {
+                            "input_file": original_object_name,  # Source file (for lineage)
+                            "saved_file": object_name,            # New file
+                            "operations": [],                      # No operations, just lineage pointer
+                            "file_columns": list(df.columns),
+                            "file_shape": [df.height, df.width],
+                            "client_name": final_client_name,
+                            "app_name": final_app_name,
+                            "project_name": final_project_name,
+                            "user_id": os.getenv("USER_ID", "unknown"),
+                            "project_id": None,
+                        }
+                        
+                        from app.features.createcolumn.service import _store_create_config
+                        
+                        document_id = f"{final_client_name}/{final_app_name}/{final_project_name}"
+                        _store_create_config(document_id, lineage_payload)
+                        # logger.info(
+                        #     f"✅ [SAVE] Created lineage entry for Save As: "
+                        #     f"'{original_object_name}' -> '{object_name}' "
+                        #     f"(document_id='{document_id}')"
+                        # )
+                    else:
+                        logger.warning(
+                            f"⚠️ [SAVE] Skipping lineage entry: missing context "
+                            f"(client='{final_client_name}', app='{final_app_name}', project='{final_project_name}')"
+                        )
+                else:
+                    logger.info(
+                        f"ℹ️ [SAVE] No lineage entry needed: "
+                        f"original_object_name='{original_object_name}', object_name='{object_name}'"
+                    )
+            except Exception as lineage_err:
+                logger.warning(f"⚠️ [SAVE] Failed to create lineage entry (non-critical): {lineage_err}")
+
         response = {
             "result_file": object_name,
             "shape": df.shape,
@@ -1175,6 +1232,80 @@ async def rename_column(df_id: str = Body(...), old_name: str = Body(...), new_n
     logger.info(f"✅ [RENAME] After rename - columns: {df.columns}")
     
     SESSIONS[df_id] = df
+    
+    # Persist rename operation to MongoDB for metadata tracking
+    # This ensures info icons show for renamed columns in Data Summary
+    try:
+        # Get session metadata to find object_name
+        session_metadata = await get_session_metadata(df_id, "dataframe")
+        object_name = session_metadata.get("object_name") if session_metadata else None
+        
+        if object_name:
+            # Normalize object_name for consistent storage
+            normalized_object_name = object_name.strip().strip("/")
+            
+            # Extract client/app/project from object_name path
+            path_parts = normalized_object_name.split("/")
+            extracted_client = path_parts[0] if len(path_parts) > 0 else ""
+            extracted_app = path_parts[1] if len(path_parts) > 1 else ""
+            extracted_project = path_parts[2] if len(path_parts) > 2 else ""
+            
+            # Fallback to environment variables if path extraction fails
+            final_client_name = extracted_client or os.getenv("CLIENT_NAME", "")
+            final_app_name = extracted_app or os.getenv("APP_NAME", "")
+            final_project_name = extracted_project or os.getenv("PROJECT_NAME", "")
+            
+            logger.info(
+                f"🔍 [RENAME] Context extraction: "
+                f"object_name='{object_name}' -> normalized='{normalized_object_name}', "
+                f"context=({final_client_name}/{final_app_name}/{final_project_name})"
+            )
+            
+            if final_client_name and final_app_name and final_project_name:
+                # Build rename operation payload
+                operation_payload = {
+                    "input_file": normalized_object_name,
+                    "saved_file": normalized_object_name,
+                    "operations": [{
+                        "operation_type": "rename",
+                        "columns": [old_name.strip()],
+                        "rename": new_name.strip(),
+                        "param": None,
+                    }],
+                    "file_columns": list(df.columns),
+                    "file_shape": [df.height, df.width],
+                    "client_name": final_client_name,
+                    "app_name": final_app_name,
+                    "project_name": final_project_name,
+                    "user_id": os.getenv("USER_ID", "unknown"),
+                    "project_id": None,
+                }
+                
+                # Store in MongoDB
+                from app.features.createcolumn.service import _store_create_config
+                document_id = f"{final_client_name}/{final_app_name}/{final_project_name}"
+                _store_create_config(document_id, operation_payload)
+                
+                # logger.info(
+                #     f"✅ [RENAME] Persisted rename operation to MongoDB: "
+                #     f"'{old_name}' -> '{new_name}' for '{normalized_object_name}'"
+                # )
+            else:
+                logger.warning(
+                    f"⚠️ [RENAME] Skipping rename persistence: missing context "
+                    f"(client='{final_client_name}', app='{final_app_name}', project='{final_project_name}')"
+                )
+        else:
+            logger.info(
+                f"ℹ️ [RENAME] No object_name in session metadata, "
+                f"skipping rename persistence (metadata may not be available)"
+            )
+    except Exception as e:
+        # CRITICAL: Rename must never fail because of metadata persistence
+        logger.warning(f"⚠️ [RENAME] Failed to persist rename operation (non-critical): {e}")
+        import traceback
+        logger.warning(f"⚠️ [RENAME] Traceback: {traceback.format_exc()}")
+    
     result = _df_payload(df, df_id)
     return result
 
@@ -1220,9 +1351,6 @@ async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_na
         
         # Reorder the dataframe with the new column order
         df = df.select(all_columns)
-        
-        print(f"[Backend] Duplicated column '{name}' as '{new_name}' at position {insert_position}")
-        print(f"[Backend] New column order: {all_columns}")
         
     except HTTPException:
         raise  # Re-raise HTTP exceptions as-is

@@ -50,6 +50,9 @@ const FeatureOverviewAtom: React.FC<Props> = ({ atomId }) => {
     };
   }, [settings.isLoading, toast]);
 
+  // Use pipelineExecutionTimestamp as key to force re-render when pipeline re-executes
+  const executionKey = settings.pipelineExecutionTimestamp || 0;
+  
   return (
     <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
       <div className="relative flex-grow min-h-[450px]">
@@ -57,6 +60,7 @@ const FeatureOverviewAtom: React.FC<Props> = ({ atomId }) => {
           <LoadingAnimation status={settings.loadingStatus} />
         ) : (
           <FeatureOverviewCanvas
+            key={`${atomId}-${executionKey}`} // Force re-render when timestamp changes
             settings={settings}
             onUpdateSettings={s => updateSettings(atomId, s)}
             atomId={atomId}

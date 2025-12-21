@@ -42,6 +42,25 @@ const SimpleCellEditor: React.FC<SimpleCellEditorProps> = ({
   }, [isEditing]); // Only depend on isEditing to avoid reselecting while typing
   
   if (isEditing) {
+    const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+      // Force plain-text paste to avoid carrying over formatting
+      e.preventDefault();
+      const paste = e.clipboardData?.getData('text/plain') ?? '';
+      const target = e.currentTarget;
+      const { selectionStart, selectionEnd, value: current } = target;
+      const start = selectionStart ?? current.length;
+      const end = selectionEnd ?? current.length;
+      const nextValue = current.slice(0, start) + paste + current.slice(end);
+      onValueChange(nextValue);
+      
+      // Manually update input value and caret position
+      requestAnimationFrame(() => {
+        target.value = nextValue;
+        const caret = start + paste.length;
+        target.setSelectionRange(caret, caret);
+      });
+    };
+
     return (
       <input
         ref={inputRef}
@@ -57,6 +76,7 @@ const SimpleCellEditor: React.FC<SimpleCellEditorProps> = ({
         value={value}
         autoFocus
         onChange={(e) => onValueChange(e.target.value)}
+        onPaste={handlePaste}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();

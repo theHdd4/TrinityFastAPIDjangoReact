@@ -3,6 +3,7 @@ from .health import router as health_router
 from app.features.feature_overview.endpoint import router as feature_overview_router
 from app.features.text_box.routes import router as textbox_router
 from app.features.data_upload_validate.endpoint import router as data_upload_validate_router
+from app.features.data_upload.endpoint import router as data_upload_router
 from .card_archive import router as card_archive_router
 from app.features.concat.endpoint import router as concat_router
 from app.features.merge.endpoint import router as merge_router
@@ -32,7 +33,10 @@ from app.features.laboratory.endpoint import router as laboratory_router
 from app.features.pivot_table.endpoint import router as pivot_table_router
 from app.features.unpivot.endpoint import router as unpivot_router
 from app.features.task_queue.endpoint import router as task_queue_router
+from app.features.kpi_dashboard.endpoint import router as kpi_dashboard_router
 from app.features.table.endpoint import router as table_router
+from app.features.cardinality_view.routes import router as cardinality_view_router
+from app.features.pipeline.endpoint import router as pipeline_router
 
 api_router = APIRouter()
 text_router = APIRouter()
@@ -43,6 +47,7 @@ api_router.include_router(health_router)
 # Core feature routers
 api_router.include_router(feature_overview_router)
 api_router.include_router(card_archive_router)
+api_router.include_router(data_upload_router)
 api_router.include_router(data_upload_validate_router)
 api_router.include_router(concat_router)
 api_router.include_router(merge_router)
@@ -64,9 +69,19 @@ api_router.include_router(laboratory_router)
 api_router.include_router(pivot_table_router)
 api_router.include_router(unpivot_router)
 api_router.include_router(
+    kpi_dashboard_router,
+    prefix="/kpi-dashboard",
+    tags=["KPI Dashboard"]
+)
+api_router.include_router(
     table_router,
     prefix="/v1/atoms/table",
     tags=["Table"]
+)
+api_router.include_router(
+    cardinality_view_router,
+    prefix="/cardinality-view",
+    tags=["Cardinality View"]
 )
 
 api_router.include_router(build_feature_router)
@@ -95,3 +110,13 @@ api_router.include_router(
 
 # Text router for text-based features
 text_router.include_router(textbox_router)
+
+# Pipeline execution router
+api_router.include_router(
+    pipeline_router,
+    prefix="/pipeline",
+    tags=["Pipeline Execution"]
+)
+
+
+

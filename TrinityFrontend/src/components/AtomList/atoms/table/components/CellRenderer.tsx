@@ -1,6 +1,5 @@
 import React from 'react';
-import SimpleCellEditor from './SimpleCellEditor';
-import RichTextCellEditor from './RichTextCellEditor';
+import TextBoxCellEditor from './TextBoxCellEditor';
 
 interface RichTextFormatting {
   fontFamily?: string;
@@ -19,8 +18,8 @@ interface CellRendererProps {
   html?: string;
   formatting?: RichTextFormatting;
   isEditing: boolean;
-  enableRichText: boolean;
   onValueChange: (value: string, html?: string) => void;
+  onFormattingChange?: (fmt: Partial<RichTextFormatting>) => void;
   onCommit: (value: string, html?: string) => void;
   onCancel: () => void;
   onFocus?: () => void;
@@ -36,8 +35,8 @@ const CellRenderer: React.FC<CellRendererProps> = ({
   html,
   formatting,
   isEditing,
-  enableRichText,
   onValueChange,
+  onFormattingChange,
   onCommit,
   onCancel,
   onFocus,
@@ -47,35 +46,19 @@ const CellRenderer: React.FC<CellRendererProps> = ({
   className,
   style,
 }) => {
-  // Use RichTextCellEditor only if rich text is enabled AND formatting exists
-  if (enableRichText && (formatting || html)) {
-    return (
-      <RichTextCellEditor
-        value={value}
-        html={html}
-        formatting={formatting}
-        isEditing={isEditing}
-        onValueChange={(plainText, htmlText) => onValueChange(plainText, htmlText)}
-        onCommit={(plainText, htmlText) => onCommit(plainText, htmlText)}
-        onCancel={onCancel}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        className={className}
-        style={style}
-      />
-    );
-  }
-  
-  // Default: Use SimpleCellEditor (like DataFrameOperations)
+  // Use TextBoxCellEditor based on text-box implementation for consistent rich text experience
   return (
-    <SimpleCellEditor
+    <TextBoxCellEditor
       value={value}
+      html={html}
+      formatting={formatting}
       isEditing={isEditing}
-      onValueChange={(plainText) => onValueChange(plainText)}
-      onCommit={(plainText) => onCommit(plainText)}
+      onValueChange={(plainText, htmlText) => onValueChange(plainText, htmlText)}
+      onCommit={(plainText, htmlText) => onCommit(plainText, htmlText)}
       onCancel={onCancel}
       onFocus={onFocus}
       onBlur={onBlur}
+      onFormattingChange={onFormattingChange}
       onClick={onClick}
       textAlign={textAlign}
       className={className}

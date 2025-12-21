@@ -42,7 +42,7 @@ async def save_createandtransform_configs(
         document_id = f"{client_name}/{app_name}/{project_name}"
         
         # Check if document already exists
-        existing_doc = await client["trinity_db"]["createandtransform_configs"].find_one({"_id": document_id})
+        existing_doc = await db["createandtransform_configs"].find_one({"_id": document_id})
         
         if existing_doc:
             # Merge new data with existing data instead of replacing
@@ -97,7 +97,7 @@ async def save_createandtransform_configs(
                 print(f"✅ Added new file {input_file} to document")
             
             # Update the existing document
-            result = await client["trinity_db"]["createandtransform_configs"].replace_one(
+            result = await db["createandtransform_configs"].replace_one(
                 {"_id": document_id},
                 merged_document
             )
@@ -126,7 +126,7 @@ async def save_createandtransform_configs(
             }
             
             # Insert new document
-            result = await client["trinity_db"]["createandtransform_configs"].insert_one(document)
+            result = await db["createandtransform_configs"].insert_one(document)
             operation = "inserted"
         
         print(f"📦 Stored in createandtransform_configs: {document_id}")

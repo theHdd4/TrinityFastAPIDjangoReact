@@ -1,5 +1,6 @@
 # app/routes.py - API Routes
 from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any, Optional
 import base64
 import json
@@ -19,6 +20,8 @@ from urllib.parse import unquote
 # Add this line with your other imports
 from datetime import datetime, timezone
 import logging
+import uuid
+from collections import Counter
 
 
 # app/routes.py - Add this import
@@ -67,6 +70,8 @@ from app.core.observability import timing_dependency_factory
 from app.core.task_queue import celery_task_client, format_task_response
 
 import re
+import csv
+from datetime import datetime
 
 # Allowed characters for file keys (alphanumeric, underscores, hyphens, periods)
 FILE_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -103,6 +108,7 @@ logger = logging.getLogger(__name__)
 
 from app.features.data_upload_validate.app.validators.custom_validator import perform_enhanced_validation
 from app.features.data_upload_validate import service as data_upload_service
+from app.features.data_upload_validate.file_ingestion import RobustFileReader
 
 # Config directory
 CUSTOM_CONFIG_DIR = data_upload_service.CUSTOM_CONFIG_DIR
@@ -114,6 +120,8 @@ CSV_READ_KWARGS = data_upload_service.CSV_READ_KWARGS
 
 def _smart_csv_parse(content: bytes, csv_kwargs: dict) -> tuple[pl.DataFrame, list[str], dict]:
     return data_upload_service._smart_csv_parse(content, csv_kwargs)
+
+
 
 
 # app/routes.py - Add MinIO imports and configuration
@@ -129,7 +137,7 @@ from app.DataStorageRetrieval.db import (
     delete_arrow_dataset,
     arrow_dataset_exists,
 )
-from app.DataStorageRetrieval.arrow_client import upload_dataframe
+from app.DataStorageRetrieval.arrow_client import upload_dataframe, download_table_bytes
 from app.DataStorageRetrieval.flight_registry import (
     set_ticket,
     get_ticket_by_key,
@@ -149,6 +157,14 @@ from app.DataStorageRetrieval.minio_utils import (
     get_client,
     ARROW_DIR,
     get_arrow_dir,
+)
+from app.features.data_upload_validate.app.minio_sheet_utils import (
+    extract_all_sheets_from_excel,
+    get_sheet_data,
+    list_upload_session_sheets,
+    normalize_sheet_name,
+    convert_session_sheet_to_arrow,
+    list_upload_folders,
 )
 from pathlib import Path
 import asyncio
@@ -379,6 +395,9 @@ read_minio_object = data_upload_service.read_minio_object
 
 @router.get("/get_object_prefix")
 async def get_object_prefix_endpoint(
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
     client_name: str = "",
     app_name: str = "",
     project_name: str = "",
@@ -388,9 +407,15 @@ async def get_object_prefix_endpoint(
     The endpoint resolves the MinIO prefix for the provided client/app/project
     combination. Environment variables are sourced from Redis when available
     and otherwise retrieved from Postgres' ``registry_environment`` table.
+    
+    Can accept either IDs or names (or both). If names are provided, they take precedence.
+    If only IDs are provided, names will be resolved dynamically from the database.
     """
 
     prefix, env, env_source = await get_object_prefix(
+        client_id=client_id,
+        app_id=app_id,
+        project_id=project_id,
         client_name=client_name,
         app_name=app_name,
         project_name=project_name,
@@ -439,6 +464,7 @@ load_existing_configs = data_upload_service.load_existing_configs
 
 
 # Upload arbitrary file to MinIO and return its path
+# Supports large files up to 2GB with chunked reading
 @router.post("/upload-file")
 async def upload_file(
     file: UploadFile = File(...),
@@ -450,6 +476,8 @@ async def upload_file(
     project_name: str = Form(""),
     sheet_name: str = Form(""),
 ):
+    import gc
+    
     start_time = perf_counter()
     logger.info(
         "data_upload.temp_upload.start file=%s client_id=%s app_id=%s project_id=%s",
@@ -473,47 +501,270 @@ async def upload_file(
 
     prefix = await get_object_prefix()
     tmp_prefix = prefix + "tmp/"
-    content = await file.read()
-    logger.info(
-        "data_upload.temp_upload.read_bytes file=%s size=%s prefix=%s",
-        file.filename,
-        len(content),
-        tmp_prefix,
-    )
+    
+    # Maximum file size: 2GB
+    MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+    CHUNK_SIZE = 10 * 1024 * 1024  # 10 MB chunks
+    
+    try:
+        # Read file in chunks to handle large files
+        content_buffer = io.BytesIO()
+        total_size = 0
+        
+        while True:
+            chunk = await file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            
+            # Check file size limit
+            if total_size > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds maximum size of 2GB. Current size: {total_size / (1024*1024*1024):.2f}GB"
+                )
+            
+            content_buffer.write(chunk)
+        
+        content = content_buffer.getvalue()
+        content_buffer.close()
+        gc.collect()
+        
+        logger.info(
+            "data_upload.temp_upload.read_bytes file=%s size=%s prefix=%s",
+            file.filename,
+            len(content),
+            tmp_prefix,
+        )
 
-    submission = celery_task_client.submit_callable(
-        name="data_upload_validate.upload_file",
-        dotted_path="app.features.data_upload_validate.service.process_temp_upload",
-        kwargs={
-            "file_b64": base64.b64encode(content).decode("utf-8"),
-            "filename": file.filename,
-            "tmp_prefix": tmp_prefix,
-            "sheet_name": sheet_name or None,
-        },
-        metadata={
-            "feature": "data_upload_validate",
-            "operation": "upload_file",
-            "filename": file.filename,
-            "prefix": tmp_prefix,
-        },
-    )
+        submission = celery_task_client.submit_callable(
+            name="data_upload_validate.upload_file",
+            dotted_path="app.features.data_upload_validate.service.process_temp_upload",
+            kwargs={
+                "file_b64": base64.b64encode(content).decode("utf-8"),
+                "filename": file.filename,
+                "tmp_prefix": tmp_prefix,
+                "sheet_name": sheet_name or None,
+            },
+            metadata={
+                "feature": "data_upload_validate",
+                "operation": "upload_file",
+                "filename": file.filename,
+                "prefix": tmp_prefix,
+                "file_size_mb": total_size / (1024 * 1024),
+            },
+        )
+        
+        # Free memory after submitting task
+        del content
+        gc.collect()
 
-    if submission.status == "failure":  # pragma: no cover - defensive programming
-        logger.error(
-            "data_upload.temp_upload.failed task_id=%s file=%s",
+        if submission.status == "failure":  # pragma: no cover - defensive programming
+            logger.error(
+                "data_upload.temp_upload.failed task_id=%s file=%s",
+                submission.task_id,
+                file.filename,
+            )
+            raise HTTPException(status_code=400, detail=submission.detail or "Upload failed")
+
+        duration_ms = (perf_counter() - start_time) * 1000
+        logger.info(
+            "data_upload.temp_upload.queued file=%s task_id=%s duration_ms=%.2f size_mb=%.2f",
+            file.filename,
             submission.task_id,
+            duration_ms,
+            total_size / (1024 * 1024),
+        )
+        return format_task_response(submission, embed_result=True)
+        
+    except HTTPException:
+        raise
+    except MemoryError as e:
+        logger.error(
+            "data_upload.temp_upload.memory_error file=%s error=%s",
+            file.filename,
+            str(e),
+        )
+        gc.collect()
+        raise HTTPException(
+            status_code=507,
+            detail="Server ran out of memory processing file. Try a smaller file or contact support."
+        )
+    except Exception as e:
+        logger.exception(
+            "data_upload.temp_upload.error file=%s",
             file.filename,
         )
-        raise HTTPException(status_code=400, detail=submission.detail or "Upload failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload file: {str(e)}"
+        )
 
-    duration_ms = (perf_counter() - start_time) * 1000
-    logger.info(
-        "data_upload.temp_upload.queued file=%s task_id=%s duration_ms=%.2f",
-        file.filename,
-        submission.task_id,
-        duration_ms,
-    )
-    return format_task_response(submission, embed_result=True)
+
+@router.post("/upload-excel-multi-sheet")
+async def upload_excel_multi_sheet(
+    file: UploadFile = File(...),
+    client_id: str = Form(""),
+    app_id: str = Form(""),
+    project_id: str = Form(""),
+    client_name: str = Form(""),
+    app_name: str = Form(""),
+    project_name: str = Form(""),
+):
+    """
+    Upload an Excel file and extract all sheets automatically.
+    Each sheet is stored separately in MinIO as a Parquet file.
+    Supports large files up to 2GB with chunked reading.
+    
+    Returns:
+        {
+            "upload_session_id": "uuid",
+            "sheets": ["Sheet1", "Sheet2", ...],
+            "sheet_details": [...],
+            "original_file_path": "..."
+        }
+    """
+    import tempfile
+    import gc
+    
+    start_time = perf_counter()
+    
+    # Validate file type
+    if not file.filename.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=400,
+            detail="Only Excel files (.xlsx, .xls) are supported for multi-sheet upload"
+        )
+    
+    # Set environment variables
+    if client_id:
+        os.environ["CLIENT_ID"] = client_id
+    if app_id:
+        os.environ["APP_ID"] = app_id
+    if project_id:
+        os.environ["PROJECT_ID"] = project_id
+    if client_name:
+        os.environ["CLIENT_NAME"] = client_name
+    if app_name:
+        os.environ["APP_NAME"] = app_name
+    if project_name:
+        os.environ["PROJECT_NAME"] = project_name
+    
+    # Get MinIO prefix
+    prefix = await get_object_prefix()
+    
+    # Generate unique upload session ID
+    upload_session_id = str(uuid.uuid4())
+    
+    # Maximum file size: 2GB
+    MAX_EXCEL_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+    
+    # Use chunked reading for large files to avoid memory issues
+    CHUNK_SIZE = 10 * 1024 * 1024  # 10 MB chunks
+    
+    try:
+        # Read file in chunks to handle large files
+        # Use a temporary file for very large files to avoid memory issues
+        content_buffer = io.BytesIO()
+        total_size = 0
+        
+        while True:
+            chunk = await file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            
+            # Check file size limit
+            if total_size > MAX_EXCEL_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds maximum size of 2GB. Current size: {total_size / (1024*1024*1024):.2f}GB"
+                )
+            
+            content_buffer.write(chunk)
+        
+        # Get the complete content
+        content = content_buffer.getvalue()
+        content_buffer.close()
+        
+        # Force garbage collection to free memory from chunks
+        gc.collect()
+        
+        logger.info(
+            "data_upload.multi_sheet.start file=%s size=%s session_id=%s",
+            file.filename,
+            len(content),
+            upload_session_id,
+        )
+        
+        # Extract all sheets and store in MinIO
+        result = extract_all_sheets_from_excel(
+            excel_content=content,
+            upload_session_id=upload_session_id,
+            prefix=prefix
+        )
+        
+        # Free memory after processing
+        del content
+        gc.collect()
+        
+        duration_ms = (perf_counter() - start_time) * 1000
+        logger.info(
+            "data_upload.multi_sheet.completed session_id=%s sheets=%s duration_ms=%.2f",
+            upload_session_id,
+            len(result["sheets"]),
+            duration_ms,
+        )
+        
+        # Return UI-friendly response format
+        response_data = {
+            "status": "success",
+            "upload_session_id": result["upload_session_id"],
+            "session_id": result["upload_session_id"],  # Alias for compatibility
+            "file_name": file.filename,
+            "file_size_mb": total_size / (1024 * 1024),
+            "sheet_count": len(result["sheets"]),
+            "sheets": result["sheets"],
+            "sheet_details": result.get("sheet_details", []),
+            "original_file_path": result.get("original_file_path", ""),
+        }
+        logger.info(
+            "data_upload.multi_sheet.response session_id=%s sheets=%s sheet_details_count=%s",
+            result["upload_session_id"],
+            result["sheets"],
+            len(result.get("sheet_details", [])),
+        )
+        return response_data
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(
+            "data_upload.multi_sheet.failed session_id=%s error=%s",
+            upload_session_id,
+            str(e),
+        )
+        raise HTTPException(status_code=400, detail=str(e))
+    except MemoryError as e:
+        logger.error(
+            "data_upload.multi_sheet.memory_error session_id=%s error=%s",
+            upload_session_id,
+            str(e),
+        )
+        gc.collect()
+        raise HTTPException(
+            status_code=507,
+            detail="Server ran out of memory processing file. Try a smaller file or contact support."
+        )
+    except Exception as e:
+        logger.exception(
+            "data_upload.multi_sheet.error session_id=%s",
+            upload_session_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process Excel file: {str(e)}"
+        )
 
 
 @router.delete("/temp-uploads")
@@ -613,16 +864,24 @@ async def create_new(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error reading file {file.filename}: {str(e)}")
 
-        # Parse file to DataFrame using Polars for efficient serialization
+        # Parse file to DataFrame using RobustFileReader (uses fixed CSVReader/ExcelReader)
         try:
-            if file.filename.lower().endswith(".csv"):
-                df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
-            elif file.filename.lower().endswith((".xls", ".xlsx")):
-                df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, file_metadata = RobustFileReader.read_file_to_pandas(
+                content=content,
+                filename=file.filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
             else:
-                raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-
-            df = df_pl.to_pandas()
+                df = df_result
+            
+            # Convert to Polars for consistency with existing code
+            df_pl = pl.from_pandas(df)
 
             # Attempt to convert object columns that look like dates or datetimes
             date_pat = re.compile(
@@ -727,9 +986,84 @@ async def create_new(
         "validator_atom_id": validator_atom_id,
         "config_saved": True
     }
+
+
+@router.post("/convert-session-sheet-to-arrow")
+async def convert_session_sheet_to_arrow_endpoint(
+    upload_session_id: str = Form(...),
+    sheet_name: str = Form(...),
+    original_filename: str = Form(...),
+    use_folder_structure: str = Form("true"),
+    client_name: str = Form(""),
+    app_name: str = Form(""),
+    project_name: str = Form(""),
+):
+    """
+    Convert a sheet from an upload session to Arrow format and save it.
     
+    Args:
+        upload_session_id: The upload session ID
+        sheet_name: The normalized sheet name
+        original_filename: Original Excel filename
+        use_folder_structure: "true" or "false" - whether to use folder structure
+        client_name, app_name, project_name: Environment context
+        
+    Returns:
+        {
+            "file_path": "path/to/file.arrow",
+            "file_name": "filename (sheet_name)",
+            "file_key": "file_key"
+        }
+    """
+    # Validate inputs
+    if not upload_session_id or not upload_session_id.strip():
+        raise HTTPException(status_code=400, detail="upload_session_id is required and cannot be empty")
     
+    if not sheet_name or not sheet_name.strip():
+        raise HTTPException(status_code=400, detail="sheet_name is required and cannot be empty")
     
+    if not original_filename or not original_filename.strip():
+        raise HTTPException(status_code=400, detail="original_filename is required and cannot be empty")
+    
+    # Set environment variables
+    if client_name:
+        os.environ["CLIENT_NAME"] = client_name
+    if app_name:
+        os.environ["APP_NAME"] = app_name
+    if project_name:
+        os.environ["PROJECT_NAME"] = project_name
+    
+    prefix = await get_object_prefix()
+    use_folder = use_folder_structure.lower() == "true"
+    
+    try:
+        logger.info(
+            "convert_session_sheet_to_arrow_endpoint called: session_id=%s sheet_name=%s original_filename=%s use_folder=%s",
+            upload_session_id,
+            sheet_name,
+            original_filename,
+            use_folder
+        )
+        result = convert_session_sheet_to_arrow(
+            upload_session_id=upload_session_id,
+            sheet_name=sheet_name,
+            original_filename=original_filename,
+            prefix=prefix,
+            use_folder_structure=use_folder
+        )
+        logger.info(
+            "convert_session_sheet_to_arrow_endpoint success: file_path=%s file_name=%s",
+            result.get("file_path"),
+            result.get("file_name")
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Error converting sheet {sheet_name} from session {upload_session_id}")
+        raise HTTPException(status_code=500, detail=f"Failed to convert sheet: {str(e)}")
+
+
 # POST: UPDATE_COLUMN_TYPES - Allow user to change column data types
 @router.post("/update_column_types", response_model=UpdateColumnTypesResponse)
 async def update_column_types(
@@ -1806,7 +2140,7 @@ async def save_dataframes(
                 }
             )
 
-    MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
+    MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB - increased for large datasets
     STATUS_TTL = 3600
 
     for source in iter_sources:
@@ -1835,15 +2169,38 @@ async def save_dataframes(
         fileobj.seek(0)
         if size > MAX_FILE_SIZE:
             redis_client.set(progress_key, "rejected", ex=STATUS_TTL)
-            raise HTTPException(status_code=413, detail=f"{filename} exceeds 512MB limit")
+            raise HTTPException(status_code=413, detail=f"{filename} exceeds 2GB limit (current size: {size / (1024*1024*1024):.2f}GB)")
 
         redis_client.set(progress_key, "parsing", ex=STATUS_TTL)
 
         if filename.lower().endswith(".csv"):
             csv_path = getattr(fileobj, "name", None)
             if csv_path and os.path.exists(csv_path):
+                # CRITICAL: For batched reading, we need to scan first to find max columns
+                # Read first batch to determine schema, then use that schema for all batches
+                from app.features.data_upload_validate.file_ingestion.readers.csv_reader import CSVReader
+                from app.features.data_upload_validate.file_ingestion.detectors.encoding_detector import EncodingDetector
+                
+                # Read file content to find max columns
+                with open(csv_path, 'rb') as f:
+                    content = f.read()
+                encoding = EncodingDetector.detect(content)
+                delimiter = CSVReader._detect_delimiter(content, encoding)
+                max_cols = CSVReader._find_max_columns(content, encoding, delimiter, sample_rows=0)
+                
+                # Create schema with all columns
+                if max_cols > 0:
+                    schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
+                    batched_kwargs = CSV_READ_KWARGS.copy()
+                    batched_kwargs["schema"] = schema
+                    batched_kwargs["truncate_ragged_lines"] = False
+                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
+                else:
+                    batched_kwargs = CSV_READ_KWARGS.copy()
+                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
+                
                 reader = pl.read_csv_batched(
-                    csv_path, batch_size=1_000_000, **CSV_READ_KWARGS
+                    csv_path, batch_size=1_000_000, **batched_kwargs
                 )
                 try:
                     first_chunk = next(reader)
@@ -1880,7 +2237,12 @@ async def save_dataframes(
                 df_pl = None
             else:
                 data_bytes = fileobj.read()
-                df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
+                # Use pl.read_csv with CSV_READ_KWARGS for proper dtype inference
+                # This matches the old routes behavior and preserves numeric types
+                # Add ignore_errors to handle mixed dtype columns (e.g., "allpacksize" in numeric column)
+                read_kwargs = CSV_READ_KWARGS.copy()
+                read_kwargs["ignore_errors"] = True  # Convert unparseable values to null instead of failing
+                df_pl = pl.read_csv(io.BytesIO(data_bytes), **read_kwargs)
                 df_pl = data_upload_service._normalize_column_names(df_pl)
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)
@@ -1904,10 +2266,28 @@ async def save_dataframes(
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
+        # Check if this is a multi-sheet Excel file and should be saved in folder structure
+        use_folder_structure = False
+        excel_folder_name = None
+        if workbook_path and sheet_meta:
+            sheet_names_meta = sheet_meta.get("sheet_names", [])
+            has_multiple = len(sheet_names_meta) > 1 if isinstance(sheet_names_meta, list) else False
+            if has_multiple:
+                # Extract Excel filename without extension for folder name
+                original_filename_meta = sheet_meta.get("original_filename") or filename
+                excel_folder_name = Path(original_filename_meta).stem.replace(' ', '_').replace('.', '_')
+                use_folder_structure = True
+                # Modify arrow_name to use folder structure: {excel_folder_name}/sheets/{sheet_name}.arrow
+                selected_sheet_meta = sheet_meta.get("selected_sheet") or (sheet_names_meta[0] if sheet_names_meta else "")
+                if selected_sheet_meta:
+                    # Normalize sheet name for path
+                    normalized_sheet_name = normalize_sheet_name(selected_sheet_meta)
+                    arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet_name}.arrow"
+        
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
-        logger.info("Uploaded %s as %s", filename, result.get("object_name", ""))
+        logger.info("Uploaded %s as %s (folder_structure=%s)", filename, result.get("object_name", ""), use_folder_structure)
 
         # If df_pl is None (chunked csv), upload via polars scan
         if filename.lower().endswith(".csv"):
@@ -2577,12 +2957,18 @@ async def list_saved_dataframes(
             )
         )
         tmp_prefix = prefix + "tmp/"
+        uploads_prefix = prefix + "uploads/"
         files = []
+        excel_folders: Dict[str, Dict[str, Any]] = {}
+        
         for obj in sorted(objects, key=lambda o: o.object_name):
             if not obj.object_name.endswith(".arrow"):
                 continue
             if obj.object_name.startswith(tmp_prefix):
                 continue
+            if obj.object_name.startswith(uploads_prefix):
+                continue  # Skip temporary upload folders
+            
             last_modified = getattr(obj, "last_modified", None)
             if last_modified is not None:
                 try:
@@ -2591,17 +2977,86 @@ async def list_saved_dataframes(
                     modified_iso = None
             else:
                 modified_iso = None
-            entry = {
-                "object_name": obj.object_name,
-                "arrow_name": Path(obj.object_name).name,
-                "csv_name": Path(obj.object_name).name,
-            }
-            if modified_iso:
-                entry["last_modified"] = modified_iso
-            size = getattr(obj, "size", None)
-            if isinstance(size, int):
-                entry["size"] = size
-            files.append(entry)
+            
+            # Check if this is part of an Excel folder structure: {prefix}{excel_name}/sheets/{sheet_name}.arrow
+            rel_path = obj.object_name[len(prefix):] if obj.object_name.startswith(prefix) else obj.object_name
+            path_parts = rel_path.split("/")
+            
+            if len(path_parts) >= 3 and path_parts[1] == "sheets":
+                # This is a sheet inside an Excel folder
+                excel_folder_name = path_parts[0]
+                sheet_name = Path(path_parts[-1]).stem  # Remove .arrow extension
+                
+                if excel_folder_name not in excel_folders:
+                    excel_folders[excel_folder_name] = {
+                        "name": excel_folder_name,
+                        "path": f"{prefix}{excel_folder_name}/",
+                        "type": "excel_folder",
+                        "sheets": []
+                    }
+                
+                # Get original filename from flight registry to preserve original name
+                original_csv_name = get_original_csv(obj.object_name)
+                display_name = original_csv_name if original_csv_name else Path(obj.object_name).name
+                # If display_name ends with .arrow, try to get original from registry
+                if display_name.endswith('.arrow'):
+                    if original_csv_name:
+                        # We have original_csv_name from registry, use it
+                        display_name = Path(original_csv_name).name
+                    else:
+                        # Try to get original from FILEKEY_TO_CSV mapping
+                        from app.DataStorageRetrieval.flight_registry import FILEKEY_TO_CSV
+                        original_from_registry = FILEKEY_TO_CSV.get(obj.object_name)
+                        if original_from_registry:
+                            display_name = Path(original_from_registry).name
+                        else:
+                            # Remove .arrow extension for display as fallback
+                            display_name = Path(obj.object_name).stem
+                
+                sheet_entry = {
+                    "object_name": obj.object_name,
+                    "sheet_name": sheet_name,
+                    "arrow_name": Path(obj.object_name).name,
+                    "csv_name": display_name,  # Use original filename for display
+                }
+                if modified_iso:
+                    sheet_entry["last_modified"] = modified_iso
+                size = getattr(obj, "size", None)
+                if isinstance(size, int):
+                    sheet_entry["size"] = size
+                
+                excel_folders[excel_folder_name]["sheets"].append(sheet_entry)
+            else:
+                # Regular file (not in Excel folder structure)
+                # Get original filename from flight registry to preserve original name
+                original_csv_name = get_original_csv(obj.object_name)
+                display_name = original_csv_name if original_csv_name else Path(obj.object_name).name
+                # If display_name ends with .arrow, try to get original from registry
+                if display_name.endswith('.arrow'):
+                    if original_csv_name:
+                        # We have original_csv_name from registry, use it
+                        display_name = Path(original_csv_name).name
+                    else:
+                        # Try to get original from FILEKEY_TO_CSV mapping
+                        from app.DataStorageRetrieval.flight_registry import FILEKEY_TO_CSV
+                        original_from_registry = FILEKEY_TO_CSV.get(obj.object_name)
+                        if original_from_registry:
+                            display_name = Path(original_from_registry).name
+                        else:
+                            # Remove .arrow extension for display as fallback
+                            display_name = Path(obj.object_name).stem
+                
+                entry = {
+                    "object_name": obj.object_name,
+                    "arrow_name": Path(obj.object_name).name,
+                    "csv_name": display_name,  # Use original filename for display
+                }
+                if modified_iso:
+                    entry["last_modified"] = modified_iso
+                size = getattr(obj, "size", None)
+                if isinstance(size, int):
+                    entry["size"] = size
+                files.append(entry)
         
         # Trigger background auto-classification for files
         asyncio.create_task(
@@ -2614,25 +3069,34 @@ async def list_saved_dataframes(
             )
         )
         
-        return {
+        result = {
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
             "files": files,
+            "excel_folders": list(excel_folders.values()),
             "environment": env,
             "env_source": env_source,
         }
+        logger.info(
+            "list_saved_dataframes result: files=%s excel_folders=%s",
+            len(files),
+            len(excel_folders)
+        )
+        return result
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
             return {
                 "bucket": MINIO_BUCKET,
                 "prefix": prefix,
                 "files": [],
+                "excel_folders": [],
                 "environment": env,
             }
         return {
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
             "files": [],
+            "excel_folders": [],
             "error": str(e),
             "environment": env,
         }
@@ -2641,6 +3105,7 @@ async def list_saved_dataframes(
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
             "files": [],
+            "excel_folders": [],
             "error": str(e),
             "environment": env,
         }
@@ -2678,6 +3143,37 @@ async def download_dataframe(object_name: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@router.get("/download_dataframe_direct")
+async def download_dataframe_direct(object_name: str):
+    """
+    Stream the dataframe file directly from MinIO (avoids presigned host resolution issues).
+    """
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+
+    try:
+        obj = minio_client.get_object(MINIO_BUCKET, object_name)
+        content = obj.read()
+        obj.close()
+        obj.release_conn()
+
+        filename = Path(object_name).name
+        return StreamingResponse(
+          iter([content]),
+          media_type="application/octet-stream",
+          headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+          },
+        )
+    except S3Error as e:
+        if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_name)
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/load-saved-dataframe")
 async def load_saved_dataframe(
@@ -2826,7 +3322,19 @@ async def export_csv(object_name: str):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
         else:
-            df = pd.read_csv(io.BytesIO(content))
+            # Use RobustFileReader to preserve all columns
+            filename = Path(object_name).name
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=content,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         
         # Convert to CSV bytes
         csv_bytes = df.to_csv(index=False).encode("utf-8")
@@ -2879,7 +3387,19 @@ async def export_excel(object_name: str):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
         else:
-            df = pd.read_csv(io.BytesIO(content))
+            # Use RobustFileReader to preserve all columns
+            filename = Path(object_name).name
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=content,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         
         # Convert to Excel bytes
         excel_buffer = io.BytesIO()
@@ -3082,7 +3602,15 @@ async def get_workbook_metadata_endpoint(object_name: str = Query(...)):
     try:
         metadata = _load_workbook_metadata(decoded)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Workbook metadata not found")
+        # Return default metadata for files without workbook metadata (e.g., single-sheet files)
+        # This prevents 404 errors in logs for normal operation
+        return {
+            "has_multiple_sheets": False,
+            "sheet_names": [],
+            "selected_sheet": None,
+            "workbook_path": None,
+            "flight_path": None
+        }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return metadata
@@ -3115,16 +3643,25 @@ async def change_workbook_sheet(
         raise HTTPException(status_code=400, detail=f"Failed to read workbook: {exc}")
 
     try:
-        excel_file = pd.ExcelFile(io.BytesIO(workbook_bytes))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Failed to open workbook: {exc}")
-
-    sheet_names = excel_file.sheet_names or []
-    if sheet_name_clean not in sheet_names:
-        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name_clean}' not found")
-
-    try:
-        df = excel_file.parse(sheet_name_clean)
+        # Use ExcelReader to preserve all columns (single approach, no duplication)
+        from app.features.data_upload_validate.file_ingestion.readers.excel_reader import ExcelReader
+        dfs_dict, excel_metadata = ExcelReader.read(
+            content=workbook_bytes,
+            sheet_name=sheet_name_clean,
+            auto_detect_header=True,
+            return_raw=False,
+        )
+        
+        # Get sheet names from metadata
+        sheet_names = excel_metadata.get("sheet_names", [])
+        if sheet_name_clean not in sheet_names:
+            raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name_clean}' not found")
+        
+        # Handle both single DataFrame and dict (multiple sheets)
+        if isinstance(dfs_dict, dict):
+            df = dfs_dict[sheet_name_clean]
+        else:
+            df = dfs_dict
         df_pl = pl.from_pandas(df)
         arrow_buf = io.BytesIO()
         df_pl.write_ipc(arrow_buf)
@@ -3157,7 +3694,18 @@ def _load_dataframe_for_processing(object_name: str, content: bytes) -> pd.DataF
         table = reader.read_all()
         return table.to_pandas()
     if object_name.lower().endswith(".csv"):
-        return pd.read_csv(io.BytesIO(content))
+        # Use RobustFileReader to preserve all columns
+        filename = Path(object_name).name
+        df_result, _ = RobustFileReader.read_file_to_pandas(
+            content=content,
+            filename=filename,
+            auto_detect_header=True,
+            return_raw=False,
+        )
+        # Handle both single DataFrame and dict (multiple sheets)
+        if isinstance(df_result, dict):
+            return list(df_result.values())[0]  # Use first sheet
+        return df_result
     if object_name.lower().endswith(".parquet"):
         return pd.read_parquet(io.BytesIO(content))
     raise ValueError("Unsupported file format for processing")
@@ -3220,6 +3768,12 @@ def _apply_missing_strategy(
         fill_value = ""
     elif strategy_lower == "custom":
         fill_value = custom_value
+    elif strategy_lower == "ffill":
+        df[column] = series.ffill()
+        return df
+    elif strategy_lower == "bfill":
+        df[column] = series.bfill()
+        return df
     else:
         fill_value = custom_value
 
@@ -3233,7 +3787,10 @@ async def process_saved_dataframe(payload: ProcessDataframeRequest):
     """Apply column-level processing (rename, dtype conversion, missing value handling) to a saved dataframe."""
     decoded = unquote(payload.object_name)
     prefix = await get_object_prefix()
+    logger.info(f"🔧 [process_saved_dataframe] Received object_name: {decoded}, current prefix: {prefix}")
+    
     if not decoded.startswith(prefix):
+        logger.warning(f"⚠️ [process_saved_dataframe] Object name {decoded} does not start with prefix {prefix}")
         raise HTTPException(status_code=400, detail="Invalid object name")
     if not payload.instructions:
         raise HTTPException(status_code=400, detail="No processing instructions supplied")
@@ -3294,13 +3851,18 @@ async def process_saved_dataframe(payload: ProcessDataframeRequest):
     arrow_buffer = io.BytesIO()
     pl.from_pandas(df_processed).write_ipc(arrow_buffer)
     arrow_bytes = arrow_buffer.getvalue()
+    
+    # CRITICAL: Write back to the exact same path (decoded) to preserve folder structure
+    # For Excel sheets in folders, decoded should be: "client/app/project/folder_name/sheets/Sheet1.arrow"
+    logger.info(f"💾 [process_saved_dataframe] Writing processed dataframe to: {decoded}")
     minio_client.put_object(
         MINIO_BUCKET,
-        decoded,
+        decoded,  # Use exact same path to preserve folder structure
         io.BytesIO(arrow_bytes),
         len(arrow_bytes),
         content_type="application/octet-stream",
     )
+    logger.info(f"✅ [process_saved_dataframe] Successfully wrote to: {decoded}")
 
     flight_path = get_flight_path_for_csv(decoded)
     if flight_path:
@@ -3344,17 +3906,25 @@ async def get_file_metadata(request: Request):
         data = read_minio_object(file_path)
         filename = Path(file_path).name
         
-        # Parse based on file type
-        if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-        elif filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        # Parse based on file type using RobustFileReader
+        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         elif filename.lower().endswith(".arrow"):
             df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
-        
-        df = df_pl.to_pandas()
         
         # Collect column metadata
         columns_info = []
@@ -3386,6 +3956,1108 @@ async def get_file_metadata(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _find_stable_column_count(rows: List[List[str]], min_consistency: int = 3) -> tuple[int, int]:
+    """
+    Find where column count stabilizes (becomes consistent).
+    Data rows typically have the same number of columns consistently.
+    
+    Example:
+        - Description rows: 5 columns each
+        - Data rows: 30 columns each (consistent)
+        - Returns: (30, index_where_30_columns_start)
+    
+    Args:
+        rows: List of rows, each row is a list of cell values
+        min_consistency: Minimum number of consecutive rows with same column count to consider it stable
+    
+    Returns:
+        Tuple of (stable_column_count, data_start_index)
+        - stable_column_count: The consistent column count in data rows
+        - data_start_index: Index where data rows start (after description rows)
+    """
+    if not rows:
+        return 0, 0
+    
+    # Count columns in each row (use actual length of row list, including empty cells)
+    # Also count non-empty cells for better detection
+    column_counts = []
+    non_empty_counts = []
+    for row in rows:
+        col_count = len(row)
+        column_counts.append(col_count)
+        # Count non-empty cells (cells that have actual content)
+        non_empty = sum(1 for cell in row if cell and str(cell).strip())
+        non_empty_counts.append(non_empty)
+    
+    if not column_counts:
+        return 0, 0
+    
+    logger.info(f"Column counts (first 20): {column_counts[:20]}")
+    logger.info(f"Non-empty counts (first 20): {non_empty_counts[:20]}")
+    
+    # Find the most common column count (excluding 0 and 1, which are likely empty/trivial rows)
+    non_trivial_counts = [c for c in column_counts if c > 1]
+    
+    if not non_trivial_counts:
+        # All rows have 0 or 1 columns, return first row as data start
+        max_count = max(column_counts) if column_counts else 0
+        logger.info(f"No non-trivial column counts found, using max_count={max_count}, data_start=0")
+        return max_count, 0
+    
+    # Find the stable column count (most common count that appears consistently)
+    count_freq = Counter(non_trivial_counts)
+    stable_count = count_freq.most_common(1)[0][0] if count_freq else max(non_trivial_counts)
+    
+    logger.info(f"Stable column count detected: {stable_count} (appears {count_freq[stable_count]} times out of {len(non_trivial_counts)} rows)")
+    
+    # Find where this stable count starts appearing consistently
+    # Look for first occurrence where we have min_consistency consecutive rows with stable_count
+    data_start_idx = 0
+    consecutive_count = 0
+    
+    for idx, col_count in enumerate(column_counts):
+        if col_count == stable_count:
+            consecutive_count += 1
+            if consecutive_count >= min_consistency:
+                # Found stable data block - data starts min_consistency rows back
+                data_start_idx = idx - min_consistency + 1
+                break
+        else:
+            consecutive_count = 0
+    
+    # If we didn't find a stable block with min_consistency, try to find where stable_count first appears
+    if data_start_idx == 0:
+        # Check if first few rows have the stable count
+        if column_counts[0] == stable_count:
+            # First row has stable count - might be header, data starts at row 0
+            data_start_idx = 0
+        else:
+            # Find first occurrence of stable_count
+            for idx, col_count in enumerate(column_counts):
+                if col_count == stable_count:
+                    data_start_idx = idx
+                    break
+    
+    # Ensure data_start_idx is valid
+    if data_start_idx < 0:
+        data_start_idx = 0
+    if data_start_idx >= len(rows):
+        data_start_idx = 0
+    
+    logger.info(f"Column count analysis: stable_count={stable_count}, data_start_idx={data_start_idx}, "
+                f"column_counts_sample={column_counts[:10]}")
+    
+    return stable_count, data_start_idx
+
+
+def _detect_delimiter(content: bytes) -> str:
+    """Detect CSV delimiter by sampling first few lines."""
+    try:
+        # Try to decode as UTF-8
+        text = content.decode('utf-8')
+    except UnicodeDecodeError:
+        try:
+            text = content.decode('latin-1')
+        except UnicodeDecodeError:
+            text = content.decode('utf-8', errors='ignore')
+    
+    # Sample first 5 lines
+    lines = text.split('\n')[:5]
+    if not lines:
+        return ','
+    
+    # Count occurrences of common delimiters
+    delimiter_counts = {',': 0, ';': 0, '\t': 0, '|': 0}
+    for line in lines:
+        if line.strip():
+            delimiter_counts[','] += line.count(',')
+            delimiter_counts[';'] += line.count(';')
+            delimiter_counts['\t'] += line.count('\t')
+            delimiter_counts['|'] += line.count('|')
+    
+    # Return delimiter with highest count
+    return max(delimiter_counts, key=delimiter_counts.get) if max(delimiter_counts.values()) > 0 else ','
+
+
+def _read_csv_rows_simple(content: bytes, pad_rows: bool = True) -> List[List[str]]:
+    """
+    Read CSV file row by row using Python's csv module.
+    This ensures we get ALL rows including headers as data (not column names).
+    Returns list of rows, each row is a list of cell values.
+    
+    Args:
+        content: File content as bytes
+        pad_rows: If True, pad all rows to same length. If False, keep original row lengths.
+    """
+    try:
+        # Try to decode as UTF-8
+        text = content.decode('utf-8')
+    except UnicodeDecodeError:
+        try:
+            text = content.decode('latin-1')
+        except UnicodeDecodeError:
+            text = content.decode('utf-8', errors='ignore')
+    
+    # Detect delimiter
+    delimiter = _detect_delimiter(content)
+    
+    # Read rows using csv module (this reads ALL rows including headers as data)
+    rows = []
+    csv_reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    
+    for row in csv_reader:
+        # Convert tuple to list
+        row_list = list(row)
+        
+        if pad_rows:
+            # Pad rows to have same length as max columns seen so far
+            if rows:
+                max_cols = max(len(r) for r in rows)
+                if len(row_list) < max_cols:
+                    row_list.extend([''] * (max_cols - len(row_list)))
+                elif len(row_list) > max_cols:
+                    # Pad previous rows
+                    for i, prev_row in enumerate(rows):
+                        if len(prev_row) < len(row_list):
+                            rows[i] = prev_row + [''] * (len(row_list) - len(prev_row))
+        
+        rows.append(row_list)
+    
+    return rows
+
+
+def _read_excel_rows_simple(content: bytes, sheet_name: Optional[str] = None) -> List[List[str]]:
+    """
+    Read Excel file row by row using pandas with header=None to get ALL rows as data.
+    This ensures we get actual column headers from the file, not pandas-generated names.
+    Returns list of rows, each row is a list of cell values.
+    
+    IMPORTANT: We preserve original dtypes during reading, then convert to strings only for
+    the row-by-row representation. This allows proper dtype detection later.
+    """
+    excel_file = io.BytesIO(content)
+    
+    # Use pandas with header=None to read ALL rows as data (including headers)
+    # This ensures we get the actual column names from the Excel file, not "col_0", "col_1", etc.
+    # CRITICAL: Don't use dtype=str here - let pandas infer types so we can preserve numeric/datetime types
+    try:
+        df = pd.read_excel(
+            excel_file,
+            sheet_name=sheet_name,
+            header=None,  # Read all rows as data, don't treat first row as column names
+            engine='openpyxl',
+            # REMOVED dtype=str - let pandas infer types naturally
+            # This preserves numeric types (int64, float64) and datetime types
+            na_filter=True,  # Convert empty cells to NaN (pandas default)
+        )
+        
+        # Convert DataFrame to list of lists
+        # Convert values to strings for row representation, but preserve type information
+        rows = []
+        for _, row in df.iterrows():
+            row_values = []
+            for val in row:
+                if pd.isna(val):
+                    row_values.append('')
+                else:
+                    # Convert to string but preserve the original value's type information
+                    # This allows downstream code to detect numeric/datetime types
+                    row_values.append(str(val))
+            rows.append(row_values)
+        
+        return rows
+    except Exception as e:
+        logger.error(f"Error reading Excel file with pandas: {e}")
+        # Fallback to openpyxl if pandas fails
+        excel_file.seek(0)  # Reset file pointer
+        workbook = openpyxl.load_workbook(excel_file, data_only=True, read_only=True)
+        
+        if sheet_name:
+            if sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+            else:
+                sheet = workbook.active
+                logger.warning(f"Sheet '{sheet_name}' not found, using active sheet")
+        else:
+            sheet = workbook.active
+        
+        rows = []
+        for row in sheet.iter_rows(values_only=True):
+            row_values = [str(cell) if cell is not None else '' for cell in row]
+            rows.append(row_values)
+        
+        workbook.close()
+        return rows
+
+
+def _separate_rows_simple(all_rows: List[List[str]]) -> tuple[List[List[str]], List[List[str]], int]:
+    """
+    Separate description rows from data rows using column count stability.
+    - Data rows have consistent column count (e.g., all have 30 columns)
+    - Description rows have different column count (e.g., 5 columns)
+    - Find where column count stabilizes - that's where data starts
+    
+    Returns: (description_rows, data_rows, data_start_index)
+    """
+    if not all_rows:
+        return [], [], 0
+    
+    # Find stable column count and where data starts
+    stable_column_count, data_start_idx = _find_stable_column_count(all_rows, min_consistency=3)
+    
+    # Ensure data_start_idx is valid
+    if data_start_idx < 0:
+        data_start_idx = 0
+    if data_start_idx >= len(all_rows):
+        data_start_idx = 0
+    
+    # Description rows are everything before data_start_idx
+    description_rows = all_rows[:data_start_idx]
+    data_rows = all_rows[data_start_idx:]
+    
+    logger.info(f"Separated rows: {len(description_rows)} description rows, {len(data_rows)} data rows, "
+                f"stable column count: {stable_column_count}, data starts at index: {data_start_idx}")
+    
+    return description_rows, data_rows, data_start_idx
+
+
+def _detect_header_row_simple(data_rows: List[List[str]], max_check: int = 20) -> tuple[int, str]:
+    """
+    Detect header row by comparing rows with each other.
+    The row that is most different/unmatched from other rows is likely the header.
+    
+    Logic:
+    1. Compare each row with all other rows
+    2. Calculate similarity/difference score for each row
+    3. The row with lowest similarity (most different) is the header
+    4. Header rows typically have:
+       - Text values (not numbers)
+       - Different patterns than data rows
+       - More consistent structure across columns
+    """
+    if not data_rows or len(data_rows) < 2:
+        return 0, 'low'
+    
+    # Check first few rows
+    check_rows = data_rows[:min(max_check, len(data_rows))]
+    
+    def _is_numeric(cell_value: str) -> bool:
+        """Check if a cell value is numeric."""
+        if not cell_value or not str(cell_value).strip():
+            return False
+        try:
+            float(str(cell_value).replace(',', '').replace('$', '').replace('%', ''))
+            return True
+        except ValueError:
+            return False
+    
+    def _row_similarity(row1: List[str], row2: List[str]) -> float:
+        """Calculate similarity between two rows (0-1, higher = more similar)."""
+        if not row1 or not row2:
+            return 0.0
+        
+        min_len = min(len(row1), len(row2))
+        if min_len == 0:
+            return 0.0
+        
+        matches = 0
+        total = 0
+        
+        for i in range(min_len):
+            val1 = str(row1[i]).strip() if row1[i] else ''
+            val2 = str(row2[i]).strip() if row2[i] else ''
+            
+            # Skip empty cells
+            if not val1 and not val2:
+                continue
+            
+            total += 1
+            
+            # Check if both are numeric (data rows often have numeric patterns)
+            if _is_numeric(val1) and _is_numeric(val2):
+                matches += 1
+            # Check if both are non-numeric (could be text data)
+            elif not _is_numeric(val1) and not _is_numeric(val2):
+                # Check if they have similar length/pattern
+                if abs(len(val1) - len(val2)) < 5:
+                    matches += 0.5
+        
+        return matches / total if total > 0 else 0.0
+    
+    # Calculate average similarity of each row with all other rows
+    row_similarities = []
+    for idx, row in enumerate(check_rows):
+        if not row:
+            row_similarities.append(1.0)  # Empty row = high similarity (not header)
+            continue
+        
+        similarities = []
+        # Compare with all other rows
+        for other_idx, other_row in enumerate(check_rows):
+            if idx != other_idx and other_row:
+                sim = _row_similarity(row, other_row)
+                similarities.append(sim)
+        
+        # Average similarity (lower = more different = more likely to be header)
+        avg_similarity = sum(similarities) / len(similarities) if similarities else 1.0
+        row_similarities.append(avg_similarity)
+    
+    # Find row with lowest similarity (most different from others)
+    min_similarity = min(row_similarities)
+    best_idx = row_similarities.index(min_similarity)
+    
+    # Additional checks to boost confidence
+    best_row = check_rows[best_idx]
+    
+    # Check if best row looks like headers (mostly text, not numbers)
+    text_count = 0
+    non_empty_count = 0
+    for cell in best_row[:min(20, len(best_row))]:  # Check first 20 columns
+        if cell and str(cell).strip():
+            non_empty_count += 1
+            if not _is_numeric(str(cell)):
+                text_count += 1
+    
+    text_ratio = text_count / non_empty_count if non_empty_count > 0 else 0
+    
+    # Calculate confidence based on:
+    # 1. How different it is from other rows (low similarity)
+    # 2. Whether it looks like headers (high text ratio)
+    # 3. Position (earlier rows more likely)
+    difference_score = 1.0 - min_similarity  # Higher = more different
+    header_likelihood = difference_score * 0.6 + text_ratio * 0.4
+    
+    # Adjust for position (earlier rows get slight boost)
+    if best_idx == 0:
+        header_likelihood += 0.1
+    elif best_idx < 3:
+        header_likelihood += 0.05
+    
+    # Determine confidence
+    if header_likelihood >= 0.7 and best_idx < 3:
+        confidence = 'high'
+    elif header_likelihood >= 0.5 and best_idx < 5:
+        confidence = 'medium'
+    else:
+        confidence = 'low'
+    
+    logger.info(f"Header detection: row {best_idx} selected (similarity={min_similarity:.3f}, "
+                f"text_ratio={text_ratio:.3f}, likelihood={header_likelihood:.3f}, confidence={confidence})")
+    
+    return best_idx, confidence
+
+
+@router.get("/file-preview")
+async def get_file_preview(
+    object_name: str = Query(..., description="MinIO object name/path"),
+    client_id: str = Query(""),
+    app_id: str = Query(""),
+    project_id: str = Query(""),
+    sheet_name: Optional[str] = Query(None, description="Sheet name for Excel files"),
+):
+    """
+    Get preview of file with raw rows (no headers applied).
+    Uses simple row-by-row reading with Python's csv module.
+    Separates description rows from data rows using column-count matching algorithm:
+    - Finds where column count stabilizes (becomes consistent)
+    - Rows before stable count = description rows
+    - Rows with stable count = data rows
+    Returns separated description_rows and data_rows for user to select header.
+    """
+    # Validate object_name is not empty
+    if not object_name or not object_name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="object_name is required and cannot be empty. Please ensure the file was uploaded successfully."
+        )
+    
+    try:
+        # CRITICAL: If we receive an Arrow file path, try to find the original CSV/Excel file
+        # Arrow files are processed files with "col_0", "col_1" column names - we need the original!
+        original_object_name = object_name
+        if object_name.lower().endswith(".arrow"):
+            logger.warning(f"Received Arrow file path for preview: {object_name} - attempting to find original file")
+            path_parts = object_name.split("/")
+            
+            # Strategy 1: Check originals/ folder (for files uploaded via /upload-file)
+            # Path format: {prefix}tmp/{filename}.arrow -> {prefix}tmp/originals/{original_filename}
+            if "tmp" in path_parts:
+                tmp_idx = path_parts.index("tmp")
+                original_filename_base = path_parts[-1].replace(".arrow", "")
+                
+                # Try common extensions
+                for ext in [".csv", ".xlsx", ".xls"]:
+                    test_path = "/".join(path_parts[:tmp_idx+1]) + "/originals/" + original_filename_base + ext
+                    try:
+                        test_data = read_minio_object(test_path)
+                        original_object_name = test_path
+                        logger.info(f"✓ Found original file in originals/: {object_name} -> {original_object_name}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"  Tried {test_path}: {e}")
+                        continue
+            
+            # Strategy 2: Check uploads/ folder (for Excel multi-sheet uploads)
+            # Excel multi-sheet saves original as: {prefix}uploads/{session_id}/original.xlsx
+            if original_object_name == object_name and "tmp" in path_parts:
+                # Extract session ID from path (might be in different positions)
+                # Try to find uploads folder at same level as tmp
+                prefix_parts = path_parts[:tmp_idx] if tmp_idx > 0 else []
+                # Session ID might be the filename without extension
+                session_id = path_parts[-1].replace(".arrow", "")
+                test_path = "/".join(prefix_parts) + "/uploads/" + session_id + "/original.xlsx"
+                try:
+                    test_data = read_minio_object(test_path)
+                    original_object_name = test_path
+                    logger.info(f"✓ Found original Excel file in uploads/: {object_name} -> {original_object_name}")
+                except Exception as e:
+                    logger.debug(f"  Tried {test_path}: {e}")
+                    pass
+            
+            # If still no original found, log warning but proceed with Arrow file
+            if original_object_name == object_name:
+                logger.warning(f"⚠ Could not find original file for {object_name}, will read Arrow file (may show col_0, col_1)")
+        
+        # Read file from MinIO (use original file if found, otherwise use provided path)
+        data = read_minio_object(original_object_name)
+        filename = Path(original_object_name).name
+        
+        logger.info(f"Reading file for preview: original_object_name={original_object_name}, filename: {filename}, size: {len(data)} bytes")
+        
+        # Read rows based on file type (WITHOUT padding to preserve original column counts)
+        # IMPORTANT: Always read original CSV/Excel files, not processed Arrow files
+        # Arrow files have column names like "col_0", "col_1" which we don't want
+        if filename.lower().endswith(".arrow"):
+            # Handle Arrow files - convert to rows
+            # Arrow files are processed files, so extract column names as first row
+            df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
+            # Extract column names as first row
+            column_names = df.columns.tolist()
+            logger.info(f"Arrow file column names (first 10): {column_names[:10]}")
+            # Reset columns to numeric indices
+            df.columns = range(len(df.columns))
+            # Prepend column names as first row
+            first_row_df = pd.DataFrame([column_names], columns=df.columns)
+            df = pd.concat([first_row_df, df], ignore_index=True)
+            # Convert DataFrame to list of lists (preserve original lengths)
+            all_rows = [list(row) for row in df.values]
+        elif filename.lower().endswith(".csv"):
+            # Use Python's csv module - reads ALL rows including headers as data
+            # This ensures we get actual column headers from CSV, not "col_0", "col_1"
+            logger.info("Reading CSV file with csv.reader() - will read all rows including headers")
+            all_rows = _read_csv_rows_simple(data, pad_rows=False)
+            if all_rows:
+                first_row_preview = all_rows[0][:10]
+                logger.info(f"CSV first row (headers): {first_row_preview}")
+                # Check if first row looks like pandas-generated column names (col_0, col_1, etc.)
+                if len(first_row_preview) > 0 and all(
+                    str(cell).strip().lower().startswith('col_') and 
+                    str(cell).strip().lower()[4:].isdigit() 
+                    for cell in first_row_preview if cell
+                ):
+                    logger.warning("CSV first row looks like pandas-generated column names (col_0, col_1, etc.) - file may have been processed incorrectly")
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            # Use pandas with header=None - reads ALL rows including headers as data
+            # This ensures we get actual column headers from Excel, not "col_0", "col_1"
+            logger.info(f"Reading Excel file with pandas (header=None) - will read all rows including headers")
+            all_rows = _read_excel_rows_simple(data, sheet_name)
+            if all_rows:
+                first_row_preview = all_rows[0][:10]
+                logger.info(f"Excel first row (headers): {first_row_preview}")
+                # Check if first row looks like pandas-generated column names (col_0, col_1, etc.)
+                if len(first_row_preview) > 0 and all(
+                    str(cell).strip().lower().startswith('col_') and 
+                    str(cell).strip().lower()[4:].isdigit() 
+                    for cell in first_row_preview if cell
+                ):
+                    logger.warning("Excel first row looks like pandas-generated column names (col_0, col_1, etc.) - file may have been processed incorrectly")
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        if not all_rows:
+            raise HTTPException(status_code=400, detail="File appears to be empty")
+        
+        # Separate description rows from data rows using simple column-count logic
+        # This works because rows have their original column counts (not padded)
+        description_rows, data_rows, data_start_idx = _separate_rows_simple(all_rows)
+        
+        # Log separation results for debugging
+        logger.info(f"File preview separation results:")
+        logger.info(f"  Total rows read: {len(all_rows)}")
+        logger.info(f"  Description rows: {len(description_rows)} (rows 0-{data_start_idx-1})")
+        logger.info(f"  Data rows: {len(data_rows)} (starting from row {data_start_idx})")
+        if all_rows:
+            logger.info(f"  Column counts sample (first 10 rows): {[len(row) for row in all_rows[:10]]}")
+        
+        # NOW pad rows for consistent structure (after separation)
+        if data_rows:
+            max_cols = max(len(row) for row in data_rows) if data_rows else 0
+            if max_cols > 0:
+                # Pad data rows to have same number of columns
+                padded_data_rows = []
+                for row in data_rows:
+                    padded_row = row + [''] * (max_cols - len(row))
+                    padded_data_rows.append(padded_row)
+                data_rows = padded_data_rows
+        
+        if description_rows:
+            max_desc_cols = max(len(row) for row in description_rows) if description_rows else 0
+            if max_desc_cols > 0:
+                # Pad description rows to have same number of columns
+                padded_desc_rows = []
+                for row in description_rows:
+                    padded_row = row + [''] * (max_desc_cols - len(row))
+                    padded_desc_rows.append(padded_row)
+                description_rows = padded_desc_rows
+        
+        # Get preview rows (first 15 rows of data)
+        preview_rows = data_rows[:15]
+        preview_row_count = len(preview_rows)
+        
+        # Detect suggested header row in the data rows (relative to data rows, 0-indexed)
+        suggested_header_row_relative, suggested_header_confidence = _detect_header_row_simple(data_rows)
+        
+        # Calculate absolute row index (1-indexed for display)
+        # data_start_idx is 0-indexed, suggested_header_row_relative is 0-indexed relative to data rows
+        # To get 1-indexed absolute: data_start_idx (0-indexed) + suggested_header_row_relative (0-indexed) + 1
+        # This matches how data_rows_structured calculates row_index: data_start_idx + idx + 1
+        suggested_header_row_absolute = data_start_idx + suggested_header_row_relative + 1
+        
+        logger.info(f"Header detection results: relative={suggested_header_row_relative}, "
+                   f"data_start_idx={data_start_idx}, absolute={suggested_header_row_absolute}, "
+                   f"confidence={suggested_header_confidence}")
+        
+        # Convert description rows to structured format
+        # Use actual absolute row indices (1-indexed for display)
+        description_rows_structured = []
+        for idx, row in enumerate(description_rows):
+            absolute_row_index = idx + 1  # 1-indexed (first description row is row 1)
+            description_rows_structured.append({
+                "row_index": absolute_row_index,  # 1-indexed for display
+                "cells": [str(cell) if cell else "" for cell in row]
+            })
+        
+        # Convert data rows to structured format with row_index and relative_index
+        data_rows_structured = []
+        for idx, row in enumerate(preview_rows):
+            data_rows_structured.append({
+                "row_index": data_start_idx + idx + 1,  # 1-indexed absolute row number
+                "relative_index": idx,  # 0-indexed relative to data rows
+                "cells": [str(cell) if cell else "" for cell in row]
+            })
+        
+        # Get column count (use max columns across all rows)
+        column_count = max(len(row) for row in all_rows) if all_rows else 0
+        
+        response_data = {
+            "data_rows": data_rows_structured,
+            "description_rows": description_rows_structured,
+            "data_rows_count": len(data_rows),
+            "description_rows_count": len(description_rows),
+            "data_rows_start": data_start_idx,
+            "preview_row_count": preview_row_count,
+            "column_count": column_count,
+            "total_rows": len(data_rows),
+            "suggested_header_row": suggested_header_row_relative,  # Relative to data rows (0-indexed)
+            "suggested_header_row_absolute": suggested_header_row_absolute,  # Absolute including description rows
+            "suggested_header_confidence": suggested_header_confidence,
+            "has_description_rows": len(description_rows) > 0,
+        }
+        
+        # Log response for debugging
+        logger.info(f"File preview response: {len(description_rows_structured)} description rows, "
+                   f"{len(data_rows_structured)} data rows in preview, "
+                   f"data_rows_start={data_start_idx}, "
+                   f"has_description_rows={len(description_rows) > 0}")
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting file preview: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/row-issues")
+async def get_row_issues(
+    object_name: str = Query(..., description="MinIO object name/path"),
+    client_id: str = Query(""),
+    app_id: str = Query(""),
+    project_id: str = Query(""),
+    sheet_name: Optional[str] = Query(None, description="Sheet name for Excel files"),
+    limit: int = Query(200, ge=1, le=2000, description="Max issues to return"),
+    offset: int = Query(0, ge=0, description="Offset into the issues list"),
+):
+    """
+    Scan the full file for structural row issues (delimiter spillover, extra/missing columns, sparse rows).
+    Returns total issue counts and a paginated slice of problematic rows to avoid loading everything in the UI.
+    """
+    try:
+        # Resolve original file if an Arrow path is provided
+        original_object_name = object_name
+        if object_name.lower().endswith(".arrow"):
+            path_parts = object_name.split("/")
+            if "tmp" in path_parts:
+                tmp_idx = path_parts.index("tmp")
+                original_filename_base = path_parts[-1].replace(".arrow", "")
+                for ext in [".csv", ".xlsx", ".xls"]:
+                    test_path = "/".join(path_parts[:tmp_idx+1]) + "/originals/" + original_filename_base + ext
+                    try:
+                        read_minio_object(test_path)
+                        original_object_name = test_path
+                        break
+                    except Exception:
+                        continue
+            if original_object_name == object_name and "tmp" in path_parts:
+                tmp_idx = path_parts.index("tmp")
+                prefix_parts = path_parts[:tmp_idx] if tmp_idx > 0 else []
+                session_id = path_parts[-1].replace(".arrow", "")
+                test_path = "/".join(prefix_parts) + "/uploads/" + session_id + "/original.xlsx"
+                try:
+                    read_minio_object(test_path)
+                    original_object_name = test_path
+                except Exception:
+                    pass
+
+        data = read_minio_object(original_object_name)
+        filename = Path(original_object_name).name
+
+        # Read all rows (un-padded) to keep true column counts
+        if filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
+            df.columns = range(len(df.columns))
+            all_rows = [list(row) for row in df.values]
+        elif filename.lower().endswith(".csv"):
+            all_rows = _read_csv_rows_simple(data, pad_rows=False)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            all_rows = _read_excel_rows_simple(data, sheet_name)
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+
+        if not all_rows:
+            raise HTTPException(status_code=400, detail="File appears to be empty")
+
+        # Separate description/data rows (keeps raw lengths)
+        description_rows, data_rows, data_start_idx = _separate_rows_simple(all_rows)
+        if not data_rows:
+            raise HTTPException(status_code=400, detail="No data rows found in file")
+
+        expected_columns = max(len(row) for row in data_rows) if data_rows else 0
+
+        issues: List[Dict[str, Any]] = []
+        for idx, row in enumerate(data_rows):
+            row_len = len(row)
+            non_empty = sum(1 for cell in row if cell and str(cell).strip())
+            row_issues: List[str] = []
+
+            if row_len > expected_columns:
+                row_issues.append(f"Has {row_len - expected_columns} extra column(s) - possible delimiter spillover")
+            elif row_len < expected_columns and non_empty > 0:
+                row_issues.append(f"Missing {expected_columns - row_len} column(s)")
+
+            # Unescaped delimiters / unconventional content
+            has_comma = any(cell and "," in str(cell) and not str(cell).startswith('"') for cell in row)
+            has_semicolon = any(cell and str(cell).count(";") >= 2 for cell in row)
+            has_tab = any(cell and "\t" in str(cell) for cell in row)
+            if has_comma or has_semicolon or has_tab:
+                row_issues.append("Contains potential unescaped delimiters")
+
+            # Sparse row
+            if expected_columns > 0 and non_empty > 0 and non_empty < expected_columns * 0.2:
+                row_issues.append("Mostly empty - may be metadata or formatting")
+
+            if row_issues:
+                issues.append({
+                    "row_index": data_start_idx + idx + 1,  # absolute, 1-indexed
+                    "column_count": row_len,
+                    "non_empty_cells": non_empty,
+                    "issues": row_issues,
+                    "severity": "warning",
+                })
+
+        total_issues = len(issues)
+        paged_issues = issues[offset:offset + limit] if issues else []
+        has_more = offset + limit < total_issues
+
+        return {
+            "total_data_rows": len(data_rows),
+            "expected_columns": expected_columns,
+            "issues_count": total_issues,
+            "issues": paged_issues,
+            "limit": limit,
+            "offset": offset,
+            "has_more": has_more,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error scanning row issues: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/apply-header-selection")
+async def apply_header_selection(
+    object_name: str = Form(..., description="MinIO object name/path"),
+    header_row: int = Form(..., description="Row index to use as header (0-based)"),
+    header_row_count: int = Form(1, description="Number of header rows to merge (default: 1)"),
+    sheet_name: Optional[str] = Form(None, description="Sheet name for Excel files"),
+    client_id: str = Form(""),
+    app_id: str = Form(""),
+    project_id: str = Form(""),
+):
+    """
+    Apply header row selection to file and save processed version.
+    Reads file in raw mode, applies selected header row, and saves as Arrow file.
+    """
+    try:
+        # Read file from MinIO
+        data = read_minio_object(object_name)
+        filename = Path(object_name).name
+        
+        # Read rows based on file type (WITHOUT padding to preserve original column counts)
+        if filename.lower().endswith(".arrow"):
+            # Handle Arrow files - convert to rows
+            df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
+            # Extract column names as first row
+            column_names = df.columns.tolist()
+            # Reset columns to numeric indices
+            df.columns = range(len(df.columns))
+            # Prepend column names as first row
+            first_row_df = pd.DataFrame([column_names], columns=df.columns)
+            df = pd.concat([first_row_df, df], ignore_index=True)
+            # Convert DataFrame to list of lists (preserve original lengths)
+            all_rows = [list(row) for row in df.values]
+        elif filename.lower().endswith(".csv"):
+            # Use Python's csv module - DON'T pad rows so we can detect column count differences
+            all_rows = _read_csv_rows_simple(data, pad_rows=False)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            # Use openpyxl for Excel files (already preserves original lengths)
+            all_rows = _read_excel_rows_simple(data, sheet_name)
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        if not all_rows:
+            raise HTTPException(status_code=400, detail="File appears to be empty")
+        
+        # Separate description rows from data rows using simple column-count logic
+        # This works because rows have their original column counts (not padded)
+        description_rows, data_rows, data_start_idx = _separate_rows_simple(all_rows)
+        
+        # Convert data rows to DataFrame for processing
+        # Find max columns to ensure consistent DataFrame structure
+        max_cols = max(len(row) for row in data_rows) if data_rows else 0
+        if max_cols == 0:
+            raise HTTPException(status_code=400, detail="No data rows found in file")
+        
+        # NOW pad rows to have same number of columns (after separation)
+        padded_data_rows = []
+        for row in data_rows:
+            padded_row = row + [''] * (max_cols - len(row))
+            padded_data_rows.append(padded_row[:max_cols])  # Ensure exact length
+        
+        # CRITICAL: Extract headers from RAW STRING ROWS before type inference
+        # This preserves numeric/date headers exactly as they appear in the file
+        # Validate header row index (header_row is relative to padded_data_rows after description separation)
+        if header_row < 0 or header_row >= len(padded_data_rows):
+            raise HTTPException(status_code=400, detail=f"Header row index {header_row} is out of range (0-{len(padded_data_rows)-1})")
+        
+        # Validate header_row_count
+        if header_row_count < 1:
+            header_row_count = 1
+        if header_row_count > 10:
+            header_row_count = 10  # Limit to 10 rows max
+        
+        # Check if we have enough rows for multi-row header
+        if header_row + header_row_count > len(padded_data_rows):
+            logger.warning(f"Requested {header_row_count} header rows starting at {header_row}, but only {len(padded_data_rows) - header_row} rows available. Using available rows.")
+            header_row_count = len(padded_data_rows) - header_row
+        
+        # Extract headers from RAW STRING ROWS (before type inference)
+        # This ensures numeric/date headers are preserved as strings exactly as they appear
+        if header_row_count > 1:
+            # Get header rows from raw string data
+            header_rows = []
+            for i in range(header_row_count):
+                row_idx = header_row + i
+                if row_idx < len(padded_data_rows):
+                    # Get raw string values directly from padded rows
+                    header_row_data = padded_data_rows[row_idx]
+                    header_rows.append(header_row_data)
+            
+            # Merge header rows: combine values from each row
+            # Example: ["Sales", "", "2024"] + ["", "Q1", ""] → ["Sales", "Q1", "2024"]
+            # Or: ["Sales", "", ""] + ["", "", "2024"] → ["Sales_2024", "", ""]
+            merged_headers = []
+            max_cols = max(len(row) for row in header_rows) if header_rows else 0
+            
+            for col_idx in range(max_cols):
+                column_values = []
+                for header_row_data in header_rows:
+                    if col_idx < len(header_row_data):
+                        val = header_row_data[col_idx]
+                        # Convert to string and strip - preserve exact representation
+                        val_str = str(val).strip() if val else ""
+                        # Only add non-empty values
+                        if val_str:
+                            column_values.append(val_str)
+                
+                # Combine column values
+                if column_values:
+                    # Join with underscore, e.g., "Sales" + "2024" → "Sales_2024"
+                    merged_header = "_".join(column_values)
+                    merged_headers.append(merged_header)
+                else:
+                    merged_headers.append("")  # Empty column
+            
+            headers = merged_headers
+            logger.info(f"Merged {header_row_count} header rows into: {headers[:5]}...")
+        else:
+            # Single header row - extract from raw string data
+            header_row_raw = padded_data_rows[header_row]
+            headers = []
+            for val in header_row_raw:
+                # Convert to string and preserve exact representation (including numeric like "2021.0")
+                val_str = str(val).strip() if val else ""
+                headers.append(val_str)
+        
+        # Now create DataFrame from data rows (skip header rows)
+        # CRITICAL: Let pandas infer types naturally instead of forcing all to string
+        # This preserves numeric and datetime types from the original file
+        data_rows_only = padded_data_rows[header_row + header_row_count:]
+        df_data = pd.DataFrame(data_rows_only)
+        
+        # Try to infer types for each column (preserve numeric/datetime types)
+        # This is important because _read_excel_rows_simple and _read_csv_rows_simple
+        # return string values, but we want pandas to detect the actual types
+        for col_idx in range(len(df_data.columns)):
+            col_data = df_data.iloc[:, col_idx]
+            
+            # Skip if column is all empty
+            if col_data.astype(str).str.strip().eq('').all():
+                continue
+            
+            # Try to convert to numeric first (handles int and float)
+            try:
+                numeric_col = pd.to_numeric(col_data, errors='coerce')
+                # If most values converted successfully, use numeric type
+                non_null_count = numeric_col.notna().sum()
+                total_count = len(col_data)
+                if total_count > 0 and non_null_count >= total_count * 0.8:  # At least 80% numeric
+                    df_data.iloc[:, col_idx] = numeric_col
+                    logger.debug(f"Column {col_idx}: inferred numeric type (converted {non_null_count}/{total_count} values)")
+                    continue
+            except Exception as e:
+                logger.debug(f"Column {col_idx}: numeric conversion failed: {e}")
+                pass
+            
+            # Try to convert to datetime
+            try:
+                datetime_col = pd.to_datetime(col_data, errors='coerce')
+                # If most values converted successfully, use datetime type
+                non_null_count = datetime_col.notna().sum()
+                total_count = len(col_data)
+                if total_count > 0 and non_null_count >= total_count * 0.8:  # At least 80% datetime
+                    df_data.iloc[:, col_idx] = datetime_col
+                    logger.debug(f"Column {col_idx}: inferred datetime type (converted {non_null_count}/{total_count} values)")
+                    continue
+            except Exception as e:
+                logger.debug(f"Column {col_idx}: datetime conversion failed: {e}")
+                pass
+            
+            # Otherwise keep as object/string (default)
+            # This preserves text columns
+        
+        # df_data already contains only data rows (header rows were excluded above)
+        df_processed = df_data.copy()
+        
+        # Ensure we have enough column names (pad if needed)
+        if len(headers) < len(df_processed.columns):
+            headers.extend([f"Column_{i}" for i in range(len(headers), len(df_processed.columns))])
+        elif len(headers) > len(df_processed.columns):
+            headers = headers[:len(df_processed.columns)]
+        
+        # Apply headers directly - preserve exact names as selected by user
+        df_processed.columns = headers[:len(df_processed.columns)]
+        
+        # Only normalize empty column names (don't standardize/modify non-empty names)
+        # This preserves numeric headers and exact user-selected names
+        from app.features.data_upload_validate.file_ingestion.processors.cleaning import DataCleaner
+        # Only normalize truly empty column names, don't modify existing ones
+        columns_list = df_processed.columns.tolist()
+        new_columns = []
+        unnamed_counter = 0
+        for col in columns_list:
+            col_str = str(col).strip()
+            if not col_str or col_str == "":
+                new_columns.append(f"Column_{unnamed_counter}")
+                unnamed_counter += 1
+            else:
+                # Preserve exact column name as-is
+                new_columns.append(col_str)
+        
+        # Handle duplicate column names by appending suffix
+        seen = {}
+        final_columns = []
+        for col in new_columns:
+            if col in seen:
+                seen[col] += 1
+                final_columns.append(f"{col}_{seen[col]}")
+            else:
+                seen[col] = 0
+                final_columns.append(col)
+        
+        df_processed.columns = final_columns
+        
+        # Remove empty rows/columns
+        df_processed = DataCleaner.remove_empty_rows(df_processed)
+        df_processed = DataCleaner.remove_empty_columns(df_processed)
+        df_processed = df_processed.reset_index(drop=True)
+        
+        # CRITICAL FIX: Replace empty strings with NaN before converting to Polars
+        # Polars will fail if it tries to convert empty strings to numeric types
+        # Replace empty strings and whitespace-only strings with NaN for all object columns
+        for col in df_processed.columns:
+            if df_processed[col].dtype == 'object':
+                # Replace empty strings, whitespace-only strings, and null-like strings with NaN
+                df_processed[col] = df_processed[col].replace(['', ' ', '  ', 'None', 'null', 'NULL', 'nan', 'NaN', 'N/A', 'n/a'], pd.NA)
+        
+        # Convert to Polars and save as Arrow
+        # Use nan_to_null=True to convert pandas NaN to Polars null
+        # This prevents Polars from trying to convert empty strings to numeric types
+        try:
+            df_pl = pl.from_pandas(df_processed, nan_to_null=True)
+        except Exception as e:
+            # If conversion fails due to type inference issues, convert all to string first
+            logger.warning(f"Direct Polars conversion failed: {e}. Converting all columns to string first, then inferring types.")
+            # Convert all columns to string first (this prevents type inference errors)
+            df_processed_str = df_processed.astype(str)
+            # Replace string representations of NaN/None/empty with None
+            df_processed_str = df_processed_str.replace(['nan', 'None', 'null', 'NULL', 'NaN', '<NA>', 'NaT', ''], None)
+            # Convert to Polars with all columns as string
+            df_pl = pl.from_pandas(df_processed_str, nan_to_null=True)
+            # Now let Polars infer proper types - it will handle None/null values gracefully
+            # Polars can infer types from string data when null values are properly set
+        
+        # Save to MinIO
+        arrow_buf = io.BytesIO()
+        df_pl.write_ipc(arrow_buf)
+        arrow_name = Path(filename).stem + ".arrow"
+        
+        # Determine upload path (use same prefix as original if possible)
+        tmp_prefix = "temp_uploads/"
+        if "/" in object_name:
+            parts = object_name.split("/")
+            if len(parts) > 1:
+                tmp_prefix = "/".join(parts[:-1]) + "/"
+        
+        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, tmp_prefix)
+        
+        if result.get("status") != "success":
+            raise HTTPException(status_code=500, detail=result.get("error_message", "Failed to save processed file"))
+        
+        return {
+            "status": "success",
+            "file_path": result["object_name"],
+            "file_name": arrow_name,
+            "total_rows": len(df_processed),
+            "total_columns": len(df_processed.columns),
+            "header_row_applied": header_row,
+            "header_row_count": header_row_count,
+            "description_rows_count": len(description_rows),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error applying header selection: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/file-columns")
+async def get_file_columns(
+    object_name: str = Query(..., description="MinIO object name/path"),
+    client_id: str = Query(""),
+    app_id: str = Query(""),
+    project_id: str = Query(""),
+):
+    """
+    Get column names and sample values from a file.
+    Returns column names, sample values, and AI/historical suggestions.
+    """
+    try:
+        # Read file from MinIO
+        data = read_minio_object(object_name)
+        filename = Path(object_name).name
+        
+        # Parse based on file type using RobustFileReader
+        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        # Get column names and sample values
+        columns = list(df.columns)
+        sample_values = []
+        rule_based_suggestions = []
+        historical_matches = []
+        
+        for col in columns:
+            # Get sample values (non-null, first 5)
+            samples = df[col].dropna().head(5).tolist()
+            sample_values.append([str(s) for s in samples])
+            
+            # Rule-based column name cleaning
+            cleaned = str(col).strip()
+            # Remove special characters (keep alphanumeric and underscores)
+            cleaned = re.sub(r'[^a-zA-Z0-9_]', '_', cleaned)
+            # Remove leading/trailing underscores
+            cleaned = cleaned.strip('_')
+            # Convert to snake_case if contains spaces or camelCase
+            if ' ' in str(col) or any(c.isupper() for c in str(col) if c.isalpha()):
+                cleaned = re.sub(r'([a-z])([A-Z])', r'\1_\2', cleaned).replace(' ', '_').lower()
+            # Ensure it starts with a letter
+            if cleaned and cleaned[0].isdigit():
+                cleaned = 'col_' + cleaned
+            # If empty after cleaning, use default
+            if not cleaned:
+                cleaned = 'unnamed_column'
+            
+            rule_based_suggestions.append(cleaned if cleaned != str(col) else None)
+            
+            # TODO: Query historical matches from memory service
+            historical_matches.append(None)
+        
+        return {
+            "columns": columns,
+            "sample_values": sample_values,
+            "rule_based_suggestions": rule_based_suggestions,
+            "historical_matches": historical_matches,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting file columns: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/detect-datetime-format")
 async def detect_datetime_format(request: Request):
     """
@@ -3406,17 +5078,25 @@ async def detect_datetime_format(request: Request):
         data = read_minio_object(file_path)
         filename = Path(file_path).name
         
-        # Parse based on file type
-        if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-        elif filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        # Parse based on file type using RobustFileReader
+        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         elif filename.lower().endswith(".arrow"):
             df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
-        
-        df = df_pl.to_pandas()
         
         if column_name not in df.columns:
             raise HTTPException(status_code=400, detail=f"Column '{column_name}' not found")
@@ -3549,9 +5229,11 @@ async def detect_datetime_format(request: Request):
 @router.post("/apply-data-transformations")
 async def apply_data_transformations(request: Request):
     """
-    Apply dtype changes and missing value strategies to a file.
+    Apply column drops, renames, dtype changes and missing value strategies to a file.
     Expects JSON body with:
     - file_path: str
+    - columns_to_drop: list[str] (column names to remove) - OPTIONAL
+    - column_renames: dict[str, str] (old_name -> new_name) - OPTIONAL
     - dtype_changes: dict[str, str | dict] (column_name -> new_dtype or {dtype: str, format: str})
     - missing_value_strategies: dict[str, dict] (column_name -> {strategy: str, value?: str})
     """
@@ -3563,14 +5245,22 @@ async def apply_data_transformations(request: Request):
         logger.info("=" * 80)
         
         file_path = body.get("file_path")
+        columns_to_drop = body.get("columns_to_drop", [])
+        column_renames = body.get("column_renames", {})
         dtype_changes = body.get("dtype_changes", {})
         missing_value_strategies = body.get("missing_value_strategies", {})
         
         logger.info(f"Extracted file_path: {file_path}")
+        logger.info(f"Extracted columns_to_drop: {columns_to_drop}")
+        logger.info(f"Extracted column_renames: {column_renames}")
         logger.info(f"Extracted dtype_changes: {dtype_changes}")
         logger.info(f"Extracted missing_value_strategies: {missing_value_strategies}")
         
-        # Check if this is a missing value only request
+        # Log what transformations are being applied
+        if len(columns_to_drop) > 0:
+            logger.info(f"✅ COLUMN DROPS: {len(columns_to_drop)} columns to drop")
+        if len(column_renames) > 0:
+            logger.info(f"✅ COLUMN RENAMES: {len(column_renames)} columns to rename")
         if len(dtype_changes) == 0 and len(missing_value_strategies) > 0:
             logger.warning("⚠️  MISSING VALUE ONLY REQUEST - No dtype changes found!")
         elif len(dtype_changes) > 0 and len(missing_value_strategies) == 0:
@@ -3585,19 +5275,48 @@ async def apply_data_transformations(request: Request):
         data = read_minio_object(file_path)
         filename = Path(file_path).name
         
-        # Parse based on file type
-        if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-        elif filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        # Parse based on file type using RobustFileReader
+        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            # Use RobustFileReader which handles column preservation automatically
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            # Handle both single DataFrame and dict (multiple sheets)
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]  # Use first sheet
+            else:
+                df = df_result
         elif filename.lower().endswith(".arrow"):
             df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
         
-        df = df_pl.to_pandas()
+        # 1. Drop columns first (before renames)
+        if columns_to_drop:
+            logger.info(f"Dropping columns: {columns_to_drop}")
+            cols_to_drop_existing = [col for col in columns_to_drop if col in df.columns]
+            if cols_to_drop_existing:
+                df = df.drop(columns=cols_to_drop_existing)
+                logger.info(f"✅ Dropped columns: {cols_to_drop_existing}")
+            else:
+                logger.info("No columns to drop found in dataframe")
         
-        # Apply missing value strategies first
+        # 2. Apply column renames (after drops)
+        if column_renames:
+            logger.info(f"Applying column renames: {column_renames}")
+            # Filter out renames where old_name == new_name
+            valid_renames = {old: new for old, new in column_renames.items() if old != new and old in df.columns}
+            if valid_renames:
+                df = df.rename(columns=valid_renames)
+                logger.info(f"✅ Renamed columns: {valid_renames}")
+            else:
+                logger.info("No valid column renames to apply")
+        
+        # Apply missing value strategies
         for col_name, strategy_config in missing_value_strategies.items():
             if col_name not in df.columns:
                 continue
@@ -3642,6 +5361,10 @@ async def apply_data_transformations(request: Request):
                     # For non-numeric columns, use as string
                     df[col_name].fillna(str(custom_value), inplace=True)
                     logger.info(f"Applied custom string value '{custom_value}' to column '{col_name}'")
+            elif strategy == "ffill":
+                df[col_name] = df[col_name].ffill()
+            elif strategy == "bfill":
+                df[col_name] = df[col_name].bfill()
         
         # Apply dtype changes
         logger.info(f"Starting dtype changes. Total dtype_changes to apply: {len(dtype_changes)}")
@@ -3722,4 +5445,375 @@ async def apply_data_transformations(request: Request):
         
     except Exception as e:
         logger.error(f"Error applying transformations: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/get-guided-flow-state")
+async def get_guided_flow_state(
+    client_name: str = Query(""),
+    app_name: str = Query(""),
+    project_name: str = Query(""),
+):
+    """Retrieve persisted guided flow state from Redis."""
+    try:
+        key_parts = ("guided_flow_state", client_name, app_name, project_name)
+        cached_state_str = redis_client.get(key_parts)
+        
+        if cached_state_str:
+            try:
+                cached_state = json.loads(cached_state_str)
+                return {"state": cached_state}
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON in cached state for {key_parts}")
+                return {"state": None}
+        
+        return {"state": None}
+    except Exception as e:
+        logger.error(f"Error retrieving guided flow state: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/save-guided-flow-state")
+async def save_guided_flow_state(request: Request):
+    """Save guided flow state to Redis."""
+    try:
+        body = await request.json()
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+        state = body.get("state", {})
+        
+        key_parts = ("guided_flow_state", client_name, app_name, project_name)
+        # Store JSON as string with 24 hours TTL
+        state_json = json.dumps(state)
+        redis_client.set(key_parts, state_json, ex=86400)  # 24 hours TTL
+        
+        return {"status": "success", "message": "Flow state saved"}
+    except Exception as e:
+        logger.error(f"Error saving guided flow state: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/check-priming-status")
+async def check_priming_status(
+    client_name: str = Query(""),
+    app_name: str = Query(""),
+    project_name: str = Query(""),
+    file_name: str = Query(""),
+):
+    """Check if a file has completed priming (all 7 steps) and return step-by-step status."""
+    try:
+        # Check Redis for completion flag
+        primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+        is_primed = redis_client.get(primed_key_parts)
+        
+        # Check for flow state to get current stage and step completion
+        flow_key_parts = ("guided_flow_state", client_name, app_name, project_name)
+        flow_state_str = redis_client.get(flow_key_parts)
+        flow_state = None
+        if flow_state_str:
+            try:
+                flow_state = json.loads(flow_state_str)
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON in flow state for {flow_key_parts}")
+        
+        current_stage = None
+        completed_steps: list[str] = []
+        all_steps = ["U0", "U1", "U2", "U3", "U4", "U5", "U6", "U7"]
+        
+        if flow_state and isinstance(flow_state, dict):
+            current_stage = flow_state.get("currentStage")
+            # Check if this file is in the uploaded files
+            uploaded_files = flow_state.get("uploadedFiles", [])
+            file_in_flow = any(
+                f.get("path") == file_name or f.get("name") == file_name
+                for f in uploaded_files
+            )
+            
+            if file_in_flow:
+                current_stage = flow_state.get("currentStage")
+                # Determine completed steps based on current stage
+                if current_stage:
+                    stage_index = all_steps.index(current_stage) if current_stage in all_steps else -1
+                    if stage_index >= 0:
+                        # All steps up to and including current stage are completed
+                        completed_steps = all_steps[:stage_index + 1]
+                    elif current_stage == "U7":
+                        # All steps completed
+                        completed_steps = all_steps
+                else:
+                    # If no current stage but file is in flow, assume U0 completed
+                    completed_steps = ["U0"]
+        
+        # If primed flag exists, all steps are completed
+        if is_primed:
+            completed_steps = all_steps
+            current_stage = "U7"
+        
+        # Determine completion status
+        completed = bool(is_primed) or (current_stage == "U7")
+        missing_steps = [s for s in all_steps if s not in completed_steps]
+        # Status colors:
+        # - Red: U0 or U1 (step 1 or earlier) - not in progress
+        # - Yellow: U2-U6 (step 2 to step 7) - in progress
+        # - Green: U7 (step 8 - completed) - primed
+        is_in_progress = bool(current_stage) and current_stage not in ["U0", "U1", "U7"]
+        
+        return {
+            "completed": completed,
+            "current_stage": current_stage,
+            "is_primed": bool(is_primed),
+            "completed_steps": completed_steps,
+            "missing_steps": missing_steps,
+            "is_in_progress": is_in_progress,
+        }
+    except Exception as e:
+        logger.error(f"Error checking priming status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/mark-file-primed")
+async def mark_file_primed(request: Request):
+    """Mark a file as primed (completed all 7 steps)."""
+    try:
+        body = await request.json()
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+        file_name = body.get("file_name", "")
+        
+        # Set primed flag in Redis
+        primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+        redis_client.set(primed_key_parts, "true", ttl=86400 * 30)  # 30 days TTL
+        
+        return {"status": "success", "message": "File marked as primed"}
+    except Exception as e:
+        logger.error(f"Error marking file as primed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/finalize-primed-file")
+async def finalize_primed_file(request: Request):
+    """
+    Finalize a primed file by moving it from tmp location to saved dataframes location.
+    This should be called after U7 completion to persist the transformed data.
+    
+    Expects JSON body with:
+    - file_path: str (current path in tmp/)
+    - file_name: str (desired file name for saved dataframe)
+    - client_name, app_name, project_name: str (for prefix)
+    - validator_atom_id: str (optional, for flight path)
+    - column_classifications: list[dict] (optional, from guided flow U4 stage)
+      Each dict has: columnName, columnRole ('identifier' | 'measure')
+    """
+    try:
+        body = await request.json()
+        logger.info("=" * 80)
+        logger.info("finalize_primed_file endpoint called")
+        logger.info(f"Request body: {body}")
+        logger.info("=" * 80)
+        
+        file_path = body.get("file_path", "")
+        file_name = body.get("file_name", "")
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+        validator_atom_id = body.get("validator_atom_id", "guided-upload")
+        # Column classifications from guided flow (U4 stage)
+        column_classifications = body.get("column_classifications", [])
+        
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path is required")
+        if not file_name:
+            # Use the original file name from path
+            file_name = Path(file_path).stem
+        
+        # Read the transformed file from MinIO
+        try:
+            data = read_minio_object(file_path)
+        except Exception as e:
+            logger.error(f"Failed to read file from MinIO: {file_path}, error: {str(e)}")
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        
+        filename = Path(file_path).name
+        
+        # Parse the file based on type
+        if filename.lower().endswith(".csv"):
+            df_result, _ = RobustFileReader.read_file_to_polars(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            if isinstance(df_result, dict):
+                df_pl = list(df_result.values())[0]
+            else:
+                df_pl = df_result
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df_result, _ = RobustFileReader.read_file_to_polars(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            if isinstance(df_result, dict):
+                df_pl = list(df_result.values())[0]
+            else:
+                df_pl = df_result
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+        
+        # Convert to Arrow format
+        arrow_buf = io.BytesIO()
+        arrow_table = df_pl.to_arrow(use_pyarrow=True)
+        with pa.ipc.new_file(arrow_buf, arrow_table.schema) as writer:
+            writer.write(arrow_table)
+        arrow_bytes = arrow_buf.getvalue()
+        
+        # Get the proper prefix for saved dataframes
+        os.environ["CLIENT_NAME"] = client_name
+        os.environ["APP_NAME"] = app_name
+        os.environ["PROJECT_NAME"] = project_name
+        prefix = await get_object_prefix()
+        
+        # Create the arrow file name
+        arrow_name = Path(file_name).stem + ".arrow"
+        
+        # Upload to MinIO with proper prefix (not tmp/)
+        result = upload_to_minio(arrow_bytes, arrow_name, prefix)
+        saved_object_name = result.get("object_name", "")
+        
+        logger.info(f"✅ Saved primed file to: {saved_object_name}")
+        
+        # Upload to Flight for fast access
+        flight_path = f"{validator_atom_id}/{arrow_name}"
+        try:
+            upload_dataframe(df_pl.to_pandas(), flight_path)
+            logger.info(f"✅ Uploaded to Flight: {flight_path}")
+        except Exception as e:
+            logger.warning(f"Failed to upload to Flight: {str(e)}")
+        
+        # Set ticket for Flight access
+        set_ticket(
+            file_name,
+            saved_object_name,
+            flight_path,
+            filename,
+        )
+        redis_client.set(f"flight:{flight_path}", saved_object_name)
+        
+        # Mark as primed in Redis
+        primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+        redis_client.set(primed_key_parts, "true", ttl=86400 * 30)
+        
+        # Save column classifications to MongoDB if provided from guided flow
+        if column_classifications:
+            try:
+                # Extract identifiers and measures from guided flow classifications
+                identifiers = []
+                measures = []
+                unclassified = []
+                
+                for col_class in column_classifications:
+                    col_name = str(col_class.get("columnName", "")).strip().lower()
+                    col_role = col_class.get("columnRole", "")
+                    
+                    if col_role == "identifier":
+                        identifiers.append(col_name)
+                    elif col_role == "measure":
+                        measures.append(col_name)
+                    else:
+                        unclassified.append(col_name)
+                
+                # Get project_id from env
+                project_id = None
+                env = None
+                try:
+                    env = await get_env_vars(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                    )
+                    if env:
+                        project_id_str = env.get("PROJECT_ID")
+                        if project_id_str:
+                            project_id = int(project_id_str)
+                except Exception as e:
+                    logger.warning(f"Failed to get project_id: {e}")
+                
+                # Save to MongoDB using same pattern as column classifier atom
+                config_data = {
+                    "project_id": project_id,
+                    "client_name": client_name,
+                    "app_name": app_name,
+                    "project_name": project_name,
+                    "identifiers": identifiers,
+                    "measures": measures,
+                    "unclassified": unclassified,
+                    "dimensions": {},  # Empty dimensions object (same as column classifier)
+                    "file_name": saved_object_name,
+                }
+                
+                # Add env if available
+                if env:
+                    config_data["env"] = env
+                
+                mongo_result = save_classifier_config_to_mongo(config_data)
+                logger.info(f"✅ Saved guided flow classification: {saved_object_name} | {len(identifiers)} identifiers, {len(measures)} measures, {len(unclassified)} unclassified")
+            except Exception as e:
+                logger.warning(f"Failed to save column classifications: {e}")
+                # Don't fail the whole operation if classification save fails
+        else:
+            # No classifications provided - run auto-classification
+            try:
+                project_id = None
+                try:
+                    env = await get_env_vars(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                    )
+                    if env:
+                        project_id_str = env.get("PROJECT_ID")
+                        if project_id_str:
+                            project_id = int(project_id_str)
+                except Exception:
+                    pass
+                
+                await _auto_classify_and_save_file(
+                    object_name=saved_object_name,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    project_id=project_id,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to auto-classify file: {e}")
+        
+        # Remove the temp file
+        if file_path.startswith(prefix + "tmp/") or "/tmp/" in file_path:
+            try:
+                minio_client.remove_object(MINIO_BUCKET, file_path)
+                logger.info(f"🗑️ Removed temp file: {file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to remove temp file: {str(e)}")
+        
+        return {
+            "status": "success",
+            "message": "File finalized and saved",
+            "saved_path": saved_object_name,
+            "flight_path": flight_path,
+            "rows": len(df_pl),
+            "columns": len(df_pl.columns),
+            "classification_saved": bool(column_classifications),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finalizing primed file: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))

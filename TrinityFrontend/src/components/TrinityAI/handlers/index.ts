@@ -21,7 +21,7 @@ export const atomHandlers: Record<string, AtomHandler> = {
   'chart-maker': chartMakerHandler,
   'explore': exploreHandler,
   'correlation': correlationHandler,
-  'data-upload-validate': dfValidateHandler,
+  'data-validate': dfValidateHandler,
   'metric': metricHandler,
   'metrics': metricHandler, // Support both singular and plural
 };
@@ -67,7 +67,7 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
         return !!(data.correlation_config);
       case 'dataframe-operations':
         return !!(data.dataframe_config);
-      case 'data-upload-validate':
+      case 'data-validate':
         return !!(data.validate_json);
       case 'metric':
       case 'metrics':
@@ -108,7 +108,7 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
       return !!(data.correlation_config);
     case 'dataframe-operations':
       return !!(data.dataframe_config);
-    case 'data-upload-validate':
+    case 'data-validate':
       return !!(data.validate_json);
     case 'metric':
     case 'metrics':
