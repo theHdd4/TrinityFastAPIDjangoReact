@@ -246,7 +246,14 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     const computeVars = state.createdVariables.filter(v => v.method === 'compute');
     const assignVars = state.createdVariables.filter(v => v.method === 'assign');
 
+    // Reset pending state
+    setPendingComputePayload(null);
+    setPendingAssignPayload(null);
+    setExistingVariableNames([]);
+
     try {
+      const allExistingVariables: string[] = [];
+
       // Save computed variables
       if (computeVars.length > 0) {
         // Reconstruct operations from operationDetails
@@ -333,7 +340,13 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
 
         const computeResult = await computeResponse.json();
         if (!computeResult.success) {
-          throw new Error(computeResult.error || 'Failed to save computed variables');
+          // Check if this is an existing variables error
+          if (computeResult.existingVariables && Array.isArray(computeResult.existingVariables)) {
+            setPendingComputePayload(computePayload);
+            allExistingVariables.push(...computeResult.existingVariables);
+          } else {
+            throw new Error(computeResult.error || 'Failed to save computed variables');
+          }
         }
       }
 
@@ -364,6 +377,108 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
 
         const assignResult = await assignResponse.json();
         if (!assignResult.success) {
+          // Check if this is an existing variables error
+          if (assignResult.existingVariables && Array.isArray(assignResult.existingVariables)) {
+            setPendingAssignPayload(assignPayload);
+            allExistingVariables.push(...assignResult.existingVariables);
+          } else {
+            throw new Error(assignResult.error || 'Failed to save assigned variables');
+          }
+        }
+      }
+
+      // If we have existing variables, show confirmation dialog
+      if (allExistingVariables.length > 0) {
+        setExistingVariableNames(allExistingVariables);
+        setShowVariableOverwriteDialog(true);
+        return; // Don't proceed to success - wait for user confirmation
+      }
+
+      // Success - call onComplete
+      toast({
+        title: 'Success',
+        description: `Successfully saved ${state.createdVariables.length} variable(s).`,
+      });
+
+      onComplete?.({
+        createdVariables: state.createdVariables,
+        createdColumns: state.createdColumns,
+        createdTables: state.createdTables,
+      });
+
+      // Close guided mode after successful save
+      closeMetricGuidedFlow();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save variables. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  }, [state, toast, onComplete, closeMetricGuidedFlow]);
+
+  // State declarations for variable overwrite dialog - must be before handlers that use them
+  const [showVariableOverwriteDialog, setShowVariableOverwriteDialog] = useState(false);
+  const [existingVariableNames, setExistingVariableNames] = useState<string[]>([]);
+  const [pendingComputePayload, setPendingComputePayload] = useState<any>(null);
+  const [pendingAssignPayload, setPendingAssignPayload] = useState<any>(null);
+  const [isSavingVariables, setIsSavingVariables] = useState(false);
+
+  // Handler to confirm variable overwrite
+  const handleConfirmVariableOverwrite = useCallback(async () => {
+    setShowVariableOverwriteDialog(false);
+    setIsSavingVariables(true);
+
+    try {
+      const projectContext = getActiveProjectContext();
+      if (!projectContext) {
+        toast({
+          title: 'Error',
+          description: 'Project context not available. Please ensure you\'re in a valid project.',
+          variant: 'destructive',
+        });
+        setIsSavingVariables(false);
+        return;
+      }
+
+      // Retry compute with confirmOverwrite if pending
+      if (pendingComputePayload) {
+        const computePayloadWithConfirm = { ...pendingComputePayload, confirmOverwrite: true };
+        const computeResponse = await fetch(`${LABORATORY_API}/variables/compute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(computePayloadWithConfirm),
+        });
+
+        if (!computeResponse.ok) {
+          const errorData = await computeResponse.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(errorData.error || `Failed to save computed variables: ${computeResponse.status}`);
+        }
+
+        const computeResult = await computeResponse.json();
+        if (!computeResult.success) {
+          throw new Error(computeResult.error || 'Failed to save computed variables');
+        }
+      }
+
+      // Retry assign with confirmOverwrite if pending
+      if (pendingAssignPayload) {
+        const assignPayloadWithConfirm = { ...pendingAssignPayload, confirmOverwrite: true };
+        const assignResponse = await fetch(`${LABORATORY_API}/variables/assign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(assignPayloadWithConfirm),
+        });
+
+        if (!assignResponse.ok) {
+          const errorData = await assignResponse.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(errorData.error || `Failed to save assigned variables: ${assignResponse.status}`);
+        }
+
+        const assignResult = await assignResponse.json();
+        if (!assignResult.success) {
           throw new Error(assignResult.error || 'Failed to save assigned variables');
         }
       }
@@ -379,14 +494,32 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
         createdColumns: state.createdColumns,
         createdTables: state.createdTables,
       });
+
+      // Clear pending state
+      setPendingComputePayload(null);
+      setPendingAssignPayload(null);
+      setExistingVariableNames([]);
+
+      // Close guided mode after successful save
+      closeMetricGuidedFlow();
     } catch (error: any) {
       toast({
         title: 'Error',
         description: error.message || 'Failed to save variables. Please try again.',
         variant: 'destructive',
       });
+    } finally {
+      setIsSavingVariables(false);
     }
-  }, [state, toast, onComplete]);
+  }, [pendingComputePayload, pendingAssignPayload, state, toast, onComplete, closeMetricGuidedFlow]);
+
+  // Handler to cancel variable overwrite
+  const handleCancelVariableOverwrite = useCallback(() => {
+    setShowVariableOverwriteDialog(false);
+    setPendingComputePayload(null);
+    setPendingAssignPayload(null);
+    setExistingVariableNames([]);
+  }, []);
 
   // State declarations for save dialogs - must be before handlers that use them
   const [showOverwriteConfirmDialog, setShowOverwriteConfirmDialog] = useState(false);
@@ -1290,6 +1423,58 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {isSavingColumnOperations ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Variable Overwrite Confirmation Dialog */}
+      <Dialog 
+        open={showVariableOverwriteDialog} 
+        onOpenChange={(open) => {
+          if (!open) {
+            handleCancelVariableOverwrite();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Overwrite Existing Variables?</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm text-gray-700 mb-2">
+                  The following variable(s) already exist and will be overwritten:
+                </p>
+                <ul className="list-disc list-inside text-sm text-gray-700 mt-2 max-h-40 overflow-y-auto">
+                  {existingVariableNames.map((varName, idx) => (
+                    <li key={idx} className="truncate" title={varName}>
+                      {varName}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-sm text-gray-600 mt-2">
+                  Are you sure you want to continue?
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={handleCancelVariableOverwrite}
+              disabled={isSavingVariables}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmVariableOverwrite}
+              disabled={isSavingVariables}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isSavingVariables ? 'Saving...' : 'Overwrite'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -490,7 +490,6 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
   const [selectedIdentifiers, setSelectedIdentifiers] = React.useState<string[]>([]);
   const [selectedIdentifiersForBackend, setSelectedIdentifiersForBackend] = React.useState<string[]>([]);
   const [identifiersListOpen, setIdentifiersListOpen] = React.useState(false);
-  const openedBySearchRef = React.useRef(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const restoredColumnStateKeyRef = React.useRef<string | null>(null);
   const isRestoringRef = React.useRef(false);
@@ -518,11 +517,11 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
   React.useEffect(() => {
     if (columnOperationsState) {
       // Create a key to identify this state (based on its content)
+      // Note: We exclude exploreOpen from the key since it's controlled locally
       const stateKey = JSON.stringify({
         selectedOperationsCount: columnOperationsState.selectedOperations.length,
         activeOperationId: columnOperationsState.activeOperationId,
         columnSearchQuery: columnOperationsState.columnSearchQuery,
-        exploreOpen: columnOperationsState.exploreOpen,
       });
       
       // Only restore if this is a different state than what we've already restored
@@ -531,7 +530,11 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
         setSelectedOperations(columnOperationsState.selectedOperations);
         setActiveOperationId(columnOperationsState.activeOperationId);
         setColumnSearchQuery(columnOperationsState.columnSearchQuery);
-        setExploreOpen(columnOperationsState.exploreOpen);
+        // Only restore exploreOpen if there's no active search query
+        // This prevents race conditions where search opens the panel but restoration closes it
+        if (!columnOperationsState.columnSearchQuery?.trim()) {
+          setExploreOpen(columnOperationsState.exploreOpen);
+        }
         restoredColumnStateKeyRef.current = stateKey;
         // Reset restoration flag after state updates complete
         requestAnimationFrame(() => {
@@ -646,59 +649,43 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
     return scoredCategories.filter(category => category.operations.length > 0);
   }, [columnSearchQuery]);
 
-  // Auto-open explore when user starts typing
+  // Determine which categories to display (filtered if searching, all otherwise)
+  const categoriesToShow = React.useMemo(() => {
+    return columnSearchQuery.trim() ? filteredColumnCategories : operationCategories;
+  }, [columnSearchQuery, filteredColumnCategories]);
+
+  // Simplified: Auto-open explore panel AND expand all matching categories when user types in search
+  // Uses a small delay to ensure this runs after any restoration effects
   React.useEffect(() => {
     if (columnSearchQuery.trim()) {
-      openedBySearchRef.current = true;
-      setExploreOpen(true);
-    }
-  }, [columnSearchQuery]);
-
-  // Maintain focus on search input when layout switches (runs synchronously after DOM update)
-  React.useLayoutEffect(() => {
-    if (columnSearchQuery.trim()) {
-      // Small delay to ensure DOM has updated after conditional render switch
-      const timeoutId = setTimeout(() => {
-        if (searchInputRef.current && document.activeElement !== searchInputRef.current) {
-          searchInputRef.current.focus();
-          // Move cursor to end of input
-          const length = searchInputRef.current.value.length;
-          searchInputRef.current.setSelectionRange(length, length);
-        }
-      }, 10);
-      return () => clearTimeout(timeoutId);
-    }
-  }, [columnSearchQuery, exploreOpen]);
-
-  // When search is active, auto-open matching categories. Otherwise, categories stay collapsed.
-  React.useEffect(() => {
-    if (!exploreOpen) {
-      return;
-    }
-
-    if (columnSearchQuery.trim()) {
-      // Search is active: open only matching categories from filtered results
-      const categoriesWithMatches: Record<string, boolean> = {};
-      filteredColumnCategories.forEach(category => {
-        if (category.operations.length > 0) {
-          categoriesWithMatches[category.name] = true;
-        }
+      // Use requestAnimationFrame to ensure this runs after any restoration effects
+      const rafId = requestAnimationFrame(() => {
+        // Open the explore panel
+        setExploreOpen(true);
+        // Open all matching categories (filteredColumnCategories already filters empty ones)
+        const categoriesToOpen: Record<string, boolean> = {};
+        filteredColumnCategories.forEach(category => {
+          categoriesToOpen[category.name] = true;
+        });
+        setOpenColumnCategories(categoriesToOpen);
       });
-      setOpenColumnCategories(categoriesWithMatches);
+      return () => cancelAnimationFrame(rafId);
     }
-    // When search is empty, don't modify openColumnCategories - let them stay collapsed
-  }, [exploreOpen, columnSearchQuery, filteredColumnCategories]);
+  }, [columnSearchQuery, filteredColumnCategories]);
 
-  // Handler for explore button - immediately open all categories if opening without search
-  const handleExploreToggle = (open?: boolean) => {
-    const next =
-      typeof open === 'boolean' ? open : !exploreOpen;
-
-    if (!next) {
-      openedBySearchRef.current = false;
-    }
-
+  // Handler for explore button - toggle panel and open all categories when opening
+  const handleExploreToggle = () => {
+    const next = !exploreOpen;
     setExploreOpen(next);
+    
+    if (next) {
+      // Opening: expand all categories
+      const allCategoriesOpen: Record<string, boolean> = {};
+      operationCategories.forEach(category => {
+        allCategoriesOpen[category.name] = true;
+      });
+      setOpenColumnCategories(allCategoriesOpen);
+    }
   };
 
   const toggleColumnCategory = (categoryName: string) => {
@@ -3765,77 +3752,64 @@ const MetricsColOps = forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ dataSo
         {/* Operations Browser - only shown when exploreOpen is true */}
         {exploreOpen && (
           <div className="p-3">
-            <Collapsible open={exploreOpen} onOpenChange={handleExploreToggle}>
-              <CollapsibleContent>
-                {(() => {
-                  // Determine what to show: filtered results if searching, all categories if not
-                  const categoriesToShow = columnSearchQuery.trim() 
-                    ? filteredColumnCategories 
-                    : operationCategories;
-                      
-                  if (categoriesToShow.length === 0) {
-                    return (
-                      <p className="text-xs text-gray-500 text-center py-4">
-                        {columnSearchQuery.trim() 
-                          ? "No operations match your search."
-                          : "No operations available."}
-                      </p>
-                    );
-                  }
-                      
-                  return categoriesToShow.map((category) => (
-                    <Collapsible
-                      key={category.name}
-                      open={openColumnCategories[category.name] ?? false}
-                      onOpenChange={() => toggleColumnCategory(category.name)}
-                    >
-                      <CollapsibleTrigger className="flex items-center justify-between w-full p-1.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 rounded transition-colors">
-                        <div className="flex items-center space-x-1.5 flex-1 min-w-0">
-                          <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded flex items-center justify-center flex-shrink-0">
-                            <category.icon className="w-2.5 h-2.5 text-gray-700" />
-                          </div>
-                          <span className="font-medium text-gray-900 text-xs truncate">{category.name}</span>
-                          <span className="text-[10px] text-gray-400 flex-shrink-0">({category.operations.length})</span>
-                        </div>
-                        {openColumnCategories[category.name] ? (
-                          <ChevronDown className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
-                        ) : (
-                          <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
-                        )}
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="pt-1.5 pb-1.5">
-                        <div className="ml-2 pl-2 border-l-2 border-gray-200 grid grid-cols-2 gap-1.5">
-                          {category.operations.map((op) => (
-                            <TooltipProvider key={op.type} delayDuration={0}>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div
-                                    onClick={() => handleOperationClick(op)}
-                                    className="p-1.5 border border-gray-200 rounded-lg bg-white transition-all cursor-pointer group relative flex items-center space-x-1.5 hover:shadow-md hover:border-gray-300"
-                                  >
-                                    <Plus className="w-3 h-3 text-gray-600" />
-                                    <span className="text-[10px] font-medium text-gray-900">{op.name}</span>
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="text-xs max-w-xs">
-                                  <p className="font-semibold mb-1">{op.name}</p>
-                                  <p className="mb-1">{op.description}</p>
-                                  {operationFormulas[op.type] && (
-                                    <p className="text-[10px] text-gray-400 italic">
-                                      Formula: {operationFormulas[op.type]}
-                                    </p>
-                                  )}
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          ))}
-                        </div>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  ));
-                })()}
-              </CollapsibleContent>
-            </Collapsible>
+            {categoriesToShow.length === 0 ? (
+              <p className="text-xs text-gray-500 text-center py-4">
+                {columnSearchQuery.trim() 
+                  ? "No operations match your search."
+                  : "No operations available."}
+              </p>
+            ) : (
+              categoriesToShow.map((category) => (
+                <Collapsible
+                  key={category.name}
+                  open={openColumnCategories[category.name] ?? false}
+                  onOpenChange={() => toggleColumnCategory(category.name)}
+                >
+                  <CollapsibleTrigger className="flex items-center justify-between w-full p-1.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 rounded transition-colors">
+                    <div className="flex items-center space-x-1.5 flex-1 min-w-0">
+                      <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded flex items-center justify-center flex-shrink-0">
+                        <category.icon className="w-2.5 h-2.5 text-gray-700" />
+                      </div>
+                      <span className="font-medium text-gray-900 text-xs truncate">{category.name}</span>
+                      <span className="text-[10px] text-gray-400 flex-shrink-0">({category.operations.length})</span>
+                    </div>
+                    {openColumnCategories[category.name] ? (
+                      <ChevronDown className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
+                    ) : (
+                      <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" />
+                    )}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-1.5 pb-1.5">
+                    <div className="ml-2 pl-2 border-l-2 border-gray-200 grid grid-cols-2 gap-1.5">
+                      {category.operations.map((op) => (
+                        <TooltipProvider key={op.type} delayDuration={0}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div
+                                onClick={() => handleOperationClick(op)}
+                                className="p-1.5 border border-gray-200 rounded-lg bg-white transition-all cursor-pointer group relative flex items-center space-x-1.5 hover:shadow-md hover:border-gray-300"
+                              >
+                                <Plus className="w-3 h-3 text-gray-600" />
+                                <span className="text-[10px] font-medium text-gray-900">{op.name}</span>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs max-w-xs">
+                              <p className="font-semibold mb-1">{op.name}</p>
+                              <p className="mb-1">{op.description}</p>
+                              {operationFormulas[op.type] && (
+                                <p className="text-[10px] text-gray-400 italic">
+                                  Formula: {operationFormulas[op.type]}
+                                </p>
+                              )}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              ))
+            )}
           </div>
         )}
 
