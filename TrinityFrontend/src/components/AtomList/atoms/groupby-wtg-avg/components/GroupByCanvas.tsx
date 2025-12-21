@@ -17,6 +17,7 @@ import { ArrowUp, ArrowDown, FilterIcon, Plus } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { InlineGroupByGuidedFlow } from './groupby-guided-flow/inlinegroupbyguidedflow';
 import {
   Pagination,
   PaginationContent,
@@ -897,6 +898,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
 
   // Get showCardinalityView setting from global store
   const showCardinalityView = settings.showCardinalityView || false;
+  // Get showGuidedMode setting from global store
+  const showGuidedMode = settings.showGuidedMode || false;
 
   return (
     <div className="p-2 space-y-2 h-full overflow-auto bg-gradient-to-br from-slate-50 to-slate-100">
@@ -1412,6 +1415,15 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
         </div>
       ) : (
         <div className="p-4 text-gray-500">No results to display. Please Configure GroupBy options.</div>
+      )}
+
+      {/* Guided Mode Flow */}
+      {showGuidedMode && (
+        <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
+          <CardContent className="p-4">
+            <InlineGroupByGuidedFlow atomId={atomId} />
+          </CardContent>
+        </Card>
       )}
 
       {/* Save DataFrame Modal */}
