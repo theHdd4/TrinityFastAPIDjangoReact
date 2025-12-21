@@ -383,7 +383,7 @@ const DataFrameCardinalityView: React.FC<DataFrameCardinalityViewProps> = ({
               <td className="table-cell-primary">
                 <div className="flex items-center gap-2">
                   <span>{col.column}</span>
-                  {col.metadata?.is_created && (
+                  {(col.metadata?.is_created || col.metadata?.is_transformed) && (
                     <ColumnInfoIcon metadata={col.metadata} />
                   )}
                 </div>

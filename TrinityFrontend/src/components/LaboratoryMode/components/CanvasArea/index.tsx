@@ -4665,25 +4665,25 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   // Sync Laboratory changes to Workflow collection
   const syncWorkflowCollectionOnLaboratorySave = async () => {
     try {
-      console.log('🔄 [SYNC START] Syncing Laboratory changes to Workflow collection...');
-      console.log('🔄 [SYNC] Function called with pendingChanges:', pendingChanges);
-      console.log('🔄 [SYNC] Current layoutCards count:', Array.isArray(layoutCards) ? layoutCards.length : 0);
+      // console.log('🔄 [SYNC START] Syncing Laboratory changes to Workflow collection...');
+      // console.log('🔄 [SYNC] Function called with pendingChanges:', pendingChanges);
+      // console.log('🔄 [SYNC] Current layoutCards count:', Array.isArray(layoutCards) ? layoutCards.length : 0);
 
       const hasPendingChanges = pendingChanges.deletedMolecules.length > 0 ||
         pendingChanges.deletedAtoms.length > 0 ||
         pendingChanges.addedAtoms.length > 0;
-      console.log('🔄 [SYNC] hasPendingChanges:', hasPendingChanges);
+      // console.log('🔄 [SYNC] hasPendingChanges:', hasPendingChanges);
 
       // Get current workflow configuration
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
-      console.log('🔄 [SYNC] Environment config:', {
-        CLIENT_NAME: env.CLIENT_NAME,
-        APP_NAME: env.APP_NAME,
-        PROJECT_NAME: env.PROJECT_NAME
-      });
+      // console.log('🔄 [SYNC] Environment config:', {
+      //   CLIENT_NAME: env.CLIENT_NAME,
+      //   APP_NAME: env.APP_NAME,
+      //   PROJECT_NAME: env.PROJECT_NAME
+      // });
 
-      console.log('🔄 [SYNC] Fetching workflow data from:', `${MOLECULES_API}/workflow/get`);
+      // console.log('🔄 [SYNC] Fetching workflow data from:', `${MOLECULES_API}/workflow/get`);
       const response = await fetch(`${MOLECULES_API}/workflow/get`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4696,21 +4696,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         })
       });
 
-      console.log('🔄 [SYNC] Fetch response status:', response.status, response.ok);
+      // console.log('🔄 [SYNC] Fetch response status:', response.status, response.ok);
 
       if (response.ok) {
         const result = await response.json();
-        console.log('🔄 [SYNC] Fetch result:', {
-          hasWorkflowData: !!result.workflow_data,
-          moleculesCount: result.workflow_data?.canvas_molecules?.length || 0
-        });
+        // console.log('🔄 [SYNC] Fetch result:', {
+        //   hasWorkflowData: !!result.workflow_data,
+        //   moleculesCount: result.workflow_data?.canvas_molecules?.length || 0
+        // });
 
         if (result.workflow_data) {
           // Fetch all molecules from MongoDB (workflow_model_molecule_configuration)
           let updatedCanvasMolecules = [...(result.workflow_data.canvas_molecules || [])];
 
-          console.log(`📦 Fetched ${updatedCanvasMolecules.length} molecules from workflow_model_molecule_configuration`);
-          console.log(`🗑️ Molecules to mark as inactive: ${pendingChanges.deletedMolecules.join(', ')}`);
+          // console.log(`📦 Fetched ${updatedCanvasMolecules.length} molecules from workflow_model_molecule_configuration`);
+          // console.log(`🗑️ Molecules to mark as inactive: ${pendingChanges.deletedMolecules.join(', ')}`);
 
           // Handle molecule deletions - mark as isActive: false instead of removing
           // Simple approach: Check which molecules were deleted in Laboratory Mode
@@ -4720,7 +4720,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
             updatedCanvasMolecules = updatedCanvasMolecules.map(mol => {
               if (deletedMoleculeIds.has(mol.id)) {
-                console.log(`🔴 Marking molecule ${mol.id} (${mol.title || 'untitled'}) as inactive (isActive: false)`);
+                // console.log(`🔴 Marking molecule ${mol.id} (${mol.title || 'untitled'}) as inactive (isActive: false)`);
                 return {
                   ...mol,
                   isActive: false // Mark as inactive instead of removing
@@ -4737,13 +4737,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               return mol;
             });
 
-            console.log(`✅ Marked ${pendingChanges.deletedMolecules.length} molecules as inactive (isActive: false)`);
-            console.log(`📊 Final molecule count: ${updatedCanvasMolecules.length} total (${updatedCanvasMolecules.filter(m => m.isActive !== false).length} active, ${updatedCanvasMolecules.filter(m => m.isActive === false).length} inactive)`);
+            // console.log(`✅ Marked ${pendingChanges.deletedMolecules.length} molecules as inactive (isActive: false)`);
+            // console.log(`📊 Final molecule count: ${updatedCanvasMolecules.length} total (${updatedCanvasMolecules.filter(m => m.isActive !== false).length} active, ${updatedCanvasMolecules.filter(m => m.isActive === false).length} inactive)`);
           }
 
           // Handle atom deletions
           if (pendingChanges.deletedAtoms.length > 0) {
-            console.log('🔍 Processing atom deletions:', pendingChanges.deletedAtoms);
+            // console.log('🔍 Processing atom deletions:', pendingChanges.deletedAtoms);
 
             const moleculeBasedDeletions = pendingChanges.deletedAtoms.filter(change => change.moleculeId !== 'standalone');
             // FIX 3: Standalone deletions should NOT affect molecules - standalone cards are separate
@@ -4757,7 +4757,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 .map(change => change.atomId);
 
               if (atomsToRemove.length > 0) {
-                console.log(`🗑️ Removing atoms from molecule ${molecule.id}:`, atomsToRemove);
+                // console.log(`🗑️ Removing atoms from molecule ${molecule.id}:`, atomsToRemove);
                 return {
                   ...molecule,
                   atoms: molecule.atoms.filter(atom => !atomsToRemove.includes(atom)),
@@ -4773,7 +4773,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
           // Handle atom additions
           if (pendingChanges.addedAtoms.length > 0) {
-            console.log('➕ Processing atom additions:', pendingChanges.addedAtoms);
+            // console.log('➕ Processing atom additions:', pendingChanges.addedAtoms);
 
             const currentCards = Array.isArray(layoutCards) ? layoutCards : [];
             const additionsByMolecule = pendingChanges.addedAtoms.reduce((acc, addition) => {
@@ -4839,10 +4839,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           // FIX: Preserve atom order for ALL molecules from Laboratory Mode
           // This ensures that when atoms are added/reordered in Laboratory Mode,
           // their order is preserved in Workflow Mode
-          console.log('🔄 [SYNC] Starting atom order preservation logic...');
+          // console.log('🔄 [SYNC] Starting atom order preservation logic...');
           const currentCards = Array.isArray(layoutCards) ? layoutCards : [];
           const allMoleculeCards = currentCards.filter(card => card.moleculeId);
-          console.log('🔄 [SYNC] Total cards:', currentCards.length, 'Molecule cards:', allMoleculeCards.length);
+          // console.log('🔄 [SYNC] Total cards:', currentCards.length, 'Molecule cards:', allMoleculeCards.length);
 
           // CRITICAL FIX: Create a position map once for O(1) lookups instead of O(n) findIndex calls
           // This maps card.id -> position in the original layoutCards array
@@ -4869,24 +4869,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           });
 
           // Log initial grouping to verify card order
-          console.log(`🔄 [Sync] Grouped cards by molecule:`,
-            Array.from(cardsByMolecule.entries()).map(([molId, cards]) => ({
-              moleculeId: molId,
-              cardCount: cards.length,
-              cards: cards.map((c, idx) => ({
-                cardId: c.id,
-                atomId: c.atoms[0]?.atomId,
-                positionInOriginalArray: cardPositionMap.get(c.id) ?? -1,
-                groupIndex: idx
-              }))
-            }))
-          );
+          // console.log(`🔄 [Sync] Grouped cards by molecule:`,
+          //   Array.from(cardsByMolecule.entries()).map(([molId, cards]) => ({
+          //     moleculeId: molId,
+          //     cardCount: cards.length,
+          //     cards: cards.map((c, idx) => ({
+          //       cardId: c.id,
+          //       atomId: c.atoms[0]?.atomId,
+          //       positionInOriginalArray: cardPositionMap.get(c.id) ?? -1,
+          //       groupIndex: idx
+          //     }))
+          //   }))
+          // );
 
           // For each molecule, sort cards by their visual order (order field) and extract atoms
           cardsByMolecule.forEach((moleculeCards, moleculeId) => {
             // CRITICAL: Count cards within this molecule to ensure we have the correct count
             const moleculeCardCount = moleculeCards.length;
-            console.log(`🔄 [Sync] Processing molecule ${moleculeId} with ${moleculeCardCount} cards`);
+            // console.log(`🔄 [Sync] Processing molecule ${moleculeId} with ${moleculeCardCount} cards`);
 
             // CRITICAL FIX: Sort cards by their position in the original layoutCards array
             // The positionInOriginalArray is the PRIMARY source of truth for visual order in Laboratory Mode
@@ -4942,23 +4942,23 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
             // Verify the count matches
             if (orderedAtomIds.length !== moleculeCardCount) {
-              console.warn(`⚠️ [Sync] Molecule ${moleculeId} atom count (${orderedAtomIds.length}) doesn't match card count (${moleculeCardCount})`);
+              // console.warn(`⚠️ [Sync] Molecule ${moleculeId} atom count (${orderedAtomIds.length}) doesn't match card count (${moleculeCardCount})`);
             }
 
-            console.log(`🔄 [Sync] Molecule ${moleculeId} atom order from Laboratory Mode:`, {
-              moleculeId,
-              cardCount: moleculeCardCount,
-              atomCount: orderedAtomIds.length,
-              atomOrder: orderedAtomIds,
-              cardOrder: sortedCards.map((c, moleculeCardIndex) => ({
-                cardId: c.id,
-                atomId: c.atoms[0]?.atomId,
-                moleculeCardIndex: moleculeCardIndex, // Index within molecule (0, 1, 2, ...)
-                positionInArray: cardPositionMap.get(c.id) ?? -1,
-                orderField: c.order,
-                expectedAtomPosition: moleculeCardIndex // This will be the order in atomPositions
-              }))
-            });
+            // console.log(`🔄 [Sync] Molecule ${moleculeId} atom order from Laboratory Mode:`, {
+            //   moleculeId,
+            //   cardCount: moleculeCardCount,
+            //   atomCount: orderedAtomIds.length,
+            //   atomOrder: orderedAtomIds,
+            //   cardOrder: sortedCards.map((c, moleculeCardIndex) => ({
+            //     cardId: c.id,
+            //     atomId: c.atoms[0]?.atomId,
+            //     moleculeCardIndex: moleculeCardIndex, // Index within molecule (0, 1, 2, ...)
+            //     positionInArray: cardPositionMap.get(c.id) ?? -1,
+            //     orderField: c.order,
+            //     expectedAtomPosition: moleculeCardIndex // This will be the order in atomPositions
+            //   }))
+            // });
 
             moleculeAtomOrderMap.set(moleculeId, orderedAtomIds);
           });
@@ -4969,7 +4969,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
             if (labModeAtomOrder && labModeAtomOrder.length > 0) {
               // Use Laboratory Mode atom order
-              console.log(`🔄 Preserving atom order for molecule ${molecule.id} (${molecule.title || 'untitled'}):`, labModeAtomOrder);
+              // console.log(`🔄 Preserving atom order for molecule ${molecule.id} (${molecule.title || 'untitled'}):`, labModeAtomOrder);
               return {
                 ...molecule,
                 atoms: labModeAtomOrder,
@@ -5002,18 +5002,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             const atomPositions = buildAtomPositions(orderSource);
 
             // Log the final atomPositions to verify order
-            if (atomPositions.length > 0) {
-              console.log(`✅ [Sync] Final atomPositions for molecule ${molecule.id}:`, {
-                moleculeId: molecule.id,
-                atomCount: atomPositions.length,
-                atomPositions: atomPositions.map((ap, idx) => ({
-                  atomId: ap.atomId,
-                  order: ap.order,
-                  expectedOrder: idx, // Should match order
-                  matches: ap.order === idx
-                }))
-              });
-            }
+            // if (atomPositions.length > 0) {
+            //   console.log(`✅ [Sync] Final atomPositions for molecule ${molecule.id}:`, {
+            //     moleculeId: molecule.id,
+            //     atomCount: atomPositions.length,
+            //     atomPositions: atomPositions.map((ap, idx) => ({
+            //       atomId: ap.atomId,
+            //       order: ap.order,
+            //       expectedOrder: idx, // Should match order
+            //       matches: ap.order === idx
+            //     }))
+            //   });
+            // }
 
             return {
               ...molecule,
@@ -5307,9 +5307,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             addedAtoms: []
           });
 
-          console.log('✅ [SYNC END] Laboratory changes synced to Workflow collection');
+          // console.log('✅ [SYNC END] Laboratory changes synced to Workflow collection');
         } else {
-          console.warn('⚠️ [SYNC] No workflow_data, skipping sync');
+          // console.warn('⚠️ [SYNC] No workflow_data, skipping sync');
         }
       } else {
         console.error('❌ [SYNC] Response not OK, skipping sync');

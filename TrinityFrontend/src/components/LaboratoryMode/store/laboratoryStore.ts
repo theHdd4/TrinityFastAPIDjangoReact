@@ -2122,17 +2122,17 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   setCards: (cards: LayoutCard[]) => {
     const currentSubMode = get().subMode;
     
-    console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS CALLED ==========');
-    console.log('🔍 [DIAGNOSIS] setCards called:', {
-      cardsCount: cards?.length || 0,
-      subMode: currentSubMode,
-      cardAtomIds: cards?.map(c => c.atoms.map(a => a.atomId)).flat() || [],
-      timestamp: new Date().toISOString()
-    });
+    // console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS CALLED ==========');
+    // console.log('🔍 [DIAGNOSIS] setCards called:', {
+    //   cardsCount: cards?.length || 0,
+    //   subMode: currentSubMode,
+    //   cardAtomIds: cards?.map(c => c.atoms.map(a => a.atomId)).flat() || [],
+    //   timestamp: new Date().toISOString()
+    // });
     
     // FIX: Ensure cards is always an array
     if (!Array.isArray(cards)) {
-      console.error('🔍 [DIAGNOSIS] ❌ [Laboratory Store] setCards called with non-array:', cards);
+      console.error('❌ [Laboratory Store] setCards called with non-array:', cards);
       set({ cards: [] });
       return;
     }
@@ -2166,39 +2166,39 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
         }
       }
       
-      if (filteredCards.length !== cardsToSet.length) {
-        console.warn('🔍 [DIAGNOSIS] ⚠️ [Laboratory Store] Filtered cards in setCards (dashboard mode):', {
-          original: cardsToSet.length,
-          filtered: filteredCards.length,
-          removed: cardsToSet.length - filteredCards.length,
-          removedCards: cardsToSet.filter(card => {
-            const allowedAtoms = (card.atoms || []).filter(atom => 
-              allowedAtomIdsSet.has(atom.atomId as any) || atom.atomId === 'landing-screen'
-            );
-            return allowedAtoms.length === 0 && (card.atoms || []).length > 0;
-          }).map(c => ({
-            id: c.id,
-            atoms: c.atoms.map(a => a.atomId)
-          }))
-        });
-      }
+      // if (filteredCards.length !== cardsToSet.length) {
+      //   console.warn('🔍 [DIAGNOSIS] ⚠️ [Laboratory Store] Filtered cards in setCards (dashboard mode):', {
+      //     original: cardsToSet.length,
+      //     filtered: filteredCards.length,
+      //     removed: cardsToSet.length - filteredCards.length,
+      //     removedCards: cardsToSet.filter(card => {
+      //       const allowedAtoms = (card.atoms || []).filter(atom => 
+      //         allowedAtomIdsSet.has(atom.atomId as any)
+      //       );
+      //       return allowedAtoms.length === 0;
+      //     }).map(c => ({
+      //       id: c.id,
+      //       atoms: c.atoms.map(a => a.atomId)
+      //     }))
+      //   });
+      // }
       cardsToSet = filteredCards;
     }
     
     const uniqueCards = dedupeCards(cardsToSet);
-    if (uniqueCards.length !== cardsToSet.length) {
-      console.warn('🔍 [DIAGNOSIS] [Laboratory Store] Deduped cards to avoid duplicates', {
-        incoming: cardsToSet.length,
-        unique: uniqueCards.length,
-      });
-    }
+    // if (uniqueCards.length !== cardsToSet.length) {
+    //   console.warn('🔍 [DIAGNOSIS] [Laboratory Store] Deduped cards to avoid duplicates', {
+    //     incoming: cardsToSet.length,
+    //     unique: uniqueCards.length,
+    //   });
+    // }
     
-    console.log('🔍 [DIAGNOSIS] Setting cards to store:', {
-      count: uniqueCards.length,
-      subMode: currentSubMode,
-      cardAtomIds: uniqueCards.map(c => c.atoms.map(a => a.atomId)).flat()
-    });
-    console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS COMPLETE ==========');
+    // console.log('🔍 [DIAGNOSIS] Setting cards to store:', {
+    //   count: uniqueCards.length,
+    //   subMode: currentSubMode,
+    //   cardAtomIds: uniqueCards.map(c => c.atoms.map(a => a.atomId)).flat()
+    // });
+    // console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS COMPLETE ==========');
     
     set({ cards: uniqueCards });
   },

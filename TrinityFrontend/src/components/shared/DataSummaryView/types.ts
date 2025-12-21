@@ -4,6 +4,7 @@
 
 export interface ColumnMetadata {
   is_created: boolean;
+  is_transformed?: boolean;
   operation_type?: string;
   input_columns?: string[];
   parameters?: Record<string, any>;
