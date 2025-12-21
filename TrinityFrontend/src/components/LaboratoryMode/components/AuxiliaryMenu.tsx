@@ -86,7 +86,14 @@ const AuxiliaryMenu: React.FC<Props> = ({
     }
   };
 
+  // Track if user has explicitly closed the guided workflow panel
+  const userClosedGuidedRef = React.useRef(false);
+  // Track if Settings was explicitly opened by user (clicking gear icon)
+  const settingsExplicitlyOpenedRef = React.useRef(false);
+  
   const openSettings = () => {
+    // Mark as explicitly opened when user clicks Settings icon
+    settingsExplicitlyOpenedRef.current = true;
     // In horizontal layout, don't close AI panel when opening settings
     if (trinityAILayout === 'horizontal') {
       setActive(active === 'settings' ? null : 'settings');
@@ -105,6 +112,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openHelp = () => setActive(active === 'help' ? null : 'help');
   const openExhibition = () => setActive(active === 'exhibition' ? null : 'exhibition');
   const openTrinityAI = () => setActive(active === 'trinity' ? null : 'trinity');
+<<<<<<< HEAD
   const openGuidedWorkflow = () => setActive(active === 'guided' ? null : 'guided');
   const openMetrics = () => setActive(active === 'metrics' ? null : 'metrics');
 
@@ -113,6 +121,27 @@ const AuxiliaryMenu: React.FC<Props> = ({
     if (isGuidedModeEnabled) {
       // Prefer guided panel when guided mode is enabled, but allow metrics panel to remain open
       if (active !== 'guided' && active !== 'metrics') {
+=======
+  const openGuidedWorkflow = () => {
+    // When user explicitly clicks wrench icon, reset the "closed" flag
+    userClosedGuidedRef.current = false;
+    setActive(active === 'guided' ? null : 'guided');
+  };
+  
+  // Open guided workflow panel by default when guided mode is enabled
+  React.useEffect(() => {
+    if (isGuidedModeEnabled) {
+      // If Settings tries to open automatically (not explicitly), redirect to Guided Workflow
+      if (active === 'settings' && !settingsExplicitlyOpenedRef.current && !userClosedGuidedRef.current) {
+        // Use setTimeout to avoid state update conflicts
+        const timeoutId = setTimeout(() => {
+          setActive('guided');
+        }, 0);
+        return () => clearTimeout(timeoutId);
+      }
+      // If no panel is active and user hasn't explicitly closed it, open Guided Workflow
+      if (active === null && !userClosedGuidedRef.current) {
+>>>>>>> 28380d565554ad03a25ccbc3d27006c62cd75cf2
         setActive('guided');
       }
     } else {
@@ -120,8 +149,27 @@ const AuxiliaryMenu: React.FC<Props> = ({
       if (active === 'guided') {
         setActive(null);
       }
+      userClosedGuidedRef.current = false;
+      settingsExplicitlyOpenedRef.current = false;
     }
   }, [isGuidedModeEnabled, active, setActive]);
+  
+  // Reset explicit flag when Settings closes
+  React.useEffect(() => {
+    if (active !== 'settings') {
+      settingsExplicitlyOpenedRef.current = false;
+    }
+  }, [active]);
+  
+  // Track when user explicitly closes the guided workflow panel
+  React.useEffect(() => {
+    if (isGuidedModeEnabled && active !== 'guided' && active !== null) {
+      // User switched to another panel, mark as closed (unless it's Settings and was explicit)
+      if (active !== 'settings' || !settingsExplicitlyOpenedRef.current) {
+        userClosedGuidedRef.current = true;
+      }
+    }
+  }, [active, isGuidedModeEnabled]);
 
   const [trinityBackgroundStatus, setTrinityBackgroundStatus] = useState<TrinityBackgroundStatus>({
     isProcessing: false,
@@ -165,7 +213,10 @@ const AuxiliaryMenu: React.FC<Props> = ({
       {active === 'guided' && (
         <GuidedWorkflowPanel
           isCollapsed={false}
-          onToggle={() => setActive(null)}
+          onToggle={() => {
+            userClosedGuidedRef.current = true;
+            setActive(null);
+          }}
           onCreateDataUploadAtom={onCreateDataUploadAtom}
         />
       )}
@@ -272,6 +323,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
             )}
           </button>
         </div>
+<<<<<<< HEAD
         {/* Position 3: Metrics - Always visible and clickable */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
           <button
@@ -291,16 +343,23 @@ const AuxiliaryMenu: React.FC<Props> = ({
         </div>
         {/* Position 4: Saved DataFrames - Always visible and clickable */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+=======
+        {/* Position 3: Saved DataFrames - Always visible and clickable */}
+        <div className="p-3 border-b border-gray-200 flex items-center justify-center relative z-10 pointer-events-auto">
+>>>>>>> 28380d565554ad03a25ccbc3d27006c62cd75cf2
           <button
-            onClick={openFrames}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+            onClick={(e) => {
+              e.stopPropagation();
+              openFrames();
+            }}
+            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center z-10 pointer-events-auto ${
               active === 'frames' ? 'bg-muted text-foreground' : ''
             }`}
             title="Saved DataFrames"
             data-saved-dataframes="true"
             type="button"
           >
-            <Database className="w-4 h-4" />
+            <Database className="w-4 h-4 pointer-events-none" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Saved DataFrames
             </span>
@@ -308,17 +367,20 @@ const AuxiliaryMenu: React.FC<Props> = ({
         </div>
         {/* Position 4: Guided Workflow (Wrench) - Only shown when guided mode is ON */}
         {isGuidedModeEnabled && (
-          <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+          <div className="p-3 border-b border-gray-200 flex items-center justify-center relative z-10 pointer-events-auto">
             <button
-              onClick={openGuidedWorkflow}
-              className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+              onClick={(e) => {
+                e.stopPropagation();
+                openGuidedWorkflow();
+              }}
+              className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center z-10 pointer-events-auto ${
                 active === 'guided' ? 'bg-muted text-foreground' : ''
               }`}
               title="Guided Workflow"
               data-guided-workflow="true"
               type="button"
             >
-              <Wrench className="w-4 h-4" />
+              <Wrench className="w-4 h-4 pointer-events-none" />
               <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
                 Guided Workflow
               </span>

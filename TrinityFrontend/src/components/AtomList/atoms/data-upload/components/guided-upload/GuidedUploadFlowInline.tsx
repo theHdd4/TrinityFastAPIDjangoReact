@@ -1,15 +1,13 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useGuidedUploadFlow, type UploadStage, type GuidedUploadFlowState } from './useGuidedUploadFlow';
-import { U0FileUpload } from './stages/U0FileUpload';
-import { U1StructuralScan } from './stages/U1StructuralScan';
 import { U2UnderstandingFiles } from './stages/U2UnderstandingFiles';
 import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
 import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
 import { U5MissingValues } from './stages/U5MissingValues';
 import { U6FinalPreview } from './stages/U6FinalPreview';
-import { U7Success } from './stages/U7Success';
-import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Maximize2, Minimize2, X } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -38,39 +36,44 @@ interface GuidedUploadFlowInlineProps {
   onClose?: () => void;
 }
 
-const STAGE_COMPONENTS: Record<UploadStage, React.ComponentType<any>> = {
-  U0: U0FileUpload,
-  U1: U1StructuralScan,
+// Only U2-U6 are used now (U0 handled by atom, U1 and U7 removed)
+const STAGE_COMPONENTS: Partial<Record<UploadStage, React.ComponentType<any>>> = {
   U2: U2UnderstandingFiles,
   U3: U3ReviewColumnNames,
   U4: U4ReviewDataTypes,
   U5: U5MissingValues,
   U6: U6FinalPreview,
-  U7: U7Success,
 };
 
-// Step 1 (Atom): Split panel for file selection/upload - NOT shown in inline flow
-// Panel flow shows U1-U7
-const STAGE_TITLES: Record<UploadStage, string> = {
-  U0: 'Choose Your Data Source', // Handled by atom (not shown in inline flow)
-  U1: 'Structural Scan',
+const STAGE_TITLES: Partial<Record<UploadStage, string>> = {
   U2: 'Confirm Your Column Headers',
   U3: 'Review Your Column Names',
   U4: 'Review Your Column Types',
   U5: 'Review Missing Values',
-  U6: 'Final Preview Before Priming',
-  U7: 'Your Data Is Ready',
+  U6: 'Final Preview Before Priming', // U6 handles priming - no U7 needed
 };
 
-// Full stage order for internal navigation
-const STAGE_ORDER: UploadStage[] = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+// Stage order: only U2-U6 (U0 handled by atom, U1 and U7 removed)
+const STAGE_ORDER: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
 
-// Stages visible in the inline flow accordion (U0 is handled by atom)
-const VISIBLE_STAGES: UploadStage[] = ['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+// All stages are visible in the inline flow
+const VISIBLE_STAGES: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
 
 // Helper to get stage index
 const getStageIndex = (stage: UploadStage): number => {
   return STAGE_ORDER.indexOf(stage);
+};
+
+// Helper to get display step number (U2=1, U3=2, etc.)
+const getDisplayStepNumber = (stage: UploadStage): number => {
+  const stageMap: Partial<Record<UploadStage, number>> = {
+    'U2': 1,
+    'U3': 2,
+    'U4': 3,
+    'U5': 4,
+    'U6': 5,
+  };
+  return stageMap[stage] || 0;
 };
 
 // Helper to check if a stage is completed
@@ -86,8 +89,44 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   savedState,
   onClose,
 }) => {
-  const flow = useGuidedUploadFlow(savedState);
-  const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage } = flow;
+  // CRITICAL FIX: If existingDataframe is provided, merge its path into savedState BEFORE initializing the hook
+  // This ensures the correct path (with folder structure) is used even if savedState has a wrong/stripped path
+  const mergedSavedState = useMemo(() => {
+    if (existingDataframe && existingDataframe.path && savedState?.uploadedFiles) {
+      // Check if any file in savedState matches existingDataframe.name but has wrong path
+      const updatedFiles = savedState.uploadedFiles.map(file => {
+        if (file.name === existingDataframe.name && file.path !== existingDataframe.path) {
+          console.log('🔧 [GuidedUploadFlowInline] Merging correct path into savedState:', {
+            fileName: file.name,
+            oldPath: file.path,
+            newPath: existingDataframe.path
+          });
+          return { ...file, path: existingDataframe.path };
+        }
+        return file;
+      });
+      
+      // If no matching file found, add it
+      const hasMatchingFile = updatedFiles.some(f => f.name === existingDataframe.name);
+      if (!hasMatchingFile) {
+        updatedFiles.push({
+          name: existingDataframe.name,
+          path: existingDataframe.path,
+          size: existingDataframe.size || 0,
+        });
+        console.log('🔧 [GuidedUploadFlowInline] Added file with correct path to savedState');
+      }
+      
+      return {
+        ...savedState,
+        uploadedFiles: updatedFiles,
+      };
+    }
+    return savedState;
+  }, [existingDataframe, savedState]);
+  
+  const flow = useGuidedUploadFlow(mergedSavedState);
+  const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage, updateUploadedFilePath } = flow;
   const { saveState, markFileAsPrimed } = useGuidedFlowPersistence();
   const { setActiveGuidedFlow, updateGuidedFlowStage, removeActiveGuidedFlow } = useLaboratoryStore();
   
@@ -102,6 +141,8 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialMountRef = useRef(true);
   const lastSavedStateRef = useRef<string>('');
+  const u2ContinueHandlerRef = useRef<(() => void) | null>(null);
+  const u2ContinueDisabledRef = useRef<(() => boolean) | null>(null);
 
   // Create stable state string representation - only recalculate when actual values change
   const stateString = useMemo(() => {
@@ -123,8 +164,8 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     Object.keys(state.missingValueStrategies).length,
   ]);
 
-  // Determine initial stage - always start from U1 now (U0 is handled by atom)
-  const effectiveInitialStage = initialStage || 'U1';
+  // Determine initial stage - always start from U2 now (U0 is handled by atom, U1 removed)
+  const effectiveInitialStage = initialStage || 'U2';
 
   // Track if we've already initialized from savedState to prevent re-initialization
   const hasInitializedFromSavedStateRef = useRef(false);
@@ -155,22 +196,91 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     }
 
     // If existing dataframe provided, initialize flow with it
-    if (existingDataframe && state.uploadedFiles.length === 0) {
-      addUploadedFiles([{
+    // CRITICAL: Use existingDataframe.path as-is - it should contain the full MinIO path including folder structure
+    // For Excel sheets in folders, this should be something like: "Quant Matrix AI/blank/New Custom Project/folder_name/sheets/Sheet1.arrow"
+    // IMPORTANT: Always use the fresh existingDataframe path, even if savedState has files, to ensure the correct path is used
+    if (existingDataframe) {
+      console.log('🔍 [GuidedUploadFlowInline] Initializing with existing dataframe:', {
         name: existingDataframe.name,
         path: existingDataframe.path,
-        size: existingDataframe.size || 0,
-      }]);
+        fullDataframe: existingDataframe,
+        currentUploadedFilesLength: state.uploadedFiles.length,
+        currentUploadedFilesPaths: state.uploadedFiles.map(f => f.path)
+      });
+      
+      // Validate that path includes folder structure for Excel sheets
+      const path = existingDataframe.path || '';
+      const pathSegments = path.split('/').filter(s => s.length > 0);
+      const isExcelFolderFile = pathSegments.length >= 5 && pathSegments[pathSegments.length - 3] === 'sheets';
+      
+      if (isExcelFolderFile) {
+        console.log('✅ [GuidedUploadFlowInline] Detected Excel folder file, path includes folder structure:', path);
+      } else {
+        console.warn('⚠️ [GuidedUploadFlowInline] Path may not include folder structure:', path, 'segments:', pathSegments);
+      }
+      
+      // CRITICAL FIX: Always replace uploadedFiles with the fresh existingDataframe path
+      // This ensures we use the correct path even if savedState has an old/stripped path
+      // IMPORTANT: We need to update the path immediately, regardless of what's in state
+      // because savedState might have a wrong/stripped path that needs to be corrected
+      
+      // Find matching file by name (path might be wrong)
+      const existingFileIndex = state.uploadedFiles.findIndex(f => f.name === existingDataframe.name);
+      const existingFile = existingFileIndex >= 0 ? state.uploadedFiles[existingFileIndex] : null;
+      const hasCorrectPath = existingFile && existingFile.path === existingDataframe.path;
+      
+      if (!hasCorrectPath) {
+        console.log('🔧 [GuidedUploadFlowInline] Path mismatch detected - correcting path:', {
+          existingPath: existingFile?.path || '(no file found)',
+          correctPath: existingDataframe.path,
+          fileName: existingDataframe.name,
+          existingFileIndex,
+          uploadedFilesLength: state.uploadedFiles.length
+        });
+        
+        if (state.uploadedFiles.length === 0) {
+          // No files yet, add the correct one
+          addUploadedFiles([{
+            name: existingDataframe.name,
+            path: existingDataframe.path, // Use exact path from existingDataframe - should include full folder structure
+            size: existingDataframe.size || 0,
+          }]);
+          console.log('✅ [GuidedUploadFlowInline] Added file with correct path via addUploadedFiles');
+        } else if (existingFileIndex >= 0 && updateUploadedFilePath) {
+          // File exists but path is wrong - update it
+          updateUploadedFilePath(existingDataframe.name, existingDataframe.path);
+          console.log('✅ [GuidedUploadFlowInline] Updated file path via updateUploadedFilePath:', {
+            fileName: existingDataframe.name,
+            oldPath: existingFile.path,
+            newPath: existingDataframe.path
+          });
+        } else if (state.uploadedFiles.length > 0 && updateUploadedFilePath) {
+          // File might be at index 0 even if name doesn't match (edge case)
+          // Update the first file's path to match existingDataframe
+          const firstFile = state.uploadedFiles[0];
+          updateUploadedFilePath(firstFile.name, existingDataframe.path);
+          console.log('⚠️ [GuidedUploadFlowInline] Updated first file path (name mismatch, using path from existingDataframe):', {
+            fileName: firstFile.name,
+            oldPath: firstFile.path,
+            newPath: existingDataframe.path,
+            existingDataframeName: existingDataframe.name
+          });
+        } else {
+          console.error('❌ [GuidedUploadFlowInline] Cannot update path - updateUploadedFilePath not available or unexpected state');
+        }
+      } else {
+        console.log('✅ [GuidedUploadFlowInline] File already has correct path, no update needed:', {
+          fileName: existingDataframe.name,
+          path: existingDataframe.path
+        });
+      }
     }
 
-    // Set initial stage - only if we're at U0 and haven't initialized from savedState
-    if (state.currentStage === 'U0' && effectiveInitialStage !== 'U0' && !hasInitializedFromSavedStateRef.current) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GuidedUploadFlowInline.tsx:139',message:'Resetting stage to initial',data:{from:state.currentStage,to:effectiveInitialStage,initialStage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
+    // Set initial stage if we're not at a valid stage (U2-U6)
+    if (!['U2', 'U3', 'U4', 'U5', 'U6'].includes(state.currentStage) && !hasInitializedFromSavedStateRef.current) {
       goToStage(effectiveInitialStage);
     }
-  }, [existingDataframe, initialStage, effectiveInitialStage, savedState, state.currentStage, state.uploadedFiles.length, addUploadedFiles, goToStage]);
+  }, [existingDataframe, initialStage, effectiveInitialStage, savedState, state.currentStage, state.uploadedFiles.length, state.uploadedFiles, addUploadedFiles, updateUploadedFilePath, goToStage]);
 
   // Debounced save function
   const debouncedSave = useCallback((stateToSave: GuidedUploadFlowState) => {
@@ -282,14 +392,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     }
   }, [storeCurrentStage, state.currentStage, goToStage]);
 
-  // Mark completion when reaching U7
-  useEffect(() => {
-    if (state.currentStage === 'U7' && state.uploadedFiles.length > 0) {
-      state.uploadedFiles.forEach(file => {
-        markFileAsPrimed(file.path || file.name);
-      });
-    }
-  }, [state.currentStage, state.uploadedFiles, markFileAsPrimed]);
+  // No need to mark as primed here - U6FinalPreview handles it
 
   const handleNext = async () => {
     // #region agent log
@@ -297,156 +400,14 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     // #endregion
     
     if (state.currentStage === 'U6') {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GuidedUploadFlowInline.tsx:223',message:'Calling goToNextStage from U6',data:{from:state.currentStage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
-      
-      // CRITICAL: Apply all transformations before moving to U7
-      const chosenIndex = state.selectedFileIndex !== undefined && state.selectedFileIndex < state.uploadedFiles.length 
-        ? state.selectedFileIndex : 0;
-      const currentFile = state.uploadedFiles[chosenIndex];
-      
-      if (currentFile?.path) {
-        try {
-          const currentColumnEdits = state.columnNameEdits[currentFile.name] || [];
-          const currentDataTypes = state.dataTypeSelections[currentFile.name] || [];
-          const currentStrategies = state.missingValueStrategies[currentFile.name] || [];
-          
-          // Build columns_to_drop from columnNameEdits (U3) - columns marked as keep=false
-          const columnsToDrop: string[] = [];
-          currentColumnEdits.forEach(edit => {
-            if (edit.keep === false) {
-              columnsToDrop.push(edit.originalName);
-            }
-          });
-          
-          // Build column_renames from columnNameEdits (U3) - only for kept columns
-          const columnRenames: Record<string, string> = {};
-          currentColumnEdits.forEach(edit => {
-            if (edit.keep !== false && edit.editedName && edit.editedName !== edit.originalName) {
-              columnRenames[edit.originalName] = edit.editedName;
-            }
-          });
-          
-          // Build dtype_changes from dataTypeSelections (U4)
-          const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
-          currentDataTypes.forEach(dt => {
-            // Use updateType (user's selection from U4) instead of selectedType
-            const userSelectedType = dt.updateType || dt.selectedType;
-            if (userSelectedType && userSelectedType !== dt.detectedType) {
-              if ((userSelectedType === 'date' || userSelectedType === 'datetime') && dt.format) {
-                dtypeChanges[dt.columnName] = { dtype: 'datetime64', format: dt.format };
-              } else {
-                // Map frontend types to backend types
-                const backendType = userSelectedType === 'number' ? 'float64' : 
-                                   userSelectedType === 'int' ? 'int64' :
-                                   userSelectedType === 'float' ? 'float64' :
-                                   userSelectedType === 'category' ? 'object' :
-                                   userSelectedType === 'string' ? 'object' :
-                                   userSelectedType === 'date' ? 'datetime64' :
-                                   userSelectedType === 'datetime' ? 'datetime64' :
-                                   userSelectedType === 'boolean' ? 'bool' :
-                                   userSelectedType;
-                dtypeChanges[dt.columnName] = backendType;
-              }
-            }
-          });
-          
-          // Build missing_value_strategies from missingValueStrategies (U5)
-          const missingValueStrategiesPayload: Record<string, { strategy: string; value?: string | number }> = {};
-          currentStrategies.forEach(s => {
-            if (s.strategy !== 'none') {
-              const strategyConfig: { strategy: string; value?: string | number } = {
-                strategy: s.strategy,
-              };
-              if (s.strategy === 'custom' && s.value !== undefined) {
-                strategyConfig.value = s.value;
-              }
-              missingValueStrategiesPayload[s.columnName] = strategyConfig;
-            }
-          });
-          
-          // Apply transformations if there are any changes
-          if (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategiesPayload).length > 0) {
-            console.log('🔄 Applying final transformations before U7:', { columnsToDrop, columnRenames, dtypeChanges, missingValueStrategiesPayload });
-            
-            const transformRes = await fetch(`${UPLOAD_API}/apply-data-transformations`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({
-                file_path: currentFile.path,
-                columns_to_drop: columnsToDrop,
-                column_renames: columnRenames,
-                dtype_changes: dtypeChanges,
-                missing_value_strategies: missingValueStrategiesPayload,
-              }),
-            });
-            
-            if (transformRes.ok) {
-              console.log('✅ Transformations applied successfully before U7');
-            } else {
-              console.warn('⚠️ Failed to apply transformations before U7');
-            }
-          }
-        } catch (error) {
-          console.error('Error applying transformations before U7:', error);
-        }
-      }
-      
+      // U6FinalPreview's handleSave already handles everything:
+      // - process_saved_dataframe (overwrites file in-place)
+      // - save_config (saves classifications)
+      // - mark as primed
+      // So we just move to the next stage - no additional processing needed
       goToNextStage();
     } else if (state.currentStage === 'U7') {
-      const projectContext = getActiveProjectContext();
-      if (projectContext && state.uploadedFiles.length > 0) {
-        for (const file of state.uploadedFiles) {
-          // Finalize the primed file - save transformed data to saved dataframes location
-          try {
-            console.log('🔄 Finalizing primed file:', file.path || file.name);
-            
-            // Get column classifications from dataTypeSelections (U4 stage)
-            const dataTypes = state.dataTypeSelections[file.name] || [];
-            const columnClassifications = dataTypes.map(dt => ({
-              columnName: dt.columnName,
-              columnRole: dt.columnRole || 'identifier', // Default to identifier if not set
-            }));
-            
-            console.log('📊 Sending column classifications:', columnClassifications);
-            
-            const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({
-                file_path: file.path,
-                file_name: file.name,
-                client_name: projectContext.client_name || '',
-                app_name: projectContext.app_name || '',
-                project_name: projectContext.project_name || '',
-                validator_atom_id: atomId || 'guided-upload',
-                column_classifications: columnClassifications,
-              }),
-            });
-            
-            if (finalizeRes.ok) {
-              const result = await finalizeRes.json();
-              console.log('✅ File finalized successfully:', result);
-              // Trigger refresh of SavedDataFramesPanel
-              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-                detail: { filePath: result.saved_path, fileName: file.name } 
-              }));
-            } else {
-              console.warn('⚠️ Failed to finalize file:', await finalizeRes.text());
-              // Fallback to just marking as primed
-              await markFileAsPrimed(file.path || file.name);
-            }
-          } catch (error) {
-            console.error('Error finalizing primed file:', error);
-            // Fallback to just marking as primed
-            await markFileAsPrimed(file.path || file.name);
-          }
-        }
-      }
-      
+      // Flow complete - U6FinalPreview already did all the work
       onComplete?.({
         uploadedFiles: state.uploadedFiles,
         headerSelections: state.headerSelections,
@@ -520,9 +481,8 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   };
 
   const handleBack = () => {
-    // U1 is now the first stage in the panel (U0/atom handles file selection)
-    // So if we're at U1, close the guided flow to go back to atom
-    if (state.currentStage === 'U1') {
+    // U2 is the first stage - if at U2, close the guided flow
+    if (state.currentStage === 'U2') {
       onClose?.();
     } else {
       goToPreviousStage();
@@ -539,15 +499,60 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   };
 
   const CurrentStageComponent = STAGE_COMPONENTS[state.currentStage];
-  // U1 is the first stage in the panel (U0/atom handles file selection)
-  const canGoBack = state.currentStage !== 'U1';
-  const isLastStage = state.currentStage === 'U7';
+  // U2 is the first stage in the panel
+  const canGoBack = state.currentStage !== 'U2';
+  const isLastStage = state.currentStage === 'U6';
 
   // Track expanded collapsed stages (for viewing completed stages)
   const [expandedCompletedStages, setExpandedCompletedStages] = useState<Set<UploadStage>>(new Set());
   
   // Track if current stage is collapsed
   const [isCurrentStageCollapsed, setIsCurrentStageCollapsed] = useState(false);
+  
+  // Track which stage is maximized (null if none)
+  const [maximizedStage, setMaximizedStage] = useState<UploadStage | null>(null);
+
+  // Handle when user makes changes on an expanded completed stage
+  const handleCompletedStageChange = useCallback((stage: UploadStage) => {
+    // Only handle if this is a completed stage that's expanded but not current
+    const isCompleted = isStageCompleted(stage, state.currentStage);
+    const isExpanded = expandedCompletedStages.has(stage);
+    
+    if (isCompleted && isExpanded && stage !== state.currentStage) {
+      // Make this stage current
+      goToStage(stage);
+      
+      // Collapse all stages below this one (they need to be redone)
+      setExpandedCompletedStages(prev => {
+        const next = new Set(prev);
+        const currentIndex = getStageIndex(stage);
+        STAGE_ORDER.forEach(s => {
+          if (getStageIndex(s) > currentIndex) {
+            next.delete(s);
+          }
+        });
+        return next;
+      });
+    }
+  }, [state.currentStage, expandedCompletedStages, goToStage]);
+
+  // Monitor flow state changes to detect when user makes changes on expanded completed stages
+  const prevFlowStateRef = useRef<string>('');
+  useEffect(() => {
+    // Check if we're viewing an expanded completed stage
+    const viewingCompletedStage = Array.from(expandedCompletedStages).find(stage => {
+      const isCompleted = isStageCompleted(stage, state.currentStage);
+      return isCompleted && stage !== state.currentStage;
+    });
+
+    if (viewingCompletedStage && stateString !== prevFlowStateRef.current && prevFlowStateRef.current !== '') {
+      // State changed while viewing a completed stage - user made a change
+      // Make that stage current and collapse stages below
+      handleCompletedStageChange(viewingCompletedStage);
+    }
+    
+    prevFlowStateRef.current = stateString;
+  }, [stateString, expandedCompletedStages, state.currentStage, handleCompletedStageChange]);
   
   // Ref for scrolling to current stage
   const stageRefs = useRef<Record<UploadStage, HTMLDivElement | null>>({} as Record<UploadStage, HTMLDivElement | null>);
@@ -605,8 +610,8 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
       headerBg = 'bg-gray-50';
       borderColor = 'border-gray-200';
     } else if (isCurrent) {
-      // Get the step number based on stage ID (U1=1, U2=2, etc.)
-      const stepNumber = parseInt(stage.replace('U', ''));
+      // Get the display step number (U2=1, U3=2, etc. since U1 is removed)
+      const stepNumber = getDisplayStepNumber(stage);
       statusIcon = (
         <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold flex-shrink-0">
           {stepNumber}
@@ -637,56 +642,94 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
       >
         {/* Stage Header */}
         {isCompleted ? (
-          <button
-            onClick={() => toggleCompletedStage(stage)}
-            className={`flex items-center justify-between px-4 py-3 border-b border-gray-100 ${headerBg} hover:bg-gray-100 transition-colors cursor-pointer w-full text-left`}
-          >
-            <div className="flex items-center gap-2">
+          <div className={`flex items-center justify-between px-4 py-3 border-b border-gray-100 ${headerBg} hover:bg-gray-100 transition-colors w-full`}>
+            <button
+              onClick={() => toggleCompletedStage(stage)}
+              className="flex items-center gap-2 flex-1 text-left"
+            >
               {statusIcon}
               <h3 className={`text-sm font-semibold ${headerTextColor}`}>
                 {STAGE_TITLES[stage]}
               </h3>
               <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">Completed</span>
-            </div>
-            {isExpanded ? (
-              <ChevronUp className="w-4 h-4 text-gray-500" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-gray-500" />
-            )}
-          </button>
-        ) : (
-          <button
-            onClick={isCurrent ? toggleCurrentStage : undefined}
-            className={`flex items-center justify-between px-4 py-3 border-b border-gray-100 ${headerBg} flex-shrink-0 w-full text-left transition-colors ${
-              isCurrent ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
-            }`}
-          >
-            <div className="flex items-center gap-2 relative">
-              {/* Blue line inside - positioned on the left of the content */}
-              {isCurrent && (
-                <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#458EE2] rounded-r" />
-              )}
-              <div className={`flex items-center gap-2 ${isCurrent ? 'pl-3' : ''}`}>
-                {statusIcon}
-                <h3 className={`text-sm font-semibold ${headerTextColor}`}>
-                  {STAGE_TITLES[stage]}
-                </h3>
-                {isCurrent && (
-                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Current</span>
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMaximizedStage(maximizedStage === stage ? null : stage);
+                }}
+                className="p-1.5 hover:bg-gray-200 rounded transition-colors"
+                title={maximizedStage === stage ? "Exit Fullscreen" : "Maximize Stage"}
+              >
+                {maximizedStage === stage ? (
+                  <Minimize2 className="w-4 h-4 text-gray-600" />
+                ) : (
+                  <Maximize2 className="w-4 h-4 text-gray-600" />
                 )}
-                {isUpcoming && (
-                  <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Upcoming</span>
-                )}
-              </div>
-            </div>
-            {isCurrent && (
-              isExpanded ? (
+              </button>
+              {isExpanded ? (
                 <ChevronUp className="w-4 h-4 text-gray-500" />
               ) : (
                 <ChevronDown className="w-4 h-4 text-gray-500" />
-              )
-            )}
-          </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className={`flex items-center justify-between px-4 py-3 border-b border-gray-100 ${headerBg} flex-shrink-0 w-full transition-colors ${
+            isCurrent ? 'hover:bg-gray-100' : ''
+          }`}>
+            <button
+              onClick={isCurrent ? toggleCurrentStage : undefined}
+              className={`flex items-center gap-2 relative flex-1 text-left ${
+                isCurrent ? 'cursor-pointer' : 'cursor-default'
+              }`}
+            >
+              <div className="flex items-center gap-2 relative">
+                {/* Blue line inside - positioned on the left of the content */}
+                {isCurrent && (
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#458EE2] rounded-r" />
+                )}
+                <div className={`flex items-center gap-2 ${isCurrent ? 'pl-3' : ''}`}>
+                  {statusIcon}
+                  <h3 className={`text-sm font-semibold ${headerTextColor}`}>
+                    {STAGE_TITLES[stage]}
+                  </h3>
+                  {isCurrent && (
+                    <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Current</span>
+                  )}
+                  {isUpcoming && (
+                    <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Upcoming</span>
+                  )}
+                </div>
+              </div>
+            </button>
+            <div className="flex items-center gap-2">
+              {(isCurrent || isCompleted) && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMaximizedStage(maximizedStage === stage ? null : stage);
+                  }}
+                  className="p-1.5 hover:bg-gray-200 rounded transition-colors"
+                  title={maximizedStage === stage ? "Exit Fullscreen" : "Maximize Stage"}
+                >
+                  {maximizedStage === stage ? (
+                    <Minimize2 className="w-4 h-4 text-gray-600" />
+                  ) : (
+                    <Maximize2 className="w-4 h-4 text-gray-600" />
+                  )}
+                </button>
+              )}
+              {isCurrent && (
+                isExpanded ? (
+                  <ChevronUp className="w-4 h-4 text-gray-500" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                )
+              )}
+            </div>
+          </div>
         )}
 
         {/* Stage Content - Only show if current or expanded */}
@@ -694,22 +737,20 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
           <div className="flex-1 overflow-y-auto">
                 {isCurrent ? (
               <>
-                <div className="p-6 min-h-[400px]">
-                  {state.currentStage === 'U1' ? (
+                <div className="p-6 min-h-[10px]">
+                  {state.currentStage === 'U2' ? (
                     <StageComponent 
                       flow={flow} 
                       onNext={handleNext} 
                       onBack={handleBack}
                       onRestart={handleRestart}
                       onCancel={handleClose}
-                    />
-                  ) : state.currentStage === 'U2' ? (
-                    <StageComponent 
-                      flow={flow} 
-                      onNext={handleNext} 
-                      onBack={handleBack}
-                      onRestart={handleRestart}
-                      onCancel={handleClose}
+                      onRegisterContinueHandler={(handler) => {
+                        u2ContinueHandlerRef.current = handler;
+                      }}
+                      onRegisterContinueDisabled={(getDisabled) => {
+                        u2ContinueDisabledRef.current = getDisabled;
+                      }}
                     />
                   ) : state.currentStage === 'U6' ? (
                     <StageComponent 
@@ -718,19 +759,13 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       onBack={handleBack}
                       onGoToStage={goToStage}
                     />
-                  ) : state.currentStage === 'U7' ? (
-                    <StageComponent 
-                      flow={flow}
-                      onClose={handleClose}
-                      onRestart={handleRestart}
-                    />
                   ) : (
                     <StageComponent flow={flow} onNext={handleNext} onBack={handleBack} />
                   )}
                 </div>
 
                 {/* Navigation Footer for current stage */}
-                {state.currentStage !== 'U1' && state.currentStage !== 'U2' && state.currentStage !== 'U6' && state.currentStage !== 'U7' && (
+                {state.currentStage !== 'U6' && (
                   <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0">
                     <div className="flex gap-2">
                       {canGoBack && (
@@ -743,14 +778,16 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                           Back
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        onClick={handleRestart}
-                        className="flex items-center gap-2 text-gray-600"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        Restart Upload
-                      </Button>
+                      {state.currentStage !== 'U2' && (
+                        <Button
+                          variant="ghost"
+                          onClick={handleRestart}
+                          className="flex items-center gap-2 text-gray-600"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Reset option
+                        </Button>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <Button variant="outline" onClick={handleClose}>
@@ -758,8 +795,18 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       </Button>
                       {!isLastStage && (
                         <Button
-                          onClick={handleNext}
-                          className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white"
+                          onClick={() => {
+                            // Use U2's custom handler if available, otherwise use default handleNext
+                            if (state.currentStage === 'U2' && u2ContinueHandlerRef.current) {
+                              u2ContinueHandlerRef.current();
+                            } else {
+                              handleNext();
+                            }
+                          }}
+                          disabled={state.currentStage === 'U2' && u2ContinueDisabledRef.current ? u2ContinueDisabledRef.current() : false}
+                          className={state.currentStage === 'U2' && u2ContinueDisabledRef.current && u2ContinueDisabledRef.current() 
+                            ? "bg-gray-400 hover:bg-gray-400 text-white cursor-not-allowed" 
+                            : "bg-[#458EE2] hover:bg-[#3a7bc7] text-white"}
                         >
                           Continue
                         </Button>
@@ -777,40 +824,132 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                 )}
               </>
             ) : isCompleted && isExpanded ? (
-              <div className="p-6 bg-gray-50">
-                {stage === 'U1' ? (
-                  <StageComponent 
-                    flow={flow} 
-                    onNext={() => {}} 
-                    onBack={() => {}}
-                    onRestart={handleRestart}
-                    onCancel={handleClose}
-                  />
-                ) : stage === 'U2' ? (
-                  <StageComponent 
-                    flow={flow} 
-                    onNext={() => {}} 
-                    onBack={() => {}}
-                    onRestart={handleRestart}
-                    onCancel={handleClose}
-                  />
-                ) : stage === 'U6' ? (
-                  <StageComponent 
-                    flow={flow} 
-                    onNext={() => {}} 
-                    onBack={() => {}}
-                    onGoToStage={goToStage}
-                  />
-                ) : stage === 'U7' ? (
-                  <StageComponent 
-                    flow={flow}
-                    onClose={handleClose}
-                    onRestart={handleRestart}
-                  />
-                ) : (
-                  <StageComponent flow={flow} onNext={() => {}} onBack={() => {}} />
+              <>
+                <div className="p-6 min-h-[10px]">
+                  {stage === 'U2' ? (
+                    <StageComponent 
+                      flow={flow} 
+                      onNext={() => {}} 
+                      onBack={() => {}}
+                      onRestart={handleRestart}
+                      onCancel={handleClose}
+                      onStageDataChange={() => handleCompletedStageChange(stage)}
+                    />
+                  ) : stage === 'U3' ? (
+                    <StageComponent 
+                      flow={flow} 
+                      onNext={() => {}} 
+                      onBack={() => {}}
+                      onStageDataChange={() => handleCompletedStageChange(stage)}
+                    />
+                  ) : stage === 'U4' ? (
+                    <StageComponent 
+                      flow={flow} 
+                      onNext={() => {}} 
+                      onBack={() => {}}
+                      onStageDataChange={() => handleCompletedStageChange(stage)}
+                    />
+                  ) : stage === 'U5' ? (
+                    <StageComponent 
+                      flow={flow} 
+                      onNext={() => {}} 
+                      onBack={() => {}}
+                      onStageDataChange={() => handleCompletedStageChange(stage)}
+                    />
+                  ) : stage === 'U6' ? (
+                    <StageComponent 
+                      flow={flow} 
+                      onNext={() => {}} 
+                      onBack={() => {}}
+                      onGoToStage={goToStage}
+                      onStageDataChange={() => handleCompletedStageChange(stage)}
+                    />
+                  ) : (
+                    <StageComponent 
+                      flow={flow} 
+                      onNext={() => {}} 
+                      onBack={() => {}}
+                      onStageDataChange={() => handleCompletedStageChange(stage)}
+                    />
+                  )}
+                </div>
+
+                {/* Navigation Footer for expanded completed stage */}
+                {stage !== 'U6' && (
+                  <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0">
+                    <div className="flex gap-2">
+                      {getStageIndex(stage) > getStageIndex('U2') && (
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            const prevStage = STAGE_ORDER[getStageIndex(stage) - 1];
+                            goToStage(prevStage);
+                            // Collapse all stages from current onwards when navigating back
+                            setExpandedCompletedStages(prev => {
+                              const next = new Set(prev);
+                              const currentIndex = getStageIndex(stage);
+                              STAGE_ORDER.forEach(s => {
+                                if (getStageIndex(s) >= currentIndex) {
+                                  next.delete(s);
+                                }
+                              });
+                              return next;
+                            });
+                          }}
+                          className="flex items-center gap-2"
+                        >
+                          <ArrowLeft className="w-4 h-4" />
+                          Back
+                        </Button>
+                      )}
+                      {stage !== 'U2' && (
+                        <Button
+                          variant="ghost"
+                          onClick={handleRestart}
+                          className="flex items-center gap-2 text-gray-600"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Reset option
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={handleClose}>
+                        Cancel
+                      </Button>
+                      {stage !== 'U6' && (
+                        <Button
+                          onClick={() => {
+                            // Make this stage current first
+                            goToStage(stage);
+                            // Collapse all stages from current onwards when navigating forward
+                            setExpandedCompletedStages(prev => {
+                              const next = new Set(prev);
+                              const currentIndex = getStageIndex(stage);
+                              STAGE_ORDER.forEach(s => {
+                                if (getStageIndex(s) >= currentIndex) {
+                                  next.delete(s);
+                                }
+                              });
+                              return next;
+                            });
+                            // Navigate to next stage
+                            const nextStage = STAGE_ORDER[getStageIndex(stage) + 1];
+                            if (nextStage) {
+                              setTimeout(() => {
+                                goToStage(nextStage);
+                              }, 50);
+                            }
+                          }}
+                          className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white"
+                        >
+                          Continue
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                 )}
-              </div>
+              </>
             ) : null}
           </div>
         )}
@@ -832,11 +971,88 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     isCurrentStageCollapsed,
   ]);
 
+  // Helper function to render stage content for maximized view
+  const renderMaximizedStageContent = useCallback((stage: UploadStage) => {
+    const StageComponent = STAGE_COMPONENTS[stage];
+    
+    return (
+      <div className="p-8">
+        {stage === 'U2' ? (
+          <StageComponent 
+            flow={flow} 
+            onNext={() => {}} 
+            onBack={() => {}}
+            onRestart={handleRestart}
+            onCancel={() => {}}
+            onRegisterContinueHandler={() => {}}
+            onRegisterContinueDisabled={() => () => false}
+            isMaximized={true}
+          />
+        ) : stage === 'U6' ? (
+          <StageComponent 
+            flow={flow} 
+            onNext={() => {}} 
+            onBack={() => {}}
+            onGoToStage={goToStage}
+            isMaximized={true}
+          />
+        ) : (
+          <StageComponent 
+            flow={flow} 
+            onNext={() => {}} 
+            onBack={() => {}}
+            isMaximized={true}
+          />
+        )}
+      </div>
+    );
+  }, [flow, handleRestart, goToStage]);
+
   return (
-    <div className="w-full mt-2 flex flex-col">
-      {/* Render only visible stages (U1-U7) - U0 is handled by atom */}
-      {VISIBLE_STAGES.map(stage => renderStageItem(stage))}
-    </div>
+    <>
+      <div className="w-full mt-2 flex flex-col">
+        {/* Render only visible stages (U2-U6) */}
+        {VISIBLE_STAGES.map(stage => renderStageItem(stage))}
+      </div>
+      
+      {/* Maximized Stage Dialog */}
+      {maximizedStage && (
+        <Dialog open={!!maximizedStage} onOpenChange={(open) => !open && setMaximizedStage(null)}>
+          <DialogContent 
+            className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 overflow-hidden"
+            hideCloseButton
+          >
+            <DialogHeader className="px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <DialogTitle className="text-lg font-semibold text-gray-900">
+                    {STAGE_TITLES[maximizedStage]}
+                  </DialogTitle>
+                  {maximizedStage === state.currentStage && (
+                    <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Current</span>
+                  )}
+                  {isStageCompleted(maximizedStage, state.currentStage) && (
+                    <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">Completed</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setMaximizedStage(null)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Close Fullscreen"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+            </DialogHeader>
+            
+            {/* Maximized Content */}
+            <div className="flex-1 overflow-auto">
+              {renderMaximizedStageContent(maximizedStage)}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 };
 

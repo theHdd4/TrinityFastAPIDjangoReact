@@ -326,6 +326,7 @@ export interface FeatureOverviewSettings {
   filterUnique?: boolean;
   isLoading?: boolean;
   loadingMessage?: string;
+  showDataSummary?: boolean;
   loadingStatus?: string;
   exhibitionSelections?: FeatureOverviewExhibitionSelection[];
 }
@@ -362,6 +363,7 @@ export interface ConcatSettings {
   performConcat: boolean;
   concatResults?: any;
   concatId?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
@@ -402,6 +404,7 @@ export interface CorrelationSettings {
     selectFilter: string;
     uploadedFile?: string;
     filterDimensions?: Record<string, string[]>;
+    saveFiltered?: boolean; // Whether to save filtered data to MinIO (default: false)
   };
   // Enhanced visualization options
   visualizationOptions?: {
@@ -454,6 +457,8 @@ export interface CorrelationSettings {
   // Note functionality (matching ChartMaker pattern)
   note?: string;
   showNote?: boolean;
+  // Data Summary functionality
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
@@ -499,7 +504,8 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   columnValuesLoading: false,
   columnValuesError: undefined,
   note: '',
-  showNote: false
+  showNote: false,
+  showDataSummary: false
 };
 
 export interface ColumnClassifierColumn {
@@ -531,6 +537,7 @@ export interface ColumnClassifierSettings {
   isLoading?: boolean;
   loadingMessage?: string;
   loadingStatus?: string;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -562,6 +569,7 @@ export interface DataFrameOperationsSettings {
   selectedFile?: string;
   tableData?: any;
   data?: any;
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings = {
@@ -575,6 +583,7 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   selectedFile: '',
   tableData: undefined,
   data: undefined,
+  showDataSummary: false,
 };
 
 export interface ChartData {
@@ -683,6 +692,7 @@ export interface ChartMakerSettings {
   };
   error?: string;
   exhibitionSelections?: ChartMakerExhibitionSelection[];
+  showDataSummary?: boolean;
 }
 
 export interface SelectModelsFeatureSettings {
@@ -843,6 +853,7 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   },
   error: undefined,
   exhibitionSelections: [],
+  showDataSummary: false,
 };
 
 export interface ClusteringData {
@@ -1573,6 +1584,7 @@ export interface ScopeSelectorSettings {
   }>;
   dataSource?: string;
   previewRows?: ScopeSelectorPreviewRow[];
+  showDataSummary?: boolean;
 }
 
 export const DEFAULT_SCOPE_SELECTOR_SETTINGS: ScopeSelectorSettings = {
@@ -1740,7 +1752,8 @@ export interface GroupByAtomSettings {
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
-  showCardinalityView?: boolean;
+  showCardinalityView?: boolean; // Deprecated - use showDataSummary instead
+  showDataSummary?: boolean;
   
   // GroupBy results
   groupbyResults?: {
@@ -1772,7 +1785,8 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   sortColumn: 'unique_count',
   sortDirection: 'desc',
   columnFilters: {},
-  showCardinalityView: false,
+  showCardinalityView: false, // Deprecated - use showDataSummary instead
+  showDataSummary: false,
   groupbyResults: {
     result_file: '',
     result_shape: [0, 0],
@@ -2011,11 +2025,22 @@ interface LaboratoryStore {
   subMode: LaboratorySubMode;
   isLaboratorySession: boolean;
   pendingClarification?: ClarificationRequest | null;
-  activeGuidedFlows: Record<string, { atomId: string; currentStage: UploadStage; state: Partial<GuidedUploadFlowState> }>;
+  
+  // --- Guided Mode State ---
   globalGuidedModeEnabled: boolean;
   // Metric Guided Flow State
   isMetricGuidedFlowOpen: boolean;
   activeMetricGuidedFlow: { currentStage: MetricStage; state: Partial<MetricGuidedFlowState>; fixedCardId?: string; cardsCountWhenOpened?: number } | null;
+  activeGuidedFlows: Record<string, any>;
+  
+  // --- Direct Review Panel State ---
+  directReviewTarget: {
+    object_name: string;
+    csv_name: string;
+    arrow_name?: string;
+    last_modified?: string;
+    size?: number;
+  } | null;
 
   // --- Basic Setters ---
   setCards: (cards: LayoutCard[]) => void;
@@ -2064,21 +2089,27 @@ interface LaboratoryStore {
   ) => Promise<void>;
   findCardByAtomId: (atomId: string) => LayoutCard | undefined;
   findCardIndex: (cardId: string) => number;
-
-  // --- Guided Flow Actions ---
-  setActiveGuidedFlow: (atomId: string, currentStage: UploadStage, state?: Partial<GuidedUploadFlowState>) => void;
-  updateGuidedFlowStage: (atomId: string, stage: UploadStage) => void;
-  removeActiveGuidedFlow: (atomId: string) => void;
   
-  // --- Guided Mode Toggle Actions ---
+  // --- Guided Mode Actions ---
   setGlobalGuidedMode: (enabled: boolean) => void;
-  toggleAtomGuidedMode: (atomId: string) => void;
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => void;
+  updateGuidedFlowStage: (atomId: string, stage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7') => void;
   isGuidedModeActiveForAtom: (atomId: string) => boolean;
   
   // --- Metric Guided Flow Actions ---
   openMetricGuidedFlow: (initialContext?: Partial<MetricGuidedFlowState>) => void;
   closeMetricGuidedFlow: () => void;
   setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>, fixedCardId?: string) => void;
+  removeActiveGuidedFlow: (atomId: string) => void;
+  
+  // --- Direct Review Panel Actions ---
+  setDirectReviewTarget: (frame: {
+    object_name: string;
+    csv_name: string;
+    arrow_name?: string;
+    last_modified?: string;
+    size?: number;
+  } | null) => void;
 }
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
@@ -2102,24 +2133,25 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     : null,
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   subMode: 'analytics',  // Default to analytics mode
-  activeGuidedFlows: {},
   globalGuidedModeEnabled: false,
   isMetricGuidedFlowOpen: false,
   activeMetricGuidedFlow: null,
+  activeGuidedFlows: {},
+  directReviewTarget: null,
   setCards: (cards: LayoutCard[]) => {
     const currentSubMode = get().subMode;
     
-    console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS CALLED ==========');
-    console.log('🔍 [DIAGNOSIS] setCards called:', {
-      cardsCount: cards?.length || 0,
-      subMode: currentSubMode,
-      cardAtomIds: cards?.map(c => c.atoms.map(a => a.atomId)).flat() || [],
-      timestamp: new Date().toISOString()
-    });
+    // console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS CALLED ==========');
+    // console.log('🔍 [DIAGNOSIS] setCards called:', {
+    //   cardsCount: cards?.length || 0,
+    //   subMode: currentSubMode,
+    //   cardAtomIds: cards?.map(c => c.atoms.map(a => a.atomId)).flat() || [],
+    //   timestamp: new Date().toISOString()
+    // });
     
     // FIX: Ensure cards is always an array
     if (!Array.isArray(cards)) {
-      console.error('🔍 [DIAGNOSIS] ❌ [Laboratory Store] setCards called with non-array:', cards);
+      console.error('❌ [Laboratory Store] setCards called with non-array:', cards);
       set({ cards: [] });
       return;
     }
@@ -2137,11 +2169,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       const filteredCards: LayoutCard[] = [];
       
       for (const card of cardsToSet) {
+        // CRITICAL FIX: Allow landing-screen atoms in dashboard mode for empty state
         const allowedAtoms = (card.atoms || []).filter(atom => 
-          allowedAtomIdsSet.has(atom.atomId as any)
+          allowedAtomIdsSet.has(atom.atomId as any) || atom.atomId === 'landing-screen'
         );
         
-        // CRITICAL FIX: Allow empty cards OR cards with allowed atoms
+        // CRITICAL FIX: Allow empty cards OR cards with allowed atoms (including landing-screen)
         // Empty cards must be preserved for "Add New Card" functionality in dashboard mode
         if (allowedAtoms.length > 0 || (card.atoms || []).length === 0) {
           // Keep only first allowed atom (one atom per card), or preserve empty array
@@ -2152,39 +2185,39 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
         }
       }
       
-      if (filteredCards.length !== cardsToSet.length) {
-        console.warn('🔍 [DIAGNOSIS] ⚠️ [Laboratory Store] Filtered cards in setCards (dashboard mode):', {
-          original: cardsToSet.length,
-          filtered: filteredCards.length,
-          removed: cardsToSet.length - filteredCards.length,
-          removedCards: cardsToSet.filter(card => {
-            const allowedAtoms = (card.atoms || []).filter(atom => 
-              allowedAtomIdsSet.has(atom.atomId as any)
-            );
-            return allowedAtoms.length === 0;
-          }).map(c => ({
-            id: c.id,
-            atoms: c.atoms.map(a => a.atomId)
-          }))
-        });
-      }
+      // if (filteredCards.length !== cardsToSet.length) {
+      //   console.warn('🔍 [DIAGNOSIS] ⚠️ [Laboratory Store] Filtered cards in setCards (dashboard mode):', {
+      //     original: cardsToSet.length,
+      //     filtered: filteredCards.length,
+      //     removed: cardsToSet.length - filteredCards.length,
+      //     removedCards: cardsToSet.filter(card => {
+      //       const allowedAtoms = (card.atoms || []).filter(atom => 
+      //         allowedAtomIdsSet.has(atom.atomId as any)
+      //       );
+      //       return allowedAtoms.length === 0;
+      //     }).map(c => ({
+      //       id: c.id,
+      //       atoms: c.atoms.map(a => a.atomId)
+      //     }))
+      //   });
+      // }
       cardsToSet = filteredCards;
     }
     
     const uniqueCards = dedupeCards(cardsToSet);
-    if (uniqueCards.length !== cardsToSet.length) {
-      console.warn('🔍 [DIAGNOSIS] [Laboratory Store] Deduped cards to avoid duplicates', {
-        incoming: cardsToSet.length,
-        unique: uniqueCards.length,
-      });
-    }
+    // if (uniqueCards.length !== cardsToSet.length) {
+    //   console.warn('🔍 [DIAGNOSIS] [Laboratory Store] Deduped cards to avoid duplicates', {
+    //     incoming: cardsToSet.length,
+    //     unique: uniqueCards.length,
+    //   });
+    // }
     
-    console.log('🔍 [DIAGNOSIS] Setting cards to store:', {
-      count: uniqueCards.length,
-      subMode: currentSubMode,
-      cardAtomIds: uniqueCards.map(c => c.atoms.map(a => a.atomId)).flat()
-    });
-    console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS COMPLETE ==========');
+    // console.log('🔍 [DIAGNOSIS] Setting cards to store:', {
+    //   count: uniqueCards.length,
+    //   subMode: currentSubMode,
+    //   cardAtomIds: uniqueCards.map(c => c.atoms.map(a => a.atomId)).flat()
+    // });
+    // console.log('🔍 [DIAGNOSIS] ========== STORE SETCARDS COMPLETE ==========');
     
     set({ cards: uniqueCards });
   },
@@ -2297,17 +2330,98 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       
       const updatedCards = state.cards.map((card) => ({
         ...card,
-        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) =>
-          atom.id === atomId
-            ? { 
-                ...atom, 
-                settings: { 
-                  ...(atom.settings || {}), 
-                  ...settings
-                } 
+        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) => {
+          if (atom.id !== atomId) {
+            return atom;
+          }
+          
+          // 🔧 CRITICAL FIX: Special handling for chart-maker charts array to prevent duplicates
+          const currentSettings = atom.settings || {};
+          const newSettings = { ...currentSettings, ...settings };
+          
+          // If this is a chart-maker atom and charts are being updated, merge by ID to prevent duplicates
+          if (atom.type === 'chart-maker' && settings.charts && Array.isArray(settings.charts)) {
+            const existingCharts = Array.isArray(currentSettings.charts) ? currentSettings.charts : [];
+            const newCharts = settings.charts;
+            
+            // 🔧 CRITICAL: Deduplicate and merge charts by ID
+            const chartMap = new Map<string, any>();
+            
+            // First, add all existing charts to the map
+            existingCharts.forEach((chart: any) => {
+              if (chart && chart.id) {
+                chartMap.set(chart.id, chart);
               }
-            : atom,
-        ) : [],
+            });
+            
+            // Then, update or add new charts
+            newCharts.forEach((chart: any) => {
+              if (chart && chart.id) {
+                const existingChart = chartMap.get(chart.id);
+                if (existingChart) {
+                  // Chart exists - merge the update (preserve existing properties, update with new ones)
+                  // 🔧 CRITICAL: NEVER change the chart ID - it must remain stable
+                  const mergedChart = {
+                    ...existingChart,
+                    ...chart
+                  };
+                  // Force preserve original ID in case it was accidentally changed
+                  mergedChart.id = existingChart.id;
+                  chartMap.set(chart.id, mergedChart);
+                } else {
+                  // New chart - add it (but verify ID is unique)
+                  if (chartMap.has(chart.id)) {
+                    console.warn('⚠️ [STORE] Attempted to add chart with existing ID, merging instead', {
+                      chartId: chart.id,
+                      existingChart: chartMap.get(chart.id)
+                    });
+                    // Merge with existing instead of replacing
+                    const existing = chartMap.get(chart.id)!;
+                    chartMap.set(chart.id, {
+                      ...existing,
+                      ...chart,
+                      id: existing.id // Preserve original ID
+                    });
+                  } else {
+                    chartMap.set(chart.id, chart);
+                  }
+                }
+              } else {
+                console.warn('⚠️ [STORE] Chart without ID detected, skipping', chart);
+              }
+            });
+            
+            // Convert map back to array, preserving order
+            const mergedCharts = Array.from(chartMap.values());
+            
+            // Verify no duplicates
+            const chartIds = mergedCharts.map((c: any) => c.id);
+            const uniqueIds = new Set(chartIds);
+            if (chartIds.length !== uniqueIds.size) {
+              console.error('❌ [STORE] Duplicate chart IDs detected after merge!', {
+                chartIds,
+                duplicateIds: chartIds.filter((id, index) => chartIds.indexOf(id) !== index)
+              });
+              // Remove duplicates, keeping the first occurrence
+              const seen = new Set<string>();
+              const deduplicatedCharts = mergedCharts.filter((chart: any) => {
+                if (seen.has(chart.id)) {
+                  return false;
+                }
+                seen.add(chart.id);
+                return true;
+              });
+              newSettings.charts = deduplicatedCharts;
+            } else {
+              newSettings.charts = mergedCharts;
+            }
+          }
+          
+          return {
+            ...atom,
+            settings: newSettings
+          };
+        }) : [],
       }));
       
       return { cards: updatedCards };
@@ -2719,99 +2833,52 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     return { success: true, tableAtomId: newTableAtomId };
   },
 
-  // --- Guided Flow Actions ---
-  setActiveGuidedFlow: (atomId: string, currentStage: UploadStage, state?: Partial<GuidedUploadFlowState>) => {
-    set((prev) => ({
+  // --- Guided Mode Actions ---
+  setGlobalGuidedMode: (enabled: boolean) => {
+    set({ globalGuidedModeEnabled: enabled });
+  },
+  
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => {
+    const currentFlows = get().activeGuidedFlows;
+    set({
       activeGuidedFlows: {
-        ...prev.activeGuidedFlows,
+        ...currentFlows,
         [atomId]: {
-          atomId,
           currentStage,
           state: state || {},
         },
       },
-    }));
+    });
   },
-
-  updateGuidedFlowStage: (atomId: string, stage: UploadStage) => {
-    set((prev) => {
-      const flow = prev.activeGuidedFlows[atomId];
-      if (!flow) return prev;
-      return {
+  
+  updateGuidedFlowStage: (atomId: string, stage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7') => {
+    const currentFlows = get().activeGuidedFlows;
+    if (currentFlows[atomId]) {
+      set({
         activeGuidedFlows: {
-          ...prev.activeGuidedFlows,
+          ...currentFlows,
           [atomId]: {
-            ...flow,
+            ...currentFlows[atomId],
             currentStage: stage,
           },
         },
-      };
-    });
+      });
+    }
   },
-
-  removeActiveGuidedFlow: (atomId: string) => {
-    set((prev) => {
-      const { [atomId]: removed, ...rest } = prev.activeGuidedFlows;
-      return { activeGuidedFlows: rest };
-    });
-  },
-
-  // --- Guided Mode Toggle Actions ---
-  setGlobalGuidedMode: (enabled: boolean) => {
-    set({ globalGuidedModeEnabled: enabled });
-  },
-
-
-
+  
   isGuidedModeActiveForAtom: (atomId: string) => {
-    const state = get();
-    // When global guided mode is enabled, it applies to ALL atoms
-    // Individual atom overrides are ignored to maintain global consistency
-    return state.globalGuidedModeEnabled;
+    const activeFlows = get().activeGuidedFlows;
+    return !!activeFlows[atomId];
   },
-
-  // --- Metric Guided Flow Actions ---
-  openMetricGuidedFlow: (initialContext?: Partial<MetricGuidedFlowState>) => {
-    console.log('[MetricGuidedFlow] openMetricGuidedFlow called', { initialContext });
-    const currentState = get();
-    const cardsCountWhenOpened = Array.isArray(currentState.cards) ? currentState.cards.length : 0;
-    const newState = {
-      isMetricGuidedFlowOpen: true,
-      activeMetricGuidedFlow: initialContext
-        ? {
-            currentStage: initialContext.currentStage || 'type',
-            state: initialContext,
-            cardsCountWhenOpened,
-          }
-        : {
-            currentStage: 'type',
-            state: {},
-            cardsCountWhenOpened,
-          },
-    };
-    console.log('[MetricGuidedFlow] Setting store state:', newState);
-    set(newState);
-    console.log('[MetricGuidedFlow] Store updated, isMetricGuidedFlowOpen should be true');
+  
+  removeActiveGuidedFlow: (atomId: string) => {
+    const currentFlows = get().activeGuidedFlows;
+    const { [atomId]: removed, ...remainingFlows } = currentFlows;
+    set({ activeGuidedFlows: remainingFlows });
   },
-
-  closeMetricGuidedFlow: () => {
-    set({
-      isMetricGuidedFlowOpen: false,
-      activeMetricGuidedFlow: null,
-    });
-  },
-
-  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>, fixedCardId?: string) => {
-    set((prev) => ({
-      activeMetricGuidedFlow: {
-        currentStage,
-        state: state || prev.activeMetricGuidedFlow?.state || {},
-        // Only update fixedCardId if provided; preserve existing one if not provided
-        fixedCardId: fixedCardId !== undefined ? fixedCardId : prev.activeMetricGuidedFlow?.fixedCardId,
-        // Preserve cardsCountWhenOpened
-        cardsCountWhenOpened: prev.activeMetricGuidedFlow?.cardsCountWhenOpened,
-      },
-    }));
+  
+  setDirectReviewTarget: (frame) => {
+    set({ directReviewTarget: frame });
   },
 
   reset: () => {
@@ -2819,10 +2886,11 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       cards: [],
       metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
       pendingClarification: null,
-      activeGuidedFlows: {},
       globalGuidedModeEnabled: false,
       isMetricGuidedFlowOpen: false,
       activeMetricGuidedFlow: null,
+      activeGuidedFlows: {},
+      directReviewTarget: null,
     });
     if (typeof window !== 'undefined') {
       localStorage.removeItem('trinity_lab_pending_clarification');

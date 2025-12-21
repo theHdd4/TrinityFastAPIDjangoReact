@@ -41,6 +41,10 @@ export interface FilterAndCorrelateRequest {
     end: string;
   };
   aggregation_level?: string;
+  // Pipeline tracking (optional)
+  validator_atom_id?: string;
+  card_id?: string;
+  canvas_position?: number;
 }
 
 export interface DateColumnInfo {

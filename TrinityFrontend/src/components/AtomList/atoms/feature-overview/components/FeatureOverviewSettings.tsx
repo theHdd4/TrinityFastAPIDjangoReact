@@ -6,6 +6,8 @@ import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { cancelPrefillController } from '@/components/AtomList/atoms/column-classifier/prefillManager';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface FeatureOverviewSettingsProps {
@@ -22,6 +24,7 @@ interface ColumnInfo {
 }
 
 const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomId, settings, onSettingsChange }) => {
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   interface Frame { object_name: string; csv_name: string; arrow_name?: string }
   const [frames, setFrames] = useState<Frame[]>([]);
   const [columns, setColumns] = useState<ColumnInfo[]>(
@@ -281,6 +284,19 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
             ))}
           </SelectContent>
         </Select>
+        
+        {/* Data Summary Toggle - Only when data source is selected (chartmaker pattern) */}
+        {settings.dataSource && (
+        <div className="flex items-center justify-between pt-4 border-t mt-4">
+          <Label className="text-xs">Show Data Summary</Label>
+          <Switch
+            checked={settings.showDataSummary || false}
+            onCheckedChange={(checked) => {
+              updateSettings(atomId, { showDataSummary: !!checked });
+            }}
+          />
+        </div>
+        )}
       </Card>
 
 

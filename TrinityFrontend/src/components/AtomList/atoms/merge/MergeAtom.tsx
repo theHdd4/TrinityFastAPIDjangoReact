@@ -17,6 +17,8 @@ const MergeAtom: React.FC<Props> = ({ atomId }) => {
       joinType: rawSettings.joinType || 'inner',
       availableColumns: Array.isArray(rawSettings.availableColumns) ? rawSettings.availableColumns : [],
       mergeResults: rawSettings.mergeResults || null,
+      resultFilePath: rawSettings.resultFilePath || rawSettings.mergeResults?.result_file || null,
+      unsavedData: rawSettings.unsavedData || rawSettings.mergeResults?.unsaved_data || rawSettings.mergeResults?.data || null,
       ...rawSettings, // Preserve other settings
     };
 
@@ -26,12 +28,12 @@ const MergeAtom: React.FC<Props> = ({ atomId }) => {
           atomId={atomId}
           availableColumns={settings.availableColumns}
           mergeId={settings.mergeId}
-          resultFilePath={settings.mergeResults?.result_file}
+          resultFilePath={settings.resultFilePath}
           file1={settings.file1}
           file2={settings.file2}
           joinColumns={settings.joinColumns}
           joinType={settings.joinType}
-          unsavedData={settings.mergeResults?.unsaved_data}
+          unsavedData={settings.unsavedData}
         />
       </div>
     );

@@ -19,9 +19,11 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
   const [pendingY, setPendingY] = useState<string[]>(settings.yAxes || []);
   const [pendingX, setPendingX] = useState<string>(settings.xAxis || 'date');
   const [pendingDimensions, setPendingDimensions] = useState<Record<string, string[]>>(settings.dimensionMap || {});
-  // Initialize originalDimensions from settings.dimensionMap if it has identifiers (includes fallback from canvas)
+  // Initialize originalDimensions from settings.originalDimensionMap (if available) or settings.dimensionMap
   const [originalDimensions, setOriginalDimensions] = useState<Record<string, string[]>>(
-    (settings.dimensionMap && settings.dimensionMap["identifiers"] && Array.isArray(settings.dimensionMap["identifiers"]) && settings.dimensionMap["identifiers"].length > 0)
+    (settings as any).originalDimensionMap && Object.keys((settings as any).originalDimensionMap).length > 0
+      ? (settings as any).originalDimensionMap
+      : (settings.dimensionMap && settings.dimensionMap["identifiers"] && Array.isArray(settings.dimensionMap["identifiers"]) && settings.dimensionMap["identifiers"].length > 0)
       ? settings.dimensionMap
       : {}
   );
@@ -39,12 +41,18 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
   }, [settings.dimensionMap]);
 
   // Fetch original dimension mapping from column classifier
-  // Priority: 1) settings.dimensionMap (includes fallback from canvas), 2) fetch from backend, 3) fallback to categorical columns
+  // Priority: 1) settings.originalDimensionMap, 2) settings.dimensionMap (includes fallback from canvas), 3) fetch from backend, 4) fallback to categorical columns
   useEffect(() => {
     const fetchOriginalDimensions = async () => {
       if (!settings.dataSource) return;
       
-      // Priority 1: Use settings.dimensionMap if it has identifiers (includes fallback from canvas)
+      // Priority 1: Use settings.originalDimensionMap if available (preserved from pipeline or previous updates)
+      if ((settings as any).originalDimensionMap && Object.keys((settings as any).originalDimensionMap).length > 0) {
+        setOriginalDimensions((settings as any).originalDimensionMap);
+        return;
+      }
+      
+      // Priority 2: Use settings.dimensionMap if it has identifiers (includes fallback from canvas)
       if (settings.dimensionMap && settings.dimensionMap["identifiers"] && Array.isArray(settings.dimensionMap["identifiers"]) && settings.dimensionMap["identifiers"].length > 0) {
         setOriginalDimensions(settings.dimensionMap);
         return;
@@ -84,14 +92,41 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
     };
 
     fetchOriginalDimensions();
-  }, [settings.dataSource, settings.allColumns, settings.columnSummary, settings.dimensionMap]);
+  }, [settings.dataSource, settings.allColumns, settings.columnSummary, settings.dimensionMap, (settings as any).originalDimensionMap]);
 
   const handleChange = (newSettings: Partial<SettingsType>) => {
     updateSettings(atomId, newSettings);
   };
 
   const applyVisual = () => {
-    updateSettings(atomId, { yAxes: pendingY, xAxis: pendingX, dimensionMap: pendingDimensions });
+    // Preserve originalDimensionMap structure - merge with pendingDimensions
+    // This ensures deselected dimensions remain in the map (with empty arrays) so they can be selected again
+    const mergedDimensionMap: Record<string, string[]> = {};
+    
+    // First, add all dimensions from originalDimensions (source of truth)
+    Object.keys(originalDimensions).forEach(dimName => {
+      mergedDimensionMap[dimName] = originalDimensions[dimName] || [];
+    });
+    
+    // Then, update with pendingDimensions (selected dimensions)
+    // This preserves the structure but updates selections
+    Object.keys(pendingDimensions).forEach(dimName => {
+      if (mergedDimensionMap[dimName]) {
+        // Dimension exists in original, update with selected values
+        mergedDimensionMap[dimName] = pendingDimensions[dimName] || [];
+      } else {
+        // New dimension (shouldn't happen, but handle it)
+        mergedDimensionMap[dimName] = pendingDimensions[dimName] || [];
+      }
+    });
+    
+    // Also preserve originalDimensionMap so it doesn't get lost
+    updateSettings(atomId, { 
+      yAxes: pendingY, 
+      xAxis: pendingX, 
+      dimensionMap: mergedDimensionMap,
+      originalDimensionMap: originalDimensions // Preserve original for future selections
+    });
   };
 
   return (

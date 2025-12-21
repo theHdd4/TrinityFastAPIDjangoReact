@@ -1,210 +1,93 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { CheckCircle2, AlertTriangle, Download, ArrowLeft, FileText, BarChart3, Users, Database, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { UPLOAD_API } from '@/lib/api';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { UPLOAD_API, VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
+import { getActiveProjectContext } from '@/utils/projectEnv';
+import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+
+// Helper to extract filename from path
+const getFileName = (path: string): string => {
+  const parts = path.split('/');
+  return parts[parts.length - 1] || path;
+};
 
 interface U6FinalPreviewProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
   onNext: () => void;
   onBack: () => void;
   onGoToStage?: (stage: 'U5' | 'U4' | 'U3') => void;
+  isMaximized?: boolean;
 }
 
-interface PreviewRow {
-  [columnName: string]: string | number | null;
-}
-
-interface ColumnSummary {
+interface ProcessingColumnConfig {
   name: string;
-  type: string;
-  role: 'identifier' | 'measure';
+  newName: string;
+  originalDtype: string;
+  selectedDtype: string;
+  sampleValues: string[];
   missingCount: number;
-  missingPercent: number;
+  missingPercentage: number;
+  missingStrategy: string;
+  missingCustomValue: string;
+  datetimeFormat?: string;
+  formatDetecting?: boolean;
+  formatFailed?: boolean;
+  dropColumn: boolean;
+  classification?: 'identifiers' | 'measures' | 'unclassified';
 }
 
-export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, onBack, onGoToStage }) => {
-  const { state } = flow;
-  const {
-    uploadedFiles,
-    headerSelections,
-    columnNameEdits,
-    dataTypeSelections,
-    missingValueStrategies,
-    selectedFileIndex,
-  } = state;
-
-  const chosenIndex =
-    selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
-  const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
-  const [columns, setColumns] = useState<ColumnSummary[]>([]);
-  const [totalRows, setTotalRows] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const [error, setError] = useState<string>('');
-
-  // Refs to prevent duplicate API calls
-  const isFetchingRef = useRef(false);
-  const loadedFileRef = useRef<string | null>(null);
-  const hasAttemptedFetchRef = useRef(false);
-
+export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, onBack, isMaximized = false }) => {
+  const { state, setColumnNameEdits, setDataTypeSelections, setMissingValueStrategies } = flow;
+  const { uploadedFiles, selectedFileIndex, columnNameEdits, dataTypeSelections, missingValueStrategies } = state;
+  const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
   const currentFile = uploadedFiles[chosenIndex];
+  
+  // CRITICAL: Log the currentFile path immediately to see if it's correct
+  if (currentFile) {
+    console.log('🔍 [U6FinalPreview] currentFile from uploadedFiles:', {
+      name: currentFile.name,
+      path: currentFile.path,
+      fullFile: currentFile,
+      allUploadedFiles: uploadedFiles.map(f => ({ name: f.name, path: f.path }))
+    });
+  }
+  
+  const [columns, setColumns] = useState<ProcessingColumnConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const loadedFileRef = useRef<string | null>(null);
+
   const currentColumnEdits = currentFile ? (columnNameEdits[currentFile.name] || []) : [];
   const currentDataTypes = currentFile ? (dataTypeSelections[currentFile.name] || []) : [];
   const currentStrategies = currentFile ? (missingValueStrategies[currentFile.name] || []) : [];
 
-  // Debug: Log state to understand what's available
-  React.useEffect(() => {
-    console.log('U6 State Debug:', {
-      currentFile: currentFile?.name,
-      currentColumnEdits: currentColumnEdits.length,
-      currentDataTypes: currentDataTypes.length,
-      currentStrategies: currentStrategies.length,
-      allColumnNameEdits: Object.keys(columnNameEdits),
-      allDataTypeSelections: Object.keys(dataTypeSelections),
-      allMissingValueStrategies: Object.keys(missingValueStrategies),
-    });
-  }, [currentFile?.name, currentColumnEdits.length, currentDataTypes.length, currentStrategies.length]);
-
-  // Reset loadedFileRef when strategies change to force re-fetch with updated strategies
-  const strategiesKeyRef = useRef<string>('');
-  React.useEffect(() => {
-    const strategiesKey = JSON.stringify(currentStrategies.map(s => ({ col: s.columnName, strategy: s.strategy, value: s.value })));
-    if (strategiesKeyRef.current && strategiesKeyRef.current !== strategiesKey) {
-      console.log('U6: Missing value strategies changed, resetting loadedFileRef to force re-fetch');
-      loadedFileRef.current = null;
-      hasAttemptedFetchRef.current = false;
-    }
-    strategiesKeyRef.current = strategiesKey;
-  }, [currentStrategies]);
-
-  // Helper function to build data from state (used when API fails or as fallback)
-  const buildStateBasedData = React.useCallback(() => {
-    const columnSummaries: ColumnSummary[] = [];
-    
-    // Get all columns from dataTypeSelections (these are the final columns after U3 edits)
-    const allColumnNames = new Set<string>();
-    currentDataTypes.forEach(dt => {
-      allColumnNames.add(dt.columnName);
-    });
-    
-    // Also include columns from columnNameEdits
-    currentColumnEdits.forEach(edit => {
-      if (edit.keep !== false) {
-        allColumnNames.add(edit.editedName);
-      }
-    });
-
-    // Build column summaries
-    allColumnNames.forEach(colName => {
-      // Check if this column should be kept
-      const edit = currentColumnEdits.find(e => 
-        e.originalName === colName || e.editedName === colName
-      );
-      
-      // Skip deleted columns
-      if (edit && edit.keep === false) {
-        return;
-      }
-
-      const dataType = currentDataTypes.find(dt => dt.columnName === colName);
-
-      columnSummaries.push({
-        name: colName,
-        type: dataType?.selectedType || 'text',
-        role: dataType?.columnRole || 'identifier',
-        missingCount: 0,
-        missingPercent: 0,
-      });
-    });
-
-    // If no columns found, create from columnNameEdits
-    if (columnSummaries.length === 0 && currentColumnEdits.length > 0) {
-      currentColumnEdits.forEach(edit => {
-        if (edit.keep !== false) {
-          const dataType = currentDataTypes.find(dt => dt.columnName === edit.editedName);
-          columnSummaries.push({
-            name: edit.editedName,
-            type: dataType?.selectedType || 'text',
-            role: dataType?.columnRole || 'identifier',
-            missingCount: 0,
-            missingPercent: 0,
-          });
-        }
-      });
-    }
-
-    setColumns(columnSummaries);
-    setTotalRows(1000); // Default estimate
-
-    // Generate warnings
-    const warningList: string[] = [];
-    const highCardinalityIds = columnSummaries.filter(col => 
-      col.role === 'identifier' && col.type !== 'number'
-    );
-    if (highCardinalityIds.length > 0) {
-      warningList.push(`This dataset contains high-cardinality identifiers.`);
-    }
-
-    const numericIds = columnSummaries.filter(col => col.type === 'number' && col.role === 'identifier');
-    if (numericIds.length > 0) {
-      warningList.push(`A numeric ID column has been marked as Identifier.`);
-    }
-
-    const zeroReplacements = currentStrategies.filter(s => s.strategy === 'zero');
-    if (zeroReplacements.length > 0) {
-      warningList.push(`Some treatments may affect aggregations.`);
-    }
-
-    setWarnings(warningList);
-
-    // Generate preview rows (sample data)
-    const sampleRows: PreviewRow[] = [];
-    for (let i = 0; i < Math.min(25, 20); i++) {
-      const row: PreviewRow = {};
-      columnSummaries.forEach(col => {
-        // Generate sample values based on type
-        if (col.type === 'number') {
-          row[col.name] = Math.floor(Math.random() * 1000);
-        } else if (col.type === 'date') {
-          row[col.name] = '2024-01-01';
-        } else if (col.type === 'category') {
-          row[col.name] = ['Category A', 'Category B', 'Category C'][Math.floor(Math.random() * 3)];
-        } else {
-          row[col.name] = `Sample ${col.name} ${i + 1}`;
-        }
-      });
-      sampleRows.push(row);
-    }
-    setPreviewData(sampleRows);
-  }, [currentColumnEdits, currentDataTypes, currentStrategies]);
+  // Hooks for finalization and closing guided mode
+  const { markFileAsPrimed } = useGuidedFlowPersistence();
+  const { setGlobalGuidedMode, removeActiveGuidedFlow, activeGuidedFlows } = useLaboratoryStore();
+  
+  // Find atomId from active guided flows
+  const atomId = Object.keys(activeGuidedFlows)[0] || 'guided-upload';
 
   useEffect(() => {
-    const fetchPreviewData = async () => {
+    const fetchColumns = async () => {
       if (!currentFile) {
         setLoading(false);
         return;
       }
 
-      // Prevent duplicate fetches
-      const fileKey = `${currentFile.name}-${currentFile.path || 'no-path'}`;
-      
-      // Reset refs if file changed
-      if (loadedFileRef.current !== fileKey) {
-        hasAttemptedFetchRef.current = false;
-        isFetchingRef.current = false;
-      }
-      
-      if (loadedFileRef.current === fileKey || isFetchingRef.current) {
+      const fileKey = `${currentFile.name}-${currentFile.path}`;
+      if (loadedFileRef.current === fileKey) {
         return;
       }
 
       setLoading(true);
       setError('');
-      isFetchingRef.current = true;
-      hasAttemptedFetchRef.current = true;
       
       try {
         const envStr = localStorage.getItem('env');
@@ -217,16 +100,10 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           }
         }
 
-        // Use the processed file path (after header selection in U2)
         const filePath = currentFile.path;
-        
-        if (!filePath) {
-          throw new Error('File path is not available');
-        }
 
-        // CRITICAL: Apply transformations (column drops + renames + dtype changes + missing value strategies) BEFORE fetching preview
-        // This ensures we see the cleaned/transformed data, not raw data
-        let transformedFilePath = filePath;
+        // CRITICAL: Apply all transformations from U1-U5 BEFORE fetching metadata
+        // This ensures we see the final transformed state, not the original raw data
         
         // Build columns_to_drop from columnNameEdits (U3) - columns marked as keep=false
         const columnsToDrop: string[] = [];
@@ -244,14 +121,18 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           }
         });
         
-        // Build dtype_changes from dataTypeSelections
+        // Build dtype_changes from dataTypeSelections (U4)
+        // Note: dt.columnName in dataTypeSelections is already the edited name (from U3)
         const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
         currentDataTypes.forEach(dt => {
           // Use updateType (user's selection from U4) instead of selectedType
           const userSelectedType = dt.updateType || dt.selectedType;
           if (userSelectedType && userSelectedType !== dt.detectedType) {
+            // dt.columnName is already the edited name (after U3 rename)
+            const columnName = dt.columnName;
+            
             if ((userSelectedType === 'date' || userSelectedType === 'datetime') && dt.format) {
-              dtypeChanges[dt.columnName] = { dtype: 'datetime64', format: dt.format };
+              dtypeChanges[columnName] = { dtype: 'datetime64', format: dt.format };
             } else {
               // Map frontend types to backend types
               const backendType = userSelectedType === 'number' ? 'float64' : 
@@ -263,15 +144,13 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
                                  userSelectedType === 'datetime' ? 'datetime64' :
                                  userSelectedType === 'boolean' ? 'bool' :
                                  userSelectedType;
-              dtypeChanges[dt.columnName] = backendType;
+              dtypeChanges[columnName] = backendType;
             }
           }
         });
         
-        // Build missing_value_strategies from currentStrategies
-        // Backend expects: { column_name: { strategy: str, value?: str | number } }
-        // value is only required for 'custom' strategy
-        const missingValueStrategies: Record<string, { strategy: string; value?: string | number }> = {};
+        // Build missing_value_strategies from missingValueStrategies (U5)
+        const missingValueStrategiesPayload: Record<string, { strategy: string; value?: string | number }> = {};
         currentStrategies.forEach(s => {
           if (s.strategy !== 'none') {
             const strategyConfig: { strategy: string; value?: string | number } = {
@@ -283,14 +162,21 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
               strategyConfig.value = s.value;
             }
             
-            missingValueStrategies[s.columnName] = strategyConfig;
+            missingValueStrategiesPayload[s.columnName] = strategyConfig;
           }
         });
         
-        // Only apply transformations if there are any changes
-        if (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategies).length > 0) {
+        // Apply transformations if there are any changes
+        let transformedFilePath = filePath;
+        if (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategiesPayload).length > 0) {
           try {
-            console.log('Applying transformations before preview:', { columnsToDrop, columnRenames, dtypeChanges, missingValueStrategies });
+            console.log('U6: Applying transformations from U1-U5 before showing final preview:', { 
+              columnsToDrop, 
+              columnRenames, 
+              dtypeChanges, 
+              missingValueStrategiesPayload 
+            });
+            
             const transformRes = await fetch(`${UPLOAD_API}/apply-data-transformations`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -300,432 +186,413 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
                 columns_to_drop: columnsToDrop,
                 column_renames: columnRenames,
                 dtype_changes: dtypeChanges,
-                missing_value_strategies: missingValueStrategies,
+                missing_value_strategies: missingValueStrategiesPayload,
               }),
             });
             
             if (transformRes.ok) {
               const transformResult = await transformRes.json();
-              console.log('Transformations applied successfully:', transformResult);
+              console.log('U6: Transformations applied successfully:', transformResult);
               // Use the same file path (transformations are applied in-place)
               transformedFilePath = filePath;
             } else {
-              console.warn('Failed to apply transformations, using original file');
+              console.warn('U6: Failed to apply transformations, using original file');
             }
           } catch (transformError) {
-            console.warn('Error applying transformations:', transformError);
+            console.warn('U6: Error applying transformations:', transformError);
             // Continue with original file if transformation fails
           }
         }
 
-        // Try to fetch file metadata for preview (use transformed file path)
-        let metadataData: any = null;
-        try {
-          const metadataRes = await fetch(`${UPLOAD_API}/file-metadata`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              file_path: transformedFilePath, // Use transformed file path
-            }),
-          });
-
-          if (metadataRes.ok) {
-            metadataData = await metadataRes.json();
-          } else {
-            console.warn('Failed to fetch metadata, using state data');
-          }
-        } catch (apiError) {
-          console.warn('API call failed, using state data:', apiError);
-          // Continue with state-based data
-        }
-
-        // Build column summary from state (columnNameEdits, dataTypeSelections)
-        // This ensures we show the final state even if API fails
-        const columnSummaries: ColumnSummary[] = [];
-        
-        // Get all columns - prioritize from dataTypeSelections (U4), then metadata, then columnNameEdits
-        const allColumnNames = new Set<string>();
-        
-        // First, add columns from dataTypeSelections (most accurate - from U4)
-        currentDataTypes.forEach(dt => {
-          allColumnNames.add(dt.columnName);
+        // Now fetch metadata from the TRANSFORMED file
+        const res = await fetch(`${UPLOAD_API}/file-metadata`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            file_path: transformedFilePath,
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+          }),
         });
-        
-        // If no data types, use metadata columns
-        if (allColumnNames.size === 0 && metadataData?.columns) {
-          metadataData.columns.forEach((col: any) => {
-            const edit = currentColumnEdits.find(e => e.originalName === col.name);
-            const editedName = edit?.editedName || col.name;
-            allColumnNames.add(editedName);
-          });
+
+        if (!res.ok) {
+          throw new Error('Failed to load dataframe metadata');
         }
+
+        const data = await res.json();
         
-        // Also include columns from columnNameEdits (U3) if not already included
+        // After transformations, column names in metadata are the edited names (from U3)
+        // Build mapping from current name (edited) back to original name for saving
+        const currentToOriginalMap = new Map<string, string>();
         currentColumnEdits.forEach(edit => {
           if (edit.keep !== false) {
-            allColumnNames.add(edit.editedName);
+            currentToOriginalMap.set(edit.editedName, edit.originalName);
           }
         });
 
-        // Build column summaries
-        allColumnNames.forEach(colName => {
-          // Check if this column should be kept
-          const edit = currentColumnEdits.find(e => 
-            e.originalName === colName || e.editedName === colName
-          );
+        const cols: ProcessingColumnConfig[] = (data.columns || []).map((col: any) => {
+          // After transformations, col.name is the edited name (from U3) - this is the current name
+          const currentName = col.name;
+          // Map back to original name for saving
+          const originalName = currentToOriginalMap.get(currentName) || currentName;
           
-          // Skip deleted columns
-          if (edit && edit.keep === false) {
-            return;
-          }
+          // Find data type and strategy using current name (edited name from U3)
+          const dataType = currentDataTypes.find(dt => dt.columnName === currentName);
+          const strategy = currentStrategies.find(s => s.columnName === currentName);
 
-          const dataType = currentDataTypes.find(dt => dt.columnName === colName);
-          const metadataCol = metadataData?.columns?.find((c: any) => {
-            const edit = currentColumnEdits.find(e => e.originalName === c.name);
-            return (edit?.editedName || c.name) === colName;
-          });
-
-          // Map backend dtype to frontend type
-          const mapDtypeToType = (dtype: string): string => {
-            if (!dtype) return 'text';
-            const dtypeLower = dtype.toLowerCase();
-            if (dtypeLower.includes('int') || dtypeLower.includes('float')) return 'number';
-            if (dtypeLower.includes('date') || dtypeLower.includes('datetime')) return 'date';
-            if (dtypeLower.includes('bool')) return 'boolean';
-            if (dtypeLower.includes('category')) return 'category';
-            return 'text';
+          // Map backend dtype to frontend dtype
+          const mapDtype = (dtype: string): string => {
+            const lower = dtype.toLowerCase();
+            if (lower.includes('int')) return 'int64';
+            if (lower.includes('float')) return 'float64';
+            if (lower.includes('datetime') || lower.includes('date')) return 'datetime64';
+            if (lower.includes('bool')) return 'bool';
+            return 'object';
           };
 
-          // Determine type: use dataType selection first, then metadata dtype
-          const selectedType = dataType?.selectedType || mapDtypeToType(metadataCol?.dtype || '');
+          // The dtype in metadata is after U4 transformations, so this is the current dtype
+          const currentDtype = mapDtype(col.dtype || 'object');
           
-          // Determine role: use dataType selection first, then default based on type
-          let selectedRole: 'identifier' | 'measure' = dataType?.columnRole || 'identifier';
-          if (!dataType?.columnRole) {
-            // Auto-classify based on type if no role set
-            if (selectedType === 'number') {
-              selectedRole = 'measure';
-            } else {
-              selectedRole = 'identifier';
-            }
-          }
+          // selectedDtype should match what was set in U4, or use current dtype
+          const selectedDtype = dataType?.updateType 
+            ? (dataType.updateType === 'int' ? 'int64' : 
+               dataType.updateType === 'float' ? 'float64' :
+               dataType.updateType === 'datetime' ? 'datetime64' :
+               dataType.updateType === 'boolean' ? 'bool' : 'object')
+            : currentDtype;
 
-          columnSummaries.push({
-            name: colName,
-            type: selectedType,
-            role: selectedRole,
-            missingCount: metadataCol?.missing_count || 0,
-            missingPercent: metadataCol?.missing_percentage || 0,
-          });
+          return {
+            name: originalName, // Store original name for saving back to columnNameEdits
+            newName: currentName, // Current name (after U3 rename) - this is what we display and allow editing
+            originalDtype: currentDtype, // Current dtype (after U4 transformations)
+            selectedDtype, // User's selected type from U4, or current dtype
+            sampleValues: (col.sample_values || []).map((v: any) => String(v)),
+            missingCount: col.missing_count || 0,
+            missingPercentage: col.missing_percentage || 0,
+            missingStrategy: strategy?.strategy || 'none',
+            missingCustomValue: strategy?.strategy === 'custom' ? String(strategy.value || '') : '',
+            dropColumn: false, // Dropped columns won't appear in transformed metadata
+            classification: dataType?.columnRole === 'identifier' ? 'identifiers' : 
+                           dataType?.columnRole === 'measure' ? 'measures' : 'unclassified',
+            datetimeFormat: dataType?.format,
+          };
         });
 
-        // If no columns found, create from columnNameEdits
-        if (columnSummaries.length === 0 && currentColumnEdits.length > 0) {
-          currentColumnEdits.forEach(edit => {
-            if (edit.keep !== false) {
-              const dataType = currentDataTypes.find(dt => dt.columnName === edit.editedName);
-              columnSummaries.push({
-                name: edit.editedName,
-                type: dataType?.selectedType || 'text',
-                role: dataType?.columnRole || 'identifier',
-                missingCount: 0,
-                missingPercent: 0,
-              });
-            }
-          });
-        }
-
-        setColumns(columnSummaries);
-        setTotalRows(metadataData?.total_rows || 1000); // Default estimate if not available
-
-        // Generate warnings
-        const warningList: string[] = [];
-        const highMissingColumns = columnSummaries.filter(col => col.missingPercent > 40);
-        if (highMissingColumns.length > 0) {
-          warningList.push(`${highMissingColumns.length} column${highMissingColumns.length > 1 ? 's' : ''} ${highMissingColumns.length > 1 ? 'have' : 'has'} high missing values. You may want to take a closer look later.`);
-        }
-
-        const highCardinalityIds = columnSummaries.filter(col => 
-          col.role === 'identifier' && col.type !== 'number'
-        );
-        if (highCardinalityIds.length > 0) {
-          warningList.push(`This dataset contains high-cardinality identifiers.`);
-        }
-
-        const numericIds = columnSummaries.filter(col => col.type === 'number' && col.role === 'identifier');
-        if (numericIds.length > 0) {
-          warningList.push(`A numeric ID column has been marked as Identifier.`);
-        }
-
-        const zeroReplacements = currentStrategies.filter(s => s.strategy === 'zero');
-        if (zeroReplacements.length > 0) {
-          warningList.push(`Some treatments may affect aggregations.`);
-        }
-
-        setWarnings(warningList);
-
-        // Fetch actual preview data from transformed file
-        // Use file-metadata to get sample values, then construct preview rows
-        let actualPreviewRows: PreviewRow[] = [];
-        try {
-          // After transformations, fetch metadata again to get transformed data
-          // The transformed file should have missing values filled and column names updated
-          if (metadataData && metadataData.columns && columnSummaries.length > 0) {
-            // Build a mapping from transformed column names (from metadata) to edited column names (from columnSummaries)
-            const columnNameMap: Record<string, string> = {};
-            metadataData.columns.forEach((metaCol: any) => {
-              // Find the edit for this column
-              const edit = currentColumnEdits.find(e => e.originalName === metaCol.name);
-              const editedName = edit?.editedName || metaCol.name;
-              // Map metadata column name to edited name
-              columnNameMap[metaCol.name] = editedName;
-            });
-            
-            // Get sample values from metadata (these are from the transformed file)
-            // We'll use these to construct preview rows
-            const rowCount = Math.min(20, metadataData.total_rows || 20);
-            
-            // For each row, construct data from sample values
-            // Since we don't have actual row data, we'll use sample values from metadata
-            // This is a limitation - ideally we'd fetch actual rows from the transformed file
-            for (let i = 0; i < rowCount; i++) {
-              const row: PreviewRow = {};
-              columnSummaries.forEach(col => {
-                // Find the metadata column that matches this edited column name
-                const metaCol = metadataData.columns.find((c: any) => {
-                  const edit = currentColumnEdits.find(e => e.originalName === c.name);
-                  return (edit?.editedName || c.name) === col.name;
-                });
-                
-                if (metaCol && metaCol.sample_values && metaCol.sample_values.length > 0) {
-                  // Use sample values, cycling through them
-                  const sampleIndex = i % metaCol.sample_values.length;
-                  let value = metaCol.sample_values[sampleIndex];
-                  
-                  // Handle null/NaN values - if this column has a missing value strategy, show the filled value
-                  if (value === null || value === undefined || (typeof value === 'number' && isNaN(value))) {
-                    const strategy = currentStrategies.find(s => s.columnName === col.name);
-                    if (strategy && strategy.strategy !== 'none') {
-                      // Show what value would be used for filling
-                      if (strategy.strategy === 'zero') {
-                        value = 0;
-                      } else if (strategy.strategy === 'empty') {
-                        value = '';
-                      } else if (strategy.strategy === 'custom' && strategy.value !== undefined) {
-                        value = strategy.value;
-                      } else if (strategy.strategy === 'mean' || strategy.strategy === 'median' || strategy.strategy === 'mode') {
-                        // For statistical strategies, show a placeholder
-                        value = `[${strategy.strategy}]`;
-                      } else {
-                        value = null;
-                      }
-                    } else {
-                      value = null;
-                    }
-                  }
-                  
-                  row[col.name] = value;
-                } else {
-                  // No sample values available, use null or default based on type
-                  row[col.name] = null;
-                }
-              });
-              actualPreviewRows.push(row);
-            }
-          } else {
-            // Fallback: construct rows from column summaries
-            const rowCount = metadataData?.total_rows || 20;
-            for (let i = 0; i < Math.min(20, rowCount); i++) {
-              const row: PreviewRow = {};
-              columnSummaries.forEach(col => {
-                // Check if this column has a missing value strategy
-                const strategy = currentStrategies.find(s => s.columnName === col.name);
-                if (strategy && strategy.strategy !== 'none') {
-                  // Show the fill value
-                  if (strategy.strategy === 'zero') {
-                    row[col.name] = 0;
-                  } else if (strategy.strategy === 'empty') {
-                    row[col.name] = '';
-                  } else if (strategy.strategy === 'custom' && strategy.value !== undefined) {
-                    row[col.name] = strategy.value;
-                  } else {
-                    row[col.name] = `[${strategy.strategy}]`;
-                  }
-                } else {
-                  // Generate sample data based on type
-                  if (col.type === 'number') {
-                    row[col.name] = Math.floor(Math.random() * 1000);
-                  } else if (col.type === 'date') {
-                    row[col.name] = '2024-01-01';
-                  } else if (col.type === 'category') {
-                    row[col.name] = ['Category A', 'Category B', 'Category C'][Math.floor(Math.random() * 3)];
-                  } else {
-                    row[col.name] = `Sample ${i + 1}`;
-                  }
-                }
-              });
-              actualPreviewRows.push(row);
-            }
-          }
-        } catch (previewError) {
-          console.warn('Error constructing preview rows:', previewError);
-          // Fallback to sample data
-          const rowCount = metadataData?.total_rows || 20;
-          for (let i = 0; i < Math.min(20, rowCount); i++) {
-            const row: PreviewRow = {};
-            columnSummaries.forEach(col => {
-              const strategy = currentStrategies.find(s => s.columnName === col.name);
-              if (strategy && strategy.strategy !== 'none') {
-                if (strategy.strategy === 'zero') {
-                  row[col.name] = 0;
-                } else if (strategy.strategy === 'empty') {
-                  row[col.name] = '';
-                } else if (strategy.strategy === 'custom' && strategy.value !== undefined) {
-                  row[col.name] = strategy.value;
-                } else {
-                  row[col.name] = `[${strategy.strategy}]`;
-                }
-              } else {
-                row[col.name] = null;
-              }
-            });
-            actualPreviewRows.push(row);
-          }
-        }
-        
-        setPreviewData(actualPreviewRows);
-        
-        // Mark as loaded successfully
+        // Sort by missing percentage descending
+        const sortedCols = cols.sort((a, b) => b.missingPercentage - a.missingPercentage);
+        setColumns(sortedCols);
         loadedFileRef.current = fileKey;
-      } catch (err) {
-        console.error('Failed to fetch preview data:', err);
-        setError('Unable to load preview data. Using summary based on your selections.');
-        // Use state-based data
-        buildStateBasedData();
-        // Mark as attempted (even if failed)
-        loadedFileRef.current = fileKey;
+      } catch (err: any) {
+        setError(err.message || 'Failed to load dataframe metadata');
       } finally {
         setLoading(false);
-        isFetchingRef.current = false;
       }
     };
 
-    void fetchPreviewData();
-  }, [currentFile?.name, currentFile?.path, buildStateBasedData, currentStrategies.length]);
+    void fetchColumns();
+  }, [currentFile?.name, currentFile?.path, currentColumnEdits, currentDataTypes, currentStrategies]);
 
-  // Calculate summary statistics - use columns state if available, otherwise fall back to dataTypeSelections
-  const getSummaryStats = () => {
-    // Use columns from state (which includes all processed columns) if available
-    const columnsToUse = columns.length > 0 ? columns : 
-      currentDataTypes.map(dt => ({
-        name: dt.columnName,
-        type: dt.selectedType || dt.detectedType || 'text',
-        role: dt.columnRole || 'identifier',
-        missingCount: 0,
-        missingPercent: 0,
-      }));
-
-    const renamedColumns = currentColumnEdits.filter(e => e.editedName !== e.originalName && e.keep !== false).length;
-
-    const numericColumns = columnsToUse.filter(col => {
-      const t = String(col.type || '').toLowerCase();
-      return (
-        t === 'number' ||
-        t === 'numeric' ||
-        t === 'int' ||
-        t === 'integer' ||
-        t === 'int64' ||
-        t === 'int32' ||
-        t === 'float' ||
-        t === 'float64' ||
-        t === 'float32' ||
-        t === 'double' ||
-        t === 'decimal'
-      );
-    }).length;
-
-    const categoricalColumns = columnsToUse.filter(col => {
-      const t = String(col.type || '').toLowerCase();
-      return (
-        t === 'category' ||
-        t === 'categorical' ||
-        t === 'object' ||
-        t === 'string' ||
-        t === 'text'
-      );
-    }).length;
-
-    const dateColumns = columnsToUse.filter(col => {
-      const t = String(col.type || '').toLowerCase();
-      return (
-        t === 'date' ||
-        t === 'datetime' ||
-        t === 'datetime64' ||
-        t === 'datetime64[ns]' ||
-        t === 'timestamp'
-      );
-    }).length;
-    const identifiers = columnsToUse.filter(col => col.role === 'identifier').length;
-    const measures = columnsToUse.filter(col => col.role === 'measure').length;
-    const treatedColumns = currentStrategies.filter(s => s.strategy !== 'none').length;
-    
-    // Calculate high-cardinality identifiers (more than 100 unique values)
-    const highCardinalityIdentifiers = columns.filter(col => 
-      col.role === 'identifier' && col.type !== 'number'
-    ).length;
-    
-    const strategyBreakdown: Record<string, number> = {};
-    currentStrategies.forEach(s => {
-      if (s.strategy !== 'none') {
-        strategyBreakdown[s.strategy] = (strategyBreakdown[s.strategy] || 0) + 1;
-      }
-    });
-
-    // Format strategy names for display
-    const formatStrategyName = (strategy: string): string => {
-      const strategyMap: Record<string, string> = {
-        'mean': 'Mean',
-        'median': 'Median',
-        'mode': 'Mode',
-        'zero': '0',
-        'empty': 'Empty string',
-        'custom': 'Unknown',
-        'drop': 'Drop rows',
-      };
-      return strategyMap[strategy] || strategy;
-    };
-
-    return {
-      renamedColumns,
-      numericColumns,
-      categoricalColumns,
-      dateColumns,
-      identifiers,
-      measures,
-      treatedColumns,
-      strategyBreakdown,
-      highCardinalityIdentifiers,
-      formatStrategyName,
-    };
+  const updateColumn = (index: number, changes: Partial<ProcessingColumnConfig>) => {
+    setColumns(prev =>
+      prev.map((col, idx) => (idx === index ? { ...col, ...changes } : col))
+    );
   };
 
-  const stats = getSummaryStats();
+  const getDtypeOptions = (currentDtype: string) => {
+    const baseOptions = [
+      { value: 'object', label: 'Object' },
+      { value: 'int64', label: 'Integer' },
+      { value: 'float64', label: 'Float' },
+      { value: 'datetime64', label: 'DateTime' },
+      { value: 'bool', label: 'Boolean' },
+    ];
+    const exists = baseOptions.some(opt => opt.value === currentDtype);
+    if (!exists && currentDtype) {
+      return [{ value: currentDtype, label: currentDtype }, ...baseOptions];
+    }
+    return baseOptions;
+  };
 
-  const handleDownload = async () => {
-    // TODO: Implement download functionality
-    console.log('Download cleaned data');
+  const getMissingOptions = (dtype: string) => {
+    const base = [
+      { value: 'none', label: 'Keep as Missing' },
+      { value: 'drop', label: 'Drop Rows' },
+      { value: 'custom', label: 'Custom Value' },
+    ];
+    if (dtype.includes('int') || dtype.includes('float')) {
+      return [
+        ...base,
+        { value: 'mean', label: 'Fill with Mean' },
+        { value: 'median', label: 'Fill with Median' },
+        { value: 'zero', label: 'Fill with 0' },
+      ];
+    }
+    if (dtype.includes('str') || dtype === 'object' || dtype === 'string') {
+      return [
+        ...base,
+        { value: 'mode', label: 'Fill with Mode' },
+        { value: 'empty', label: 'Fill with Empty String' },
+      ];
+    }
+    return base;
+  };
+
+  const getDtypeBadgeColor = (dtype: string) => {
+    const lower = dtype.toLowerCase();
+    if (lower.includes('int') || lower.includes('float')) return 'bg-blue-100 text-blue-800 border-blue-300';
+    if (lower.includes('datetime') || lower.includes('date')) return 'bg-purple-100 text-purple-800 border-purple-300';
+    if (lower.includes('bool')) return 'bg-green-100 text-green-800 border-green-300';
+    return 'bg-gray-100 text-gray-800 border-gray-300';
+  };
+
+  const handleSave = async () => {
+    if (!currentFile) return;
+
+    setSaving(true);
+    setError('');
+
+    try {
+      // Build instructions array exactly like Direct Review mode does
+      const instructions = columns
+        .map(col => {
+          const instruction: Record<string, any> = { column: col.name };
+          if (col.dropColumn) {
+            instruction.drop_column = true;
+            return instruction;
+          }
+          const trimmedNewName = col.newName?.trim();
+          if (trimmedNewName && trimmedNewName !== col.name) {
+            instruction.new_name = trimmedNewName;
+          }
+          if (col.selectedDtype && col.selectedDtype !== col.originalDtype) {
+            instruction.dtype = col.selectedDtype;
+            if (col.selectedDtype === 'datetime64' && col.datetimeFormat) {
+              instruction.datetime_format = col.datetimeFormat;
+            }
+          }
+          if (col.missingStrategy && col.missingStrategy !== 'none') {
+            instruction.missing_strategy = col.missingStrategy;
+            if (col.missingStrategy === 'custom') {
+              instruction.custom_value = col.missingCustomValue || '';
+            }
+          }
+          return instruction;
+        })
+        .filter(inst => Object.keys(inst).length > 1);
+
+      // Extract identifiers and measures exactly like Direct Review mode does
+      // After processing, columns will have their new names, so use newName (final name after rename)
+      const identifiers = columns
+        .filter(c => !c.dropColumn && c.classification === 'identifiers')
+        .map(c => {
+          // If column was renamed, use newName (final name), otherwise use original name
+          const finalName = c.newName && c.newName.trim() && c.newName !== c.name ? c.newName.trim() : c.name;
+          return finalName;
+        });
+      const measures = columns
+        .filter(c => !c.dropColumn && c.classification === 'measures')
+        .map(c => {
+          // If column was renamed, use newName (final name), otherwise use original name
+          const finalName = c.newName && c.newName.trim() && c.newName !== c.name ? c.newName.trim() : c.name;
+          return finalName;
+        });
+
+      const hasProcessingChanges = instructions.length > 0;
+      const canSaveClassifications = columns.length > 0;
+
+      if (!hasProcessingChanges && !canSaveClassifications) {
+        setError('No changes detected. Adjust at least one column before saving.');
+        setSaving(false);
+        return;
+      }
+
+      // CRITICAL: Extract and validate the exact MinIO path ONCE at the start
+      // This path will be used for ALL operations (processing, classification, status updates)
+      // For Excel sheets in folders, this should be: "Quant Matrix AI/blank/New Custom Project/folder_name/sheets/Sheet1.arrow"
+      let exactMinIOPath = currentFile.path || '';
+      
+      // CRITICAL DIAGNOSIS: Log the path we're about to use to diagnose path issues
+      console.error('🔴 [U6FinalPreview] DIAGNOSIS - currentFile.path at save time:', {
+        path: exactMinIOPath,
+        name: currentFile.name,
+        segmentCount: exactMinIOPath.split('/').filter(s => s.length > 0).length,
+        expectedSegmentCount: '>= 6 for Excel sheets in folders (client/app/project/folder/sheets/file.arrow)',
+        fullCurrentFile: currentFile,
+        allUploadedFiles: uploadedFiles.map(f => ({ name: f.name, path: f.path }))
+      });
+      
+      if (!exactMinIOPath) {
+        throw new Error('File path is missing - cannot save dataframe');
+      }
+
+      // Process dataframe if there are changes (exactly like Direct Review mode)
+      // CRITICAL: Use the exact MinIO path from currentFile.path (includes full folder structure)
+      // This ensures files in subfolders (like folder_name/sheets/Sheet1.arrow) stay in the same location
+      if (hasProcessingChanges) {
+        
+        console.log('🔧 [U6FinalPreview] Processing dataframe with path:', exactMinIOPath);
+        console.log('🔧 [U6FinalPreview] Current file object:', { name: currentFile.name, path: currentFile.path, fullFile: currentFile });
+        
+        // CRITICAL CHECK: Detect if file is from an Excel folder structure
+        // Excel folders have structure: client/app/project/folder_name/sheets/sheet_name.arrow
+        const pathSegments = exactMinIOPath.split('/').filter(s => s.length > 0);
+        const isExcelFolderFile = pathSegments.length >= 5 && pathSegments[pathSegments.length - 3] === 'sheets';
+        const isInFolderStructure = pathSegments.length >= 4; // At least client/app/project/filename or client/app/project/folder/filename
+        
+        console.log('🔍 [U6FinalPreview] Path analysis:', {
+          path: exactMinIOPath,
+          segments: pathSegments,
+          segmentCount: pathSegments.length,
+          isExcelFolderFile,
+          isInFolderStructure,
+          lastThreeSegments: pathSegments.slice(-3)
+        });
+        
+        // If file is from an Excel folder, ensure we preserve the exact folder structure
+        if (isExcelFolderFile) {
+          // File is in: client/app/project/folder_name/sheets/sheet_name.arrow
+          // Verify the path structure is correct
+          const folderName = pathSegments[pathSegments.length - 3]; // Should be the folder name before 'sheets'
+          const sheetName = pathSegments[pathSegments.length - 1]; // The .arrow file
+          
+          if (pathSegments[pathSegments.length - 2] !== 'sheets') {
+            console.error('❌ [U6FinalPreview] Invalid Excel folder structure - expected "sheets" directory:', pathSegments);
+            throw new Error(`Invalid Excel folder structure in path: ${exactMinIOPath}`);
+          }
+          
+          console.log('✅ [U6FinalPreview] Detected Excel folder file - preserving folder structure:', {
+            folderName,
+            sheetName,
+            fullPath: exactMinIOPath
+          });
+        } else if (isInFolderStructure) {
+          // File is in a folder but not an Excel folder structure
+          console.log('✅ [U6FinalPreview] Detected file in folder structure - preserving path:', exactMinIOPath);
+        } else {
+          // File is at root level (client/app/project/filename.arrow)
+          console.warn('⚠️ [U6FinalPreview] File appears to be at root level (not in folder):', exactMinIOPath);
+        }
+        
+        // Use the exact path as-is - backend will overwrite at this exact location
+        console.log('📤 [U6FinalPreview] Sending process_saved_dataframe request with object_name:', exactMinIOPath);
+        const res = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            object_name: exactMinIOPath, // Use exact MinIO path - file will be overwritten in-place at this exact location
+            instructions,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          const detail = data?.detail || (typeof data === 'string' ? data : '');
+          throw new Error(detail || 'Failed to process dataframe');
+        }
+      }
+
+      // Save classification config (exactly like Direct Review mode)
+      const projectContext = getActiveProjectContext();
+      if (projectContext) {
+        const stored = localStorage.getItem('current-project');
+        const envStr = localStorage.getItem('env');
+        const project = stored ? JSON.parse(stored) : {};
+        const env = envStr ? JSON.parse(envStr) : {};
+        // CRITICAL: Use exact MinIO path for classification save (same as process_saved_dataframe)
+        // This ensures the classification is saved for the exact file location in MinIO
+        // IMPORTANT: exactMinIOPath is already declared at function scope level above - use that same variable
+        // This ensures consistency across all operations (processing, classification, status updates)
+        console.log('🔧 [U6FinalPreview] Saving classification config with exact MinIO path:', exactMinIOPath);
+
+        const payload: Record<string, any> = {
+          project_id: project.id || null,
+          client_name: env.CLIENT_NAME || '',
+          app_name: env.APP_NAME || '',
+          project_name: env.PROJECT_NAME || '',
+          identifiers,
+          measures,
+          dimensions: {},
+        };
+        if (exactMinIOPath) {
+          payload.file_name = exactMinIOPath; // Use exact MinIO path for classification save
+        }
+
+        const saveRes = await fetch(`${CLASSIFIER_API}/save_config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          credentials: 'include',
+        });
+
+        if (saveRes.ok) {
+          // Mark file as primed (exactly like Direct Review mode)
+          // CRITICAL: Use exact MinIO path for all status updates to ensure UI matches the actual file location
+          // This MUST be the same path used for process_saved_dataframe to ensure files in folders stay in folders
+          if (exactMinIOPath) {
+            // Final verification: ensure path contains folder structure if it should
+            const pathSegments = exactMinIOPath.split('/').filter(s => s.length > 0);
+            const isExcelFolderFile = pathSegments.length >= 5 && pathSegments[pathSegments.length - 3] === 'sheets';
+            
+            if (isExcelFolderFile) {
+              console.log('✅ [U6FinalPreview] Confirmed: File is from Excel folder, using exact path:', exactMinIOPath);
+              console.log('✅ [U6FinalPreview] Path segments:', pathSegments);
+            } else {
+              console.log('ℹ️ [U6FinalPreview] File path (may or may not be in folder):', exactMinIOPath);
+            }
+            
+            console.log('✅ [U6FinalPreview] Marking file as primed with exact MinIO path:', exactMinIOPath);
+            await markFileAsPrimed(exactMinIOPath);
+            window.dispatchEvent(
+              new CustomEvent('dataframe-saved', {
+                detail: { filePath: exactMinIOPath, fileName: exactMinIOPath },
+              })
+            );
+            window.dispatchEvent(
+              new CustomEvent('priming-status-changed', {
+                detail: { filePath: exactMinIOPath, fileName: exactMinIOPath },
+              })
+            );
+            window.dispatchEvent(
+              new CustomEvent('force-refresh-priming-status', {
+                detail: { objectName: exactMinIOPath, isPrimed: true },
+              })
+            );
+            console.log('✅ [U6FinalPreview] File marked as primed and events dispatched for:', exactMinIOPath);
+          } else {
+            console.error('❌ [U6FinalPreview] Cannot mark file as primed - path is missing!');
+          }
+
+          // Close guided mode (exactly like Direct Review mode calls onClose)
+          setSaving(false);
+          setTimeout(() => {
+            try {
+              setGlobalGuidedMode(false);
+              removeActiveGuidedFlow(atomId);
+            } catch (closeError) {
+              console.error('U6 Approve: Error closing guided mode:', closeError);
+            }
+            onNext();
+          }, 100);
+        } else {
+          throw new Error('Failed to save configuration');
+        }
+      }
+    } catch (err: any) {
+      console.error('U6 Approve: Error:', err);
+      setError(err.message || 'Failed to save changes');
+      setSaving(false);
+    }
   };
 
   if (loading) {
     return (
-      <StageLayout
-        title=""
-        explanation="Preparing your cleaned dataset preview..."
-      >
+      <StageLayout title="" explanation="">
         <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#458EE2]"></div>
-          <p className="mt-4 text-sm text-gray-600">Loading preview...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-[#458EE2] mx-auto" />
+          <p className="mt-4 text-sm text-gray-600">Loading dataframe metadata...</p>
         </div>
       </StageLayout>
     );
@@ -733,303 +600,303 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
 
   if (error && columns.length === 0) {
     return (
-      <StageLayout
-        title=""
-        explanation="Here's your cleaned dataset after all preparation steps. Please review the preview and confirm to complete priming."
-        helpText="Once confirmed, the dataset will be ready for analysis. You can always make adjustments later if needed."
-      >
+      <StageLayout title="" explanation="">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-800">{error}</p>
-          <p className="text-sm text-gray-600 mt-2">
-            You can still proceed with priming. The summary information below is based on your selections.
-          </p>
         </div>
       </StageLayout>
     );
   }
 
   return (
-    <StageLayout
-      title=""
-      explanation="Here's your cleaned dataset after all preparation steps. Please review the preview and confirm to complete priming."
-      helpText="Once confirmed, the dataset will be ready for analysis. You can always make adjustments later if needed."
-    >
-      <div className="space-y-6">
-        {/* Reassurance Banner */}
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="flex items-start gap-2">
-            <CheckCircle2 className="w-5 h-5 text-[#41C185] mt-0.5 flex-shrink-0" />
-            <p className="text-sm text-gray-700">
-              This is your cleaned and primed dataset. Everything is ready for use.
-            </p>
-          </div>
+    <StageLayout title="" explanation="">
+      <div className="space-y-4">
+        <div>
+          <h4 className="text-lg font-semibold text-gray-900 mb-2">Dataframe Profiling (Verify details)</h4>
+          <p className="text-sm text-gray-600">
+            {currentFile?.name || 'No file selected'}
+          </p>
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Column Naming Card */}
-          <div className="border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-[#458EE2]" />
-                <h4 className="font-semibold text-gray-900">Column Naming</h4>
-              </div>
-            </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[#41C185]" />
-                <span>{stats.renamedColumns} renamed columns</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[#41C185]" />
-                <span>Auto-classified</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[#41C185]" />
-                <span>AI/Client Memory applied</span>
-              </div>
-            </div>
-            <button
-              onClick={() => onGoToStage && onGoToStage('U3')}
-              className="mt-3 text-xs text-[#458EE2] hover:text-[#3a7bc7] flex items-center gap-1"
-            >
-              View naming decisions
-              <ExternalLink className="w-3 h-3" />
-            </button>
-          </div>
-
-          {/* Data Types Card */}
-          <div className="border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <BarChart3 className="w-5 h-5 text-[#458EE2]" />
-              <h4 className="font-semibold text-gray-900">Data Types</h4>
-            </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[#41C185]" />
-                <span>{stats.numericColumns} numeric columns</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[#41C185]" />
-                <span>{stats.categoricalColumns} categorical columns</span>
-              </div>
-              {stats.dateColumns > 0 && (
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-[#41C185]" />
-                  <span>{stats.dateColumns} date column{stats.dateColumns > 1 ? 's' : ''}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Roles Card */}
-          <div className="border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Users className="w-5 h-5 text-[#458EE2]" />
-                <h4 className="font-semibold text-gray-900">Roles: Identifiers & Measures</h4>
-              </div>
-            </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[#41C185]" />
-                <span>{stats.identifiers} identifier{stats.identifiers !== 1 ? 's' : ''}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[#41C185]" />
-                <span>{stats.measures} measure{stats.measures !== 1 ? 's' : ''}</span>
-              </div>
-            </div>
-            <button
-              onClick={() => onGoToStage && onGoToStage('U4')}
-              className="mt-3 text-xs text-[#458EE2] hover:text-[#3a7bc7] flex items-center gap-1"
-            >
-              View details
-              <ExternalLink className="w-3 h-3" />
-            </button>
-          </div>
-
-          {/* Missing Value Treatments Card */}
-          <div className="border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Database className="w-5 h-5 text-[#458EE2]" />
-                <h4 className="font-semibold text-gray-900">Missing Value Treatments</h4>
-              </div>
-            </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[#41C185]" />
-                <span>{stats.treatedColumns} treated column{stats.treatedColumns !== 1 ? 's' : ''}</span>
-              </div>
-              {Object.keys(stats.strategyBreakdown).length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {Object.entries(stats.strategyBreakdown).map(([strategy, count]) => (
-                    <div key={strategy} className="text-xs text-gray-600 pl-6">
-                      • {stats.formatStrategyName(strategy)}: {count}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <button
-              onClick={() => onGoToStage && onGoToStage('U5')}
-              className="mt-3 text-xs text-[#458EE2] hover:text-[#3a7bc7] flex items-center gap-1"
-            >
-              View missing-value summary
-              <ExternalLink className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-
-        {/* Intelligent Alerts */}
-        {warnings.length > 0 && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-yellow-900 mb-2">Reminders</p>
-                <div className="space-y-1">
-                  {warnings.map((warning, idx) => (
-                    <p key={idx} className="text-xs text-yellow-800">{warning}</p>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Error message if API failed but we have data */}
         {error && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-            <p className="text-xs text-yellow-800">
-              {error} Showing preview based on your selections.
-            </p>
+            <p className="text-xs text-yellow-800">{error}</p>
           </div>
         )}
 
-        {/* Final Dataset Preview */}
-        {columns.length > 0 && (
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
-            <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-              <h4 className="font-semibold text-gray-900">Final Dataset Preview</h4>
-              <p className="text-xs text-gray-600 mt-1">
-                Showing first {Math.min(25, previewData.length)} rows (data rows only) • {totalRows.toLocaleString()} total rows • {columns.length} columns
-              </p>
-            </div>
-            <div className="overflow-x-auto max-h-96 overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    {columns.map((col, idx) => (
-                      <th key={idx} className="px-4 py-2 text-left font-medium text-gray-700 border-r border-gray-200">
-                        <div className="flex flex-col">
-                          <span>{col.name}</span>
-                          <div className="flex gap-1 mt-1">
-                            <Badge variant="outline" className="text-xs">{col.type}</Badge>
-                            <Badge variant="outline" className="text-xs">
-                              {col.role === 'identifier' ? 'ID' : 'M'}
-                            </Badge>
+        {/* Column Table - Using same compact format as U3/U4 */}
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <div 
+            className="overflow-x-auto" 
+            style={{ 
+              maxHeight: '8.75rem',
+              overflowY: 'auto',
+              scrollbarGutter: 'stable'
+            }}
+          >
+            <table className="text-[10px] table-fixed w-full">
+              <colgroup>
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '80px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '80px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '70px' }} />
+              </colgroup>
+              <thead className="sticky top-0 z-10 bg-gradient-to-r from-blue-50 to-blue-100">
+                <tr className="bg-gradient-to-r from-blue-50 to-blue-100" style={{ height: '1.75rem' }}>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Column Name
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Rename
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Current Type
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Change Type
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Missing
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Strategy
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Classification
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gradient-to-r from-blue-50 to-blue-100 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Drop
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {columns.map((col, idx) => {
+                  const dtypeOptions = getDtypeOptions(col.originalDtype);
+                  const missingOptions = getMissingOptions(col.selectedDtype);
+                  const hasMissingValues = col.missingCount > 0;
+                  const inputsDisabled = col.dropColumn;
+
+                  // Build unique sample values preview (match behavior from U3/U4 tables)
+                  const uniqueSampleValues = Array.from(new Set(col.sampleValues || []));
+                  const previewSampleValues = uniqueSampleValues.slice(0, 5).join(', ');
+                  const fullSampleValuesText = uniqueSampleValues.join(', ');
+
+                  return (
+                    <tr
+                      key={`col-${col.name}-${idx}`}
+                      className={col.dropColumn ? 'bg-gray-50 opacity-60 hover:bg-gray-50' : 'hover:bg-gray-50'}
+                      style={{ height: '1.75rem' }}
+                    >
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={col.newName}>
+                        <div className="truncate">
+                          <div className="text-gray-700 text-[10px] leading-tight truncate">
+                            {col.newName}
                           </div>
+                          {uniqueSampleValues.length === 0 ? (
+                            <div className="text-gray-400 text-[9px] leading-tight truncate">No samples</div>
+                          ) : (
+                            <div 
+                              className="text-gray-500 text-[9px] leading-tight truncate" 
+                              title={fullSampleValuesText}
+                            >
+                              {previewSampleValues}
+                              {uniqueSampleValues.length > 5 && '...'}
+                            </div>
+                          )}
                         </div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {previewData.length > 0 ? (
-                    previewData.map((row, rowIdx) => (
-                      <tr key={rowIdx} className="hover:bg-gray-50">
-                        {columns.map((col, colIdx) => (
-                          <td key={colIdx} className="px-4 py-2 text-gray-600 border-r border-gray-200">
-                            {row[col.name] !== null && row[col.name] !== undefined 
-                              ? String(row[col.name]).length > 30 
-                                ? String(row[col.name]).substring(0, 30) + '...' 
-                                : String(row[col.name])
-                              : <span className="text-gray-400 italic">null</span>}
-                          </td>
-                        ))}
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={columns.length} className="px-4 py-8 text-center text-gray-500">
-                        Preview data will be available after transformations are applied.
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <input
+                          type="text"
+                          value={col.newName}
+                          onChange={e => updateColumn(idx, { newName: e.target.value })}
+                          disabled={inputsDisabled}
+                          className="w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] disabled:bg-gray-100 disabled:cursor-not-allowed"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div className="truncate">
+                          <span className={`inline-flex items-center rounded-full border px-1 py-0 text-[9px] font-semibold ${getDtypeBadgeColor(col.originalDtype)}`}>
+                            {col.originalDtype}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div 
+                          className="relative inline-block w-full max-w-[90px]" 
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <select
+                            value={col.selectedDtype}
+                            onChange={e => {
+                              e.stopPropagation();
+                              updateColumn(idx, { selectedDtype: e.target.value });
+                            }}
+                            disabled={inputsDisabled}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed`}
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              backgroundSize: '1em 1em',
+                              backgroundPosition: 'right 0.25rem center',
+                              backgroundRepeat: 'no-repeat',
+                              paddingRight: '1.5rem'
+                            }}
+                          >
+                            {dtypeOptions.map(opt => (
+                              <option key={`dtype-${col.name}-${opt.value}`} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        {hasMissingValues ? (
+                          <div className="truncate">
+                            <span className="text-red-600 text-[9px] font-semibold">
+                              {col.missingCount}
+                            </span>
+                            <span className="text-gray-500 text-[9px]">
+                              ({col.missingPercentage.toFixed(1)}%)
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-[10px]">None</span>
+                        )}
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        {hasMissingValues ? (
+                          <div 
+                            className="relative inline-block w-full max-w-[90px]" 
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <select
+                              value={col.missingStrategy}
+                              onChange={e => {
+                                e.stopPropagation();
+                                updateColumn(idx, { 
+                                  missingStrategy: e.target.value,
+                                  ...(e.target.value !== 'custom' ? { missingCustomValue: '' } : {})
+                                });
+                              }}
+                              disabled={inputsDisabled}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              className="w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                backgroundSize: '1em 1em',
+                                backgroundPosition: 'right 0.25rem center',
+                                backgroundRepeat: 'no-repeat',
+                                paddingRight: '1.5rem'
+                              }}
+                            >
+                              {missingOptions.map(opt => (
+                                <option key={`missing-${col.name}-${opt.value}`} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-[10px]">N/A</span>
+                        )}
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div 
+                          className="relative inline-block w-full max-w-[90px]" 
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <select
+                            value={col.classification || 'unclassified'}
+                            onChange={e => {
+                              e.stopPropagation();
+                              const value = e.target.value as 'identifiers' | 'measures' | 'unclassified';
+                              updateColumn(idx, { classification: value });
+                            }}
+                            disabled={inputsDisabled}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none disabled:bg-gray-100 disabled:cursor-not-allowed ${
+                              col.classification === 'identifiers' ? 'text-blue-600 border-blue-300' :
+                              col.classification === 'measures' ? 'text-green-600 border-green-300' :
+                              'text-yellow-600 border-yellow-300'
+                            }`}
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                              backgroundSize: '1em 1em',
+                              backgroundPosition: 'right 0.25rem center',
+                              backgroundRepeat: 'no-repeat',
+                              paddingRight: '1.5rem'
+                            }}
+                          >
+                            <option value="identifiers">Identifiers</option>
+                            <option value="measures">Measures</option>
+                            <option value="unclassified">Unclassified</option>
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div className="flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            className="h-3 w-3 accent-red-600 cursor-pointer"
+                            checked={col.dropColumn}
+                            onChange={e => {
+                              const checked = e.target.checked;
+                              updateColumn(idx, {
+                                dropColumn: checked,
+                                ...(checked ? {
+                                  missingStrategy: 'none',
+                                  missingCustomValue: '',
+                                  datetimeFormat: undefined,
+                                } : {})
+                              });
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
                       </td>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        )}
-
-        {/* Behind the Scenes Info */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <p className="text-xs text-gray-600">
-            <strong>Dataset details:</strong> {totalRows.toLocaleString()} rows • {columns.length} columns • 
-            Missing values resolved • No row misalignment detected • Final delimiter confirmed • Header rows flattened • Dataset version created (v1)
-          </p>
         </div>
 
-        {/* Final Confirmation Panel */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-gray-700 mb-4">
-            Your data is now ready to be used across Trinity. You can proceed, or go back to adjust anything.
-          </p>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {onGoToStage && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onGoToStage('U5')}
-                  className="flex items-center gap-2"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  Back to Missing Values
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onGoToStage('U4')}
-                  className="flex items-center gap-2"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  Back to Data Types
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onGoToStage('U3')}
-                  className="flex items-center gap-2"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  Back to Column Names
-                </Button>
-              </>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDownload}
-              className="flex items-center gap-2"
-            >
-              <Download className="w-4 h-4" />
-              Download Cleaned Preview
-            </Button>
-          </div>
-          <div className="flex justify-end pt-4 border-t border-blue-200">
-            <Button
-              onClick={onNext}
-              className="bg-[#41C185] hover:bg-[#36a870] text-white"
-            >
-              Confirm & Prime Dataset
-            </Button>
-          </div>
+        <div className="flex justify-end gap-2 pt-4 border-t border-gray-200">
+          <Button variant="outline" size="sm" onClick={onBack} disabled={saving}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={saving || loading || columns.length === 0}>
+            {saving ? 'Saving…' : 'Approve'}
+          </Button>
         </div>
       </div>
     </StageLayout>
   );
 };
-

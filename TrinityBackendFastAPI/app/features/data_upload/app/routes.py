@@ -1,5 +1,5 @@
 # app/routes.py - API Routes
-from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response, Body
 from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any, Optional
 import base64
@@ -34,6 +34,9 @@ from app.features.data_upload.app.schemas import (
 from app.features.data_upload.app.database import (
     log_operation_to_mongo,
     mark_operation_log_deleted,
+    save_guided_workflow_state,
+    get_guided_workflow_state,
+    delete_guided_workflow_state,
 )
 
 from app.redis_cache import cache_master_config
@@ -358,6 +361,9 @@ read_minio_object = data_upload_service.read_minio_object
 
 @router.get("/get_object_prefix")
 async def get_object_prefix_endpoint(
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
     client_name: str = "",
     app_name: str = "",
     project_name: str = "",
@@ -367,9 +373,15 @@ async def get_object_prefix_endpoint(
     The endpoint resolves the MinIO prefix for the provided client/app/project
     combination. Environment variables are sourced from Redis when available
     and otherwise retrieved from Postgres' ``registry_environment`` table.
+    
+    Can accept either IDs or names (or both). If names are provided, they take precedence.
+    If only IDs are provided, names will be resolved dynamically from the database.
     """
 
     prefix, env, env_source = await get_object_prefix(
+        client_id=client_id,
+        app_id=app_id,
+        project_id=project_id,
         client_name=client_name,
         app_name=app_name,
         project_name=project_name,
@@ -492,7 +504,7 @@ async def upload_file(
         )
 
         submission = celery_task_client.submit_callable(
-            name="data_upload_validate.upload_file",
+            name="data_upload.upload_file",
             dotted_path="app.features.data_upload_validate.service.process_temp_upload",
             kwargs={
                 "file_b64": base64.b64encode(content).decode("utf-8"),
@@ -501,7 +513,7 @@ async def upload_file(
                 "sheet_name": sheet_name or None,
             },
             metadata={
-                "feature": "data_upload_validate",
+                "feature": "data_upload",
                 "operation": "upload_file",
                 "filename": file.filename,
                 "prefix": tmp_prefix,
@@ -1776,7 +1788,7 @@ async def validate(
             )
 
     submission = celery_task_client.submit_callable(
-        name="data_upload_validate.validate",
+        name="data_upload.validate",
         dotted_path="app.features.data_upload_validate.service.run_validation",
         kwargs={
             "validator_atom_id": validator_atom_id,
@@ -1788,7 +1800,7 @@ async def validate(
             "client_id": client_id,
         },
         metadata={
-            "feature": "data_upload_validate",
+            "feature": "data_upload",
             "operation": "validate",
             "validator_atom_id": validator_atom_id,
             "file_count": len(keys),
@@ -2155,8 +2167,10 @@ async def save_dataframes(
                     batched_kwargs = CSV_READ_KWARGS.copy()
                     batched_kwargs["schema"] = schema
                     batched_kwargs["truncate_ragged_lines"] = False
+                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                 else:
                     batched_kwargs = CSV_READ_KWARGS.copy()
+                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                 
                 reader = pl.read_csv_batched(
                     csv_path, batch_size=1_000_000, **batched_kwargs
@@ -2198,7 +2212,10 @@ async def save_dataframes(
                 data_bytes = fileobj.read()
                 # Use pl.read_csv with CSV_READ_KWARGS for proper dtype inference
                 # This matches the old routes behavior and preserves numeric types
-                df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
+                # Add ignore_errors to handle mixed dtype columns (e.g., "allpacksize" in numeric column)
+                read_kwargs = CSV_READ_KWARGS.copy()
+                read_kwargs["ignore_errors"] = True  # Convert unparseable values to null instead of failing
+                df_pl = pl.read_csv(io.BytesIO(data_bytes), **read_kwargs)
                 df_pl = data_upload_service._normalize_column_names(df_pl)
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)
@@ -5500,11 +5517,17 @@ async def check_priming_status(
         # Determine completion status
         completed = bool(is_primed) or (current_stage == "U7")
         missing_steps = [s for s in all_steps if s not in completed_steps]
-        # Status colors:
-        # - Red: U0 or U1 (step 1 or earlier) - not in progress
-        # - Yellow: U2-U6 (step 2 to step 7) - in progress
-        # - Green: U7 (step 8 - completed) - primed
-        is_in_progress = bool(current_stage) and current_stage not in ["U0", "U1", "U7"]
+        # Status colors (proper encoding):
+        # - Red: File not approved/not primed (no guided mode started OR U0/U1 - not started)
+        # - Yellow: File has started guided mode but not completed (U2-U6 - in progress)
+        # - Green: File is fully primed/approved (U7 - completed)
+        # is_in_progress means: guided mode has started (U2-U6) but not completed (not primed)
+        is_in_progress = (
+            not is_primed and 
+            bool(current_stage) and 
+            current_stage not in ["U0", "U1", "U7"] and
+            current_stage in ["U2", "U3", "U4", "U5", "U6"]
+        )
         
         return {
             "completed": completed,
@@ -5562,6 +5585,11 @@ async def finalize_primed_file(request: Request):
         
         file_path = body.get("file_path", "")
         file_name = body.get("file_name", "")
+        selected_sheet = body.get("selected_sheet")  # For Excel sheets
+        use_folder_structure = body.get("use_folder_structure", False)  # For multi-sheet Excel files
+        base_file_name_param = body.get("base_file_name")  # Base filename for folder structure
+        preserve_existing_folder = body.get("preserve_existing_folder", False)  # Preserve existing folder structure
+        existing_folder_path = body.get("existing_folder_path")  # Existing folder path to preserve
         client_name = body.get("client_name", "")
         app_name = body.get("app_name", "")
         project_name = body.get("project_name", "")
@@ -5574,6 +5602,48 @@ async def finalize_primed_file(request: Request):
         if not file_name:
             # Use the original file name from path
             file_name = Path(file_path).stem
+        
+        # Get the proper prefix for saved dataframes (needed early for folder detection)
+        os.environ["CLIENT_NAME"] = client_name
+        os.environ["APP_NAME"] = app_name
+        os.environ["PROJECT_NAME"] = project_name
+        prefix = await get_object_prefix()
+        
+        # CRITICAL: If file is already in a folder (not in tmp/), preserve the existing folder structure
+        # Extract folder path from file_path if it's already in a saved location
+        if not preserve_existing_folder and file_path and '/' in file_path and not file_path.startswith(prefix + "tmp/") and "/tmp/" not in file_path:
+            # File is already in a saved folder location, extract the folder path
+            # file_path format: prefix + folder_path + filename
+            # We need to extract just the folder_path part (without prefix and filename)
+            file_path_without_prefix = file_path
+            if file_path.startswith(prefix):
+                file_path_without_prefix = file_path[len(prefix):]
+            folder_parts = file_path_without_prefix.split('/')
+            if len(folder_parts) > 1:
+                existing_folder_path = '/'.join(folder_parts[:-1])  # All parts except the filename
+                preserve_existing_folder = True
+                logger.info(f"📁 Detected existing folder structure in file_path: {existing_folder_path} (from {file_path})")
+        
+        # Handle sheet files: file_name format is "fileName (sheetName)"
+        # Extract base filename and sheet name for proper arrow file naming
+        base_file_name = base_file_name_param or file_name
+        sheet_name = None
+        if selected_sheet:
+            sheet_name = selected_sheet
+            # If file_name contains sheet info like "file.xlsx (Sheet1)", extract base name
+            import re
+            sheet_match = re.match(r'^(.+?)\s*\(([^)]+)\)$', file_name)
+            if sheet_match:
+                base_file_name = base_file_name_param or sheet_match.group(1).strip()
+                if not sheet_name:
+                    sheet_name = sheet_match.group(2).strip()
+        elif '(' in file_name and ')' in file_name:
+            # Extract sheet name from file_name format "fileName (sheetName)"
+            import re
+            sheet_match = re.match(r'^(.+?)\s*\(([^)]+)\)$', file_name)
+            if sheet_match:
+                base_file_name = base_file_name_param or sheet_match.group(1).strip()
+                sheet_name = sheet_match.group(2).strip()
         
         # Read the transformed file from MinIO
         try:
@@ -5614,25 +5684,78 @@ async def finalize_primed_file(request: Request):
         
         # Convert to Arrow format
         arrow_buf = io.BytesIO()
-        arrow_table = df_pl.to_arrow(use_pyarrow=True)
+        arrow_table = df_pl.to_arrow()  # Remove use_pyarrow argument - it's not needed
         with pa.ipc.new_file(arrow_buf, arrow_table.schema) as writer:
             writer.write(arrow_table)
         arrow_bytes = arrow_buf.getvalue()
         
-        # Get the proper prefix for saved dataframes
-        os.environ["CLIENT_NAME"] = client_name
-        os.environ["APP_NAME"] = app_name
-        os.environ["PROJECT_NAME"] = project_name
-        prefix = await get_object_prefix()
+        # Create the arrow file name and determine folder structure
+        # CRITICAL: For sheets, ALWAYS use folder structure to prevent sheets from being pulled out
+        # If sheet_name exists, we MUST use folder structure regardless of use_folder_structure flag
+        # This ensures sheets NEVER appear outside folders
+        if sheet_name:
+            # ALWAYS use folder structure for sheets - this prevents them from being pulled out
+            if not use_folder_structure:
+                logger.warning(f"⚠️ Sheet detected ({sheet_name}) but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out.")
+            use_folder_structure = True  # Force folder structure for sheets
         
-        # Create the arrow file name
-        arrow_name = Path(file_name).stem + ".arrow"
+        if use_folder_structure and sheet_name:
+            # CRITICAL: If preserve_existing_folder is True, use the existing folder path
+            # This ensures files already in folders stay in their original folder location
+            if preserve_existing_folder and existing_folder_path:
+                # Extract just the filename from file_name (in case it has sheet info)
+                from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
+                normalized_sheet = normalize_sheet_name(sheet_name)
+                # Use the existing folder path and just add the sheet filename
+                # existing_folder_path should already include the full folder structure (e.g., "folder_name/sheets")
+                # So we just append the normalized sheet name with .arrow extension
+                arrow_name = f"{existing_folder_path}/{normalized_sheet}.arrow"
+                logger.info(f"📁 Preserving existing folder structure: {arrow_name} (existing_folder: {existing_folder_path}, sheet: {sheet_name})")
+            else:
+                # Normalize Excel folder name from base file name
+                # Use a more robust normalization to prevent conflicts across multiple folders
+                base_stem = Path(base_file_name).stem
+                # Normalize: remove spaces, special chars, make it filesystem-safe
+                excel_folder_name = base_stem.replace(' ', '_').replace('.', '_')
+                excel_folder_name = ''.join(c for c in excel_folder_name if c.isalnum() or c in ('_', '-'))
+                
+                # If folder name is empty or too short, use a fallback
+                if not excel_folder_name or len(excel_folder_name) < 2:
+                    excel_folder_name = 'Excel_File'
+                
+                # Normalize sheet name (remove spaces, special chars)
+                from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
+                normalized_sheet = normalize_sheet_name(sheet_name)
+                
+                # Use folder structure: {excel_folder_name}/sheets/{normalized_sheet}.arrow
+                # This ensures sheets stay in folders and prevents conflicts
+                arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet}.arrow"
+                
+                logger.info(f"📁 Using folder structure: {arrow_name} (base: {base_file_name}, sheet: {sheet_name})")
+        elif sheet_name:
+            # CRITICAL: If we have a sheet_name but use_folder_structure is False, 
+            # we MUST still use folder structure to prevent sheets from being pulled out
+            # This ensures sheets NEVER appear outside folders
+            logger.warning(f"⚠️ Sheet detected but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out: {sheet_name}")
+            base_stem = Path(base_file_name).stem
+            excel_folder_name = base_stem.replace(' ', '_').replace('.', '_')
+            excel_folder_name = ''.join(c for c in excel_folder_name if c.isalnum() or c in ('_', '-'))
+            if not excel_folder_name or len(excel_folder_name) < 2:
+                excel_folder_name = 'Excel_File'
+            from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
+            normalized_sheet = normalize_sheet_name(sheet_name)
+            arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet}.arrow"
+            logger.info(f"📁 Forced folder structure to keep sheet in folder: {arrow_name}")
+            # Update use_folder_structure flag for logging
+            use_folder_structure = True
+        else:
+            arrow_name = Path(base_file_name).stem + ".arrow"
         
         # Upload to MinIO with proper prefix (not tmp/)
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_object_name = result.get("object_name", "")
         
-        logger.info(f"✅ Saved primed file to: {saved_object_name}")
+        logger.info(f"✅ Saved primed file to: {saved_object_name} (folder_structure={use_folder_structure}, sheet_name={sheet_name})")
         
         # Upload to Flight for fast access
         flight_path = f"{validator_atom_id}/{arrow_name}"
@@ -5651,9 +5774,11 @@ async def finalize_primed_file(request: Request):
         )
         redis_client.set(f"flight:{flight_path}", saved_object_name)
         
-        # Mark as primed in Redis
-        primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+        # Mark as primed in Redis using saved_object_name (not original file_name)
+        # This ensures sheets are correctly identified by their saved arrow file name
+        primed_key_parts = ("primed_files", client_name, app_name, project_name, saved_object_name)
         redis_client.set(primed_key_parts, "true", ttl=86400 * 30)
+        logger.info(f"✅ Marked as primed in Redis: {saved_object_name}")
         
         # Save column classifications to MongoDB if provided from guided flow
         if column_classifications:
@@ -5762,4 +5887,115 @@ async def finalize_primed_file(request: Request):
         logger.error(f"Error finalizing primed file: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# GUIDED WORKFLOW STATE PERSISTENCE ENDPOINTS
+# ============================================================================
+
+@router.post("/guided-workflow/save-state")
+async def save_guided_workflow_state_endpoint(
+    user_id: str = Body(...),
+    dataset_id: str = Body(...),
+    workflow_state: Dict[str, Any] = Body(...),
+    client_name: str = Body(""),
+    app_name: str = Body(""),
+    project_name: str = Body(""),
+):
+    """
+    Save guided workflow state for a user and dataset.
+    
+    Structure in MongoDB: trinity_guided_workflow collection
+    Document ID: {user_id}:{dataset_id}
+    """
+    try:
+        result = save_guided_workflow_state(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            workflow_state=workflow_state,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to save workflow state"))
+        
+        return {
+            "status": "success",
+            "message": "Workflow state saved successfully",
+            "mongo_id": result.get("mongo_id"),
+            "is_new": result.get("is_new", False),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving guided workflow state: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/guided-workflow/get-state")
+async def get_guided_workflow_state_endpoint(
+    user_id: str = Body(...),
+    dataset_id: str = Body(...),
+):
+    """
+    Get guided workflow state for a user and dataset.
+    """
+    try:
+        result = get_guided_workflow_state(
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to get workflow state"))
+        
+        if result.get("status") == "not_found":
+            return {
+                "status": "not_found",
+                "message": "No workflow state found",
+                "workflow_state": None,
+            }
+        
+        return {
+            "status": "success",
+            "workflow_state": result.get("workflow_state"),
+            "updated_at": result.get("updated_at"),
+            "created_at": result.get("created_at"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting guided workflow state: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/guided-workflow/delete-state")
+async def delete_guided_workflow_state_endpoint(
+    user_id: str = Body(...),
+    dataset_id: str = Body(...),
+):
+    """
+    Delete guided workflow state for a user and dataset.
+    """
+    try:
+        result = delete_guided_workflow_state(
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to delete workflow state"))
+        
+        return {
+            "status": "success",
+            "message": "Workflow state deleted successfully" if result.get("deleted") else "Workflow state not found",
+            "deleted": result.get("deleted", False),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting guided workflow state: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -165,12 +165,33 @@ export interface TableSaveResponse {
 
 /**
  * Load a table from MinIO
+ * @param objectName Path to Arrow file in MinIO
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
-export const loadTable = async (objectName: string): Promise<TableResponse> => {
-  const response = await fetch(`${TABLE_API}/load`, {
+export const loadTable = async (
+  objectName: string,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
+): Promise<TableResponse> => {
+  // Build query parameters for pipeline tracking (like feature-overview and groupby)
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/load${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ object_name: objectName })
+    body: JSON.stringify({ 
+      object_name: objectName,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
+    })
   });
   
   if (!response.ok) {
@@ -183,12 +204,36 @@ export const loadTable = async (objectName: string): Promise<TableResponse> => {
 
 /**
  * Update table settings and get updated data
+ * @param tableId Table session ID
+ * @param settings Table settings to apply
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
-export const updateTable = async (tableId: string, settings: TableSettings): Promise<TableResponse> => {
-  const response = await fetch(`${TABLE_API}/update`, {
+export const updateTable = async (
+  tableId: string, 
+  settings: TableSettings,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
+): Promise<TableResponse> => {
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/update${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table_id: tableId, settings })
+    body: JSON.stringify({ 
+      table_id: tableId, 
+      settings,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
+    })
   });
   
   if (!response.ok) {
@@ -207,6 +252,9 @@ export const updateTable = async (tableId: string, settings: TableSettings): Pro
  * @param useHeaderRow If true, first row values become column names (for blank tables with header row ON)
  * @param conditionalFormatRules Optional conditional formatting rules
  * @param metadata Optional table metadata (formatting, design, layout)
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
 export const saveTable = async (
   tableId: string, 
@@ -214,9 +262,30 @@ export const saveTable = async (
   overwriteOriginal?: boolean,
   useHeaderRow?: boolean,
   conditionalFormatRules?: ConditionalFormatRule[],
-  metadata?: TableMetadata
+  metadata?: TableMetadata,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
 ): Promise<TableSaveResponse> => {
-  const response = await fetch(`${TABLE_API}/save`, {
+  // Get environment variables for client/app/project (same as Metrics)
+  const envStr = localStorage.getItem('env');
+  const env = envStr ? JSON.parse(envStr) : {};
+  const stored = localStorage.getItem('current-project');
+  const project = stored ? JSON.parse(stored) : {};
+  
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  // Add client/app/project to query params (same as Metrics pattern)
+  if (env.CLIENT_NAME) queryParams.append('client_name', env.CLIENT_NAME);
+  if (env.APP_NAME) queryParams.append('app_name', env.APP_NAME);
+  if (env.PROJECT_NAME) queryParams.append('project_name', env.PROJECT_NAME);
+  
+  const url = `${TABLE_API}/save${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ 
@@ -231,7 +300,9 @@ export const saveTable = async (
         layout: metadata.layout,
         column_widths: metadata.columnWidths,
         row_heights: metadata.rowHeights,
-      } : undefined
+      } : undefined,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
     })
   });
   
@@ -344,19 +415,49 @@ export const createBlankTable = async (rows: number, columns: number, useHeaderR
 
 /**
  * Edit a single cell in the table
+ * @param tableId Table session ID
+ * @param row Row index
+ * @param column Column name
+ * @param value New cell value
+ * @param atomId Atom instance ID for pipeline tracking
+ * @param cardId Card ID for pipeline tracking
+ * @param canvasPosition Canvas position for pipeline tracking
  */
-export const editTableCell = async (tableId: string, row: number, column: string, value: any) => {
-  const response = await fetch(`${TABLE_API}/edit-cell`, {
+export const editTableCell = async (
+  tableId: string, 
+  row: number, 
+  column: string, 
+  value: any,
+  atomId?: string,
+  cardId?: string,
+  canvasPosition?: number
+) => {
+  // Build query parameters for pipeline tracking
+  const queryParams = new URLSearchParams();
+  if (atomId) queryParams.append('atom_id', atomId);
+  if (cardId) queryParams.append('card_id', cardId);
+  if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  
+  const url = `${TABLE_API}/edit-cell${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table_id: tableId, row, column, value })
+    body: JSON.stringify({ 
+      table_id: tableId, 
+      row, 
+      column, 
+      value,
+      atom_id: atomId,
+      project_id: undefined // Will be extracted from environment
+    })
   });
-
+  
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Failed to edit cell' }));
     throw new Error(error.detail || 'Failed to edit cell');
   }
-
+  
   return response.json();
 };
 

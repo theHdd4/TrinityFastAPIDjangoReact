@@ -27,8 +27,12 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() in {"1", "true", "yes", "on"}
 
-DEFAULT_MONGO_URI = "mongodb://mongo:27017/trinity"
-MONGO_URI = os.getenv("OVERVIEW_MONGO_URI", os.getenv("MONGO_URI", DEFAULT_MONGO_URI))
+# MongoDB Configuration - same pattern as other atoms
+MONGODB_URL = os.getenv("OVERVIEW_MONGO_URI", os.getenv("MONGO_URI", "mongodb://mongo:27017"))
+# Accept both MONGO_USERNAME and legacy MONGO_USER for credentials
+MONGO_USER = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER", "root")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD", "rootpass")
+MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
 
 _mongo_client: Optional[MongoClient] = None
 
@@ -36,7 +40,20 @@ _mongo_client: Optional[MongoClient] = None
 def _get_mongo_client() -> MongoClient:
     global _mongo_client
     if _mongo_client is None:
-        _mongo_client = MongoClient(MONGO_URI)
+        auth_kwargs = (
+            {
+                "username": MONGO_USER,
+                "password": MONGO_PASSWORD,
+                "authSource": MONGO_AUTH_DB,
+            }
+            if MONGO_USER and MONGO_PASSWORD
+            else {}
+        )
+        _mongo_client = MongoClient(
+            MONGODB_URL,
+            **auth_kwargs,
+            serverSelectionTimeoutMS=5000,
+        )
     return _mongo_client
 
 

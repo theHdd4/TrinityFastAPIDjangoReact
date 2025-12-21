@@ -80,6 +80,8 @@ import {
 } from '@/components/AtomList/atoms/column-classifier/prefillManager';
 import { TextBoxToolbar } from './text-box/TextBoxToolbar';
 import type { TextAlignOption, TextStylePreset } from './text-box/types';
+import { LandingScreenAtom } from '../../LandingScreen/LandingScreenAtom';
+import { useLaboratoryScenario } from '../../hooks/useLaboratoryScenario';
 
 import {
   useLaboratoryStore,
@@ -293,7 +295,12 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     return null;
   }
 
-  return rawCards.map((card: any) => ({
+  // Filter out landing cards before hydrating
+  const cardsWithoutLanding = rawCards.filter((card: any) => 
+    !card.atoms?.some((atom: any) => atom.atomId === 'landing-screen')
+  );
+
+  return cardsWithoutLanding.map((card: any) => ({
     id: card.id,
     atoms: Array.isArray(card.atoms)
       ? card.atoms.map((atom: any) => hydrateDroppedAtom(atom))
@@ -1248,13 +1255,20 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     activeGuidedFlows,
     isGuidedModeActiveForAtom,
     removeActiveGuidedFlow,
+<<<<<<< HEAD
     isMetricGuidedFlowOpen,
     activeMetricGuidedFlow,
     closeMetricGuidedFlow,
     setActiveMetricGuidedFlow,
     metricsInputs,
     findCardByAtomId,
+=======
+    globalGuidedModeEnabled
+>>>>>>> 28380d565554ad03a25ccbc3d27006c62cd75cf2
   } = useLaboratoryStore();
+
+  // Get scenario to determine landing card title
+  const scenarioData = useLaboratoryScenario();
 
   // Calculate allowed atom IDs based on current mode
   const allowedAtomIds = useMemo(() => {
@@ -1489,6 +1503,41 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   const initialLoad = React.useRef(true);
   const { setCards } = useExhibitionStore();
   const { toast } = useToast();
+  
+  // Automatically create landing card when there are no cards
+  React.useEffect(() => {
+    if (!Array.isArray(layoutCards) || layoutCards.length === 0) {
+      // Check if landing card already exists
+      const hasLandingCard = Array.isArray(layoutCards) && 
+        layoutCards.some(card => 
+          card.atoms?.some(atom => atom.atomId === 'landing-screen')
+        );
+      
+      if (!hasLandingCard) {
+        // Create landing card with landing-screen atom
+        const landingCardId = `landing-card-${Date.now()}`;
+        const landingAtomId = `landing-atom-${Date.now()}`;
+        
+        const landingCard: LayoutCard = {
+          id: landingCardId,
+          atoms: [{
+            id: landingAtomId,
+            atomId: 'landing-screen',
+            title: 'Project Landing',
+            category: 'System',
+            color: '#458EE2',
+            settings: {},
+          }],
+          isExhibited: false,
+        };
+        
+        setLayoutCards([landingCard]);
+      }
+    }
+    // NOTE: Landing card should remain even when other cards are added
+    // Removed the logic that automatically removes landing card when non-landing cards exist
+    // This allows users to keep the landing card and add new cards below it
+  }, [layoutCards, setLayoutCards]);
 
   const renderAppendedVariables = (card: LayoutCard) => {
     const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
@@ -4362,6 +4411,50 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
   };
 
+  // Replace an atom in a card (used for landing screen to replace itself with another atom)
+  const replaceAtomInCard = (cardId: string, oldAtomId: string, newAtomId: string) => {
+    const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+    if (!card) return;
+
+    // Check if the card has the landing-screen atom
+    const hasLandingAtom = card.atoms.some(a => a.id === oldAtomId && a.atomId === 'landing-screen');
+    if (!hasLandingAtom) {
+      // If not a landing atom, use normal add flow
+      addAtomByName(cardId, newAtomId);
+      return;
+    }
+
+    // Build the new atom
+    const info = allAtoms.find(a => a.id === newAtomId);
+    if (!info) return;
+
+    const newAtom = buildAtomFromApiPayload(info.id, {
+      atomId: info.id,
+      source: 'landing-action',
+    });
+
+    // Replace the landing atom with the new atom
+    setLayoutCards(
+      (Array.isArray(layoutCards) ? layoutCards : []).map(c =>
+        c.id === cardId 
+          ? { ...c, atoms: [newAtom] } // Replace all atoms with just the new one
+          : c
+      )
+    );
+
+    prefillAtomIfRequired(cardId, newAtom);
+
+    // Automatically open properties panel
+    setTimeout(() => {
+      if (onAtomSelect) {
+        onAtomSelect(newAtom.id);
+      }
+      if (onOpenSettingsPanel) {
+        onOpenSettingsPanel();
+      }
+    }, 0);
+  };
+
 
   const deleteCard = async (cardId: string) => {
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
@@ -4721,25 +4814,25 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   // Sync Laboratory changes to Workflow collection
   const syncWorkflowCollectionOnLaboratorySave = async () => {
     try {
-      console.log('🔄 [SYNC START] Syncing Laboratory changes to Workflow collection...');
-      console.log('🔄 [SYNC] Function called with pendingChanges:', pendingChanges);
-      console.log('🔄 [SYNC] Current layoutCards count:', Array.isArray(layoutCards) ? layoutCards.length : 0);
+      // console.log('🔄 [SYNC START] Syncing Laboratory changes to Workflow collection...');
+      // console.log('🔄 [SYNC] Function called with pendingChanges:', pendingChanges);
+      // console.log('🔄 [SYNC] Current layoutCards count:', Array.isArray(layoutCards) ? layoutCards.length : 0);
 
       const hasPendingChanges = pendingChanges.deletedMolecules.length > 0 ||
         pendingChanges.deletedAtoms.length > 0 ||
         pendingChanges.addedAtoms.length > 0;
-      console.log('🔄 [SYNC] hasPendingChanges:', hasPendingChanges);
+      // console.log('🔄 [SYNC] hasPendingChanges:', hasPendingChanges);
 
       // Get current workflow configuration
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
-      console.log('🔄 [SYNC] Environment config:', {
-        CLIENT_NAME: env.CLIENT_NAME,
-        APP_NAME: env.APP_NAME,
-        PROJECT_NAME: env.PROJECT_NAME
-      });
+      // console.log('🔄 [SYNC] Environment config:', {
+      //   CLIENT_NAME: env.CLIENT_NAME,
+      //   APP_NAME: env.APP_NAME,
+      //   PROJECT_NAME: env.PROJECT_NAME
+      // });
 
-      console.log('🔄 [SYNC] Fetching workflow data from:', `${MOLECULES_API}/workflow/get`);
+      // console.log('🔄 [SYNC] Fetching workflow data from:', `${MOLECULES_API}/workflow/get`);
       const response = await fetch(`${MOLECULES_API}/workflow/get`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4752,21 +4845,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         })
       });
 
-      console.log('🔄 [SYNC] Fetch response status:', response.status, response.ok);
+      // console.log('🔄 [SYNC] Fetch response status:', response.status, response.ok);
 
       if (response.ok) {
         const result = await response.json();
-        console.log('🔄 [SYNC] Fetch result:', {
-          hasWorkflowData: !!result.workflow_data,
-          moleculesCount: result.workflow_data?.canvas_molecules?.length || 0
-        });
+        // console.log('🔄 [SYNC] Fetch result:', {
+        //   hasWorkflowData: !!result.workflow_data,
+        //   moleculesCount: result.workflow_data?.canvas_molecules?.length || 0
+        // });
 
         if (result.workflow_data) {
           // Fetch all molecules from MongoDB (workflow_model_molecule_configuration)
           let updatedCanvasMolecules = [...(result.workflow_data.canvas_molecules || [])];
 
-          console.log(`📦 Fetched ${updatedCanvasMolecules.length} molecules from workflow_model_molecule_configuration`);
-          console.log(`🗑️ Molecules to mark as inactive: ${pendingChanges.deletedMolecules.join(', ')}`);
+          // console.log(`📦 Fetched ${updatedCanvasMolecules.length} molecules from workflow_model_molecule_configuration`);
+          // console.log(`🗑️ Molecules to mark as inactive: ${pendingChanges.deletedMolecules.join(', ')}`);
 
           // Handle molecule deletions - mark as isActive: false instead of removing
           // Simple approach: Check which molecules were deleted in Laboratory Mode
@@ -4776,7 +4869,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
             updatedCanvasMolecules = updatedCanvasMolecules.map(mol => {
               if (deletedMoleculeIds.has(mol.id)) {
-                console.log(`🔴 Marking molecule ${mol.id} (${mol.title || 'untitled'}) as inactive (isActive: false)`);
+                // console.log(`🔴 Marking molecule ${mol.id} (${mol.title || 'untitled'}) as inactive (isActive: false)`);
                 return {
                   ...mol,
                   isActive: false // Mark as inactive instead of removing
@@ -4793,13 +4886,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               return mol;
             });
 
-            console.log(`✅ Marked ${pendingChanges.deletedMolecules.length} molecules as inactive (isActive: false)`);
-            console.log(`📊 Final molecule count: ${updatedCanvasMolecules.length} total (${updatedCanvasMolecules.filter(m => m.isActive !== false).length} active, ${updatedCanvasMolecules.filter(m => m.isActive === false).length} inactive)`);
+            // console.log(`✅ Marked ${pendingChanges.deletedMolecules.length} molecules as inactive (isActive: false)`);
+            // console.log(`📊 Final molecule count: ${updatedCanvasMolecules.length} total (${updatedCanvasMolecules.filter(m => m.isActive !== false).length} active, ${updatedCanvasMolecules.filter(m => m.isActive === false).length} inactive)`);
           }
 
           // Handle atom deletions
           if (pendingChanges.deletedAtoms.length > 0) {
-            console.log('🔍 Processing atom deletions:', pendingChanges.deletedAtoms);
+            // console.log('🔍 Processing atom deletions:', pendingChanges.deletedAtoms);
 
             const moleculeBasedDeletions = pendingChanges.deletedAtoms.filter(change => change.moleculeId !== 'standalone');
             // FIX 3: Standalone deletions should NOT affect molecules - standalone cards are separate
@@ -4813,7 +4906,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 .map(change => change.atomId);
 
               if (atomsToRemove.length > 0) {
-                console.log(`🗑️ Removing atoms from molecule ${molecule.id}:`, atomsToRemove);
+                // console.log(`🗑️ Removing atoms from molecule ${molecule.id}:`, atomsToRemove);
                 return {
                   ...molecule,
                   atoms: molecule.atoms.filter(atom => !atomsToRemove.includes(atom)),
@@ -4829,7 +4922,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
           // Handle atom additions
           if (pendingChanges.addedAtoms.length > 0) {
-            console.log('➕ Processing atom additions:', pendingChanges.addedAtoms);
+            // console.log('➕ Processing atom additions:', pendingChanges.addedAtoms);
 
             const currentCards = Array.isArray(layoutCards) ? layoutCards : [];
             const additionsByMolecule = pendingChanges.addedAtoms.reduce((acc, addition) => {
@@ -4895,10 +4988,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           // FIX: Preserve atom order for ALL molecules from Laboratory Mode
           // This ensures that when atoms are added/reordered in Laboratory Mode,
           // their order is preserved in Workflow Mode
-          console.log('🔄 [SYNC] Starting atom order preservation logic...');
+          // console.log('🔄 [SYNC] Starting atom order preservation logic...');
           const currentCards = Array.isArray(layoutCards) ? layoutCards : [];
           const allMoleculeCards = currentCards.filter(card => card.moleculeId);
-          console.log('🔄 [SYNC] Total cards:', currentCards.length, 'Molecule cards:', allMoleculeCards.length);
+          // console.log('🔄 [SYNC] Total cards:', currentCards.length, 'Molecule cards:', allMoleculeCards.length);
 
           // CRITICAL FIX: Create a position map once for O(1) lookups instead of O(n) findIndex calls
           // This maps card.id -> position in the original layoutCards array
@@ -4925,24 +5018,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           });
 
           // Log initial grouping to verify card order
-          console.log(`🔄 [Sync] Grouped cards by molecule:`,
-            Array.from(cardsByMolecule.entries()).map(([molId, cards]) => ({
-              moleculeId: molId,
-              cardCount: cards.length,
-              cards: cards.map((c, idx) => ({
-                cardId: c.id,
-                atomId: c.atoms[0]?.atomId,
-                positionInOriginalArray: cardPositionMap.get(c.id) ?? -1,
-                groupIndex: idx
-              }))
-            }))
-          );
+          // console.log(`🔄 [Sync] Grouped cards by molecule:`,
+          //   Array.from(cardsByMolecule.entries()).map(([molId, cards]) => ({
+          //     moleculeId: molId,
+          //     cardCount: cards.length,
+          //     cards: cards.map((c, idx) => ({
+          //       cardId: c.id,
+          //       atomId: c.atoms[0]?.atomId,
+          //       positionInOriginalArray: cardPositionMap.get(c.id) ?? -1,
+          //       groupIndex: idx
+          //     }))
+          //   }))
+          // );
 
           // For each molecule, sort cards by their visual order (order field) and extract atoms
           cardsByMolecule.forEach((moleculeCards, moleculeId) => {
             // CRITICAL: Count cards within this molecule to ensure we have the correct count
             const moleculeCardCount = moleculeCards.length;
-            console.log(`🔄 [Sync] Processing molecule ${moleculeId} with ${moleculeCardCount} cards`);
+            // console.log(`🔄 [Sync] Processing molecule ${moleculeId} with ${moleculeCardCount} cards`);
 
             // CRITICAL FIX: Sort cards by their position in the original layoutCards array
             // The positionInOriginalArray is the PRIMARY source of truth for visual order in Laboratory Mode
@@ -4998,23 +5091,23 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
             // Verify the count matches
             if (orderedAtomIds.length !== moleculeCardCount) {
-              console.warn(`⚠️ [Sync] Molecule ${moleculeId} atom count (${orderedAtomIds.length}) doesn't match card count (${moleculeCardCount})`);
+              // console.warn(`⚠️ [Sync] Molecule ${moleculeId} atom count (${orderedAtomIds.length}) doesn't match card count (${moleculeCardCount})`);
             }
 
-            console.log(`🔄 [Sync] Molecule ${moleculeId} atom order from Laboratory Mode:`, {
-              moleculeId,
-              cardCount: moleculeCardCount,
-              atomCount: orderedAtomIds.length,
-              atomOrder: orderedAtomIds,
-              cardOrder: sortedCards.map((c, moleculeCardIndex) => ({
-                cardId: c.id,
-                atomId: c.atoms[0]?.atomId,
-                moleculeCardIndex: moleculeCardIndex, // Index within molecule (0, 1, 2, ...)
-                positionInArray: cardPositionMap.get(c.id) ?? -1,
-                orderField: c.order,
-                expectedAtomPosition: moleculeCardIndex // This will be the order in atomPositions
-              }))
-            });
+            // console.log(`🔄 [Sync] Molecule ${moleculeId} atom order from Laboratory Mode:`, {
+            //   moleculeId,
+            //   cardCount: moleculeCardCount,
+            //   atomCount: orderedAtomIds.length,
+            //   atomOrder: orderedAtomIds,
+            //   cardOrder: sortedCards.map((c, moleculeCardIndex) => ({
+            //     cardId: c.id,
+            //     atomId: c.atoms[0]?.atomId,
+            //     moleculeCardIndex: moleculeCardIndex, // Index within molecule (0, 1, 2, ...)
+            //     positionInArray: cardPositionMap.get(c.id) ?? -1,
+            //     orderField: c.order,
+            //     expectedAtomPosition: moleculeCardIndex // This will be the order in atomPositions
+            //   }))
+            // });
 
             moleculeAtomOrderMap.set(moleculeId, orderedAtomIds);
           });
@@ -5025,7 +5118,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
             if (labModeAtomOrder && labModeAtomOrder.length > 0) {
               // Use Laboratory Mode atom order
-              console.log(`🔄 Preserving atom order for molecule ${molecule.id} (${molecule.title || 'untitled'}):`, labModeAtomOrder);
+              // console.log(`🔄 Preserving atom order for molecule ${molecule.id} (${molecule.title || 'untitled'}):`, labModeAtomOrder);
               return {
                 ...molecule,
                 atoms: labModeAtomOrder,
@@ -5058,18 +5151,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             const atomPositions = buildAtomPositions(orderSource);
 
             // Log the final atomPositions to verify order
-            if (atomPositions.length > 0) {
-              console.log(`✅ [Sync] Final atomPositions for molecule ${molecule.id}:`, {
-                moleculeId: molecule.id,
-                atomCount: atomPositions.length,
-                atomPositions: atomPositions.map((ap, idx) => ({
-                  atomId: ap.atomId,
-                  order: ap.order,
-                  expectedOrder: idx, // Should match order
-                  matches: ap.order === idx
-                }))
-              });
-            }
+            // if (atomPositions.length > 0) {
+            //   console.log(`✅ [Sync] Final atomPositions for molecule ${molecule.id}:`, {
+            //     moleculeId: molecule.id,
+            //     atomCount: atomPositions.length,
+            //     atomPositions: atomPositions.map((ap, idx) => ({
+            //       atomId: ap.atomId,
+            //       order: ap.order,
+            //       expectedOrder: idx, // Should match order
+            //       matches: ap.order === idx
+            //     }))
+            //   });
+            // }
 
             return {
               ...molecule,
@@ -5363,9 +5456,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             addedAtoms: []
           });
 
-          console.log('✅ [SYNC END] Laboratory changes synced to Workflow collection');
+          // console.log('✅ [SYNC END] Laboratory changes synced to Workflow collection');
         } else {
-          console.warn('⚠️ [SYNC] No workflow_data, skipping sync');
+          // console.warn('⚠️ [SYNC] No workflow_data, skipping sync');
         }
       } else {
         console.error('❌ [SYNC] Response not OK, skipping sync');
@@ -6186,7 +6279,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         {expandedCard &&
           createPortal(
             <div
-              className="fixed inset-0 z-40 pointer-events-none"
+              className="fixed inset-0 z-[60] pointer-events-none"
               role="dialog"
               aria-modal="true"
             >
@@ -6214,6 +6307,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         }
 
                         if (!card) return 'Card';
+                        
+                        // Check if this is a landing card - use scenario-based title (same logic as minimized view)
+                        const isLandingCard = card.atoms?.some(atom => atom.atomId === 'landing-screen');
+                        if (isLandingCard) {
+                          // Case 1 (Scenario A): No files -> "Initialize"
+                          // Case 2 (Scenarios B, C): Some files not primed -> "Continue priming your data"
+                          // Case 3 (Scenario D): All files primed -> "Priming Complete"
+                          // While loading, default to "Initialize"
+                          if (scenarioData.scenario === 'loading' || scenarioData.scenario === 'A') {
+                            return 'Initialize';
+                          } else if (scenarioData.scenario === 'D') {
+                            return 'Priming Complete';
+                          } else {
+                            return 'Continue priming your data';
+                          }
+                        }
+                        
+                        // For non-landing cards, use moleculeTitle or atom title
                         return card.moleculeTitle
                           ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                           : (Array.isArray(card.atoms) && card.atoms.length > 0)
@@ -6262,28 +6373,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     ) : (
                       <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                         {card.atoms.map((atom) => (
-                          <React.Fragment key={`${atom.id}-expanded`}>
+                          <React.Fragment key={atom.id}>
                           <AtomBox
                             className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                           >
-                            {/* Atom Header */}
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="flex items-center space-x-2">
-                                <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
-                              </div>
-                              {/* <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                                }}
-                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4 text-gray-400" />
-                            </button> */}
-                            </div>
-
-                            {/* Atom Content */}
+                            {/* Atom Content - No duplicate header, card header already shows it */}
                             <div className="w-full flex-1 overflow-visible">
                               {atom.atomId === 'text-box' ? (
                                 <TextBoxEditor textId={atom.id} />
@@ -6337,6 +6431,25 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'landing-screen' ? (
+                                <div className="w-full h-full">
+                                  <LandingScreenAtom 
+                                    atomId={atom.id} 
+                                    cardId={card.id}
+                                    onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                    onAddNewCard={() => {
+                                      // Find the landing card's position and add new card right after it
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      // Find landing card by checking for landing-screen atom
+                                      const landingCardIndex = arr.findIndex(c => 
+                                        c.atoms?.some(a => a.atomId === 'landing-screen')
+                                      );
+                                      // If landing card found, add after it; otherwise add at end
+                                      const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                      addNewCard(undefined, insertPosition);
+                                    }}
+                                  />
+                                </div>
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
@@ -6395,15 +6508,40 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       <div className="h-full w-full min-w-0 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={`${canEdit ? '' : 'pointer-events-none'} min-w-0`}>
           {/* Layout Cards Container */}
+<<<<<<< HEAD
           <div data-lab-cards-container="true" className="p-2 space-y-6 w-full min-w-0">
             {/* Render cards before flow (existing cards when flow was opened) */}
             {cardsBeforeFlow.length > 0 && cardsBeforeFlow.map((card, index) => {
               const allCardsIndex = Array.isArray(layoutCards) ? layoutCards.findIndex(c => c.id === card.id) : -1;
               const cardTitle = card.moleculeTitle
+=======
+          <div data-lab-cards-container="true" className="p-2 space-y-6 w-full">
+            {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
+              // Check if this is a landing card
+              const isLandingCard = card.atoms?.some(atom => atom.atomId === 'landing-screen');
+              
+              // For landing cards, use scenario-based title
+              let cardTitle: string;
+              if (isLandingCard) {
+                // Case 1 (Scenario A): No files -> "Initialize"
+                // Case 2 (Scenarios B, C): Some files not primed -> "Continue priming your data"
+                // Case 3 (Scenario D): All files primed -> "Priming Complete"
+                // While loading, default to "Initialize"
+                if (scenarioData.scenario === 'loading' || scenarioData.scenario === 'A') {
+                  cardTitle = 'Initialize';
+                } else if (scenarioData.scenario === 'D') {
+                  cardTitle = 'Priming Complete';
+                } else {
+                  cardTitle = 'Continue priming your data';
+                }
+              } else {
+                cardTitle = card.moleculeTitle
+>>>>>>> 28380d565554ad03a25ccbc3d27006c62cd75cf2
                 ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                 : (Array.isArray(card.atoms) && card.atoms.length > 0)
                   ? card.atoms[0].title
                   : 'Card';
+              }
 
               // Check if someone is editing this card
               const editor = cardEditors?.get(card.id);
@@ -6413,7 +6551,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 <React.Fragment key={card.id}>
                   <Card
                     data-card-id={card.id}
-            className={`relative w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+            className={`relative w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col ${
+              // Allow landing card to extend when guided mode is active
+              isLandingCard && globalGuidedModeEnabled && activeGuidedFlows[card.atoms?.find(a => a.atomId === 'landing-screen')?.id || ''] 
+                ? 'overflow-visible' 
+                : 'overflow-hidden'
+            } ${
               dragOver === card.id
                         ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                         : isBeingEdited
@@ -6470,6 +6613,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     className="transition-transform hover:scale-110"
                   />
                 ) : null}
+                        {!isLandingCard && (
+                          <>
                         <button
                           onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                           className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
@@ -6500,8 +6645,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 >
                   <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                         </button>
+                          </>
+                        )}
                       </div>
                       <div className="flex items-center space-x-1.5">
+                        {!isLandingCard && (
                         <button
                           onClick={e => {
                             e.stopPropagation();
@@ -6512,6 +6660,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         >
                           <Trash2 className="w-3.5 h-3.5 text-gray-400" />
                         </button>
+                        )}
                         <button
                           onClick={e => {
                             e.stopPropagation();
@@ -6661,6 +6810,25 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'landing-screen' ? (
+                                <div className="w-full h-full">
+                                  <LandingScreenAtom 
+                                    atomId={atom.id} 
+                                    cardId={card.id}
+                                    onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                    onAddNewCard={() => {
+                                      // Find the landing card's position and add new card right after it
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      // Find landing card by checking for landing-screen atom
+                                      const landingCardIndex = arr.findIndex(c => 
+                                        c.atoms?.some(a => a.atomId === 'landing-screen')
+                                      );
+                                      // If landing card found, add after it; otherwise add at end
+                                      const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                      addNewCard(undefined, insertPosition);
+                                    }}
+                                  />
+                                </div>
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -7000,7 +7168,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               );
             })}
 
-            {/* Add New Card Button */}
+            {/* Add New Card Button - Show at end if there are cards (including landing card) */}
+            {Array.isArray(layoutCards) && layoutCards.length > 0 && (
             <div className="flex justify-center">
               <button
                 onClick={() => addNewCard()}
@@ -7020,6 +7189,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 </span>
               </button>
             </div>
+            )}
           </div>
         </div>
 
@@ -7027,7 +7197,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         {expandedCard &&
           createPortal(
             <div
-              className="fixed inset-0 z-40 pointer-events-none"
+              className="fixed inset-0 z-[60] pointer-events-none"
               role="dialog"
               aria-modal="true"
             >
@@ -7043,6 +7213,24 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                       {(() => {
                         const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
                         if (!card) return 'Card';
+                        
+                        // Check if this is a landing card - use scenario-based title (same logic as minimized view)
+                        const isLandingCard = card.atoms?.some(atom => atom.atomId === 'landing-screen');
+                        if (isLandingCard) {
+                          // Case 1 (Scenario A): No files -> "Initialize"
+                          // Case 2 (Scenarios B, C): Some files not primed -> "Continue priming your data"
+                          // Case 3 (Scenario D): All files primed -> "Priming Complete"
+                          // While loading, default to "Initialize"
+                          if (scenarioData.scenario === 'loading' || scenarioData.scenario === 'A') {
+                            return 'Initialize';
+                          } else if (scenarioData.scenario === 'D') {
+                            return 'Priming Complete';
+                          } else {
+                            return 'Continue priming your data';
+                          }
+                        }
+                        
+                        // For non-landing cards, use moleculeTitle or atom title
                         return card.moleculeTitle
                           ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                           : (Array.isArray(card.atoms) && card.atoms.length > 0)
@@ -7079,28 +7267,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     ) : (
                       <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                         {card.atoms.map((atom) => (
-                          <React.Fragment key={`${atom.id}-expanded`}>
+                          <React.Fragment key={atom.id}>
                           <AtomBox
                             className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                           >
-                            {/* Atom Header */}
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="flex items-center space-x-2">
-                                <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
-                              </div>
-                          {/* <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteAtomClick(card.id, atom.id, atom.title || '');
-                                }}
-                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4 text-gray-400" />
-                          </button> */}
-                            </div>
-
-                            {/* Atom Content */}
+                            {/* Atom Content - No duplicate header, card header already shows it */}
                             <div className="w-full flex-1 overflow-visible">
                               {atom.atomId === 'text-box' ? (
                                 <TextBoxEditor textId={atom.id} />
@@ -7154,6 +7325,25 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                               ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                 <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                              ) : atom.atomId === 'landing-screen' ? (
+                                <div className="w-full h-full">
+                                  <LandingScreenAtom 
+                                    atomId={atom.id} 
+                                    cardId={card.id}
+                                    onReplaceAtom={(newAtomId) => replaceAtomInCard(card.id, atom.id, newAtomId)}
+                                    onAddNewCard={() => {
+                                      // Find the landing card's position and add new card right after it
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      // Find landing card by checking for landing-screen atom
+                                      const landingCardIndex = arr.findIndex(c => 
+                                        c.atoms?.some(a => a.atomId === 'landing-screen')
+                                      );
+                                      // If landing card found, add after it; otherwise add at end
+                                      const insertPosition = landingCardIndex >= 0 ? landingCardIndex + 1 : arr.length;
+                                      addNewCard(undefined, insertPosition);
+                                    }}
+                                  />
+                                </div>
                               ) : (
                                 <div>
                                   <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 
-export type UploadStage = 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7';
+export type UploadStage = 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
 
 export interface UploadedFileInfo {
   name: string;
@@ -58,7 +58,7 @@ export interface GuidedUploadFlowState {
 }
 
 const INITIAL_STATE: GuidedUploadFlowState = {
-  currentStage: 'U1',
+  currentStage: 'U2', // Start at U2 (Confirm Headers) - U1 removed
   uploadedFiles: [],
   headerSelections: {},
   columnNameEdits: {},
@@ -102,7 +102,8 @@ export function useGuidedUploadFlow(initialState?: Partial<GuidedUploadFlowState
   }, []);
 
   const goToNextStage = useCallback(() => {
-    const stages: UploadStage[] = ['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+    // U1 removed - start from U2
+    const stages: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
     const currentIndex = stages.indexOf(state.currentStage);
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useGuidedUploadFlow.ts:96',message:'goToNextStage called',data:{currentStage:state.currentStage,currentIndex,nextStage:currentIndex < stages.length - 1 ? stages[currentIndex + 1] : 'none'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
@@ -113,7 +114,8 @@ export function useGuidedUploadFlow(initialState?: Partial<GuidedUploadFlowState
   }, [state.currentStage, goToStage]);
 
   const goToPreviousStage = useCallback(() => {
-    const stages: UploadStage[] = ['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+    // U1 removed - start from U2
+    const stages: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
     const currentIndex = stages.indexOf(state.currentStage);
     if (currentIndex > 0) {
       goToStage(stages[currentIndex - 1]);

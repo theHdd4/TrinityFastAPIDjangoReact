@@ -5,6 +5,8 @@ import { VALIDATE_API, FEATURE_OVERVIEW_API, CREATECOLUMN_API } from '@/lib/api'
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 interface Props {
   atomId: string;
@@ -245,6 +247,19 @@ const CreateColumnInputFiles: React.FC<Props> = ({ atomId, selectedIdentifiers, 
             ))}
           </SelectContent>
         </Select>
+      
+        {/* Show Data Summary Toggle - Only when data source is selected (chartmaker pattern) */}
+        {settings.dataSource && (
+        <div className="flex items-center justify-between pt-4 border-t mt-4">
+          <Label className="text-xs">Show Data Summary</Label>
+          <Switch
+            checked={settings.showDataSummary || false}
+            onCheckedChange={(checked) => {
+              updateSettings(atomId, { showDataSummary: !!checked });
+            }}
+          />
+        </div>
+        )}
       </Card>
     </div>
   );

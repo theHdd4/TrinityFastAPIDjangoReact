@@ -50,6 +50,23 @@ export interface ChartRequest {
   title?: string;
   filters?: Record<string, string[]>;
   filtered_data?: Record<string, any>[];
+  // Pipeline tracking fields
+  validator_atom_id?: string;
+  card_id?: string;
+  canvas_position?: number;
+  // Dual axis configuration
+  dual_axis_mode?: "dual" | "single";
+  second_y_axis?: string;
+  // All charts configuration (for saving all charts together in MongoDB)
+  all_charts?: Array<{
+    file_id: string;
+    chart_type: string;
+    title: string;
+    traces: ChartTrace[];
+    filters?: Record<string, string[]>;
+    second_y_axis?: string;
+    dual_axis_mode?: "dual" | "single";
+  }>;
 }
 
 export interface RechartsConfig {
@@ -104,14 +121,24 @@ class ChartMakerApiService {
     return this.uploadFile(file);
   }
 
-  async loadSavedDataframe(objectName: string): Promise<UploadCSVResponse> {
+  async loadSavedDataframe(
+    objectName: string,
+    validator_atom_id?: string,
+    card_id?: string,
+    canvas_position?: number
+  ): Promise<UploadCSVResponse> {
     // Direct API call to load saved dataframe without download/upload cycle
     const response = await fetch(`${this.baseUrl}/load-saved-dataframe`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ object_name: objectName }),
+      body: JSON.stringify({
+        object_name: objectName,
+        validator_atom_id,
+        card_id,
+        canvas_position,
+      }),
     });
 
     if (!response.ok) {

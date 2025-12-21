@@ -17,11 +17,15 @@ export const DEFAULT_TRACE_COLORS = [
 
 // Convert legacy single yAxis/filters to traces format
 export const migrateLegacyChart = (chart: ChartMakerConfig): ChartMakerConfig => {
+  // 🔧 CRITICAL FIX: Preserve chart ID - it must NEVER change
+  const originalChartId = chart.id;
+  
   if (chart.traces && chart.traces.length > 0) {
-    // Already in new format - but ensure filters is initialized
+    // Already in new format - but ensure filters is initialized and ID is preserved
     return {
       ...chart,
       filters: chart.filters || {},
+      id: originalChartId, // Force preserve ID
     };
   }
 
@@ -35,6 +39,7 @@ export const migrateLegacyChart = (chart: ChartMakerConfig): ChartMakerConfig =>
       traces: [], 
       isAdvancedMode,
       filters: chart.filters || {},
+      id: originalChartId, // Force preserve ID
     };
   }
 
@@ -58,13 +63,25 @@ export const migrateLegacyChart = (chart: ChartMakerConfig): ChartMakerConfig =>
     });
   }
 
-  return {
+  const migrated = {
     ...chart,
     traces: legacyTraces,
     isAdvancedMode,
     // 🔧 CRITICAL FIX: Preserve filters at chart level (not just in traces)
     filters: chart.filters || {},
+    id: originalChartId, // Force preserve ID
   };
+  
+  // Final verification
+  if (migrated.id !== originalChartId) {
+    console.error('❌ [MIGRATE] Chart ID changed during migration!', {
+      originalId: originalChartId,
+      newId: migrated.id
+    });
+    migrated.id = originalChartId;
+  }
+  
+  return migrated;
 };
 
 // Convert traces to API format
@@ -95,15 +112,21 @@ export const buildTracesForAPI = (chart: ChartMakerConfig): ChartTrace[] => {
   }];
   
   // Add second Y-axis if configured
+  // Only skip if dualAxisMode is explicitly set to 'single'
+  // Default behavior (when dualAxisMode is undefined/null/'dual') is to add the second axis if secondYAxis exists
   if (chart.secondYAxis) {
-    traces.push({
-      x_column: chart.xAxis,
-      y_column: chart.secondYAxis,
-      name: chart.secondYAxis,
-      chart_type: chart.type === 'stacked_bar' ? 'bar' : chart.type,
-      aggregation: chart.aggregation || 'sum',
-      legend_field: chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined,
-    });
+    // Only exclude second axis if explicitly set to 'single'
+    const shouldExcludeSecondAxis = chart.dualAxisMode === 'single';
+    if (!shouldExcludeSecondAxis) {
+      traces.push({
+        x_column: chart.xAxis,
+        y_column: chart.secondYAxis,
+        name: chart.secondYAxis,
+        chart_type: chart.type === 'stacked_bar' ? 'bar' : chart.type,
+        aggregation: chart.aggregation || 'sum',
+        legend_field: chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined,
+      });
+    }
   }
   
   return traces;

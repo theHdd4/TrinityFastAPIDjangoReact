@@ -395,6 +395,9 @@ read_minio_object = data_upload_service.read_minio_object
 
 @router.get("/get_object_prefix")
 async def get_object_prefix_endpoint(
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
     client_name: str = "",
     app_name: str = "",
     project_name: str = "",
@@ -404,9 +407,15 @@ async def get_object_prefix_endpoint(
     The endpoint resolves the MinIO prefix for the provided client/app/project
     combination. Environment variables are sourced from Redis when available
     and otherwise retrieved from Postgres' ``registry_environment`` table.
+    
+    Can accept either IDs or names (or both). If names are provided, they take precedence.
+    If only IDs are provided, names will be resolved dynamically from the database.
     """
 
     prefix, env, env_source = await get_object_prefix(
+        client_id=client_id,
+        app_id=app_id,
+        project_id=project_id,
         client_name=client_name,
         app_name=app_name,
         project_name=project_name,
@@ -2185,8 +2194,10 @@ async def save_dataframes(
                     batched_kwargs = CSV_READ_KWARGS.copy()
                     batched_kwargs["schema"] = schema
                     batched_kwargs["truncate_ragged_lines"] = False
+                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                 else:
                     batched_kwargs = CSV_READ_KWARGS.copy()
+                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                 
                 reader = pl.read_csv_batched(
                     csv_path, batch_size=1_000_000, **batched_kwargs
@@ -2228,7 +2239,10 @@ async def save_dataframes(
                 data_bytes = fileobj.read()
                 # Use pl.read_csv with CSV_READ_KWARGS for proper dtype inference
                 # This matches the old routes behavior and preserves numeric types
-                df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
+                # Add ignore_errors to handle mixed dtype columns (e.g., "allpacksize" in numeric column)
+                read_kwargs = CSV_READ_KWARGS.copy()
+                read_kwargs["ignore_errors"] = True  # Convert unparseable values to null instead of failing
+                df_pl = pl.read_csv(io.BytesIO(data_bytes), **read_kwargs)
                 df_pl = data_upload_service._normalize_column_names(df_pl)
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)
@@ -3773,7 +3787,10 @@ async def process_saved_dataframe(payload: ProcessDataframeRequest):
     """Apply column-level processing (rename, dtype conversion, missing value handling) to a saved dataframe."""
     decoded = unquote(payload.object_name)
     prefix = await get_object_prefix()
+    logger.info(f"🔧 [process_saved_dataframe] Received object_name: {decoded}, current prefix: {prefix}")
+    
     if not decoded.startswith(prefix):
+        logger.warning(f"⚠️ [process_saved_dataframe] Object name {decoded} does not start with prefix {prefix}")
         raise HTTPException(status_code=400, detail="Invalid object name")
     if not payload.instructions:
         raise HTTPException(status_code=400, detail="No processing instructions supplied")
@@ -3834,13 +3851,18 @@ async def process_saved_dataframe(payload: ProcessDataframeRequest):
     arrow_buffer = io.BytesIO()
     pl.from_pandas(df_processed).write_ipc(arrow_buffer)
     arrow_bytes = arrow_buffer.getvalue()
+    
+    # CRITICAL: Write back to the exact same path (decoded) to preserve folder structure
+    # For Excel sheets in folders, decoded should be: "client/app/project/folder_name/sheets/Sheet1.arrow"
+    logger.info(f"💾 [process_saved_dataframe] Writing processed dataframe to: {decoded}")
     minio_client.put_object(
         MINIO_BUCKET,
-        decoded,
+        decoded,  # Use exact same path to preserve folder structure
         io.BytesIO(arrow_bytes),
         len(arrow_bytes),
         content_type="application/octet-stream",
     )
+    logger.info(f"✅ [process_saved_dataframe] Successfully wrote to: {decoded}")
 
     flight_path = get_flight_path_for_csv(decoded)
     if flight_path:

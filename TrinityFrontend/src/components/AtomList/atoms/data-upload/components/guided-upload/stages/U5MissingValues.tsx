@@ -11,6 +11,7 @@ interface U5MissingValuesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
   onNext: () => void;
   onBack: () => void;
+  isMaximized?: boolean;
 }
 
 interface ColumnMissingInfo {
@@ -18,6 +19,7 @@ interface ColumnMissingInfo {
   dataType: string;
   columnRole: 'identifier' | 'measure';
   displayType?: string;
+  dtype: string; // Original dtype from metadata (e.g., 'int64', 'float64', 'object', etc.)
   missingCount: number;
   missingPercent: number;
   totalRows: number;
@@ -146,7 +148,7 @@ function getMissingColor(missingPercent: number): string {
   return 'bg-red-500'; // Red
 }
 
-export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, onBack }) => {
+export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, onBack, isMaximized = false }) => {
   const { state, setMissingValueStrategies } = flow;
   const { uploadedFiles, dataTypeSelections, missingValueStrategies, selectedFileIndex, columnNameEdits } = state;
   const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
@@ -258,6 +260,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
                 columnName: col.name,
                 dataType,
                 columnRole,
+                dtype: col.dtype || 'object',
                 missingPercent,
                 missingCount: col.missing_count || 0,
                 totalRows: metadataData.total_rows || 0,
@@ -308,6 +311,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
               displayType,
               dataType,
               columnRole,
+              dtype: col.dtype || 'object', // Store original dtype from metadata
               missingCount: col.missing_count || 0,
               missingPercent,
               totalRows: metadataData.total_rows || 0,
@@ -426,11 +430,28 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
               customValue = '';
             }
           }
+          
+          // Determine tag: only mark as edited if treatment differs from suggestion
+          // If user selects the suggested treatment, keep the AI suggestion tag (yellow)
+          // If user selects historical treatment, use previously_used tag (green)
+          // If user changes to something else, mark as edited (blue)
+          let newTag: 'previously_used' | 'ai_suggestion' | 'edited_by_user' | undefined = col.tag;
+          if (col.historicalTreatment && treatment === col.historicalTreatment) {
+            // User selected the historical treatment
+            newTag = 'previously_used';
+          } else if (treatment === col.suggestedTreatment) {
+            // User selected the same as AI suggested - keep AI suggestion tag (yellow)
+            newTag = col.tag === 'ai_suggestion' ? 'ai_suggestion' : (col.tag || 'ai_suggestion');
+          } else {
+            // User changed from the suggested treatment - mark as edited (blue)
+            newTag = 'edited_by_user';
+          }
+          
           const updatedCol = {
             ...col,
             selectedTreatment: treatment,
             customValue,
-            tag: 'edited_by_user' as const,
+            tag: newTag,
           };
           console.log('🔧 U5 Updated column:', updatedCol);
           return updatedCol;
@@ -654,11 +675,11 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
     return (
       <StageLayout
         title=""
-        explanation="Analyzing missing values in your dataset..."
+        explanation=""
       >
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#458EE2]"></div>
-          <p className="mt-4 text-sm text-gray-600">Analyzing missing values...</p>
+          <p className="mt-4 text-sm text-gray-600">Loading missing values...</p>
         </div>
       </StageLayout>
     );
@@ -668,7 +689,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
     return (
       <StageLayout
         title=""
-        explanation="Error loading missing value information"
+        explanation=""
       >
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-600">{error}</p>
@@ -681,8 +702,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
     return (
       <StageLayout
         title=""
-        explanation="These are the missing values across your dataset. Most treatments are suggested automatically, but you can adjust anything if needed."
-        helpText="Correctly handling missing data ensures smooth analysis and calculations."
+        explanation=""
       >
         <div className="text-center py-8">
           <div className="inline-block p-4 bg-green-50 rounded-full mb-4">
@@ -698,156 +718,142 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
   const hasNumericMeasures = columns.some(col => col.dataType === 'number' && col.columnRole === 'measure');
   const hasCategoricalIdentifiers = columns.some(col => (col.dataType === 'category' || col.dataType === 'text') && col.columnRole === 'identifier');
   const hasClientMemory = columns.some(col => col.historicalTreatment);
-  const hasWarnings = columns.some(col => col.warning);
-  const hasColumns = columns.length > 0;
+  const hasAISuggestions = columns.some(col => col.tag === 'ai_suggestion' || col.suggestedTreatment !== 'none');
 
   return (
     <StageLayout
       title=""
-      explanation="These are the missing values across your dataset. Most treatments are suggested automatically, but you can adjust anything if needed."
-      helpText="Correctly handling missing data ensures smooth analysis and calculations."
+      explanation=""
     >
-      <div className="space-y-6">
+      <div className="space-y-2">
         {/* Bulk Actions */}
-        {hasColumns && (
-          <div className="flex flex-wrap gap-2 pb-4 border-b">
+        <div className="flex flex-wrap gap-2 pb-2 border-b">
+          {hasCategoricalIdentifiers && (
             <Button
               variant="outline"
               size="sm"
-              onClick={handleApplyAISuggestions}
-              className="flex items-center gap-2"
+              onClick={handleApplyAllCategorical}
+              className="flex items-center gap-1.5 text-xs h-7"
+              type="button"
             >
-              <Lightbulb className="w-4 h-4" />
-              Apply AI Suggestions
+              Apply to All Categorical
             </Button>
-            {hasNumericMeasures && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleApplyAllNumeric}
-                className="flex items-center gap-2"
-              >
-                Apply Same Treatment to All Numeric Columns
-              </Button>
-            )}
-            {hasCategoricalIdentifiers && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleApplyAllCategorical}
-                className="flex items-center gap-2"
-              >
-                Apply Same Treatment to All Categorical Columns
-              </Button>
-            )}
-            {hasClientMemory && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleApplyClientMemory}
-                className="flex items-center gap-2"
-              >
-                <History className="w-4 h-4" />
-                Apply Client Memory Recommendations
-              </Button>
-            )}
-          </div>
-        )}
-
-        {/* Warnings */}
-        {hasWarnings && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-yellow-900 mb-2">Some columns may need attention</p>
-                <div className="space-y-1">
-                  {columns.filter(col => col.warning).map((col, idx) => (
-                    <p key={idx} className="text-xs text-yellow-800">
-                      <strong>{col.columnName}:</strong> {col.warning}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+          )}
+          {hasClientMemory && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleApplyClientMemory}
+              className="flex items-center gap-1.5 text-xs h-7"
+              type="button"
+            >
+              <History className="w-3.5 h-3.5" />
+              Use Historical
+            </Button>
+          )}
+        </div>
 
         {/* Column Table */}
         <div className="border border-gray-200 rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Column Name</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Missing Count (%)</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Sample Values</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Suggested Treatment</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Tags</th>
+          <div 
+            className="overflow-x-auto" 
+            style={{ 
+              maxHeight: isMaximized ? 'calc(100vh - 300px)' : '8.75rem',
+              overflowY: 'auto',
+              scrollbarGutter: 'stable'
+            }}
+          >
+            <table className="text-[10px] table-fixed w-full">
+              <colgroup>
+                <col style={{ width: '150px' }} />
+                <col style={{ width: '120px' }} />
+                <col style={{ width: '200px' }} />
+                <col style={{ width: '180px' }} />
+                <col style={{ width: '130px' }} />
+              </colgroup>
+              <thead className="sticky top-0 z-10 bg-gray-50">
+                <tr className="bg-gray-50" style={{ height: '1.75rem' }}>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Column Name
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Missing (%)
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Sample Values
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Treatment
+                    </div>
+                  </th>
+                  <th className="px-0.5 py-0 text-left font-medium text-gray-900 border border-gray-300 text-[10px] leading-tight bg-gray-50 whitespace-nowrap overflow-hidden">
+                    <div className="truncate">
+                      Tags
+                    </div>
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody>
                 {columns.map((column, index) => {
                   const treatmentOptions = getTreatmentOptions(column.dataType, column.columnRole);
                   const barColor = getMissingColor(column.missingPercent);
+                  const sampleValuesText = Array.from(new Set(column.sampleValues.map(v => String(v)))).slice(0, 5).join(', ');
+                  const fullSampleValuesText = Array.from(new Set(column.sampleValues.map(v => String(v)))).join(', ');
                   
                   return (
-                    <tr key={index} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-gray-900">{column.columnName}</span>
-                          {column.displayType && (
-                            <Badge variant="outline" className="text-xs text-gray-700 border-gray-300">
-                              {column.displayType}
-                            </Badge>
-                          )}
+                    <tr
+                      key={index}
+                      className="hover:bg-gray-50"
+                      style={{ height: '1.75rem' }}
+                    >
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={column.columnName}>
+                        <div className="flex items-center gap-1 overflow-hidden">
+                          <span className="text-gray-700 text-[10px] leading-tight truncate flex-1 whitespace-nowrap">
+                            {column.columnName}
+                          </span>
+                          <span className="text-gray-500 text-[9px] leading-tight flex-shrink-0 whitespace-nowrap font-mono">
+                            ({column.dtype || 'object'})
+                          </span>
                         </div>
-                        {column.warning && (
-                          <div className="mt-1">
-                            <Badge variant="outline" className="text-yellow-700 border-yellow-300 text-xs">
-                              <AlertTriangle className="w-3 h-3 mr-1" />
-                              Warning
-                            </Badge>
-                          </div>
-                        )}
-                        {column.note && (
-                          <p className="text-xs text-gray-500 mt-1">{column.note}</p>
-                        )}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-600">
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div className="flex items-center gap-1">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-gray-600 truncate">
                               {column.missingCount.toLocaleString()} ({column.missingPercent.toFixed(1)}%)
-                            </span>
-                            <span className="text-gray-500">
-                              of {column.totalRows.toLocaleString()} rows
-                            </span>
+                            </div>
                           </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div className="w-8 bg-gray-200 rounded-full h-1.5 flex-shrink-0">
                             <div
-                              className={`h-2 rounded-full ${barColor}`}
+                              className={`h-1.5 rounded-full ${barColor}`}
                               style={{ width: `${Math.min(column.missingPercent, 100)}%` }}
                             />
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="text-xs text-gray-600 max-w-xs">
-                          {column.sampleValues.slice(0, 3).map((val, idx) => (
-                            <div key={idx} className="truncate">
-                              {String(val).length > 30 ? String(val).substring(0, 30) + '...' : String(val)}
-                            </div>
-                          ))}
-                          {column.sampleValues.length === 0 && (
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={fullSampleValuesText}>
+                        <div className="truncate">
+                          {column.sampleValues.length === 0 ? (
                             <span className="text-gray-400">No samples</span>
+                          ) : (
+                            <>
+                              {sampleValuesText}
+                              {Array.from(new Set(column.sampleValues.map(v => String(v)))).length > 5 && '...'}
+                            </>
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="space-y-2">
-                          <div
-                            className="relative inline-block w-48"
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div className="space-y-0.5">
+                          <div 
+                            className="relative inline-block w-full max-w-[160px]" 
                             onClick={(e) => e.stopPropagation()}
                           >
                             <select
@@ -858,9 +864,13 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
                               }}
                               onClick={(e) => e.stopPropagation()}
                               onMouseDown={(e) => e.stopPropagation()}
-                              className="w-full h-9 px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none bg-[right_0.5rem_center] bg-no-repeat pr-8"
+                              className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none`}
                               style={{
                                 backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                backgroundSize: '1em 1em',
+                                backgroundPosition: 'right 0.25rem center',
+                                backgroundRepeat: 'no-repeat',
+                                paddingRight: '1.5rem'
                               }}
                             >
                               {treatmentOptions.map(option => (
@@ -876,7 +886,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
                               value={column.customValue || ''}
                               onChange={(e) => handleCustomValueChange(column.columnName, e.target.value)}
                               placeholder={column.columnRole === 'identifier' ? 'e.g., Unknown' : 'e.g., Not provided'}
-                              className="w-48 text-xs"
+                              className="w-full max-w-[160px] h-5 text-[10px] px-1"
                             />
                           )}
                           {column.selectedTreatment !== 'none' && (
@@ -884,32 +894,32 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
                               variant="ghost"
                               size="sm"
                               onClick={() => handleReset(column.columnName)}
-                              className="h-6 text-xs"
+                              className="h-4 text-[9px] px-1 py-0"
                             >
-                              <RotateCcw className="w-3 h-3 mr-1" />
-                              Reset to None
+                              <RotateCcw className="w-2.5 h-2.5 mr-0.5" />
+                              Reset
                             </Button>
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-1 flex-wrap">
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
+                        <div className="flex gap-0.5 flex-wrap overflow-hidden">
                           {column.tag === 'previously_used' && (
-                            <Badge className="bg-[#41C185] text-white text-xs">
-                              <History className="w-3 h-3 mr-1" />
-                              Previously Used
+                            <Badge className="bg-[#41C185] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <History className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">Previously Used</span>
                             </Badge>
                           )}
                           {column.tag === 'ai_suggestion' && (
-                            <Badge className="bg-[#FFBD59] text-white text-xs">
-                              <Lightbulb className="w-3 h-3 mr-1" />
-                              AI Suggestion
+                            <Badge className="bg-[#FFBD59] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <Lightbulb className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">AI Suggestion</span>
                             </Badge>
                           )}
                           {column.tag === 'edited_by_user' && (
-                            <Badge className="bg-[#458EE2] text-white text-xs">
-                              <RotateCcw className="w-3 h-3 mr-1" />
-                              Edited
+                            <Badge className="bg-[#458EE2] text-white text-[9px] flex items-center px-1 py-0 leading-tight flex-shrink-0 whitespace-nowrap truncate max-w-full">
+                              <RotateCcw className="w-2 h-2 mr-0.5 flex-shrink-0" />
+                              <span className="truncate">Edited</span>
                             </Badge>
                           )}
                         </div>
@@ -922,36 +932,12 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
           </div>
         </div>
 
-        {/* Debug Section - Remove this after fixing */}
-        <div className="bg-gray-50 border border-gray-300 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium text-gray-700">Debug: Current Saved Missing Value Strategies</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                const currentStrategies = currentFile ? (missingValueStrategies[currentFile.name] || []) : [];
-                console.log('🔍 U5 Current saved missingValueStrategies:', currentStrategies);
-                alert(`Saved strategies: ${JSON.stringify(currentStrategies, null, 2)}`);
-              }}
-            >
-              Show Saved Strategies
-            </Button>
-          </div>
-          <p className="text-xs text-gray-600">
-            Click "Show Saved Strategies" to see what's currently saved in missingValueStrategies. 
-            This should update when you change treatment dropdowns.
-          </p>
-        </div>
-
         {/* Summary */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-gray-700">
-            Select a treatment strategy for each column with missing values. The backend will apply your selections using robust logic that handles data type conversions and edge cases automatically.
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-0 -mt-1">
+          <p className="text-xs text-gray-700">
+            <strong>{columns.length}</strong> column{columns.length !== 1 ? 's' : ''} with missing values.
           </p>
         </div>
-
-        {/* Single-file flow after U1 selection: no file navigation */}
       </div>
     </StageLayout>
   );

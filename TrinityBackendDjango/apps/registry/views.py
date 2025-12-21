@@ -679,7 +679,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             try:
                 client_id, app_id, project_id = _get_env_ids(project)
                 mc = MongoClient(getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"))
-                coll = mc["trinity_db"]["django_atom_list_configuration"]
+                coll = mc["trinity_db"]["atom_list_configuration"]
                 coll.update_many(
                     {"client_id": client_id, "app_id": app_id, "project_id": project_id},
                     {"$set": {"isDeleted": True}},

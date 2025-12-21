@@ -10,7 +10,7 @@ import MultiSelectDropdown from '@/templates/dropdown/multiselect/MultiSelectDro
 import { Plus, Minus, X, Divide, Circle, BarChart3, Calculator, TrendingDown, Activity, Calendar, ChevronDown, ChevronRight, Trash2, AlertCircle, Hash, Type, Filter, Users, TrendingUp, Clock, FileText, FunctionSquare, HelpCircle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useLaboratoryStore, LayoutCard } from '../../../store/laboratoryStore';
-import { FEATURE_OVERVIEW_API, CREATECOLUMN_API } from '@/lib/api';
+import { FEATURE_OVERVIEW_API, CREATECOLUMN_API, PIPELINE_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
 import { atoms as allAtoms } from "@/components/AtomList/data";
@@ -408,17 +408,17 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
           if (resp.ok) {
             const data = await resp.json();
             if (Array.isArray(data.identifiers) && data.identifiers.length > 0) {
-              console.log('[MetricsColOps] All identifiers from backend:', data.identifiers);
+              // console.log('[MetricsColOps] All identifiers from backend:', data.identifiers);
               // Store unfiltered identifiers for compute_metrics_within_group
               const allIds = data.identifiers || [];
-              // Filter out all date-related columns from MongoDB/Redis identifiers
+              // Filter out all date-related columns for backend (but show all in UI)
               const filteredIdentifiers = filterDateColumns(allIds);
-              console.log('[MetricsColOps] Filtered identifiers (for global list):', filteredIdentifiers);
-              // Set all filtered identifiers as selected by default
+              // console.log('[MetricsColOps] Filtered identifiers (for backend):', filteredIdentifiers);
+              // Set all identifiers for display, but only non-time-related ones selected for backend
               updateMetricsInputs({
                 columnOpsAllIdentifiers: allIds,
-                columnOpsSelectedIdentifiers: filteredIdentifiers,
-                columnOpsSelectedIdentifiersForBackend: filteredIdentifiers,
+                columnOpsSelectedIdentifiers: allIds, // Show all in UI
+                columnOpsSelectedIdentifiersForBackend: filteredIdentifiers, // Only non-time-related selected
               });
               return;
             }
@@ -442,11 +442,11 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
           ).map((c: any) => (c.column || '').trim());
           // Store unfiltered categorical columns for compute_metrics_within_group
           const filteredCats = filterDateColumns(cats);
-          // Set all filtered categorical columns as selected by default
+          // Set all categorical columns for display, but only non-time-related ones selected for backend
           updateMetricsInputs({
             columnOpsAllIdentifiers: cats,
-            columnOpsSelectedIdentifiers: filteredCats,
-            columnOpsSelectedIdentifiersForBackend: filteredCats,
+            columnOpsSelectedIdentifiers: cats, // Show all in UI
+            columnOpsSelectedIdentifiersForBackend: filteredCats, // Only non-time-related selected
           });
         }
       } catch {}
@@ -493,7 +493,7 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
     // Skip fetching if file path contains 'create-data' (newly created files may not be immediately available)
     // This prevents CORS/500 errors for newly saved files
     if (objectName.includes('create-data') || objectName.includes('create_data')) {
-      console.log('[MetricsColOps] Skipping columns_with_missing_values fetch for newly created file:', objectName);
+      // console.log('[MetricsColOps] Skipping columns_with_missing_values fetch for newly created file:', objectName);
       setColumnsWithMissingValues([]);
       return;
     }
@@ -536,16 +536,16 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
   ).map((c: any) => c.column).filter((col: string) => {
     const isIdentifier = allIdentifiers.includes(col);
     if (isIdentifier) {
-      console.log(`[MetricsColOps] Excluding ${col} from numericalColumns (it's an identifier)`);
+      // console.log(`[MetricsColOps] Excluding ${col} from numericalColumns (it's an identifier)`);
     }
     return !isIdentifier;
   });
   
   // Debug log
-  React.useEffect(() => {
-    console.log('[MetricsColOps] allIdentifiers:', allIdentifiers);
-    console.log('[MetricsColOps] numericalColumns (after filtering identifiers):', numericalColumns);
-  }, [allIdentifiers, numericalColumns]);
+  // React.useEffect(() => {
+  //   console.log('[MetricsColOps] allIdentifiers:', allIdentifiers);
+  //   console.log('[MetricsColOps] numericalColumns (after filtering identifiers):', numericalColumns);
+  // }, [allIdentifiers, numericalColumns]);
 
   const categoricalColumns: string[] = allColumns.filter((c: any) =>
     c && typeof c.data_type === 'string' &&
@@ -694,6 +694,47 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
     return numericalColumns;
   };
 
+  // Helper to get the output column name for a single column in an operation
+  // Used for operations that use global identifiers and create one column per input column
+  const getOutputColNameForColumn = (op: typeof selectedOperations[0], col: string) => {
+    if (op.rename && typeof op.rename === 'string' && op.rename.trim()) {
+      // If rename is provided and only one column, use rename
+      // For multiple columns with rename, we'd need per-column rename (not currently supported)
+      const columns = op.columns?.filter(Boolean) || [];
+      if (columns.length === 1) {
+        return op.rename.trim();
+      }
+    }
+    
+    switch (op.type) {
+      case 'dummy': return `${col}_dummy`;
+      case 'log': return `${col}_log`;
+      case 'sqrt': return `${col}_sqrt`;
+      case 'exp': return `${col}_exp`;
+      case 'power': return op.param ? `${col}_power${op.param}` : `${col}_power`;
+      case 'standardize_zscore': return `${col}_zscore_scaled`;
+      case 'standardize_minmax': return `${col}_minmax_scaled`;
+      case 'logistic': return `${col}_logistic`;
+      case 'detrend': return `${col}_detrended`;
+      case 'deseasonalize': return `${col}_deseasonalized`;
+      case 'detrend_deseasonalize': return `${col}_detrend_deseasonalized`;
+      case 'lag': return `${col}_lag`;
+      case 'lead': return `${col}_lead`;
+      case 'diff': return `${col}_diff`;
+      case 'rolling_mean': return `${col}_rolling_mean`;
+      case 'rolling_sum': return `${col}_rolling_sum`;
+      case 'rolling_min': return `${col}_rolling_min`;
+      case 'rolling_max': return `${col}_rolling_max`;
+      case 'cumulative_sum': return `${col}_cumulative_sum`;
+      case 'growth_rate': return `${col}_growth_rate`;
+      case 'abs': return `${col}_abs`;
+      case 'lower': return `${col}_lower`;
+      case 'upper': return `${col}_upper`;
+      case 'strip': return `${col}_strip`;
+      default: return `${col}_${op.type}`;
+    }
+  };
+
   // Helper to get the output column name for an operation
   // IMPORTANT: These names must match the backend naming in service.py
   const getOutputColName = (op: typeof selectedOperations[0]) => {
@@ -704,11 +745,8 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
       case 'add': return columns.join('_plus_');
       // Backend: "_minus_".join(columns)
       case 'subtract': return columns.join('_minus_');
-      // Backend: "_x_".join(columns)
-      case 'multiply': return columns.join('_x_');
-      // Backend: "_div_".join(columns)
-      case 'divide': return columns.join('_div_');
-      // Backend: f"{col2}_pct_change_from_{col1}"
+      case 'multiply': return columns.join('_x_');  // Backend uses _x_ not _times_
+      case 'divide': return columns.join('_div_');   // Backend uses _div_ not _dividedby_
       case 'pct_change': return columns.length === 2 ? `${columns[1]}_pct_change_from_${columns[0]}` : 'pct_change';
       // Backend: f"Res_{y_var}"
       case 'residual': return `Res_${columns[0] || ''}`;
@@ -837,6 +875,211 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
       }
       default: return `${op.type}_${columns.join('_')}`;
     }
+  };
+
+  // Helper to expand operations for metadata storage
+  // Handles multi-output operations, multi-column operations with identifiers, and in-place operations
+  const expandOperationsForMetadata = (operations: typeof selectedOperations): Array<{
+    operation_type: string;
+    columns: string[];
+    rename: string | null;
+    param: any;
+    created_column_name: string;
+    is_transformed?: boolean;
+    metric_col?: string;
+    method?: string;
+  }> => {
+    const inPlaceOps = ['lower', 'upper', 'strip', 'replace', 'fill_na'];
+    const usesGlobalIdentifiers = [
+      'detrend', 'deseasonalize', 'detrend_deseasonalize', 
+      'standardize_zscore', 'standardize_minmax', 
+      'residual', 'rpi', 'logistic',
+      'lag', 'lead', 'diff', 'growth_rate',
+      'rolling_mean', 'rolling_sum', 'rolling_min', 'rolling_max',
+      'cumulative_sum', 'abs', 'log', 'sqrt', 'exp', 'power',
+      'lower', 'upper', 'strip', 'fill_na', 'replace', 'dummy'
+    ];
+    const hasIdentifiers = (columnOpsSelectedIdentifiersForBackend || []).length > 0;
+
+    return operations.flatMap(op => {
+      const columns = op.columns?.filter(Boolean) || [];
+
+      // 1. Multi-output operations: compute_metrics_within_group
+      if (op.type === 'compute_metrics_within_group' && op.param && typeof op.param === 'object') {
+        const metricCols = (op.param as any).metric_cols || [];
+        return metricCols
+          .filter((item: any) => item.metric_col && item.method)
+          .map((item: any) => ({
+            operation_type: op.type,
+            columns: op.columns || [],
+            rename: op.rename || null,
+            param: op.param,
+            created_column_name: item.rename || `${item.metric_col}_group_${item.method}`,
+            metric_col: item.metric_col,
+            method: item.method
+          }));
+      }
+
+      // 2. Multi-output operations: group_share_of_total
+      if (op.type === 'group_share_of_total' && op.param && typeof op.param === 'object') {
+        const metricCols = (op.param as any).metric_cols || [];
+        return metricCols
+          .filter((item: any) => item.metric_col)
+          .map((item: any) => ({
+            operation_type: op.type,
+            columns: op.columns || [],
+            rename: op.rename || null,
+            param: op.param,
+            created_column_name: item.rename || `${item.metric_col}_share_of_total`,
+            metric_col: item.metric_col
+          }));
+      }
+
+      // 3. Multi-output operations: group_contribution
+      if (op.type === 'group_contribution' && op.param && typeof op.param === 'object') {
+        const metricCols = (op.param as any).metric_cols || [];
+        return metricCols
+          .filter((item: any) => item.metric_col)
+          .map((item: any) => ({
+            operation_type: op.type,
+            columns: op.columns || [],
+            rename: op.rename || null,
+            param: op.param,
+            created_column_name: item.rename || `${item.metric_col}_contribution`,
+            metric_col: item.metric_col
+          }));
+      }
+
+      // 4. Multi-output operations: rpi
+      if (op.type === 'rpi') {
+        return columns.map((col: string) => ({
+          operation_type: op.type,
+          columns: op.columns || [],
+          rename: op.rename || null,
+          param: op.param || null,
+          created_column_name: `${col}_rpi`
+        }));
+      }
+
+      // 5. In-place operations
+      if (inPlaceOps.includes(op.type)) {
+        return columns.map((col: string) => ({
+          operation_type: op.type,
+          columns: [col],
+          rename: op.rename || null,
+          param: op.param || null,
+          created_column_name: col, // Same as input column (in-place)
+          is_transformed: true
+        }));
+      }
+
+      // 6. Multi-column operations with identifiers
+      if (usesGlobalIdentifiers.includes(op.type) && hasIdentifiers && columns.length > 1) {
+        return columns.map((col: string) => {
+          let created_column_name = '';
+          if (op.rename && typeof op.rename === 'string' && op.rename.trim() && columns.length === 1) {
+            // Only use rename if single column
+            created_column_name = op.rename.trim();
+          } else {
+            // Use per-column naming
+            created_column_name = getOutputColNameForColumn(op, col);
+          }
+          return {
+            operation_type: op.type,
+            columns: [col], // Single column per entry
+            rename: op.rename || null,
+            param: op.param || null,
+            created_column_name: created_column_name
+          };
+        });
+      }
+
+      // 7. Single-output operations (default case)
+      let created_column_name = '';
+      if (op.rename && typeof op.rename === 'string' && op.rename.trim()) {
+        created_column_name = op.rename.trim();
+      } else {
+        created_column_name = getOutputColName(op);
+      }
+      return [{
+        operation_type: op.type,
+        columns: op.columns || [],
+        rename: op.rename || null,
+        param: op.param || null,
+        created_column_name: created_column_name
+      }];
+    });
+  };
+
+  // Helper to build created_columns list for operations
+  // Handles operations that use global identifiers (create one column per input column)
+  const buildCreatedColumns = (operations: typeof selectedOperations): string[] => {
+    const created_columns: string[] = [];
+    
+    operations.forEach(op => {
+      const columns = op.columns?.filter(Boolean) || [];
+      
+      // Operations that use global identifiers create one column per input column
+      // These operations apply to each column individually within identifier groups
+      const usesGlobalIdentifiers = [
+        'detrend', 'deseasonalize', 'detrend_deseasonalize', 
+        'standardize_zscore', 'standardize_minmax', 
+        'residual', 'rpi', 'logistic',
+        'lag', 'lead', 'diff', 'growth_rate',
+        'rolling_mean', 'rolling_sum', 'rolling_min', 'rolling_max',
+        'cumulative_sum', 'abs', 'log', 'sqrt', 'exp', 'power',
+        'lower', 'upper', 'strip', 'fill_na', 'replace', 'dummy'
+      ].includes(op.type);
+      
+      if (usesGlobalIdentifiers) {
+        // Create one column per input column
+        columns.forEach((col: string) => {
+          if (op.rename && typeof op.rename === 'string' && op.rename.trim() && columns.length === 1) {
+            // If rename is provided and only one column, use rename
+            created_columns.push(op.rename.trim());
+          } else {
+            // Use default naming pattern per column
+            const colName = getOutputColNameForColumn(op, col);
+            if (colName) created_columns.push(colName);
+          }
+        });
+      } else if (op.type === 'compute_metrics_within_group' && op.param && typeof op.param === 'object') {
+        // Group operations create multiple columns (one per metric_col + method)
+        const metricCols = (op.param as any).metric_cols || [];
+        metricCols.forEach((item: any) => {
+          if (item.metric_col && item.method) {
+            const colName = item.rename || `${item.metric_col}_group_${item.method}`;
+            if (colName) created_columns.push(colName);
+          }
+        });
+      } else if (op.type === 'group_share_of_total' && op.param && typeof op.param === 'object') {
+        const metricCols = (op.param as any).metric_cols || [];
+        metricCols.forEach((item: any) => {
+          if (item.metric_col) {
+            const colName = item.rename || `${item.metric_col}_share_of_total`;
+            if (colName) created_columns.push(colName);
+          }
+        });
+      } else if (op.type === 'group_contribution' && op.param && typeof op.param === 'object') {
+        const metricCols = (op.param as any).metric_cols || [];
+        metricCols.forEach((item: any) => {
+          if (item.metric_col) {
+            const colName = item.rename || `${item.metric_col}_contribution`;
+            if (colName) created_columns.push(colName);
+          }
+        });
+      } else {
+        // Regular operations create a single column (add, subtract, multiply, divide, etc.)
+        if (op.rename && typeof op.rename === 'string' && op.rename.trim()) {
+          created_columns.push(op.rename.trim());
+        } else {
+          const colName = getOutputColName(op);
+          if (colName) created_columns.push(colName);
+        }
+      }
+    });
+    
+    return created_columns;
   };
 
   // Helper to check if a column name already exists in the uploaded file
@@ -1303,10 +1546,10 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
       formData.append('identifiers', filteredIdentifiers.join(','));
       
       // Debug: Log all FormData entries
-      console.log('🔍 MetricsColOps - FormData entries:');
-      for (const [key, value] of formData.entries()) {
-        console.log(`  ${key}: ${value}`);
-      }
+      // console.log('🔍 MetricsColOps - FormData entries:');
+      // for (const [key, value] of formData.entries()) {
+      //   console.log(`  ${key}: ${value}`);
+      // }
       
       // Call backend
       const res = await fetch(`${CREATECOLUMN_API}/perform`, {
@@ -1390,24 +1633,10 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
       const stored = localStorage.getItem('current-project');
       const project = stored ? JSON.parse(stored) : {};
       
-      // Prepare operation details
+      // Prepare operation details - expand operations for metadata storage
       const operation_details = {
         input_file: metricsInputs.dataSource,
-        operations: selectedOperations.map(op => {
-          let created_column_name = '';
-          if (op.rename && typeof op.rename === 'string' && op.rename.trim()) {
-            created_column_name = op.rename.trim();
-          } else {
-            created_column_name = getOutputColName(op);
-          }
-          return {
-            operation_type: op.type,
-            columns: op.columns || [],
-            rename: op.rename || null,
-            param: op.param || null,
-            created_column_name: created_column_name
-          };
-        })
+        operations: expandOperationsForMetadata(selectedOperations)
       };
       
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
@@ -1436,6 +1665,42 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
           ? filename
           : `${filename}.arrow`;
       setPreviewFile(savedFile);
+      
+      // ========================================================================
+      // SAVE COLUMN OPERATIONS TO PIPELINE EXECUTION
+      // ========================================================================
+      try {
+        const created_columns = buildCreatedColumns(selectedOperations);
+        
+        const operations_for_pipeline = selectedOperations.map(op => ({
+          id: op.id,
+          type: op.type,
+          name: op.name,
+          columns: op.columns || [],
+          rename: op.rename || null,
+          param: op.param || null,
+          created_column_name: op.rename && typeof op.rename === 'string' && op.rename.trim()
+            ? op.rename.trim()
+            : getOutputColName(op)
+        }));
+        
+        await fetch(`${PIPELINE_API}/save-column-operations?client_name=${encodeURIComponent(env.CLIENT_NAME || '')}&app_name=${encodeURIComponent(env.APP_NAME || '')}&project_name=${encodeURIComponent(env.PROJECT_NAME || '')}&mode=laboratory`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input_file: metricsInputs.dataSource,
+            output_file: null, // Overwrite, so no new file
+            overwrite_original: true,
+            operations: operations_for_pipeline,
+            created_columns: created_columns,
+            identifiers: columnOpsSelectedIdentifiersForBackend || []  // Send identifiers for grouping operations
+          }),
+        });
+        console.log('✅ Column operations saved to pipeline execution');
+      } catch (err) {
+        console.warn('⚠️ Failed to save column operations to pipeline execution:', err);
+        // Don't fail the save operation if pipeline save fails
+      }
       
       // ========================================================================
       // AUTO-DISPLAY IN TABLE ATOM (Save - overwrites same dataframe)
@@ -1487,7 +1752,10 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
 
   // Save As - open modal
   const handleSaveAs = () => {
-    const defaultFilename = `createcolumn_${metricsInputs.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+    // Generate default filename (remove file extension before timestamp)
+    const sourceFile = metricsInputs.dataSource?.split('/')?.pop() || 'data';
+    const filenameWithoutExt = sourceFile.includes('.') ? sourceFile.substring(0, sourceFile.lastIndexOf('.')) : sourceFile;
+    const defaultFilename = `createcolumn_${filenameWithoutExt}_${Date.now()}`;
     setSaveFileName(defaultFilename);
     setShowSaveModal(true);
   };
@@ -1520,24 +1788,10 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
       const stored = localStorage.getItem('current-project');
       const project = stored ? JSON.parse(stored) : {};
       
-      // Prepare operation details
+      // Prepare operation details - expand operations for metadata storage
       const operation_details = {
         input_file: metricsInputs.dataSource || 'unknown_input_file',
-        operations: selectedOperations.map(op => {
-          let created_column_name = '';
-          if (op.rename && typeof op.rename === 'string' && op.rename.trim()) {
-            created_column_name = op.rename.trim();
-          } else {
-            created_column_name = getOutputColName(op);
-          }
-          return {
-            operation_type: op.type,
-            columns: op.columns || [],
-            rename: op.rename || null,
-            param: op.param || null,
-            created_column_name: created_column_name
-          };
-        })
+        operations: expandOperationsForMetadata(selectedOperations)
       };
       
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
@@ -1566,6 +1820,42 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
           : `${filename}.arrow`;
       setPreviewFile(savedFile);
       setShowSaveModal(false);
+      
+      // ========================================================================
+      // SAVE COLUMN OPERATIONS TO PIPELINE EXECUTION
+      // ========================================================================
+      try {
+        const created_columns = buildCreatedColumns(selectedOperations);
+        
+        const operations_for_pipeline = selectedOperations.map(op => ({
+          id: op.id,
+          type: op.type,
+          name: op.name,
+          columns: op.columns || [],
+          rename: op.rename || null,
+          param: op.param || null,
+          created_column_name: op.rename && typeof op.rename === 'string' && op.rename.trim()
+            ? op.rename.trim()
+            : getOutputColName(op)
+        }));
+        
+        await fetch(`${PIPELINE_API}/save-column-operations?client_name=${encodeURIComponent(env.CLIENT_NAME || '')}&app_name=${encodeURIComponent(env.APP_NAME || '')}&project_name=${encodeURIComponent(env.PROJECT_NAME || '')}&mode=laboratory`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input_file: metricsInputs.dataSource,
+            output_file: savedFile, // New file created
+            overwrite_original: false,
+            operations: operations_for_pipeline,
+            created_columns: created_columns,
+            identifiers: columnOpsSelectedIdentifiersForBackend || []  // Send identifiers for grouping operations
+          }),
+        });
+        console.log('✅ Column operations saved to pipeline execution');
+      } catch (err) {
+        console.warn('⚠️ Failed to save column operations to pipeline execution:', err);
+        // Don't fail the save operation if pipeline save fails
+      }
       
       // ========================================================================
       // AUTO-DISPLAY IN TABLE ATOM (Save As - creates new dataframe)
@@ -1623,35 +1913,35 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
       const contextCardId = metricsInputs.contextCardId;
       const contextAtomId = metricsInputs.contextAtomId;
 
-      console.log('🎯 [MetricsColOps Table Atom] Checking context:', {
-        contextCardId,
-        contextAtomId,
-        savedFile,
-        hasContext: !!(contextCardId && contextAtomId),
-        allMetricsInputs: metricsInputs
-      });
+      // console.log('🎯 [MetricsColOps Table Atom] Checking context:', {
+      //   contextCardId,
+      //   contextAtomId,
+      //   savedFile,
+      //   hasContext: !!(contextCardId && contextAtomId),
+      //   allMetricsInputs: metricsInputs
+      // });
 
       if (contextCardId && contextAtomId) {
         // Context available - check atom type
         const card = store.findCardByAtomId?.(contextAtomId);
         const currentAtom = card?.atoms.find(a => a.id === contextAtomId);
 
-        console.log('🎯 [MetricsColOps Table Atom] Context found:', {
-          cardFound: !!card,
-          cardId: card?.id,
-          cardIndex: card ? store.cards.findIndex(c => c.id === card.id) : -1,
-          currentAtomType: currentAtom?.atomId,
-          currentAtomId: currentAtom?.id,
-          allCardsCount: store.cards.length,
-          allCardIds: store.cards.map(c => c.id)
-        });
+        // console.log('🎯 [MetricsColOps Table Atom] Context found:', {
+        //   cardFound: !!card,
+        //   cardId: card?.id,
+        //   cardIndex: card ? store.cards.findIndex(c => c.id === card.id) : -1,
+        //   currentAtomType: currentAtom?.atomId,
+        //   currentAtomId: currentAtom?.id,
+        //   allCardsCount: store.cards.length,
+        //   allCardIds: store.cards.map(c => c.id)
+        // });
 
         if (currentAtom?.atomId === 'table') {
           // Update existing Table atom
-          console.log('✅ [MetricsColOps Table Atom] Condition 1: Updating existing Table atom', {
-            contextAtomId,
-            savedFile
-          });
+          // console.log('✅ [MetricsColOps Table Atom] Condition 1: Updating existing Table atom', {
+          //   contextAtomId,
+          //   savedFile
+          // });
           await store.updateTableAtomWithFile?.(contextAtomId, savedFile);
           toast({
             title: 'Table updated',
@@ -1671,15 +1961,15 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
           const hasOriginalAtomAtNPlus1 = hasCardNPlus1 && 
             cardNPlus1.atoms[0]?.id === contextAtomId;
           
-          console.log('🔍 [Condition 2] Pattern check:', {
-            cardNIndex,
-            hasTableAtN,
-            hasCardNPlus1,
-            hasOriginalAtomAtNPlus1,
-            cardNAtomType: cardN?.atoms[0]?.atomId,
-            cardNPlus1AtomId: cardNPlus1?.atoms[0]?.id,
-            contextAtomId
-          });
+          // console.log('🔍 [Condition 2] Pattern check:', {
+          //   cardNIndex,
+          //   hasTableAtN,
+          //   hasCardNPlus1,
+          //   hasOriginalAtomAtNPlus1,
+          //   cardNAtomType: cardN?.atoms[0]?.atomId,
+          //   cardNPlus1AtomId: cardNPlus1?.atoms[0]?.id,
+          //   contextAtomId
+          // });
           
           if (hasTableAtN && hasCardNPlus1 && hasOriginalAtomAtNPlus1) {
             // Pattern exists - check files
@@ -1694,16 +1984,16 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
                                originalAtomAtNPlus1.settings?.selectedDataSource;
             const newFile = savedFile;
             
-            console.log('🔍 [Condition 2] File comparison:', {
-              tableFile,
-              originalFile,
-              newFile,
-              sameFile: tableFile === originalFile && originalFile === newFile
-            });
+            // console.log('🔍 [Condition 2] File comparison:', {
+            //   tableFile,
+            //   originalFile,
+            //   newFile,
+            //   sameFile: tableFile === originalFile && originalFile === newFile
+            // });
             
             if (tableFile === originalFile && originalFile === newFile) {
               // Same file → Update Table at N
-              console.log('✅ [Condition 2] Same file detected - updating Table at N');
+              // console.log('✅ [Condition 2] Same file detected - updating Table at N');
               await store.updateTableAtomWithFile?.(tableAtN.id, newFile);
               
               toast({
@@ -1712,7 +2002,7 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
               });
             } else {
               // Different file → Move old Table to N-1, create new Table at N
-              console.log('🔄 [Condition 2] Different file detected - moving old Table to N-1, creating new Table at N');
+              // console.log('🔄 [Condition 2] Different file detected - moving old Table to N-1, creating new Table at N');
               
               // Save old Table atom
               const oldTableAtom = { ...tableAtN };
@@ -1773,12 +2063,12 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
             }
           } else {
             // No pattern - use existing replacement logic
-            console.log('🔄 [MetricsColOps Table Atom] Condition 2: No pattern found, using standard replacement', {
-              contextCardId,
-              contextAtomId,
-              currentAtomType: currentAtom.atomId,
-              savedFile
-            });
+            // console.log('🔄 [MetricsColOps Table Atom] Condition 2: No pattern found, using standard replacement', {
+            //   contextCardId,
+            //   contextAtomId,
+            //   currentAtomType: currentAtom.atomId,
+            //   savedFile
+            // });
             const result = await store.replaceAtomWithTable?.(
               contextCardId,
               contextAtomId,
@@ -1795,21 +2085,21 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
             }
           }
         } else {
-          console.warn('⚠️ [MetricsColOps Table Atom] Atom not found in card, creating new card', {
-            contextCardId,
-            contextAtomId,
-            cardFound: !!card,
-            cardAtoms: card?.atoms.map(a => ({ id: a.id, atomId: a.atomId }))
-          });
+          // console.warn('⚠️ [MetricsColOps Table Atom] Atom not found in card, creating new card', {
+          //   contextCardId,
+          //   contextAtomId,
+          //   cardFound: !!card,
+          //   cardAtoms: card?.atoms.map(a => ({ id: a.id, atomId: a.atomId }))
+          // });
           // Atom not found, create new card
           const result = await store.createCardWithTableAtom?.(savedFile);
-          console.log('🆕 [MetricsColOps Table Atom] createCardWithTableAtom result (atom not found):', result);
+          // console.log('🆕 [MetricsColOps Table Atom] createCardWithTableAtom result (atom not found):', result);
           
           if (result && result.tableAtomId && result.cardId) {
-            console.log('✅ [MetricsColOps Table Atom] Created new card with Table atom (atom not found case)', {
-              tableAtomId: result.tableAtomId,
-              cardId: result.cardId
-            });
+            // console.log('✅ [MetricsColOps Table Atom] Created new card with Table atom (atom not found case)', {
+            //   tableAtomId: result.tableAtomId,
+            //   cardId: result.cardId
+            // });
             
             // Auto-set context to the newly created Table atom
             const beforeContext = store.metricsInputs;
@@ -1819,22 +2109,22 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
             });
             
             // Verify context was set
-            const afterContext = useLaboratoryStore.getState().metricsInputs;
-            console.log('✅ [Condition 3] Auto-set context (atom not found case):', {
-              beforeContext: {
-                contextCardId: beforeContext.contextCardId,
-                contextAtomId: beforeContext.contextAtomId
-              },
-              settingContext: {
-                contextCardId: result.cardId,
-                contextAtomId: result.tableAtomId
-              },
-              afterContext: {
-                contextCardId: afterContext.contextCardId,
-                contextAtomId: afterContext.contextAtomId
-              },
-              contextSet: afterContext.contextCardId === result.cardId && afterContext.contextAtomId === result.tableAtomId
-            });
+            // const afterContext = useLaboratoryStore.getState().metricsInputs;
+            // console.log('✅ [Condition 3] Auto-set context (atom not found case):', {
+            //   beforeContext: {
+            //     contextCardId: beforeContext.contextCardId,
+            //     contextAtomId: beforeContext.contextAtomId
+            //   },
+            //   settingContext: {
+            //     contextCardId: result.cardId,
+            //     contextAtomId: result.tableAtomId
+            //   },
+            //   afterContext: {
+            //     contextCardId: afterContext.contextCardId,
+            //     contextAtomId: afterContext.contextAtomId
+            //   },
+            //   contextSet: afterContext.contextCardId === result.cardId && afterContext.contextAtomId === result.tableAtomId
+            // });
             
             toast({
               title: 'Data displayed in Table',
@@ -1844,20 +2134,20 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
         }
       } else {
         // No context - create new card with Table atom
-        console.log('🆕 [MetricsColOps Table Atom] Condition 3: No context, creating new card', {
-          contextCardId,
-          contextAtomId,
-          savedFile
-        });
+        // console.log('🆕 [MetricsColOps Table Atom] Condition 3: No context, creating new card', {
+        //   contextCardId,
+        //   contextAtomId,
+        //   savedFile
+        // });
         const result = await store.createCardWithTableAtom?.(savedFile);
-        console.log('🆕 [MetricsColOps Table Atom] createCardWithTableAtom result:', result);
+        // console.log('🆕 [MetricsColOps Table Atom] createCardWithTableAtom result:', result);
         
         if (result && result.tableAtomId && result.cardId) {
-          console.log('✅ [MetricsColOps Table Atom] Created new card with Table atom', {
-            tableAtomId: result.tableAtomId,
-            cardId: result.cardId,
-            savedFile
-          });
+          // console.log('✅ [MetricsColOps Table Atom] Created new card with Table atom', {
+          //   tableAtomId: result.tableAtomId,
+          //   cardId: result.cardId,
+          //   savedFile
+          // });
           
           // Auto-set context to the newly created Table atom (Condition 3)
           const beforeContext = store.metricsInputs;
@@ -1867,22 +2157,22 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
           });
           
           // Verify context was set
-          const afterContext = useLaboratoryStore.getState().metricsInputs;
-          console.log('✅ [Condition 3] Auto-set context to new Table:', {
-            beforeContext: {
-              contextCardId: beforeContext.contextCardId,
-              contextAtomId: beforeContext.contextAtomId
-            },
-            settingContext: {
-              contextCardId: result.cardId,
-              contextAtomId: result.tableAtomId
-            },
-            afterContext: {
-              contextCardId: afterContext.contextCardId,
-              contextAtomId: afterContext.contextAtomId
-            },
-            contextSet: afterContext.contextCardId === result.cardId && afterContext.contextAtomId === result.tableAtomId
-          });
+          // const afterContext = useLaboratoryStore.getState().metricsInputs;
+          // console.log('✅ [Condition 3] Auto-set context to new Table:', {
+          //   beforeContext: {
+          //     contextCardId: beforeContext.contextCardId,
+          //     contextAtomId: beforeContext.contextAtomId
+          //   },
+          //   settingContext: {
+          //     contextCardId: result.cardId,
+          //     contextAtomId: result.tableAtomId
+          //   },
+          //   afterContext: {
+          //     contextCardId: afterContext.contextCardId,
+          //     contextAtomId: afterContext.contextAtomId
+          //   },
+          //   contextSet: afterContext.contextCardId === result.cardId && afterContext.contextAtomId === result.tableAtomId
+          // });
           
           toast({
             title: 'Data displayed in Table',
@@ -2037,7 +2327,7 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
                         const generatedSuffixes = ['_dummy', '_detrended', '_deseasonalized', '_detrend_deseasonalized', '_log', '_sqrt', '_exp', '_power', '_logistic', '_abs', '_scaled', '_zscore', '_minmax', '_residual', '_outlier', '_rpi', '_lag', '_lead', '_diff', '_growth_rate', '_rolling_mean', '_rolling_sum', '_rolling_min', '_rolling_max', '_cumulative_sum'];
                         const isGenerated = generatedSuffixes.some(suffix => idLower.endsWith(suffix));
                         const isDatetimeSuffix = datetimeSuffixes.some(suffix => idLower.endsWith(suffix));
-                        const isFiltered = isDateColumn || isDatetimeSuffix || isGenerated;
+                        const isTimeRelated = isDateColumn || isDatetimeSuffix || isGenerated;
                         const isSelected = selectedIdentifiersForBackend.has(identifier);
                         
                         return (
@@ -2047,8 +2337,8 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
                                 <div className="flex items-center space-x-1.5 p-1 hover:bg-gray-50 rounded">
                                   <input
                                     type="checkbox"
-                                    checked={isSelected && !isFiltered}
-                                    disabled={isFiltered}
+                                    checked={isSelected}
+                                    disabled={isTimeRelated}
                                     onChange={(e) => {
                                       const newSet = new Set(columnOpsSelectedIdentifiersForBackend);
                                       if (e.target.checked) {
@@ -2060,9 +2350,8 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
                                     }}
                                     className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500 flex-shrink-0"
                                   />
-                                  <span className={`text-[10px] flex-1 truncate ${isFiltered ? 'text-gray-400 line-through' : isSelected ? 'text-blue-700 font-medium' : 'text-gray-600'}`} title={identifier}>
+                                  <span className={`text-[10px] flex-1 truncate ${isTimeRelated ? 'text-gray-400' : isSelected ? 'text-blue-700 font-medium' : 'text-gray-600'}`} title={identifier}>
                                     {identifier}
-                                    {isFiltered && <span className="ml-1 text-[9px] text-gray-400">(filtered)</span>}
                                   </span>
                                 </div>
                               </TooltipTrigger>
@@ -2098,6 +2387,7 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
             const showDiffParam = opType === 'diff';
             const showRollingParam = opType === 'rolling_mean' || opType === 'rolling_sum' || opType === 'rolling_min' || opType === 'rolling_max';
             const showGrowthRateParam = opType === 'growth_rate';
+            const showSTLPeriodParam = opType === 'detrend' || opType === 'deseasonalize' || opType === 'detrend_deseasonalize';
             const isStandardize = opType.startsWith('standardize');
             // For individual column ops: allow rename only when 1 column, disable when multiple
             // For combine column ops: always allow rename (they create one combined result)
@@ -2637,7 +2927,7 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
                                   updateOperationColumns(selectedOperation.id, selectedValues);
                                 }}
                                 options={(() => {
-                                  console.log('[MetricsColOps] compute_metrics_within_group identifiers options:', allIdentifiers);
+                                  // console.log('[MetricsColOps] compute_metrics_within_group identifiers options:', allIdentifiers);
                                   return allIdentifiers.map(id => ({
                                     value: id,
                                     label: id
@@ -2772,7 +3062,7 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
                                   updateOperationColumns(selectedOperation.id, selectedValues);
                                 }}
                                 options={(() => {
-                                  console.log('[MetricsColOps] group_share_of_total identifiers options:', allIdentifiers);
+                                  // console.log('[MetricsColOps] group_share_of_total identifiers options:', allIdentifiers);
                                   return allIdentifiers.map(id => ({
                                     value: id,
                                     label: id
@@ -2881,7 +3171,7 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
                                   updateOperationColumns(selectedOperation.id, selectedValues);
                                 }}
                                 options={(() => {
-                                  console.log('[MetricsColOps] group_contribution identifiers options:', allIdentifiers);
+                                  // console.log('[MetricsColOps] group_contribution identifiers options:', allIdentifiers);
                                   return allIdentifiers.map(id => ({
                                     value: id,
                                     label: id
@@ -3231,6 +3521,24 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
                           placeholder="Enter window size"
                           className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
                         />
+                      </div>
+                    )}
+
+                    {showSTLPeriodParam && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-gray-600">Period (Optional - auto-detected if not provided)</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="2"
+                          value={selectedOperation.param || ''}
+                          onChange={e => {
+                            updateMetricsOperation(selectedOperation.id, { param: e.target.value });
+                          }}
+                          placeholder="Enter period (e.g., 7 for weekly, 12 for monthly)"
+                          className="w-full px-1.5 py-1 h-6 text-[10px] border border-gray-200 rounded focus:border-gray-400 focus:ring-1 focus:ring-gray-100"
+                        />
+                        <p className="text-[9px] text-gray-500">Leave empty to auto-detect from date frequency</p>
                       </div>
                     )}
 

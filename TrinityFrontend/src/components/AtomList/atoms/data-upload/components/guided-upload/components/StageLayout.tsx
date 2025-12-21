@@ -20,7 +20,11 @@ export const StageLayout: React.FC<StageLayoutProps> = ({
   className,
 }) => {
   return (
-    <div className={cn('space-y-6 h-full flex flex-col', className)}>
+    <div className={cn(
+      explanation ? 'space-y-6' : 'space-y-3',
+      'h-full flex flex-col',
+      className
+    )}>
       {/* Clear Title - Only show if title/explanation provided */}
       {(title || explanation) && (
         <div className="space-y-2 flex-shrink-0">
@@ -30,7 +34,10 @@ export const StageLayout: React.FC<StageLayoutProps> = ({
       )}
 
       {/* Main Content - Single Key Action or Decision */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6 flex-1 overflow-y-auto">
+      <div className={cn(
+        "bg-white border border-gray-200 rounded-lg flex-1 overflow-y-auto",
+        explanation ? "p-6" : "pt-2 px-6 pb-0"
+      )}>
         {children}
       </div>
 

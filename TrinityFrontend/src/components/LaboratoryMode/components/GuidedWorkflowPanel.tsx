@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Upload, Play, X, Settings, ChevronRight, ChevronDown } from 'lucide-react';
+import { RotateCcw, X, Settings, ChevronRight, ChevronDown, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VerticalProgressStepper } from '@/components/AtomList/atoms/data-upload/components/guided-upload/VerticalProgressStepper';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -59,6 +59,14 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
     setIsProgressCollapsed(prev => !prev);
   };
 
+  // Handle reset - go back to step 1 (U2 - Confirm Headers)
+  const handleReset = () => {
+    if (selectedAtomId && updateGuidedFlowStage) {
+      // Reset to U2 (Confirm Headers) - first step in the guided flow (U1 removed)
+      updateGuidedFlowStage(selectedAtomId, 'U2');
+    }
+  };
+
   if (isCollapsed) {
     return null;
   }
@@ -73,29 +81,38 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
           </div>
           <h3 className="text-sm font-semibold text-gray-900">Guided Workflow</h3>
         </div>
-        {!globalGuidedModeEnabled && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggle}
-            className="h-8 w-8 hover:bg-white/50"
-            title="Close guided workflow panel"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggle}
+          className="h-8 w-8 hover:bg-white/50"
+          title="Close guided workflow panel"
+        >
+          <X className="w-4 h-4" />
+        </Button>
       </div>
 
-      {/* Current Atom Info - Made bigger and bolder */}
-      {selectedAtom && (
+      {/* Priming Info - Made bigger and bolder */}
+      {selectedFlow && (
         <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50/30">
-          <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Current Atom</div>
+          <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Priming</div>
           <button
             onClick={toggleProgressStepper}
             className="w-full text-left flex items-center justify-between group hover:opacity-80 transition-opacity"
           >
             <div className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              {selectedAtom.title}
+              {(() => {
+                // Get file name from guided flow state
+                const state = selectedFlow.state;
+                const fileName = 
+                  state?.initialFile?.name ||
+                  (state?.uploadedFiles && state.uploadedFiles.length > 0 
+                    ? (state.selectedFileIndex !== undefined && state.uploadedFiles[state.selectedFileIndex]
+                      ? state.uploadedFiles[state.selectedFileIndex].name
+                      : state.uploadedFiles[0].name)
+                    : null);
+                return fileName || 'No file selected';
+              })()}
             </div>
             {isProgressCollapsed ? (
               <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
@@ -153,49 +170,20 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
         </div>
       )}
 
-      {/* Action Buttons */}
-      <div className="p-4 border-t border-gray-200 bg-gray-50/50 space-y-2">
-        {!selectedFlow ? (
-          // No active flow - show upload button
+      {/* Reset Button */}
+      {selectedFlow && (
+        <div className="p-4 border-t border-gray-200 bg-gray-50/50">
           <Button
-            onClick={async () => {
-              if (onCreateDataUploadAtom) {
-                await onCreateDataUploadAtom();
-              }
-            }}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            onClick={handleReset}
+            variant="outline"
+            className="w-full border-gray-300 hover:bg-gray-100"
             size="sm"
           >
-            <Upload className="w-4 h-4 mr-2" />
-            Upload More Data
+            <RotateCcw className="w-4 h-4 mr-2" />
+            Reset
           </Button>
-        ) : (
-          // Active flow - show contextual actions
-          <div className="space-y-2">
-            <Button
-              onClick={async () => {
-                if (onCreateDataUploadAtom) {
-                  await onCreateDataUploadAtom();
-                }
-              }}
-              variant="outline"
-              className="w-full"
-              size="sm"
-            >
-              <Upload className="w-4 h-4 mr-2" />
-              Upload More Data
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full"
-              size="sm"
-            >
-              <Play className="w-4 h-4 mr-2" />
-              Start Analysis
-            </Button>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="p-3 border-t border-gray-200 bg-gray-100/50">

@@ -1,4 +1,7 @@
 import base64
+import os
+import logging
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi import Depends
 from typing import List, Dict
@@ -18,6 +21,10 @@ from .schemas import (
 
 from app.core.observability import timing_dependency_factory
 from app.core.task_queue import celery_task_client, format_task_response
+from app.features.pipeline.service import record_atom_execution
+from app.features.project_state.routes import get_atom_list_configuration
+
+logger = logging.getLogger(__name__)
 
 timing_dependency = timing_dependency_factory("app.features.chart_maker")
 
@@ -85,6 +92,8 @@ async def load_saved_dataframe(request: LoadSavedDataframeRequest):
     - Unique values for categorical columns
     - Sample data
     """
+    execution_started_at = datetime.utcnow()
+    
     submission = celery_task_client.submit_callable(
         name="chart_maker.load_saved_dataframe",
         dotted_path="app.features.chart_maker.service.load_saved_dataframe_task",
@@ -101,6 +110,114 @@ async def load_saved_dataframe(request: LoadSavedDataframeRequest):
             status_code=404,
             detail=submission.detail or f"Error loading saved dataframe {request.object_name}",
         )
+
+    execution_completed_at = datetime.utcnow()
+    execution_status = "success" if submission.status == "success" else "failed"
+    execution_error = submission.detail if submission.status == "failure" else None
+
+    # Record atom execution for pipeline tracking (if validator_atom_id is provided)
+    if request.validator_atom_id:
+        try:
+            # Extract project context from environment
+            client_name = os.getenv("CLIENT_NAME", "")
+            app_name = os.getenv("APP_NAME", "")
+            project_name = os.getenv("PROJECT_NAME", "")
+            user_id = os.getenv("USER_ID", "unknown")
+            
+            # Get card_id and canvas_position from atom_list_configuration
+            card_id_from_config = None
+            canvas_position_from_config = None
+            
+            if client_name and app_name and project_name:
+                try:
+                    atom_config_response = await get_atom_list_configuration(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        mode="laboratory"
+                    )
+                    
+                    if atom_config_response.get("status") == "success":
+                        cards = atom_config_response.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            for atom in atoms:
+                                if atom.get("id") == request.validator_atom_id:
+                                    card_id_from_config = card.get("id")
+                                    canvas_position_from_config = card.get("canvas_position", 0)
+                                    break
+                            if card_id_from_config:
+                                break
+                except Exception as e:
+                    logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
+            
+            # Prioritize atom_list_configuration as source of truth
+            final_card_id = card_id_from_config or request.card_id or (request.validator_atom_id.split("-")[0] if "-" in request.validator_atom_id else request.validator_atom_id)
+            final_canvas_position = canvas_position_from_config if canvas_position_from_config is not None else (request.canvas_position if request.canvas_position is not None else 0)
+            
+            # Build configuration
+            configuration = {
+                "object_name": request.object_name,
+            }
+            
+            # Build API calls
+            api_calls = [
+                {
+                    "endpoint": "/chart-maker/load-saved-dataframe",
+                    "method": "POST",
+                    "timestamp": execution_started_at,
+                    "params": configuration,
+                    "response_status": 200 if execution_status == "success" else 404,
+                    "response_data": {
+                        "status": execution_status.upper(),
+                        "task_id": submission.task_id if hasattr(submission, "task_id") else None
+                    }
+                }
+            ]
+            
+            # Build output files (file_id from response)
+            output_files = []
+            if submission.status == "success" and hasattr(submission, "result"):
+                result = submission.result if hasattr(submission, "result") else {}
+                file_id = result.get("file_id") if isinstance(result, dict) else None
+                if file_id:
+                    # Extract filename from file_id for save_as_name
+                    save_as_name = file_id.split("/")[-1] if "/" in file_id else file_id
+                    output_files.append({
+                        "file_key": file_id,
+                        "file_path": file_id,
+                        "flight_path": file_id,  # Required field for pipeline schema
+                        "save_as_name": save_as_name,  # Use filename instead of None to avoid validation errors
+                        "is_default_name": True,
+                        "columns": result.get("columns", []) if isinstance(result, dict) else [],
+                        "dtypes": {},
+                        "row_count": result.get("row_count", 0) if isinstance(result, dict) else 0
+                    })
+            
+            if client_name and app_name and project_name:
+                await record_atom_execution(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    atom_instance_id=request.validator_atom_id,
+                    card_id=final_card_id,
+                    atom_type="chart-maker",
+                    atom_title="Chart Maker - Load Dataframe",
+                    input_files=[request.object_name],
+                    configuration=configuration,
+                    api_calls=api_calls,
+                    output_files=output_files,
+                    execution_started_at=execution_started_at,
+                    execution_completed_at=execution_completed_at,
+                    execution_status=execution_status,
+                    execution_error=execution_error,
+                    user_id=user_id,
+                    mode="laboratory",
+                    canvas_position=final_canvas_position
+                )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record atom execution for pipeline: {e}")
 
     return format_task_response(submission)
 
@@ -238,6 +355,8 @@ async def generate_chart(request: ChartRequest):
     - chart_config: Ready-to-use recharts configuration
     - data_summary: Metadata about the processed data
     """
+    execution_started_at = datetime.utcnow()
+    
     submission = celery_task_client.submit_callable(
         name="chart_maker.generate_chart",
         dotted_path="app.features.chart_maker.service.generate_chart_task",
@@ -256,6 +375,176 @@ async def generate_chart(request: ChartRequest):
             status_code=400,
             detail=submission.detail or "Failed to generate chart",
         )
+
+    execution_completed_at = datetime.utcnow()
+    execution_status = "success" if submission.status == "success" else "failed"
+    execution_error = submission.detail if submission.status == "failure" else None
+
+    # Record atom execution for pipeline tracking (if validator_atom_id is provided)
+    if request.validator_atom_id:
+        try:
+            # Extract project context from environment
+            client_name = os.getenv("CLIENT_NAME", "")
+            app_name = os.getenv("APP_NAME", "")
+            project_name = os.getenv("PROJECT_NAME", "")
+            user_id = os.getenv("USER_ID", "unknown")
+            
+            # Get card_id and canvas_position from atom_list_configuration
+            card_id_from_config = None
+            canvas_position_from_config = None
+            
+            if client_name and app_name and project_name:
+                try:
+                    atom_config_response = await get_atom_list_configuration(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                        mode="laboratory"
+                    )
+                    
+                    if atom_config_response.get("status") == "success":
+                        cards = atom_config_response.get("cards", [])
+                        for card in cards:
+                            atoms = card.get("atoms", [])
+                            for atom in atoms:
+                                if atom.get("id") == request.validator_atom_id:
+                                    card_id_from_config = card.get("id")
+                                    canvas_position_from_config = card.get("canvas_position", 0)
+                                    break
+                            if card_id_from_config:
+                                break
+                except Exception as e:
+                    logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
+            
+            # Prioritize atom_list_configuration as source of truth
+            final_card_id = card_id_from_config or request.card_id or (request.validator_atom_id.split("-")[0] if "-" in request.validator_atom_id else request.validator_atom_id)
+            final_canvas_position = canvas_position_from_config if canvas_position_from_config is not None else (request.canvas_position if request.canvas_position is not None else 0)
+            
+            # Build configuration (convert column names to lowercase for pipeline)
+            # Use explicit dual_axis_mode and second_y_axis from request if provided
+            # Otherwise, detect from traces for backward compatibility
+            dual_axis_mode = request.dual_axis_mode
+            second_y_axis = request.second_y_axis.lower() if request.second_y_axis else None
+            
+            # If not explicitly provided, detect dual Y-axis from traces (backward compatibility)
+            if not dual_axis_mode and not second_y_axis:
+                is_dual_y_axis = (
+                    len(request.traces) == 2 and
+                    request.traces[0].x_column and
+                    request.traces[1].x_column and
+                    request.traces[0].x_column.lower() == request.traces[1].x_column.lower() and
+                    request.traces[0].y_column and
+                    request.traces[1].y_column and
+                    request.traces[0].y_column.lower() != request.traces[1].y_column.lower() and
+                    not request.traces[0].legend_field and
+                    not request.traces[1].legend_field
+                )
+                if is_dual_y_axis and len(request.traces) >= 2:
+                    second_y_axis = request.traces[1].y_column.lower() if request.traces[1].y_column else None
+                    dual_axis_mode = "dual"
+            
+            # Build configuration for this specific chart
+            chart_config = {
+                "file_id": request.file_id,
+                "chart_type": request.chart_type,
+                "title": request.title,
+                "traces": [
+                    {
+                        "x_column": trace.x_column.lower() if trace.x_column else None,
+                        "y_column": trace.y_column.lower() if trace.y_column else None,
+                        "name": trace.name,
+                        "aggregation": trace.aggregation,  # Save aggregation per trace
+                        "chart_type": trace.chart_type,
+                        "legend_field": trace.legend_field.lower() if trace.legend_field else None,  # Include legend_field (segregation)
+                    }
+                    for trace in request.traces
+                ],
+                "filters": {k.lower(): v for k, v in (request.filters or {}).items()} if request.filters else None,
+                "second_y_axis": second_y_axis,  # Save second Y-axis (explicit or detected)
+                "dual_axis_mode": dual_axis_mode,  # Save axis mode (explicit or detected)
+            }
+            
+            # 🔧 NEW: Check if all_charts is provided - this contains ALL charts in the atom
+            # If provided, use it as the full configuration; otherwise, use single chart config for backward compatibility
+            if request.all_charts and len(request.all_charts) > 0:
+                # Build configuration with all charts
+                all_charts_config = []
+                for chart_data in request.all_charts:
+                    chart_traces = chart_data.get('traces', [])
+                    chart_config_item = {
+                        "file_id": chart_data.get('file_id') or request.file_id,
+                        "chart_type": chart_data.get('chart_type') or 'line',
+                        "title": chart_data.get('title') or 'Chart',
+                        "traces": [
+                            {
+                                "x_column": trace.get('x_column', '').lower() if trace.get('x_column') else None,
+                                "y_column": trace.get('y_column', '').lower() if trace.get('y_column') else None,
+                                "name": trace.get('name') or 'Series',
+                                "aggregation": trace.get('aggregation') or 'sum',
+                                "chart_type": trace.get('chart_type') or chart_data.get('chart_type') or 'line',
+                                "legend_field": trace.get('legend_field', '').lower() if trace.get('legend_field') else None,
+                            }
+                            for trace in chart_traces
+                        ],
+                        "filters": {k.lower(): v for k, v in (chart_data.get('filters') or {}).items()} if chart_data.get('filters') else None,
+                        "second_y_axis": chart_data.get('second_y_axis'),
+                        "dual_axis_mode": chart_data.get('dual_axis_mode'),
+                    }
+                    all_charts_config.append(chart_config_item)
+                
+                # Configuration with all charts
+                configuration = {
+                    "file_id": request.file_id,
+                    "charts": all_charts_config,  # Array of all charts
+                    "chart_type": request.chart_type,  # Keep for backward compatibility (latest chart)
+                    "title": request.title,  # Keep for backward compatibility (latest chart)
+                }
+            else:
+                # Backward compatibility: single chart configuration
+                configuration = chart_config
+            
+            # Build API calls
+            api_calls = [
+                {
+                    "endpoint": "/chart-maker/charts",
+                    "method": "POST",
+                    "timestamp": execution_started_at,
+                    "params": configuration,
+                    "response_status": 200 if execution_status == "success" else 400,
+                    "response_data": {
+                        "status": execution_status.upper(),
+                        "task_id": submission.task_id if hasattr(submission, "task_id") else None
+                    }
+                }
+            ]
+            
+            # Build output files (chartmaker doesn't produce output files, but we track the chart config)
+            output_files = []
+            
+            if client_name and app_name and project_name:
+                await record_atom_execution(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    atom_instance_id=request.validator_atom_id,
+                    card_id=final_card_id,
+                    atom_type="chart-maker",
+                    atom_title="Chart Maker",
+                    input_files=[request.file_id],
+                    configuration=configuration,
+                    api_calls=api_calls,
+                    output_files=output_files,
+                    execution_started_at=execution_started_at,
+                    execution_completed_at=execution_completed_at,
+                    execution_status=execution_status,
+                    execution_error=execution_error,
+                    user_id=user_id,
+                    mode="laboratory",
+                    canvas_position=final_canvas_position
+                )
+        except Exception as e:
+            # Don't fail the request if pipeline recording fails
+            logger.warning(f"Failed to record atom execution for pipeline: {e}")
 
     return format_task_response(submission)
 
@@ -548,3 +837,4 @@ async def get_column_summary(object_name: str):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "chart-maker"}
+

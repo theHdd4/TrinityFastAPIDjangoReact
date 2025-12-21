@@ -21,6 +21,13 @@ interface KPIDashboardChartConfigProps {
   data: KPIDashboardData | null;
   settings: KPIDashboardSettings;
   onSettingsChange: (settings: Partial<KPIDashboardSettings>) => void;
+  onDataUpload: (data: KPIDashboardData) => void;
+}
+
+interface Frame {
+  object_name: string;
+  arrow_name?: string;
+  csv_name?: string;
 }
 
 // Filter Value Selector Component
@@ -94,12 +101,19 @@ const FilterValueSelector: React.FC<FilterValueSelectorProps> = ({
 const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
   data,
   settings,
-  onSettingsChange
+  onSettingsChange,
+  onDataUpload
 }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [fileId, setFileId] = useState<string>('');
   const [chartData, setChartData] = useState<any>(null);
+  
+  // Data Source state
+  const [frames, setFrames] = useState<Frame[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string>((settings as any).selectedFile || '');
+  const [loadingDataSource, setLoadingDataSource] = useState(false);
+  const [dataSourceError, setDataSourceError] = useState<string | null>(null);
   
   // Find the selected chart box (memoized to prevent unnecessary recalculations)
   const selectedChartBox = useMemo(() => {
@@ -125,6 +139,98 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
       isAdvancedMode: false,
     };
   });
+
+  // Fetch available dataframes from database
+  useEffect(() => {
+    fetch(`${VALIDATE_API}/list_saved_dataframes`, {
+      credentials: 'include'
+    })
+      .then(r => r.json())
+      .then(d => {
+        // Filter to only show Arrow files
+        const allFiles = Array.isArray(d.files) ? d.files : [];
+        const arrowFiles = allFiles.filter(f => 
+          f.object_name && f.object_name.endsWith('.arrow')
+        );
+        setFrames(arrowFiles);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch dataframes:', err);
+        setFrames([]);
+      });
+  }, []);
+
+  // Load dataframe data when file is selected
+  const handleFileSelect = async (fileId: string) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:164',message:'handleFileSelect entry',data:{fileId,onDataUploadType:typeof onDataUpload,onDataUploadIsFunc:typeof onDataUpload==='function',onSettingsChangeType:typeof onSettingsChange,onSettingsChangeIsFunc:typeof onSettingsChange==='function'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    setSelectedFile(fileId);
+    setLoadingDataSource(true);
+    setDataSourceError(null);
+
+    try {
+      const response = await fetch(`${VALIDATE_API}/load_dataframe_by_key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ key: fileId })
+      });
+
+      if (!response.ok) {
+        // Try to get the actual error message from the backend
+        let errorMessage = 'Failed to load dataframe';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.message || errorMessage;
+        } catch {
+          // If response is not JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const responseData = await response.json();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:190',message:'Response data received',data:{hasHeaders:!!responseData.headers,headersType:typeof responseData.headers,headersIsArray:Array.isArray(responseData.headers),headersLength:Array.isArray(responseData.headers)?responseData.headers.length:'N/A',hasRows:!!responseData.rows,rowsType:typeof responseData.rows,rowsIsArray:Array.isArray(responseData.rows),rowsLength:Array.isArray(responseData.rows)?responseData.rows.length:'N/A',responseDataKeys:Object.keys(responseData)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      const frame = frames.find(f => f.object_name === fileId);
+      const fileName = frame?.arrow_name?.split('/').pop() || fileId;
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:195',message:'Before onSettingsChange call',data:{fileName,onSettingsChangeType:typeof onSettingsChange,onSettingsChangeIsFunc:typeof onSettingsChange==='function'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      // Save selected file to settings so it's available for chart rendering
+      onSettingsChange({ 
+        ...settings,
+        selectedFile: fileId,
+        dataSource: fileName
+      } as any);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:201',message:'Before onDataUpload call',data:{onDataUploadType:typeof onDataUpload,onDataUploadIsFunc:typeof onDataUpload==='function',uploadDataHeaders:Array.isArray(responseData.headers)?responseData.headers.length:'N/A',uploadDataRows:Array.isArray(responseData.rows)?responseData.rows.length:'N/A',fileName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      onDataUpload({
+        headers: responseData.headers || [],
+        rows: responseData.rows || [],
+        fileName: fileName,
+        metrics: []
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:207',message:'After onDataUpload call',data:{success:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+
+      setLoadingDataSource(false);
+    } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:209',message:'Error in handleFileSelect',data:{errorType:err instanceof Error?err.constructor.name:'unknown',errorMessage:err instanceof Error?err.message:String(err),errorStack:err instanceof Error?err.stack:'N/A'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      console.error('Error loading dataframe:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load dataframe';
+      setDataSourceError(errorMessage);
+      setLoadingDataSource(false);
+    }
+  };
 
   // Track previous data source to prevent unnecessary reloads
   const previousDataSourceRef = useRef<string | null>(null);
@@ -468,18 +574,7 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
     );
   }
 
-  if (!data) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 text-center p-4">
-        <BarChart3 className="w-12 h-12 text-muted-foreground mb-3" />
-        <p className="text-sm text-muted-foreground">
-          Upload data in the Settings tab to configure charts
-        </p>
-      </div>
-    );
-  }
-
-  if (loading && !chartData) {
+  if (loading && !chartData && data) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center p-4">
         <BarChart3 className="w-12 h-12 text-muted-foreground mb-3 animate-pulse" />
@@ -490,11 +585,56 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
 
   return (
     <div className="space-y-4 h-full flex flex-col">
+      {/* Data Source Selection */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Chart Configuration</CardTitle>
+          <CardTitle className="text-sm">Data Source</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
+          <Select value={selectedFile} onValueChange={handleFileSelect}>
+            <SelectTrigger className="w-full bg-white border-gray-300">
+              <SelectValue placeholder="Select a saved dataframe..." />
+            </SelectTrigger>
+            <SelectContent>
+              {frames.length === 0 ? (
+                <SelectItem value="no-data" disabled>
+                  No dataframes available
+                </SelectItem>
+              ) : (
+                frames.map(f => (
+                  <SelectItem key={f.object_name} value={f.object_name}>
+                    {f.arrow_name?.split('/').pop() || f.csv_name || f.object_name}
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
+          {loadingDataSource && (
+            <p className="text-xs text-blue-600">Loading dataframe...</p>
+          )}
+          {dataSourceError && (
+            <p className="text-xs text-red-600">{dataSourceError}</p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Select a dataframe from the database to use as data source
+          </p>
+        </CardContent>
+      </Card>
+
+      {!data && (
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <p className="text-sm text-muted-foreground">
+            Select a dataframe above to configure your chart
+          </p>
+        </div>
+      )}
+
+      {data && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Chart Configuration</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
           {/* Chart Title and Type */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -766,17 +906,20 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
           </div>
         </CardContent>
       </Card>
+      )}
 
-      <div className="sticky bottom-0 pt-4 border-t bg-white z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
-        <Button 
-          onClick={handleRenderChart} 
-          className="w-full"
-          disabled={!chartData || !validateChart(migrateLegacyChart(chartConfig)) || loading}
-        >
-          <BarChart3 className="w-4 h-4 mr-2" />
-          {loading ? 'Rendering...' : 'Render Chart'}
-        </Button>
-      </div>
+      {data && (
+        <div className="sticky bottom-0 pt-4 border-t bg-white z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+          <Button 
+            onClick={handleRenderChart} 
+            className="w-full"
+            disabled={!chartData || !validateChart(migrateLegacyChart(chartConfig)) || loading}
+          >
+            <BarChart3 className="w-4 h-4 mr-2" />
+            {loading ? 'Rendering...' : 'Render Chart'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

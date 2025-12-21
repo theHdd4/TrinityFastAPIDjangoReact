@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { MERGE_API, VALIDATE_API } from '@/lib/api';
 
 interface MergeInputFilesProps {
@@ -51,14 +53,14 @@ const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsC
       .catch(() => setFrames([]));
   }, []);
 
+  const hasBothSources = Boolean(settings.file1 && settings.file2);
+
   return (
     <div className="w-full h-full p-6 overflow-y-auto">
       <div className="space-y-6">
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-2">Primary Source</label>
-          <Select value={settings.file1} onValueChange={val => {
-            onSettingsChange({ ...settings, file1: val });
-          }}>
+          <Select value={settings.file1} onValueChange={val => onSettingsChange({ ...settings, file1: val })}>
             <SelectTrigger className="bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors">
               <SelectValue placeholder="Select primary dataframe" />
             </SelectTrigger>
@@ -71,11 +73,10 @@ const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsC
             </SelectContent>
           </Select>
         </div>
+
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-2">Secondary Source</label>
-          <Select value={settings.file2} onValueChange={val => {
-            onSettingsChange({ ...settings, file2: val });
-          }}>
+          <Select value={settings.file2} onValueChange={val => onSettingsChange({ ...settings, file2: val })}>
             <SelectTrigger className="bg-green-50 border border-green-200 hover:bg-green-100 transition-colors">
               <SelectValue placeholder="Select secondary dataframe" />
             </SelectTrigger>
@@ -88,7 +89,20 @@ const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsC
             </SelectContent>
           </Select>
         </div>
-        
+
+        {/* Show Data Summary Toggle - only after both sources selected (no extra Card wrapper) */}
+        {hasBothSources && (
+          <div className="flex items-center justify-between pt-4 border-t mt-2">
+            <Label className="text-xs">Show Data Summary</Label>
+            <Switch
+              checked={(settings as any).showDataSummary || false}
+              onCheckedChange={(checked) => {
+                onSettingsChange({ ...settings, showDataSummary: !!checked });
+              }}
+            />
+          </div>
+        )}
+
         {/* Perform Merge Button */}
         <div className="pt-6">
           <Button
@@ -104,4 +118,4 @@ const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsC
   );
 };
 
-export default MergeInputFiles; 
+export default MergeInputFiles;  
