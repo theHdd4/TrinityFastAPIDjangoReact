@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import SettingsPanel from './SettingsPanel/';
 import SavedDataFramesPanel from './SavedDataFramesPanel';
 import HelpPanel from './HelpPanel/';
@@ -76,6 +76,10 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const controlled = activeProp !== undefined;
   const active = controlled ? activeProp : internalActive;
 
+  // Refs to track user interactions with guided workflow
+  const userClosedGuidedRef = useRef(false);
+  const settingsExplicitlyOpenedRef = useRef(false);
+
   const setActive = (
     value: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | 'guided' | 'metrics' | null,
   ) => {
@@ -86,11 +90,6 @@ const AuxiliaryMenu: React.FC<Props> = ({
     }
   };
 
-  // Track if user has explicitly closed the guided workflow panel
-  const userClosedGuidedRef = React.useRef(false);
-  // Track if Settings was explicitly opened by user (clicking gear icon)
-  const settingsExplicitlyOpenedRef = React.useRef(false);
-  
   const openSettings = () => {
     // Mark as explicitly opened when user clicks Settings icon
     settingsExplicitlyOpenedRef.current = true;
@@ -112,23 +111,10 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openHelp = () => setActive(active === 'help' ? null : 'help');
   const openExhibition = () => setActive(active === 'exhibition' ? null : 'exhibition');
   const openTrinityAI = () => setActive(active === 'trinity' ? null : 'trinity');
-<<<<<<< HEAD
   const openGuidedWorkflow = () => setActive(active === 'guided' ? null : 'guided');
   const openMetrics = () => setActive(active === 'metrics' ? null : 'metrics');
 
   // Keep guided workflow panel open when guided mode is enabled
-  React.useEffect(() => {
-    if (isGuidedModeEnabled) {
-      // Prefer guided panel when guided mode is enabled, but allow metrics panel to remain open
-      if (active !== 'guided' && active !== 'metrics') {
-=======
-  const openGuidedWorkflow = () => {
-    // When user explicitly clicks wrench icon, reset the "closed" flag
-    userClosedGuidedRef.current = false;
-    setActive(active === 'guided' ? null : 'guided');
-  };
-  
-  // Open guided workflow panel by default when guided mode is enabled
   React.useEffect(() => {
     if (isGuidedModeEnabled) {
       // If Settings tries to open automatically (not explicitly), redirect to Guided Workflow
@@ -141,7 +127,6 @@ const AuxiliaryMenu: React.FC<Props> = ({
       }
       // If no panel is active and user hasn't explicitly closed it, open Guided Workflow
       if (active === null && !userClosedGuidedRef.current) {
->>>>>>> 28380d565554ad03a25ccbc3d27006c62cd75cf2
         setActive('guided');
       }
     } else {
@@ -153,23 +138,6 @@ const AuxiliaryMenu: React.FC<Props> = ({
       settingsExplicitlyOpenedRef.current = false;
     }
   }, [isGuidedModeEnabled, active, setActive]);
-  
-  // Reset explicit flag when Settings closes
-  React.useEffect(() => {
-    if (active !== 'settings') {
-      settingsExplicitlyOpenedRef.current = false;
-    }
-  }, [active]);
-  
-  // Track when user explicitly closes the guided workflow panel
-  React.useEffect(() => {
-    if (isGuidedModeEnabled && active !== 'guided' && active !== null) {
-      // User switched to another panel, mark as closed (unless it's Settings and was explicit)
-      if (active !== 'settings' || !settingsExplicitlyOpenedRef.current) {
-        userClosedGuidedRef.current = true;
-      }
-    }
-  }, [active, isGuidedModeEnabled]);
 
   const [trinityBackgroundStatus, setTrinityBackgroundStatus] = useState<TrinityBackgroundStatus>({
     isProcessing: false,
@@ -323,7 +291,6 @@ const AuxiliaryMenu: React.FC<Props> = ({
             )}
           </button>
         </div>
-<<<<<<< HEAD
         {/* Position 3: Metrics - Always visible and clickable */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
           <button
@@ -343,16 +310,9 @@ const AuxiliaryMenu: React.FC<Props> = ({
         </div>
         {/* Position 4: Saved DataFrames - Always visible and clickable */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-=======
-        {/* Position 3: Saved DataFrames - Always visible and clickable */}
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center relative z-10 pointer-events-auto">
->>>>>>> 28380d565554ad03a25ccbc3d27006c62cd75cf2
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              openFrames();
-            }}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center z-10 pointer-events-auto ${
+            onClick={openFrames}
+            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
               active === 'frames' ? 'bg-muted text-foreground' : ''
             }`}
             title="Saved DataFrames"

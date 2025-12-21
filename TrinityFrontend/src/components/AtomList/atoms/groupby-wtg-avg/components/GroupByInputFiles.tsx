@@ -4,16 +4,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-<<<<<<< HEAD
-import { useToast } from '@/hooks/use-toast';
-import { Info } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-=======
->>>>>>> 28380d565554ad03a25ccbc3d27006c62cd75cf2
-
+import { Info } from 'lucide-react';
 const normalizeColumnName = (value: string | undefined | null) => {
   if (!value || typeof value !== 'string') return '';
   return value.trim().toLowerCase();
@@ -35,14 +29,9 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings = atom?.settings || {};
-  const { toast } = useToast();
   const [frames, setFrames] = useState<Frame[]>([]);
   const [columns, setColumns] = useState<ColumnInfo[]>(Array.isArray(settings.allColumns) ? settings.allColumns.filter(Boolean) : []);
   const [identifiers, setIdentifiers] = useState<string[]>(settings.identifiers || []);
-  const [identifiersLoaded, setIdentifiersLoaded] = useState(false);
-  const [mappingResolved, setMappingResolved] = useState(false);
-  const [catColumns, setCatColumns] = useState<string[]>([]);
-  const [showCatSelector, setShowCatSelector] = useState(false);
   const [measures, setMeasures] = useState<string[]>(settings.measures || []);
 
   useEffect(() => {
@@ -256,78 +245,6 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
           background: #a0aec0;
         }
       `}</style>
-<<<<<<< HEAD
-      <Card className="p-4 space-y-4">
-        <div className="space-y-3">
-          <label className="text-sm font-medium text-gray-700 block">Data Source</label>
-          <Select value={settings.dataSource} onValueChange={handleFrameChange}>
-            <SelectTrigger className="bg-white border-gray-300">
-              <SelectValue placeholder="Choose a saved dataframe..." />
-            </SelectTrigger>
-            <SelectContent>
-              {(Array.isArray(frames) ? frames : []).map(f => (
-                <SelectItem key={f.object_name} value={f.object_name}>
-                  {f.csv_name.split('/').pop()}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-medium text-gray-700">Guided mode</span>
-            {!settings.dataSource && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button className="text-gray-400 hover:text-gray-600 transition-colors">
-                      <Info className="w-4 h-4" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="text-sm">Select a data set to start guided mode</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-          </div>
-          <Switch
-            id="groupby-guidedmode-toggle"
-            aria-label="guidedmode"
-            checked={settings.showGuidedMode || false}
-            disabled={!settings.dataSource}
-            onCheckedChange={(checked) => {
-              if (checked && !settings.dataSource) {
-                toast({
-                  title: 'Data Source Required',
-                  description: 'Please select a data source before enabling guided mode.',
-                  variant: 'destructive',
-                });
-                return;
-              }
-              updateSettings(atomId, { showGuidedMode: !!checked });
-            }}
-          />
-        </div>
-      </Card>
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            id="cardinality-toggle"
-            checked={settings.showCardinalityView || false}
-            onCheckedChange={(checked) => {
-              updateSettings(atomId, { showCardinalityView: !!checked });
-            }}
-          />
-          <Label
-            htmlFor="cardinality-toggle"
-            className="text-sm font-medium text-gray-700 cursor-pointer"
-          >
-            Show Cardinality View
-          </Label>
-        </div>
-=======
       <Card className="p-4 space-y-3">
         <label className="text-sm font-medium text-gray-700 block">Data Source</label>
         <Select value={settings.dataSource} onValueChange={handleFrameChange}>
@@ -355,7 +272,35 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
             />
           </div>
         )}
->>>>>>> 28380d565554ad03a25ccbc3d27006c62cd75cf2
+
+        {/* Guided Mode Toggle */}
+        <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-medium text-gray-700">Guided mode</span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[200px] text-xs">
+                  {settings.dataSource 
+                    ? "Step-by-step workflow to configure your Group By operation"
+                    : "Please select a dataframe before turning on the guided workflow"
+                  }
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <Switch
+            id="groupby-guidedmode-toggle"
+            aria-label="guidedmode"
+            checked={settings.showGuidedMode || false}
+            disabled={!settings.dataSource}
+            onCheckedChange={(checked) => {
+              updateSettings(atomId, { showGuidedMode: !!checked });
+            }}
+          />
+        </div>
       </Card>
       {false && identifiers.length > 0 && (
         <Card className="p-4 space-y-3 bg-gradient-to-br from-blue-50 to-blue-100">

@@ -2030,7 +2030,7 @@ interface LaboratoryStore {
   globalGuidedModeEnabled: boolean;
   // Metric Guided Flow State
   isMetricGuidedFlowOpen: boolean;
-  activeMetricGuidedFlow: { currentStage: MetricStage; state: Partial<MetricGuidedFlowState>; fixedCardId?: string; cardsCountWhenOpened?: number } | null;
+  activeMetricGuidedFlow: { currentStage: MetricStage; state: Partial<MetricGuidedFlowState>; fixedCardId?: string; fixedAtomId?: string; cardsCountWhenOpened?: number } | null;
   activeGuidedFlows: Record<string, any>;
   
   // --- Direct Review Panel State ---
@@ -2875,6 +2875,70 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     const currentFlows = get().activeGuidedFlows;
     const { [atomId]: removed, ...remainingFlows } = currentFlows;
     set({ activeGuidedFlows: remainingFlows });
+  },
+  
+  // --- Metric Guided Flow Actions ---
+  openMetricGuidedFlow: (initialContext?: Partial<MetricGuidedFlowState>) => {
+    const cards = get().cards;
+    const metricsInputs = get().metricsInputs;
+    
+    // Capture the current context when opened - this becomes the fixed position
+    const contextAtomId = metricsInputs.contextAtomId;
+    const contextCardId = metricsInputs.contextCardId;
+    
+    // If context is set, use it as the fixed position
+    // Otherwise, fall back to the first card
+    let fixedCardId = contextCardId;
+    let fixedAtomId = contextAtomId;
+    
+    if (!fixedCardId && cards.length > 0) {
+      // No context - use the first card's last atom
+      fixedCardId = cards[0].id;
+      if (cards[0].atoms.length > 0) {
+        fixedAtomId = cards[0].atoms[cards[0].atoms.length - 1].id;
+      }
+    }
+    
+    console.log('[LaboratoryStore] Opening metric guided flow', { 
+      initialContext, 
+      fixedCardId, 
+      fixedAtomId,
+      contextAtomId,
+      contextCardId 
+    });
+    
+    set({
+      isMetricGuidedFlowOpen: true,
+      activeMetricGuidedFlow: {
+        currentStage: initialContext?.currentStage || 'type',
+        state: initialContext || {},
+        fixedCardId,
+        fixedAtomId,
+        cardsCountWhenOpened: cards.length,
+      },
+    });
+  },
+  
+  closeMetricGuidedFlow: () => {
+    console.log('[LaboratoryStore] Closing metric guided flow');
+    set({
+      isMetricGuidedFlowOpen: false,
+      activeMetricGuidedFlow: null,
+    });
+  },
+  
+  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>, fixedCardId?: string) => {
+    const existingFlow = get().activeMetricGuidedFlow;
+    set({
+      activeMetricGuidedFlow: {
+        currentStage,
+        state: state || {},
+        // Preserve fixedCardId and fixedAtomId from existing flow if not explicitly provided
+        fixedCardId: fixedCardId ?? existingFlow?.fixedCardId,
+        fixedAtomId: existingFlow?.fixedAtomId,
+        cardsCountWhenOpened: existingFlow?.cardsCountWhenOpened,
+      },
+    });
   },
   
   setDirectReviewTarget: (frame) => {
