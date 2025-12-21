@@ -3446,6 +3446,30 @@ async def delete_dataframe(object_name: str):
         remove_arrow_object(object_name)
         await delete_arrow_dataset(object_name)
         mark_operation_log_deleted(object_name)
+        
+        # Clear priming status from Redis when file is deleted
+        # This prevents re-uploaded files from showing as primed
+        try:
+            env = await get_env_vars()
+            client_name = env.get("CLIENT_NAME", "") if env else os.getenv("CLIENT_NAME", "")
+            app_name = env.get("APP_NAME", "") if env else os.getenv("APP_NAME", "")
+            project_name = env.get("PROJECT_NAME", "") if env else os.getenv("PROJECT_NAME", "")
+            
+            # Use the full object_name as file_name to match how it's stored in Redis
+            file_name = object_name
+            primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+            redis_client.delete(primed_key_parts)
+            logger.info(f"🗑️ Cleared priming status for deleted file: {file_name}")
+            
+            # Also try with just the filename (without path) in case it was stored that way
+            filename_only = Path(object_name).name
+            if filename_only != file_name:
+                primed_key_parts_filename = ("primed_files", client_name, app_name, project_name, filename_only)
+                redis_client.delete(primed_key_parts_filename)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to clear priming status for {object_name}: {e}")
+            # Don't fail the delete operation if clearing priming status fails
+        
         return {"deleted": object_name}
     except S3Error as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -3459,6 +3483,12 @@ async def delete_all_dataframes():
     prefix = await get_object_prefix()
     deleted = []
     try:
+        # Get environment variables for clearing priming status
+        env = await get_env_vars()
+        client_name = env.get("CLIENT_NAME", "") if env else os.getenv("CLIENT_NAME", "")
+        app_name = env.get("APP_NAME", "") if env else os.getenv("APP_NAME", "")
+        project_name = env.get("PROJECT_NAME", "") if env else os.getenv("PROJECT_NAME", "")
+        
         objects = list(minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True))
         for obj in objects:
             obj_name = obj.object_name
@@ -3468,6 +3498,20 @@ async def delete_all_dataframes():
                 if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                     raise
             redis_client.delete(obj_name)
+            
+            # Clear priming status for each deleted file
+            try:
+                file_name = obj_name
+                primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+                redis_client.delete(primed_key_parts)
+                # Also try with just the filename
+                filename_only = Path(obj_name).name
+                if filename_only != file_name:
+                    primed_key_parts_filename = ("primed_files", client_name, app_name, project_name, filename_only)
+                    redis_client.delete(primed_key_parts_filename)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to clear priming status for {obj_name}: {e}")
+            
             if obj_name.endswith('.arrow'):
                 remove_arrow_object(obj_name)
                 await delete_arrow_dataset(obj_name)
@@ -5519,10 +5563,11 @@ async def check_priming_status(
         
         current_stage = None
         completed_steps: list[str] = []
-        all_steps = ["U0", "U1", "U2", "U3", "U4", "U5", "U6", "U7"]
+        all_steps = ["U2", "U3", "U4", "U5", "U6"]
         
-        if flow_state and isinstance(flow_state, dict):
-            current_stage = flow_state.get("currentStage")
+        # Only check flow state if file is NOT primed - if primed, we know it's U6
+        # This prevents incorrectly assigning current_stage from a flow state for a different file
+        if flow_state and isinstance(flow_state, dict) and not is_primed:
             # Check if this file is in the uploaded files
             uploaded_files = flow_state.get("uploadedFiles", [])
             file_in_flow = any(
@@ -5530,6 +5575,7 @@ async def check_priming_status(
                 for f in uploaded_files
             )
             
+            # Only set current_stage if the file is actually in this flow state
             if file_in_flow:
                 current_stage = flow_state.get("currentStage")
                 # Determine completed steps based on current stage
@@ -5538,26 +5584,26 @@ async def check_priming_status(
                     if stage_index >= 0:
                         # All steps up to and including current stage are completed
                         completed_steps = all_steps[:stage_index + 1]
-                    elif current_stage == "U7":
-                        # All steps completed
+                    elif current_stage == "U6":
+                        # All steps completed (U6 is the final step)
                         completed_steps = all_steps
                 else:
-                    # If no current stage but file is in flow, assume U0 completed
-                    completed_steps = ["U0"]
+                    # If no current stage but file is in flow, assume U2 completed
+                    completed_steps = ["U2"]
         
-        # If primed flag exists, all steps are completed
+        # If primed flag exists, all steps are completed and current_stage is U6
         if is_primed:
             completed_steps = all_steps
-            current_stage = "U7"
+            current_stage = "U6"
         
         # Determine completion status
-        completed = bool(is_primed) or (current_stage == "U7")
+        completed = bool(is_primed) or (current_stage == "U6")
         missing_steps = [s for s in all_steps if s not in completed_steps]
         # Status colors:
-        # - Red: U0 or U1 (step 1 or earlier) - not in progress
-        # - Yellow: U2-U6 (step 2 to step 7) - in progress
-        # - Green: U7 (step 8 - completed) - primed
-        is_in_progress = bool(current_stage) and current_stage not in ["U0", "U1", "U7"]
+        # - Red: No stage or not started - not in progress
+        # - Yellow: U2-U5 (steps 1 to 4) - in progress
+        # - Green: U6 (step 5 - completed) - primed
+        is_in_progress = bool(current_stage) and current_stage not in ["U6"]
         
         return {
             "completed": completed,

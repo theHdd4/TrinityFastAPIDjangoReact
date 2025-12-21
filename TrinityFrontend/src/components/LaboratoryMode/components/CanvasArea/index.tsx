@@ -1355,8 +1355,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   const { setCards } = useExhibitionStore();
   const { toast } = useToast();
   
-  // Automatically create landing card when there are no cards
+  // Automatically create landing card when there are no cards (only in analytics mode)
   React.useEffect(() => {
+    // Only create landing card in analytics mode, not in dashboard mode
+    if (subMode !== 'analytics') {
+      return;
+    }
+    
     if (!Array.isArray(layoutCards) || layoutCards.length === 0) {
       // Check if landing card already exists
       const hasLandingCard = Array.isArray(layoutCards) && 
@@ -1388,7 +1393,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     // NOTE: Landing card should remain even when other cards are added
     // Removed the logic that automatically removes landing card when non-landing cards exist
     // This allows users to keep the landing card and add new cards below it
-  }, [layoutCards, setLayoutCards]);
+  }, [layoutCards, setLayoutCards, subMode]);
 
   const renderAppendedVariables = (card: LayoutCard) => {
     const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
@@ -6357,7 +6362,15 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         <div className={canEdit ? '' : 'pointer-events-none'}>
           {/* Layout Cards Container */}
           <div data-lab-cards-container="true" className="p-2 space-y-6 w-full">
-            {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
+            {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards
+              // Filter out landing cards in dashboard mode
+              .filter(card => {
+                if (subMode === 'dashboard') {
+                  return !card.atoms?.some(atom => atom.atomId === 'landing-screen');
+                }
+                return true; // Show all cards in analytics mode
+              })
+              .map((card, index) => {
               // Check if this is a landing card
               const isLandingCard = card.atoms?.some(atom => atom.atomId === 'landing-screen');
               

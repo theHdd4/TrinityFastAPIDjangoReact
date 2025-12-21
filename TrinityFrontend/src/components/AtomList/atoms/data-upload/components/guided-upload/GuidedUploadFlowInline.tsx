@@ -22,13 +22,13 @@ interface GuidedUploadFlowInlineProps {
     dataTypeSelections: Record<string, any[]>;
     missingValueStrategies: Record<string, any[]>;
   }) => void;
-  /** If provided, start from an existing dataframe (skip U0) */
+  /** If provided, start from an existing dataframe */
   existingDataframe?: {
     name: string;
     path: string;
     size?: number;
   };
-  /** Initial stage to start from (default: U0 or U1 if existingDataframe) */
+  /** Initial stage to start from (default: U2 - U0 and U1 removed) */
   initialStage?: UploadStage;
   /** Saved state to restore (for resuming) */
   savedState?: Partial<GuidedUploadFlowState>;
@@ -36,7 +36,7 @@ interface GuidedUploadFlowInlineProps {
   onClose?: () => void;
 }
 
-// Only U2-U6 are used now (U0 handled by atom, U1 and U7 removed)
+// Only U2-U6 are used now (U0, U1, and U7 removed)
 const STAGE_COMPONENTS: Partial<Record<UploadStage, React.ComponentType<any>>> = {
   U2: U2UnderstandingFiles,
   U3: U3ReviewColumnNames,
@@ -53,7 +53,7 @@ const STAGE_TITLES: Partial<Record<UploadStage, string>> = {
   U6: 'Final Preview Before Priming', // U6 handles priming - no U7 needed
 };
 
-// Stage order: only U2-U6 (U0 handled by atom, U1 and U7 removed)
+// Stage order: only U2-U6 (U0, U1, and U7 removed)
 const STAGE_ORDER: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
 
 // All stages are visible in the inline flow
@@ -164,7 +164,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     Object.keys(state.missingValueStrategies).length,
   ]);
 
-  // Determine initial stage - always start from U2 now (U0 is handled by atom, U1 removed)
+  // Determine initial stage - always start from U2 now (U0 and U1 removed)
   const effectiveInitialStage = initialStage || 'U2';
 
   // Track if we've already initialized from savedState to prevent re-initialization
@@ -610,7 +610,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
       headerBg = 'bg-gray-50';
       borderColor = 'border-gray-200';
     } else if (isCurrent) {
-      // Get the display step number (U2=1, U3=2, etc. since U1 is removed)
+      // Get the display step number (U2=1, U3=2, etc. since U0 and U1 are removed)
       const stepNumber = getDisplayStepNumber(stage);
       statusIcon = (
         <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold flex-shrink-0">
@@ -917,11 +917,10 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       <Button variant="outline" onClick={handleClose}>
                         Cancel
                       </Button>
-                      {stage !== 'U6' && (
-                        <Button
-                          onClick={() => {
-                            // Make this stage current first
-                            goToStage(stage);
+                      <Button
+                        onClick={() => {
+                          // Make this stage current first
+                          goToStage(stage);
                             // Collapse all stages from current onwards when navigating forward
                             setExpandedCompletedStages(prev => {
                               const next = new Set(prev);
@@ -945,7 +944,6 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                         >
                           Continue
                         </Button>
-                      )}
                     </div>
                   </div>
                 )}

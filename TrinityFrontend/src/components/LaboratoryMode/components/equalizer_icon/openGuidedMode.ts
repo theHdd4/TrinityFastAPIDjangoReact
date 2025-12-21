@@ -12,7 +12,7 @@ interface Frame {
 interface OpenGuidedModeParams {
   frame: Frame;
   findOrCreateDataUploadAtom: () => string;
-  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => void;
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U2' | 'U3' | 'U4' | 'U5' | 'U6', state?: any) => void;
   setGlobalGuidedMode: (enabled: boolean) => void;
   // Optional: Direct dependencies in case the function approach fails
   cards?: any[];
@@ -102,7 +102,7 @@ export const openGuidedMode = async ({
     // Check priming status to determine initial stage
     const projectContext = getActiveProjectContext();
     // Default to U2 (Confirm Headers) for files uploaded directly from Saved DataFrames (U1 removed)
-    let startStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7' = 'U2';
+    let startStage: 'U2' | 'U3' | 'U4' | 'U5' | 'U6' = 'U2';
     let isPrimed = false;
     
     if (projectContext) {
@@ -132,11 +132,10 @@ export const openGuidedMode = async ({
           }
           
           // If file is in progress (partially primed), continue from current stage
-          // Skip U1 if it was the current stage, go to U2 instead
           if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
             startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
           }
-          // If file has started but not in progress (U0 or U1), start at U2 (U1 removed)
+          // If file has old stage (U0 or U1), start at U2 (U0 and U1 removed)
           else if (currentStage === 'U0' || currentStage === 'U1') {
             startStage = 'U2';
           }

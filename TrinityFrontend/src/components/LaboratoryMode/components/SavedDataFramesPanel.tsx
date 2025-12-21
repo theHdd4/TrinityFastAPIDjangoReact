@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X, Wrench, FileText } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X, Wrench, FileText, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API, CLASSIFIER_API, SHARE_LINKS_API } from '@/lib/api';
@@ -265,6 +265,24 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const updateCard = useLaboratoryStore((state) => state.updateCard);
   const setCards = useLaboratoryStore((state) => state.setCards);
   const addAtom = useLaboratoryStore((state) => (state as any).addAtom); // May not exist, used only for debugging
+  const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows);
+  const removeActiveGuidedFlow = useLaboratoryStore((state) => state.removeActiveGuidedFlow);
+  const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
+  
+  // State for mode switching confirmation dialog
+  const [modeSwitchConfirmation, setModeSwitchConfirmation] = useState<{
+    show: boolean;
+    fromMode: 'direct' | 'guided';
+    toMode: 'direct' | 'guided';
+    frame: Frame | null;
+    onConfirm: () => void;
+  }>({
+    show: false,
+    fromMode: 'direct',
+    toMode: 'guided',
+    frame: null,
+    onConfirm: () => {},
+  });
   
   // Hook for marking files as primed
   const { markFileAsPrimed } = useGuidedFlowPersistence();
@@ -297,12 +315,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       return '';
     }
   }, [cards]);
+  
   const [viewColumns, setViewColumns] = useState<ProcessingColumnConfig[]>([]);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError, setViewError] = useState('');
   const [isGuidedUploadFlowOpen, setIsGuidedUploadFlowOpen] = useState(false);
   const [guidedFlowInitialFile, setGuidedFlowInitialFile] = useState<{ name: string; path: string; size?: number } | undefined>(undefined);
-  const [guidedFlowInitialStage, setGuidedFlowInitialStage] = useState<'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7'>('U1');
+  const [guidedFlowInitialStage, setGuidedFlowInitialStage] = useState<'U2' | 'U3' | 'U4' | 'U5' | 'U6'>('U2');
 
   const getProcessingDtypeOptions = (currentDtype: string) => {
     const baseOptions = [
@@ -2245,18 +2264,21 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     }
   }, [markFileAsPrimed, toast]);
 
-  useEffect(() => {
-    // Auto-approve files instead of opening preview modal
-    if (processingTarget || pendingProcessFiles.length === 0 || !files.length) return;
-    
-    const nextFileToProcess = pendingProcessFiles[0];
-    const frame = files.find(f => f.object_name === nextFileToProcess);
-    if (frame) {
-      // Remove this file from the queue and auto-approve
-      setPendingProcessFiles(prev => prev.slice(1));
-      void autoApproveFile(frame);
-    }
-  }, [files, pendingProcessFiles, processingTarget, autoApproveFile]);
+  // DISABLED: Auto-approve files after upload
+  // Files should only be primed when explicitly approved by the user through the guided workflow
+  // This prevents files from being automatically primed without user confirmation
+  // useEffect(() => {
+  //   // Auto-approve files instead of opening preview modal
+  //   if (processingTarget || pendingProcessFiles.length === 0 || !files.length) return;
+  //   
+  //   const nextFileToProcess = pendingProcessFiles[0];
+  //   const frame = files.find(f => f.object_name === nextFileToProcess);
+  //   if (frame) {
+  //     // Remove this file from the queue and auto-approve
+  //     setPendingProcessFiles(prev => prev.slice(1));
+  //     void autoApproveFile(frame);
+  //   }
+  // }, [files, pendingProcessFiles, processingTarget, autoApproveFile]);
 
   const handleOpen = (obj: string) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
@@ -2776,14 +2798,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   // Helper function to get step name
   const getStepName = (step: string): string => {
     const stepNames: Record<string, string> = {
-      'U0': 'Upload',
-      'U1': 'Scan',
-      'U2': 'Understand',
-      'U3': 'Headers',
-      'U4': 'Columns',
-      'U5': 'Types',
-      'U6': 'Missing',
-      'U7': 'Summary',
+      'U2': 'Step 1',
+      'U3': 'Step 2',
+      'U4': 'Step 3',
+      'U5': 'Step 4',
+      'U6': 'Step 5',
     };
     return stepNames[step] || step;
   };
@@ -4544,18 +4563,45 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   e.stopPropagation();
                   const target = modeSelectionTarget;
                   if (target) {
-                    try {
-                      // Ensure handleOpenGuidedFlow is a function before calling
-                      if (typeof handleOpenGuidedFlow === 'function') {
-                        await handleOpenGuidedFlow(target);
-                      } else {
-                        console.error('[SavedDataFramesPanel] handleOpenGuidedFlow is not a function, type:', typeof handleOpenGuidedFlow);
+                    // Check if Direct mode is currently active
+                    if (directReviewTarget) {
+                      // Show confirmation dialog before switching from Direct to Guided mode
+                      setModeSwitchConfirmation({
+                        show: true,
+                        fromMode: 'direct',
+                        toMode: 'guided',
+                        frame: target,
+                        onConfirm: async () => {
+                          // Clear Direct mode
+                          setDirectReviewTarget(null);
+                          // Proceed with Guided mode activation
+                          try {
+                            if (typeof handleOpenGuidedFlow === 'function') {
+                              await handleOpenGuidedFlow(target);
+                            } else {
+                              console.error('[SavedDataFramesPanel] handleOpenGuidedFlow is not a function, type:', typeof handleOpenGuidedFlow);
+                            }
+                          } catch (error) {
+                            console.error('[SavedDataFramesPanel] Error opening guided flow:', error);
+                          }
+                          setModeSelectionTarget(null);
+                          setModeSwitchConfirmation({ show: false, fromMode: 'direct', toMode: 'guided', frame: null, onConfirm: () => {} });
+                        },
+                      });
+                    } else {
+                      // No Direct mode active, proceed directly
+                      try {
+                        if (typeof handleOpenGuidedFlow === 'function') {
+                          await handleOpenGuidedFlow(target);
+                        } else {
+                          console.error('[SavedDataFramesPanel] handleOpenGuidedFlow is not a function, type:', typeof handleOpenGuidedFlow);
+                        }
+                      } catch (error) {
+                        console.error('[SavedDataFramesPanel] Error opening guided flow:', error);
                       }
-                    } catch (error) {
-                      console.error('[SavedDataFramesPanel] Error opening guided flow:', error);
+                      setModeSelectionTarget(null);
                     }
                   }
-                  setModeSelectionTarget(null);
                 }}
               >
                 <div className="flex items-center gap-3 mb-2 w-full">
@@ -4577,11 +4623,44 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   e.stopPropagation();
                   const target = modeSelectionTarget;
                   if (target) {
-                    openProcessingModal(target).catch((error) => {
-                      console.error('[SavedDataFramesPanel] Error opening processing modal:', error);
-                    });
+                    // Check if Guided mode is active (if globally enabled, show confirmation)
+                    if (globalGuidedModeEnabled) {
+                      // Get the landing atom ID to clear the flow
+                      const atomId = findOrCreateDataUploadAtom();
+                      // Show confirmation dialog before switching from Guided to Direct mode
+                      setModeSwitchConfirmation({
+                        show: true,
+                        fromMode: 'guided',
+                        toMode: 'direct',
+                        frame: target,
+                        onConfirm: async () => {
+                          // Clear Guided mode state for the landing atom
+                          if (atomId) {
+                            removeActiveGuidedFlow(atomId);
+                            // Check if there are any other active guided flows, if not, disable global guided mode
+                            // Use getState() to get fresh state
+                            const currentFlows = useLaboratoryStore.getState().activeGuidedFlows;
+                            const remainingFlows = Object.keys(currentFlows).filter(id => id !== atomId);
+                            if (remainingFlows.length === 0) {
+                              setGlobalGuidedMode(false);
+                            }
+                          }
+                          // Proceed with Direct mode activation
+                          openProcessingModal(target).catch((error) => {
+                            console.error('[SavedDataFramesPanel] Error opening processing modal:', error);
+                          });
+                          setModeSelectionTarget(null);
+                          setModeSwitchConfirmation({ show: false, fromMode: 'guided', toMode: 'direct', frame: null, onConfirm: () => {} });
+                        },
+                      });
+                    } else {
+                      // No Guided mode active, proceed directly
+                      openProcessingModal(target).catch((error) => {
+                        console.error('[SavedDataFramesPanel] Error opening processing modal:', error);
+                      });
+                      setModeSelectionTarget(null);
+                    }
                   }
-                  setModeSelectionTarget(null);
                 }}
               >
                 <div className="flex items-center gap-3 mb-2 w-full">
@@ -4604,6 +4683,37 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           </DialogContent>
         </Dialog>
       )}
+      
+      {/* Mode Switch Confirmation Dialog */}
+      <ConfirmationDialog
+        open={modeSwitchConfirmation.show}
+        onOpenChange={(open) => {
+          if (!open) {
+            setModeSwitchConfirmation({ show: false, fromMode: 'direct', toMode: 'guided', frame: null, onConfirm: () => {} });
+          }
+        }}
+        onConfirm={() => {
+          modeSwitchConfirmation.onConfirm();
+        }}
+        onCancel={() => {
+          setModeSwitchConfirmation({ show: false, fromMode: 'direct', toMode: 'guided', frame: null, onConfirm: () => {} });
+        }}
+        title={
+          modeSwitchConfirmation.fromMode === 'direct'
+            ? 'Switch to Guided Mode?'
+            : 'Switch to Direct Review?'
+        }
+        description={
+          modeSwitchConfirmation.fromMode === 'direct'
+            ? 'You are currently in Direct Review mode. Switching to Guided Mode will replace the Direct Review panel. Do you want to continue?'
+            : 'You are currently in Guided Mode. Switching to Direct Review will exit the Guided Mode workflow. Do you want to continue?'
+        }
+        icon={<AlertCircle className="w-5 h-5 text-white" />}
+        confirmLabel="Yes, Switch"
+        cancelLabel="Cancel"
+        iconBgClass="bg-blue-500"
+        confirmButtonClass="bg-blue-500 hover:bg-blue-600"
+      />
     </div>
   );
 };

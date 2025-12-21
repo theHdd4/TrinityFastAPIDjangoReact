@@ -2080,8 +2080,8 @@ interface LaboratoryStore {
   
   // --- Guided Mode Actions ---
   setGlobalGuidedMode: (enabled: boolean) => void;
-  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => void;
-  updateGuidedFlowStage: (atomId: string, stage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7') => void;
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U2' | 'U3' | 'U4' | 'U5' | 'U6', state?: any) => void;
+  updateGuidedFlowStage: (atomId: string, stage: 'U2' | 'U3' | 'U4' | 'U5' | 'U6') => void;
   isGuidedModeActiveForAtom: (atomId: string) => boolean;
   removeActiveGuidedFlow: (atomId: string) => void;
   
@@ -2150,12 +2150,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       const filteredCards: LayoutCard[] = [];
       
       for (const card of cardsToSet) {
-        // CRITICAL FIX: Allow landing-screen atoms in dashboard mode for empty state
+        // Filter out landing-screen atoms in dashboard mode - landing pages are only for analytics mode
         const allowedAtoms = (card.atoms || []).filter(atom => 
-          allowedAtomIdsSet.has(atom.atomId as any) || atom.atomId === 'landing-screen'
+          allowedAtomIdsSet.has(atom.atomId as any) && atom.atomId !== 'landing-screen'
         );
         
-        // CRITICAL FIX: Allow empty cards OR cards with allowed atoms (including landing-screen)
+        // CRITICAL FIX: Allow empty cards OR cards with allowed atoms (excluding landing-screen)
         // Empty cards must be preserved for "Add New Card" functionality in dashboard mode
         if (allowedAtoms.length > 0 || (card.atoms || []).length === 0) {
           // Keep only first allowed atom (one atom per card), or preserve empty array
@@ -2807,7 +2807,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     set({ globalGuidedModeEnabled: enabled });
   },
   
-  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => {
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U2' | 'U3' | 'U4' | 'U5' | 'U6', state?: any) => {
     const currentFlows = get().activeGuidedFlows;
     set({
       activeGuidedFlows: {
@@ -2820,7 +2820,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     });
   },
   
-  updateGuidedFlowStage: (atomId: string, stage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7') => {
+  updateGuidedFlowStage: (atomId: string, stage: 'U2' | 'U3' | 'U4' | 'U5' | 'U6') => {
     const currentFlows = get().activeGuidedFlows;
     if (currentFlows[atomId]) {
       set({

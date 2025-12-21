@@ -116,7 +116,10 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           let isPrimed = false;
           if (primingRes.ok) {
             const primingData = await primingRes.json();
-            const completed = primingData?.completed === true || primingData?.is_primed === true;
+            // Only trust is_primed flag - don't use completed flag as it can be true even if file hasn't been primed
+            // Check if flow has been completed by checking if current_stage is U6 (final step)
+            const hasCompletedFlow = primingData?.current_stage === 'U6';
+            const isPrimedFromAPI = primingData?.is_primed === true;
             
             // Check classifier config
             try {
@@ -138,7 +141,10 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
                 if (configData?.data) {
                   const hasIdentifiers = Array.isArray(configData.data.identifiers) && configData.data.identifiers.length > 0;
                   const hasMeasures = Array.isArray(configData.data.measures) && configData.data.measures.length > 0;
-                  isPrimed = completed && (hasIdentifiers || hasMeasures);
+                  const hasClassifierConfig = hasIdentifiers || hasMeasures;
+                  // ONLY trust is_primed flag from API - this is the authoritative source
+                  // Do NOT use fallback logic as it can incorrectly mark files as primed
+                  isPrimed = isPrimedFromAPI;
                 }
               }
             } catch (err) {
@@ -238,7 +244,10 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           let isPrimed = false;
           if (primingRes.ok) {
             const primingData = await primingRes.json();
-            const completed = primingData?.completed === true || primingData?.is_primed === true;
+            // Only trust is_primed flag - don't use completed flag as it can be true even if file hasn't been primed
+            // Check if flow has been completed by checking if current_stage is U6 (final step)
+            const hasCompletedFlow = primingData?.current_stage === 'U6';
+            const isPrimedFromAPI = primingData?.is_primed === true;
             
             // Check classifier config
             try {
@@ -260,7 +269,10 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
                 if (configData?.data) {
                   const hasIdentifiers = Array.isArray(configData.data.identifiers) && configData.data.identifiers.length > 0;
                   const hasMeasures = Array.isArray(configData.data.measures) && configData.data.measures.length > 0;
-                  isPrimed = completed && (hasIdentifiers || hasMeasures);
+                  const hasClassifierConfig = hasIdentifiers || hasMeasures;
+                  // ONLY trust is_primed flag from API - this is the authoritative source
+                  // Do NOT use fallback logic as it can incorrectly mark files as primed
+                  isPrimed = isPrimedFromAPI;
                 }
               }
             } catch (err) {
@@ -519,7 +531,8 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
       </div>
 
       {/* Direct Review Panel - Show BELOW the buttons when Directly Review is clicked */}
-      {directReviewTarget && (
+      {/* Only show if no Guided mode is active for this atom (mutual exclusivity) */}
+      {directReviewTarget && !hasActiveGuidedFlow && (
         <DirectReviewPanel
           frame={directReviewTarget}
           onClose={() => {
@@ -534,7 +547,8 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
 
       {/* Guided Flow Steps - Show BELOW the buttons, extending the card downward */}
       {/* Only show for the selected file (existingDataframe must match the clicked file) */}
-      {hasActiveGuidedFlow && globalGuidedModeEnabled && flowState && existingDataframe && (
+      {/* Only show if Direct mode is not active (mutual exclusivity) */}
+      {hasActiveGuidedFlow && globalGuidedModeEnabled && flowState && existingDataframe && !directReviewTarget && (
         <div className="w-full border-t-2 border-blue-200 bg-white flex-shrink-0" style={{ minHeight: '400px', maxHeight: '70vh', overflowY: 'auto' }}>
           <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50 sticky top-0 z-10">
             <h3 className="text-base font-semibold text-gray-800">Guided Priming Workflow</h3>

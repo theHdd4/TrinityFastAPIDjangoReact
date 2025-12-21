@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 
-export type UploadStage = 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+export type UploadStage = 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
 
 export interface UploadedFileInfo {
   name: string;

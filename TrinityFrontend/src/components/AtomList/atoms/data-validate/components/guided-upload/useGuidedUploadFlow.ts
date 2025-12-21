@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 
-export type UploadStage = 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7';
+export type UploadStage = 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
 
 export interface UploadedFileInfo {
   name: string;
@@ -94,7 +94,7 @@ export function useGuidedUploadFlow(initialState?: Partial<GuidedUploadFlowState
   }, []);
 
   const goToNextStage = useCallback(() => {
-    const stages: UploadStage[] = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+    const stages: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
     const currentIndex = stages.indexOf(state.currentStage);
     if (currentIndex < stages.length - 1) {
       goToStage(stages[currentIndex + 1]);
@@ -102,7 +102,7 @@ export function useGuidedUploadFlow(initialState?: Partial<GuidedUploadFlowState
   }, [state.currentStage, goToStage]);
 
   const goToPreviousStage = useCallback(() => {
-    const stages: UploadStage[] = ['U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
+    const stages: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
     const currentIndex = stages.indexOf(state.currentStage);
     if (currentIndex > 0) {
       goToStage(stages[currentIndex - 1]);

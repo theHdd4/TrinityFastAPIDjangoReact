@@ -146,10 +146,10 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
         processed: false,
       };
       
-      // Start guided flow at U1 (Structural Scan) - atom split panel is Step 1
-      setActiveGuidedFlow(atomId, 'U1', {
+      // Start guided flow at U2 (U0 and U1 removed)
+      setActiveGuidedFlow(atomId, 'U2', {
         uploadedFiles: [uploadedFileInfo],
-        currentStage: 'U1',
+        currentStage: 'U2',
       });
       
       toast({ title: 'File uploaded', description: `${data.file_name || sanitizedFileName} is ready for processing.` });
@@ -172,10 +172,10 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
       processed: true,
     };
     
-    // Start guided flow at U1 (Structural Scan) - atom split panel is Step 1
-    setActiveGuidedFlow(atomId, 'U1', {
+    // Start guided flow at U2 (U0 and U1 removed)
+    setActiveGuidedFlow(atomId, 'U2', {
       uploadedFiles: [uploadedFileInfo],
-      currentStage: 'U1',
+      currentStage: 'U2',
     });
     
     toast({
