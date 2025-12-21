@@ -12,10 +12,8 @@ import {
   Hash,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { GROUPBY_API, CREATECOLUMN_API } from '@/lib/api';
+import { GROUPBY_API, CREATECOLUMN_API, VALIDATE_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
-import { useSavedDataframes } from '../../hooks/useSavedDataframes';
-import type { SavedFrame } from '../../hooks/useSavedDataframes';
 import { cn } from '@/lib/utils';
 import {
   Tooltip,
@@ -58,9 +56,35 @@ interface PreviewRow {
   [column: string]: string | number | null;
 }
 
+interface SavedFrame {
+  object_name: string;
+  csv_name: string;
+}
+
 export const M1Dataset: React.FC<M1DatasetProps> = ({ flow, contextAtomId, readOnly = false }) => {
   const { state, setState } = flow;
-  const { frames, loading: framesLoading, error: framesError } = useSavedDataframes();
+  
+  // Direct fetch for saved dataframes (replaces useSavedDataframes hook)
+  const [frames, setFrames] = useState<SavedFrame[]>([]);
+  const [framesLoading, setFramesLoading] = useState(true);
+  
+  useEffect(() => {
+    setFramesLoading(true);
+    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+      .then(r => r.json())
+      .then(d => {
+        const allFiles = Array.isArray(d.files) ? d.files : [];
+        const arrowFiles = allFiles.filter(
+          (f: SavedFrame) => f.object_name && f.object_name.endsWith('.arrow'),
+        );
+        setFrames(arrowFiles);
+        setFramesLoading(false);
+      })
+      .catch(() => {
+        setFrames([]);
+        setFramesLoading(false);
+      });
+  }, []);
   
   const [cardinalityData, setCardinalityData] = useState<ColumnMetadata[]>([]);
   const [loadingCardinality, setLoadingCardinality] = useState(false);
