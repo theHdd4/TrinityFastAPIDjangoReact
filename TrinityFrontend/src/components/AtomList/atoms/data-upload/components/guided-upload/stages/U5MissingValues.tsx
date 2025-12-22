@@ -275,15 +275,16 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
             if (existingStrategy) {
               tag = 'previously_used';
             } else if (suggestedTreatment !== 'none') {
-              // AI suggested a treatment
+              // AI suggested a treatment (but default selected will be 'none')
               tag = 'ai_suggestion';
             } else {
               // No suggestion - user needs to select manually
               tag = undefined;
             }
             
-            // Set default selected treatment to suggested if no existing strategy
-            const selectedTreatment = existingStrategy?.strategy || suggestedTreatment;
+            // Set default selected treatment to 'none' (Leave as Missing) if no existing strategy
+            // AI suggestions are still calculated and shown, but default selection is always 'none'
+            const selectedTreatment = existingStrategy?.strategy || 'none';
 
             // Generate warnings and notes
             let warning: string | undefined;

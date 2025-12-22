@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -888,13 +888,27 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 pt-4 border-t border-gray-200">
-          <Button variant="outline" size="sm" onClick={onBack} disabled={saving}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving || loading || columns.length === 0}>
-            {saving ? 'Saving…' : 'Approve'}
-          </Button>
+        <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onBack}
+              disabled={saving}
+              className="flex items-center gap-2"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={onBack} disabled={saving}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={saving || loading || columns.length === 0}>
+              {saving ? 'Saving…' : 'Approve'}
+            </Button>
+          </div>
         </div>
       </div>
     </StageLayout>
