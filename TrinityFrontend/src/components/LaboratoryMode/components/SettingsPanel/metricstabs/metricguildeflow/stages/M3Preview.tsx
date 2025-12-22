@@ -173,6 +173,7 @@ export const M3Preview: React.FC<M3PreviewProps> = ({ flow, onSave, onClose, rea
     window.open(url, '_blank');
   };
 
+
   const getVariableValue = (variable: CreatedVariable): string | null => {
     // For both assign and compute, use value from state first (set during preview computation)
     if (variable.value) {

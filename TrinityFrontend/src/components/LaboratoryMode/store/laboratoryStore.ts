@@ -2569,6 +2569,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   updateTableAtomWithFile: async (atomId: string, objectName: string) => {
+    console.log(`called this atom and save dataframe as :${objectName}:`);
     // Update atom settings to trigger auto-load
     // We need to explicitly set sourceFile and mode, and ensure tableData is cleared
     // so the auto-load mechanism will trigger
@@ -2613,6 +2614,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
 
   createCardWithTableAtom: async (objectName: string, position?: number) => {
     try {
+      console.log(`called this atom and save dataframe as :${objectName}:`);
       // console.log('🆕 [createCardWithTableAtom] Starting:', { objectName, position });
       // console.log('🆕 [createCardWithTableAtom] LABORATORY_API:', LABORATORY_API);
       
@@ -2721,6 +2723,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     currentAtomId: string,
     newDataframePath: string
   ) => {
+    console.log(`called this atom and save dataframe as :${newDataframePath}:`);
     const cards = get().cards;
     if (!Array.isArray(cards)) {
       console.error('❌ [replaceAtomWithTable] Cards array is invalid');
