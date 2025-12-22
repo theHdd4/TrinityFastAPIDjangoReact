@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowRight, AlertTriangle, Upload } from 'lucide-react';
+import { ArrowRight, AlertTriangle, Upload, SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import SavedDataFramesPanel from '@/components/LaboratoryMode/components/SavedDataFramesPanel';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
@@ -327,13 +327,15 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
       {/* Priming Status Heading */}
       {primingStats.total > 0 && (
         <div className="px-6 pt-1 pb-0">
-          <h3 className="text-base font-semibold text-gray-800">
+          <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
             {primingStats.unprimed > 0 
-              ? (primingStats.total === 1 && primingStats.unprimed === 1
-                  ? `Status : File need to be prime`
-                  : primingStats.unprimed === primingStats.total
-                  ? `Status : All file need to prime`
-                  : `Status : ${primingStats.unprimed} out of ${primingStats.total} files yet to be primed`)
+              ? (
+                  <>
+                    <span>Unprimed files detected. Click on</span>
+                    <SlidersHorizontal className="w-4 h-4 text-gray-600" />
+                    <span>icon to prime them</span>
+                  </>
+                )
               : `Status : All files primed`
             }
           </h3>
