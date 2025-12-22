@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useGuidedUploadFlow, type UploadStage, type GuidedUploadFlowState } from './useGuidedUploadFlow';
 import { U2UnderstandingFiles } from './stages/U2UnderstandingFiles';
 import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
@@ -1012,25 +1012,38 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
         {/* Render only visible stages (U2-U6) */}
         {VISIBLE_STAGES.map(stage => renderStageItem(stage))}
       </div>
-      
-      {/* Maximized Stage Dialog */}
-      {maximizedStage && (
-        <Dialog open={!!maximizedStage} onOpenChange={(open) => !open && setMaximizedStage(null)}>
-          <DialogContent 
-            className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 overflow-hidden"
-            hideCloseButton
+
+      {/* Maximized Stage Fullscreen Overlay */}
+      {maximizedStage && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-40 pointer-events-none"
+            role="dialog"
+            aria-modal="true"
           >
-            <DialogHeader className="px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0">
-              <div className="flex items-center justify-between">
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 bg-black/40 pointer-events-auto"
+              aria-hidden="true"
+              onClick={() => setMaximizedStage(null)}
+            />
+
+            {/* Fullscreen Content Container */}
+            <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white shadow-sm">
                 <div className="flex items-center space-x-2">
-                  <DialogTitle className="text-lg font-semibold text-gray-900">
+                  <span className="text-lg font-semibold text-gray-900">
                     {STAGE_TITLES[maximizedStage]}
-                  </DialogTitle>
+                  </span>
                   {maximizedStage === state.currentStage && (
-                    <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Current</span>
+                    <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+                      Current
+                    </span>
                   )}
                   {isStageCompleted(maximizedStage, state.currentStage) && (
-                    <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">Completed</span>
+                    <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">
+                      Completed
+                    </span>
                   )}
                 </div>
                 <button
@@ -1041,15 +1054,16 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                   <X className="w-5 h-5 text-gray-500" />
                 </button>
               </div>
-            </DialogHeader>
-            
-            {/* Maximized Content */}
-            <div className="flex-1 overflow-auto">
-              {renderMaximizedStageContent(maximizedStage)}
+
+              {/* Fullscreen Stage Content */}
+              <div className="flex-1 overflow-auto">
+                {renderMaximizedStageContent(maximizedStage)}
+              </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
+          </div>,
+          document.body
+        )
+      }
     </>
   );
 };

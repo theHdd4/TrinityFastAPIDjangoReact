@@ -62,21 +62,37 @@ export const openGuidedMode = async ({
     console.log('[openGuidedMode] Cards available:', Array.isArray(cards) ? cards.length : 'not an array');
     let atomId: string = '';
     
-    // Look for landing-screen atom in cards
+    // Look for data-upload atom first (new integrated approach), then landing-screen atom (legacy)
     if (Array.isArray(cards)) {
+      // First pass: look for data-upload atom (integrated in Upload atom)
       for (const card of cards) {
         if (card?.atoms && Array.isArray(card.atoms)) {
           console.log('[openGuidedMode] Checking card:', card.id, 'with', card.atoms.length, 'atoms');
           for (const atom of card.atoms) {
             console.log('[openGuidedMode] Checking atom:', atom.atomId, atom.id);
-            // Use landing-screen atom if it exists
-            if (atom?.atomId === 'landing-screen' && atom?.id) {
+            if (atom?.atomId === 'data-upload' && atom?.id) {
               atomId = atom.id;
-              console.log('[openGuidedMode] ✅ Found landing card atom:', atomId);
+              console.log('[openGuidedMode] ✅ Found data-upload atom (integrated):', atomId);
               break;
             }
           }
           if (atomId) break;
+        }
+      }
+      
+      // Second pass: fallback to landing-screen atom (legacy)
+      if (!atomId) {
+        for (const card of cards) {
+          if (card?.atoms && Array.isArray(card.atoms)) {
+            for (const atom of card.atoms) {
+              if (atom?.atomId === 'landing-screen' && atom?.id) {
+                atomId = atom.id;
+                console.log('[openGuidedMode] ✅ Found landing-screen atom (legacy):', atomId);
+                break;
+              }
+            }
+            if (atomId) break;
+          }
         }
       }
     }

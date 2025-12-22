@@ -288,20 +288,32 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   // Hook for marking files as primed
   const { markFileAsPrimed } = useGuidedFlowPersistence();
 
-  // Helper function to find the landing card atom (not create a new one)
+  // Helper function to find the landing card atom or data-upload atom (not create a new one)
   // Use useCallback to ensure stable function reference
+  // Priority: data-upload atom (new integrated approach) > landing-screen atom (legacy)
   const findOrCreateDataUploadAtom = useCallback(() => {
     try {
-      console.log('[findOrCreateDataUploadAtom] Looking for landing card atom, cards type:', Array.isArray(cards) ? `array(${cards.length})` : typeof cards);
+      console.log('[findOrCreateDataUploadAtom] Looking for data-upload or landing card atom, cards type:', Array.isArray(cards) ? `array(${cards.length})` : typeof cards);
       
-      // Look for landing-screen atom (the landing card)
       if (Array.isArray(cards)) {
+        // First, look for data-upload atom (new integrated approach in Upload atom)
         for (const card of cards) {
           if (card?.atoms && Array.isArray(card.atoms)) {
             for (const atom of card.atoms) {
-              // Use landing-screen atom instead of creating data-upload atom
+              if (atom?.atomId === 'data-upload' && atom?.id) {
+                console.log('[findOrCreateDataUploadAtom] Found data-upload atom (integrated):', atom.id);
+                return atom.id;
+              }
+            }
+          }
+        }
+        
+        // Fallback: look for landing-screen atom (legacy approach)
+        for (const card of cards) {
+          if (card?.atoms && Array.isArray(card.atoms)) {
+            for (const atom of card.atoms) {
               if (atom?.atomId === 'landing-screen' && atom?.id) {
-                console.log('[findOrCreateDataUploadAtom] Found landing card atom:', atom.id);
+                console.log('[findOrCreateDataUploadAtom] Found landing-screen atom (legacy):', atom.id);
                 return atom.id;
               }
             }
@@ -309,7 +321,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         }
       }
 
-      console.error('[findOrCreateDataUploadAtom] Landing card atom not found');
+      console.error('[findOrCreateDataUploadAtom] Neither data-upload nor landing-screen atom found');
       return '';
     } catch (error) {
       console.error('[findOrCreateDataUploadAtom] Error:', error);
@@ -2802,8 +2814,85 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     };
   });
   
-  // Combine regular tree with Excel folders
-  const combinedTree = [...tree, ...excelFolderNodes];
+  // Helper function to sort tree nodes by priming status (unprimed first)
+  const sortTreeByPrimingStatus = (nodes: TreeNode[]): TreeNode[] => {
+    // First, recursively sort children of each node
+    const nodesWithSortedChildren = nodes.map(node => {
+      if (node.children && node.children.length > 0) {
+        return { ...node, children: sortTreeByPrimingStatus(node.children) };
+      }
+      return node;
+    });
+    
+    // Then sort the nodes themselves
+    return nodesWithSortedChildren.sort((a, b) => {
+      // If both are Excel folders, keep original order
+      if (a.isExcelFolder && b.isExcelFolder) {
+        return 0;
+      }
+      
+      // Excel folders come after regular files
+      if (a.isExcelFolder) return 1;
+      if (b.isExcelFolder) return -1;
+      
+      // If both have frames, sort by priming status
+      if (a.frame && b.frame) {
+        const aStatus = filePrimingStatus[a.frame.object_name];
+        const bStatus = filePrimingStatus[b.frame.object_name];
+        const aIsPrimed = aStatus?.isApproved === true;
+        const bIsPrimed = bStatus?.isApproved === true;
+        
+        // Unprimed (false) comes before primed (true)
+        if (aIsPrimed !== bIsPrimed) {
+          return aIsPrimed ? 1 : -1;
+        }
+      }
+      
+      // If one has frame and other doesn't, frame comes first
+      if (a.frame && !b.frame) return -1;
+      if (!a.frame && b.frame) return 1;
+      
+      // Default: maintain original order
+      return 0;
+    });
+  };
+  
+  // Sort sheets within Excel folders by priming status
+  const sortExcelFolderSheets = (folders: TreeNode[]): TreeNode[] => {
+    return folders.map(folder => {
+      if (folder.isExcelFolder && folder.children) {
+        const sortedChildren = folder.children.map(child => {
+          if (child.isSheetsFolder && child.sheets) {
+            const sortedSheets = [...child.sheets].sort((a, b) => {
+              const aStatus = filePrimingStatus[a.object_name];
+              const bStatus = filePrimingStatus[b.object_name];
+              const aIsPrimed = aStatus?.isApproved === true;
+              const bIsPrimed = bStatus?.isApproved === true;
+              
+              // Unprimed (false) comes before primed (true)
+              if (aIsPrimed !== bIsPrimed) {
+                return aIsPrimed ? 1 : -1;
+              }
+              return 0;
+            });
+            return { ...child, sheets: sortedSheets };
+          }
+          return child;
+        });
+        return { ...folder, children: sortedChildren };
+      }
+      return folder;
+    });
+  };
+  
+  // Sort regular tree nodes
+  const sortedTree = sortTreeByPrimingStatus(tree);
+  
+  // Sort Excel folder sheets
+  const sortedExcelFolderNodes = sortExcelFolderSheets(excelFolderNodes);
+  
+  // Combine regular tree with Excel folders (unprimed files appear first)
+  const combinedTree = [...sortedTree, ...sortedExcelFolderNodes];
 
   const toggleDir = (path: string) => {
     setOpenDirs(prev => ({ ...prev, [path]: !prev[path] }));
@@ -3590,7 +3679,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           </Button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-3 text-sm">
+      <div 
+        className="flex-1 overflow-y-auto p-3 text-sm" 
+        style={{ 
+          maxHeight: '100%', 
+          height: '100%',
+          overflowY: 'auto',
+          overflowX: 'hidden'
+        }}
+      >
         {loading ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-gray-700">
             <div className="w-20 h-20 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center mx-auto mb-4 shadow-inner">

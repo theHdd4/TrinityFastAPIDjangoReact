@@ -323,16 +323,16 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
   };
 
   return (
-    <div className="w-full flex flex-col" style={{ minHeight: '100%' }}>
+    <div className="w-full flex flex-col h-full" style={{ height: '100%', overflow: 'hidden' }}>
       {/* Priming Status Heading */}
       {primingStats.total > 0 && (
-        <div className="px-6 pt-1 pb-0">
+        <div className="px-6 pt-1 pb-0 flex-shrink-0">
           <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
             {primingStats.unprimed > 0 
               ? (
                   <>
                     <span>Unprimed files detected. Click on</span>
-                    <SlidersHorizontal className="w-4 h-4 text-gray-600" />
+                    <SlidersHorizontal className="w-4 h-4 text-gray-700" />
                     <span>icon to prime them</span>
                   </>
                 )
@@ -503,9 +503,22 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           max-width: 100% !important;
         }
       `}</style>
-      {/* Saved DataFrames Panel - Always visible, but limit height when guided mode is active */}
-      <div className={`overflow-y-auto w-full flex flex-col ${hasActiveGuidedFlow ? 'flex-shrink-0' : 'flex-1 min-h-0'}`} data-saved-dataframes-panel ref={panelContainerRef} style={{ maxHeight: hasActiveGuidedFlow ? '300px' : 'none' }}>
-        <div className="w-full">
+      {/* Saved DataFrames Panel - Always visible, with scrolling when needed */}
+      {/* Fixed width to match right panel, with proper scrolling */}
+      <div 
+        className={`w-full flex flex-col ${hasActiveGuidedFlow ? 'flex-shrink-0' : 'flex-1 min-h-0'}`} 
+        data-saved-dataframes-panel 
+        ref={panelContainerRef} 
+        style={{ 
+          maxHeight: hasActiveGuidedFlow ? '300px' : '100%',
+          height: hasActiveGuidedFlow ? '300px' : 'calc(100% - 60px)',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          width: '100%',
+          flex: hasActiveGuidedFlow ? '0 0 300px' : '1 1 auto'
+        }}
+      >
+        <div className="w-full h-full" style={{ overflowY: 'auto', overflowX: 'hidden', height: '100%' }}>
           <SavedDataFramesPanel 
             isOpen={true} 
             onToggle={() => {}} 
@@ -514,15 +527,8 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
         </div>
       </div>
 
-      {/* Action Buttons - Blue with text, right side - Always visible */}
+      {/* Action Buttons - Only Continue (upload handled by Upload atom) */}
       <div className="flex items-center justify-end gap-3 px-3 pt-2 pb-2 border-t border-gray-200 flex-shrink-0 bg-white">
-        <Button
-          onClick={handleUploadMore}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2"
-        >
-          <Upload className="w-4 h-4 mr-2" />
-          Upload More
-        </Button>
         <Button
           onClick={handleContinue}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2"
@@ -534,24 +540,29 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
 
       {/* Direct Review Panel - Show BELOW the buttons when Directly Review is clicked */}
       {/* Only show if no Guided mode is active for this atom (mutual exclusivity) */}
+      {/* DirectReviewPanel now uses StageLayout which provides full-area coverage like U2 */}
       {directReviewTarget && !hasActiveGuidedFlow && (
-        <DirectReviewPanel
-          frame={directReviewTarget}
-          onClose={() => {
-            setDirectReviewTarget(null);
-          }}
-          onSave={() => {
-            // Refresh priming stats after save
-            fetchPrimingStats();
-          }}
-        />
+        <div className="w-full border-t-2 border-blue-200 bg-white flex-shrink-0 mt-2" style={{ minHeight: '500px', maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
+          <div className="p-4 h-full">
+            <DirectReviewPanel
+              frame={directReviewTarget}
+              onClose={() => {
+                setDirectReviewTarget(null);
+              }}
+              onSave={() => {
+                // Refresh priming stats after save
+                fetchPrimingStats();
+              }}
+            />
+          </div>
+        </div>
       )}
 
       {/* Guided Flow Steps - Show BELOW the buttons, extending the card downward */}
       {/* Only show for the selected file (existingDataframe must match the clicked file) */}
       {/* Only show if Direct mode is not active (mutual exclusivity) */}
       {hasActiveGuidedFlow && globalGuidedModeEnabled && flowState && existingDataframe && !directReviewTarget && (
-        <div className="w-full border-t-2 border-blue-200 bg-white flex-shrink-0" style={{ minHeight: '400px', maxHeight: '70vh', overflowY: 'auto' }}>
+        <div className="w-full border-t-2 border-blue-200 bg-white flex-shrink-0 mt-2" style={{ minHeight: '500px', maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
           <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50 sticky top-0 z-10">
             <h3 className="text-base font-semibold text-gray-800">Guided Priming Workflow</h3>
             <p className="text-xs text-gray-600 mt-1">
@@ -574,6 +585,9 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
                   uploadedFiles: fileNames,
                   filePathMap: filePathMap,
                 });
+                
+                // Refresh priming stats after completion
+                fetchPrimingStats();
               }}
               onClose={() => {
                 removeActiveGuidedFlow(atomId);

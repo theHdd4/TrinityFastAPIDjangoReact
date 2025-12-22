@@ -322,28 +322,9 @@ const AuxiliaryMenu: React.FC<Props> = ({
             </span>
           </button>
         </div>
-        {/* Position 4: Guided Workflow (Wrench) - Only shown when guided mode is ON */}
-        {isGuidedModeEnabled && (
-          <div className="p-3 border-b border-gray-200 flex items-center justify-center relative z-10 pointer-events-auto">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                openGuidedWorkflow();
-              }}
-              className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center z-10 pointer-events-auto ${
-                active === 'guided' ? 'bg-muted text-foreground' : ''
-              }`}
-              title="Guided Workflow"
-              data-guided-workflow="true"
-              type="button"
-            >
-              <Wrench className="w-4 h-4 pointer-events-none" />
-              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-                Guided Workflow
-              </span>
-            </button>
-          </div>
-        )}
+        {/* Position 4 previously contained the Guided Workflow wrench icon.
+            Guided Workflow is now controlled directly from the Data Upload card header,
+            so we intentionally omit the wrench icon from the auxiliary menu. */}
         {/* Help - Hidden (has hidden class) */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-center hidden">
           <button
