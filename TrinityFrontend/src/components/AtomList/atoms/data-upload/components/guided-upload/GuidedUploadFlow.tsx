@@ -550,14 +550,15 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
               onNext={handleNext} 
               onBack={handleBack}
               onGoToStage={goToStage}
+              isMaximized={isMaximized}
             />
           ) : (
             <CurrentStageComponent flow={flow} onNext={handleNext} onBack={handleBack} />
           )}
         </div>
 
-        {/* Navigation Footer - Consistent across all stages (hidden for U2 and U6 as they have their own controls) */}
-        {!isMinimized && !['U2', 'U6'].includes(state.currentStage) && (
+        {/* Navigation Footer - Show for U2, U3, U4, U5 in both normal and maximized mode (U6 has its own controls) */}
+        {!isMinimized && ['U2', 'U3', 'U4', 'U5'].includes(state.currentStage) && (
           <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0">
             <div className="flex gap-2">
               {canGoBack && (

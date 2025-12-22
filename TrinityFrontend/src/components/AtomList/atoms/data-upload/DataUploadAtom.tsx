@@ -10,6 +10,8 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { PartialPrimedCard } from '@/components/LaboratoryMode/LandingScreen/PartialPrimedCard';
+import { DirectReviewPanel } from '@/components/LaboratoryMode/components/DirectReviewPanel';
+import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
 import {
   Dialog,
   DialogContent,
@@ -37,6 +39,11 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows);
   const isGuidedModeActive = useLaboratoryStore((state) => state.isGuidedModeActiveForAtom(atomId));
   const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
+  const isGuidedModeActiveForAtom = useLaboratoryStore((state) => state.isGuidedModeActiveForAtom);
+  const directReviewTarget = useLaboratoryStore((state) => state.directReviewTarget);
+  const setDirectReviewTarget = useLaboratoryStore((state) => state.setDirectReviewTarget);
+  const removeActiveGuidedFlow = useLaboratoryStore((state) => state.removeActiveGuidedFlow);
+  const updateAtomSettings = useLaboratoryStore((state) => state.updateAtomSettings);
   
   const settings = useLaboratoryStore((state) => {
     const currentAtom = state.getAtom(atomId);
@@ -877,11 +884,11 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     onDragLeave,
     onUploadAreaClick,
   }) => (
-    <div className="w-full bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col" style={{ maxHeight: '280px', height: 'fit-content' }}>
-      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex-shrink-0">
+    <div className="w-full h-full bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
         <h3 className="text-sm font-semibold text-gray-800">Upload New Files</h3>
       </div>
-      <div className="p-3 flex flex-col flex-shrink-0">
+      <div className="flex-1 p-3 flex flex-col">
         {/* Hidden file input */}
         <input
           ref={fileInputRef}
@@ -894,19 +901,18 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
 
         {/* Upload Drop Zone or Loading State */}
         {uploadingFile ? (
-          <div className="border-2 border-dashed border-blue-300 rounded-lg flex flex-col items-center justify-center text-center bg-blue-50/50" style={{ height: '180px', minHeight: '180px' }}>
+          <div className="flex-1 border-2 border-dashed border-blue-300 rounded-lg flex flex-col items-center justify-center text-center bg-blue-50/50">
             <Loader2 className="w-10 h-10 animate-spin text-blue-500 mb-3" />
             <p className="text-sm font-medium text-blue-700 mb-1">Uploading...</p>
             <p className="text-xs text-blue-500">{pendingFile?.name || 'Processing file'}</p>
           </div>
         ) : (
           <div
-            className={`border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer ${
+            className={`flex-1 border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer ${
               isDragOver
                 ? 'border-blue-400 bg-blue-50'
                 : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/30'
             }`}
-            style={{ height: '180px', minHeight: '180px' }}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
@@ -928,7 +934,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
 
         {/* Upload Error */}
         {uploadError && (
-          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg flex-shrink-0">
+          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-xs text-red-600">{uploadError}</p>
           </div>
         )}
@@ -936,11 +942,18 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     </div>
   );
 
+  // Check if this atom has an active guided flow
+  const hasActiveGuidedFlow = activeGuidedFlows[atomId] && isGuidedModeActiveForAtom(atomId);
+  const flowState = activeGuidedFlows[atomId];
+  const existingDataframe = flowState?.state?.initialFile as { name: string; path: string; size?: number } | undefined;
+
   return (
-    <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
-      <div className="w-full h-full flex gap-3 p-3" style={{ overflow: 'hidden' }}>
-        {/* Left Panel - File List (matches right panel width, with scrolling) */}
-        <div className="flex-1 min-w-0 flex flex-col h-full" style={{ overflow: 'hidden', maxWidth: '50%' }}>
+    <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex flex-col">
+      {/* Top row: Priming list (left) + Upload panel (right).
+          This behaves exactly like before – intrinsic height based on content,
+          not tied to the bottom panels. */}
+      <div className="w-full flex gap-3 p-3 flex-shrink-0">
+        <div className="flex-[3] min-w-0 flex flex-col overflow-hidden">
           <PartialPrimedCard
             atomId={atomId}
             cardId={atomId}
@@ -948,8 +961,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
             primingStatuses={[]}
           />
         </div>
-        {/* Right Panel - Upload New Files (fixed width, matches left) */}
-        <div className="flex-1 min-w-0 flex-shrink-0 flex items-start" style={{ maxWidth: '50%' }}>
+        <div className="flex-1 min-w-0 flex-shrink-0">
           <UploadPanelRight
             onFileInputChange={handleFileInput}
             onDrop={handleDrop}
@@ -959,6 +971,62 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           />
         </div>
       </div>
+
+      {/* Bottom row: Either DirectReviewPanel OR GuidedUploadFlowInline.
+          This is a separate flex child, so it appears below the top row
+          without changing how the files list/upload panel render. */}
+      {directReviewTarget && !hasActiveGuidedFlow && (
+        <div className="w-full border-t-2 border-gray-200 bg-white flex-1 min-h-[300px] max-h-[75vh] overflow-y-auto">
+          <DirectReviewPanel
+            frame={directReviewTarget}
+            onClose={() => {
+              setDirectReviewTarget(null);
+            }}
+            onSave={() => {
+              // Refresh priming stats after save - dispatch event for PartialPrimedCard to pick up
+              window.dispatchEvent(new CustomEvent('priming-status-changed'));
+            }}
+          />
+        </div>
+      )}
+
+      {hasActiveGuidedFlow && globalGuidedModeEnabled && flowState && existingDataframe && !directReviewTarget && (
+        <div className="w-full border-t-2 border-blue-200 bg-white flex-1 min-h-[300px] max-h-[75vh] overflow-y-auto">
+          <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50 sticky top-0 z-10">
+            <h3 className="text-base font-semibold text-gray-800">Guided Priming Workflow</h3>
+            <p className="text-xs text-gray-600 mt-1">
+              Priming file: <span className="font-medium text-blue-700">{existingDataframe.name}</span>
+            </p>
+          </div>
+          <div className="p-4">
+            <GuidedUploadFlowInline
+              atomId={atomId}
+              onComplete={(result) => {
+                // Handle completion - update atom settings
+                const fileNames = result.uploadedFiles.map((f: any) => f.name);
+                const filePathMap: Record<string, string> = {};
+                result.uploadedFiles.forEach((f: any) => {
+                  filePathMap[f.name] = f.path;
+                });
+                
+                updateAtomSettings(atomId, {
+                  uploadedFiles: fileNames,
+                  filePathMap: filePathMap,
+                });
+                
+                // Refresh priming stats after completion - dispatch event for PartialPrimedCard to pick up
+                window.dispatchEvent(new CustomEvent('priming-status-changed'));
+              }}
+              onClose={() => {
+                removeActiveGuidedFlow(atomId);
+              }}
+              savedState={flowState.state}
+              initialStage={flowState.currentStage}
+              existingDataframe={existingDataframe}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Upload Modal for non-guided mode (Excel sheet selection) */}
       <Dialog open={isUploadModalOpen} onOpenChange={(open) => { if (!open) resetUploadState(); }}>

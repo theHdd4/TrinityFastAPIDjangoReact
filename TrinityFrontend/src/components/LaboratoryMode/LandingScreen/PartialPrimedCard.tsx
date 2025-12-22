@@ -5,9 +5,7 @@ import SavedDataFramesPanel from '@/components/LaboratoryMode/components/SavedDa
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
-import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { DirectReviewPanel } from '@/components/LaboratoryMode/components/DirectReviewPanel';
 
 interface PartialPrimedCardProps {
   atomId: string;
@@ -32,31 +30,10 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
   const isCheckingRef = useRef(false);
   const panelContainerRef = useRef<HTMLDivElement>(null);
   
-  // Check if guided mode is active for this landing card atom
-  const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows || {});
-  const isGuidedModeActiveForAtom = useLaboratoryStore((state) => state.isGuidedModeActiveForAtom);
-  const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
-  const removeActiveGuidedFlow = useLaboratoryStore((state) => state.removeActiveGuidedFlow);
-  const updateAtomSettings = useLaboratoryStore((state) => state.updateAtomSettings);
-  const directReviewTarget = useLaboratoryStore((state) => state.directReviewTarget);
+  // Note: We still access store state to update it when needed (e.g., when "Direct review" is chosen),
+  // but we don't render DirectReviewPanel or GuidedUploadFlowInline here anymore.
+  // Those are now rendered in DataUploadAtom.tsx as separate bottom row.
   const setDirectReviewTarget = useLaboratoryStore((state) => state.setDirectReviewTarget);
-  
-  // Check if this atom has an active guided flow
-  const hasActiveGuidedFlow = activeGuidedFlows[atomId] && isGuidedModeActiveForAtom(atomId);
-  const flowState = activeGuidedFlows[atomId];
-  const existingDataframe = flowState?.state?.initialFile as { name: string; path: string; size?: number } | undefined;
-  
-  // Debug logging
-  useEffect(() => {
-    console.log('[PartialPrimedCard] Guided mode check:', {
-      atomId,
-      hasActiveGuidedFlow,
-      globalGuidedModeEnabled,
-      flowState: !!flowState,
-      existingDataframe: !!existingDataframe,
-      activeGuidedFlowsKeys: Object.keys(activeGuidedFlows),
-    });
-  }, [atomId, hasActiveGuidedFlow, globalGuidedModeEnabled, flowState, existingDataframe, activeGuidedFlows]);
 
   // Fetch priming stats for heading
   const fetchPrimingStats = async () => {
@@ -323,10 +300,10 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
   };
 
   return (
-    <div className="w-full flex flex-col h-full" style={{ height: '100%', overflow: 'hidden' }}>
+    <div className="w-full flex flex-col" style={{ height: '100%', overflowY: 'auto' }}>
       {/* Priming Status Heading */}
       {primingStats.total > 0 && (
-        <div className="px-6 pt-1 pb-0 flex-shrink-0">
+        <div className="px-6 pt-1 pb-0">
           <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
             {primingStats.unprimed > 0 
               ? (
@@ -503,22 +480,9 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           max-width: 100% !important;
         }
       `}</style>
-      {/* Saved DataFrames Panel - Always visible, with scrolling when needed */}
-      {/* Fixed width to match right panel, with proper scrolling */}
-      <div 
-        className={`w-full flex flex-col ${hasActiveGuidedFlow ? 'flex-shrink-0' : 'flex-1 min-h-0'}`} 
-        data-saved-dataframes-panel 
-        ref={panelContainerRef} 
-        style={{ 
-          maxHeight: hasActiveGuidedFlow ? '300px' : '100%',
-          height: hasActiveGuidedFlow ? '300px' : 'calc(100% - 60px)',
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          width: '100%',
-          flex: hasActiveGuidedFlow ? '0 0 300px' : '1 1 auto'
-        }}
-      >
-        <div className="w-full h-full" style={{ overflowY: 'auto', overflowX: 'hidden', height: '100%' }}>
+      {/* Saved DataFrames Panel - Always visible */}
+      <div className="overflow-y-auto w-full flex flex-col flex-1 min-h-0" data-saved-dataframes-panel ref={panelContainerRef}>
+        <div className="w-full">
           <SavedDataFramesPanel 
             isOpen={true} 
             onToggle={() => {}} 
@@ -537,68 +501,6 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           <ArrowRight className="w-4 h-4 ml-2" />
         </Button>
       </div>
-
-      {/* Direct Review Panel - Show BELOW the buttons when Directly Review is clicked */}
-      {/* Only show if no Guided mode is active for this atom (mutual exclusivity) */}
-      {/* DirectReviewPanel now uses StageLayout which provides full-area coverage like U2 */}
-      {directReviewTarget && !hasActiveGuidedFlow && (
-        <div className="w-full border-t-2 border-blue-200 bg-white flex-shrink-0 mt-2" style={{ minHeight: '500px', maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
-          <div className="p-4 h-full">
-            <DirectReviewPanel
-              frame={directReviewTarget}
-              onClose={() => {
-                setDirectReviewTarget(null);
-              }}
-              onSave={() => {
-                // Refresh priming stats after save
-                fetchPrimingStats();
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Guided Flow Steps - Show BELOW the buttons, extending the card downward */}
-      {/* Only show for the selected file (existingDataframe must match the clicked file) */}
-      {/* Only show if Direct mode is not active (mutual exclusivity) */}
-      {hasActiveGuidedFlow && globalGuidedModeEnabled && flowState && existingDataframe && !directReviewTarget && (
-        <div className="w-full border-t-2 border-blue-200 bg-white flex-shrink-0 mt-2" style={{ minHeight: '500px', maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
-          <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50 sticky top-0 z-10">
-            <h3 className="text-base font-semibold text-gray-800">Guided Priming Workflow</h3>
-            <p className="text-xs text-gray-600 mt-1">
-              Priming file: <span className="font-medium text-blue-700">{existingDataframe.name}</span>
-            </p>
-          </div>
-          <div className="p-4">
-            <GuidedUploadFlowInline
-              atomId={atomId}
-              onComplete={(result) => {
-                // Handle completion - update atom settings
-                // Only process the selected file (existingDataframe)
-                const fileNames = result.uploadedFiles.map((f: any) => f.name);
-                const filePathMap: Record<string, string> = {};
-                result.uploadedFiles.forEach((f: any) => {
-                  filePathMap[f.name] = f.path;
-                });
-                
-                updateAtomSettings(atomId, {
-                  uploadedFiles: fileNames,
-                  filePathMap: filePathMap,
-                });
-                
-                // Refresh priming stats after completion
-                fetchPrimingStats();
-              }}
-              onClose={() => {
-                removeActiveGuidedFlow(atomId);
-              }}
-              savedState={flowState.state}
-              initialStage={flowState.currentStage}
-              existingDataframe={existingDataframe}
-            />
-          </div>
-        </div>
-      )}
 
       {/* Warning Dialog */}
       <ConfirmationDialog
