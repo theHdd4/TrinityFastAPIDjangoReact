@@ -16,7 +16,7 @@ const STAGES: Array<{ id: MetricStage; label: string }> = [
   { id: 'preview', label: 'Preview and Save' },
 ];
 
-export const VerticalProgressStepper: React.FC<VerticalProgressStepperProps> = ({ 
+export const VerticalProgressStepper: React.FC<VerticalProgressStepperProps> = ({
   currentStage, 
   className,
   onStageClick,
