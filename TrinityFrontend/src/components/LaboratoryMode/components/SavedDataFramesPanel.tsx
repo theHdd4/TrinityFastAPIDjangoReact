@@ -170,6 +170,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     children?: TreeNode[];
     frame?: Frame;
     isExcelFolder?: boolean;
+    isSheetsFolder?: boolean;
     sheets?: ExcelSheet[];
   }
 
@@ -2772,21 +2773,34 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   // Build tree from regular files
   const tree = buildTree(files, prefix);
   
-  // Add Excel folders to the tree
-  const excelFolderNodes: TreeNode[] = excelFolders.map(folder => ({
-    name: folder.name,
-    path: folder.path,
-    isExcelFolder: true,
-    sheets: folder.sheets.map(sheet => ({
-      object_name: sheet.object_name,
-      sheet_name: sheet.sheet_name,
-      arrow_name: sheet.arrow_name,
-      csv_name: sheet.csv_name,
-      last_modified: sheet.last_modified,
-      size: sheet.size,
-    })),
-    children: []
-  }));
+  // Add Excel folders to the tree with sheets/ folder as intermediate node
+  const excelFolderNodes: TreeNode[] = excelFolders.map(folder => {
+    // Create a sheets folder node as a child
+    const sheetsFolderPath = `${folder.path}sheets/`;
+    const sheetsFolderNode: TreeNode = {
+      name: 'sheets',
+      path: sheetsFolderPath,
+      isExcelFolder: false,
+      isSheetsFolder: true,
+      sheets: folder.sheets.map(sheet => ({
+        object_name: sheet.object_name,
+        sheet_name: sheet.sheet_name,
+        arrow_name: sheet.arrow_name,
+        csv_name: sheet.csv_name,
+        last_modified: sheet.last_modified,
+        size: sheet.size,
+      })),
+      children: []
+    };
+    
+    return {
+      name: folder.name,
+      path: folder.path,
+      isExcelFolder: true,
+      sheets: [], // Sheets are now in the sheets folder node
+      children: [sheetsFolderNode] // Add sheets folder as child
+    };
+  });
   
   // Combine regular tree with Excel folders
   const combinedTree = [...tree, ...excelFolderNodes];
@@ -2817,9 +2831,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   };
 
   const renderNode = (node: TreeNode, level = 0): React.ReactNode => {
-    // Handle Excel folders with expandable sheets
-    if (node.isExcelFolder && node.sheets) {
+    // Handle Excel folders - show children (sheets folder)
+    if (node.isExcelFolder) {
       const isOpen = openDirs[node.path];
+      // Count total sheets from children (sheets folder)
+      const totalSheets = node.children?.find(c => c.isSheetsFolder)?.sheets?.length || 0;
       return (
         <div key={node.path} style={{ marginLeft: level * 12 }} className="mt-1">
           <div className="flex items-center justify-between">
@@ -2842,9 +2858,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 <ChevronRight className="w-3.5 h-3.5 mr-1" />
               )}
               <span>{node.name}</span>
-              <span className="ml-2 text-xs text-gray-500 font-normal">
-                ({node.sheets.length} sheet{node.sheets.length !== 1 ? 's' : ''})
-              </span>
+              {totalSheets > 0 && (
+                <span className="ml-2 text-xs text-gray-500 font-normal">
+                  ({totalSheets} sheet{totalSheets !== 1 ? 's' : ''})
+                </span>
+              )}
             </button>
             <Trash2
               className="w-3.5 h-3.5 text-gray-400 cursor-pointer ml-2 hover:text-red-500"
@@ -2853,6 +2871,36 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 promptDeleteFolder(node.path);
               }}
             />
+          </div>
+          {isOpen && node.children && (
+            <div className="ml-4 mt-1">
+              {node.children.map(child => renderNode(child, level + 1))}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    // Handle sheets folder with expandable sheets
+    if (node.isSheetsFolder && node.sheets) {
+      const isOpen = openDirs[node.path];
+      return (
+        <div key={node.path} style={{ marginLeft: level * 12 }} className="mt-1">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => toggleDir(node.path)}
+              className="flex items-center text-xs text-gray-700 hover:text-gray-900 font-medium"
+            >
+              {isOpen ? (
+                <ChevronDown className="w-3.5 h-3.5 mr-1" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 mr-1" />
+              )}
+              <span>{node.name}</span>
+              <span className="ml-2 text-xs text-gray-500 font-normal">
+                ({node.sheets.length} sheet{node.sheets.length !== 1 ? 's' : ''})
+              </span>
+            </button>
           </div>
           {isOpen && (
             <div className="ml-4 mt-1 space-y-0.5">

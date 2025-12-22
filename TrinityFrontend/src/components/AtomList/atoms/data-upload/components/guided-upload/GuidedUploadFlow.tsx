@@ -90,6 +90,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
         name: existingDataframe.name,
         path: existingDataframe.path,
         size: existingDataframe.size || 0,
+        originalPath: existingDataframe.path,  // Store original path for later use when finalizing
       }]);
     }
 
@@ -264,12 +265,17 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
             
             console.log('📊 Sending column classifications:', columnClassifications);
             
+            // Determine original file path - if file was opened from existing dataframe, use that path
+            // Otherwise, file.path might be in tmp/ after transformations, so we need to track original
+            const originalFilePath = (file as any).originalPath || (file.path && !file.path.includes('tmp/') && !file.path.includes('/tmp/') ? file.path : '');
+            
             const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
               body: JSON.stringify({
-                file_path: file.path,
+                file_path: file.path,  // Current path (may be in tmp/ after transformations)
+                original_file_path: originalFilePath,  // Original path before priming (if priming existing file)
                 file_name: file.name,
                 client_name: projectContext.client_name || '',
                 app_name: projectContext.app_name || '',
@@ -325,12 +331,17 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
             
             console.log('📊 Sending column classifications:', columnClassifications);
             
+            // Determine original file path - if file was opened from existing dataframe, use that path
+            // Otherwise, file.path might be in tmp/ after transformations, so we need to track original
+            const originalFilePath = (file as any).originalPath || (file.path && !file.path.includes('tmp/') && !file.path.includes('/tmp/') ? file.path : '');
+            
             const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
               body: JSON.stringify({
-                file_path: file.path,
+                file_path: file.path,  // Current path (may be in tmp/ after transformations)
+                original_file_path: originalFilePath,  // Original path before priming (if priming existing file)
                 file_name: file.name,
                 client_name: projectContext.client_name || '',
                 app_name: projectContext.app_name || '',

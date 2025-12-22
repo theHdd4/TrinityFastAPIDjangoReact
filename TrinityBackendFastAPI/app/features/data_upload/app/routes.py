@@ -5629,7 +5629,8 @@ async def finalize_primed_file(request: Request):
         logger.info(f"Request body: {body}")
         logger.info("=" * 80)
         
-        file_path = body.get("file_path", "")
+        file_path = body.get("file_path", "")  # Current file path (may be in tmp/ after transformations)
+        original_file_path = body.get("original_file_path", "")  # Original file path before priming (if priming existing file)
         file_name = body.get("file_name", "")
         selected_sheet = body.get("selected_sheet")  # For Excel sheets
         use_folder_structure = body.get("use_folder_structure", False)  # For multi-sheet Excel files
@@ -5657,6 +5658,7 @@ async def finalize_primed_file(request: Request):
         
         # CRITICAL: If file is already in a folder (not in tmp/), preserve the existing folder structure
         # Extract folder path from file_path if it's already in a saved location
+        # This is especially important for files in sheets/ folder structure
         if not preserve_existing_folder and file_path and '/' in file_path and not file_path.startswith(prefix + "tmp/") and "/tmp/" not in file_path:
             # File is already in a saved folder location, extract the folder path
             # file_path format: prefix + folder_path + filename
@@ -5668,12 +5670,28 @@ async def finalize_primed_file(request: Request):
             if len(folder_parts) > 1:
                 existing_folder_path = '/'.join(folder_parts[:-1])  # All parts except the filename
                 preserve_existing_folder = True
-                logger.info(f"📁 Detected existing folder structure in file_path: {existing_folder_path} (from {file_path})")
+                # If this is a sheets/ folder structure, ensure we preserve it
+                if "/sheets/" in file_path or existing_folder_path.endswith("/sheets"):
+                    logger.info(f"📁 Detected sheets/ folder structure in file_path: {existing_folder_path} (from {file_path})")
+                else:
+                    logger.info(f"📁 Detected existing folder structure in file_path: {existing_folder_path} (from {file_path})")
         
         # Handle sheet files: file_name format is "fileName (sheetName)"
         # Extract base filename and sheet name for proper arrow file naming
         base_file_name = base_file_name_param or file_name
         sheet_name = None
+        
+        # CRITICAL: First check if file_path contains sheets/ folder structure
+        # If so, extract sheet name from the path itself
+        file_path_without_prefix = file_path[len(prefix):] if file_path.startswith(prefix) else file_path
+        path_parts = file_path_without_prefix.split("/")
+        if len(path_parts) >= 3 and path_parts[1] == "sheets":
+            # This is a sheet file in folder structure: {folder_name}/sheets/{sheet_name}.arrow
+            sheet_name_from_path = Path(path_parts[-1]).stem  # Remove .arrow extension
+            if not selected_sheet:
+                sheet_name = sheet_name_from_path
+                logger.info(f"📁 Extracted sheet name from file_path: {sheet_name} (from {file_path})")
+        
         if selected_sheet:
             sheet_name = selected_sheet
             # If file_name contains sheet info like "file.xlsx (Sheet1)", extract base name
@@ -5683,7 +5701,7 @@ async def finalize_primed_file(request: Request):
                 base_file_name = base_file_name_param or sheet_match.group(1).strip()
                 if not sheet_name:
                     sheet_name = sheet_match.group(2).strip()
-        elif '(' in file_name and ')' in file_name:
+        elif not sheet_name and '(' in file_name and ')' in file_name:
             # Extract sheet name from file_name format "fileName (sheetName)"
             import re
             sheet_match = re.match(r'^(.+?)\s*\(([^)]+)\)$', file_name)
@@ -5735,69 +5753,77 @@ async def finalize_primed_file(request: Request):
             writer.write(arrow_table)
         arrow_bytes = arrow_buf.getvalue()
         
-        # Create the arrow file name and determine folder structure
-        # CRITICAL: For sheets, ALWAYS use folder structure to prevent sheets from being pulled out
-        # If sheet_name exists, we MUST use folder structure regardless of use_folder_structure flag
-        # This ensures sheets NEVER appear outside folders
-        if sheet_name:
-            # ALWAYS use folder structure for sheets - this prevents them from being pulled out
-            if not use_folder_structure:
-                logger.warning(f"⚠️ Sheet detected ({sheet_name}) but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out.")
-            use_folder_structure = True  # Force folder structure for sheets
-        
-        if use_folder_structure and sheet_name:
-            # CRITICAL: If preserve_existing_folder is True, use the existing folder path
-            # This ensures files already in folders stay in their original folder location
-            if preserve_existing_folder and existing_folder_path:
-                # Extract just the filename from file_name (in case it has sheet info)
-                from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
-                normalized_sheet = normalize_sheet_name(sheet_name)
-                # Use the existing folder path and just add the sheet filename
-                # existing_folder_path should already include the full folder structure (e.g., "folder_name/sheets")
-                # So we just append the normalized sheet name with .arrow extension
-                arrow_name = f"{existing_folder_path}/{normalized_sheet}.arrow"
-                logger.info(f"📁 Preserving existing folder structure: {arrow_name} (existing_folder: {existing_folder_path}, sheet: {sheet_name})")
-            else:
-                # Normalize Excel folder name from base file name
-                # Use a more robust normalization to prevent conflicts across multiple folders
+        # CRITICAL: If original_file_path is provided, use it to UPDATE the existing file at its original location
+        # This ensures primed files overwrite the original instead of creating duplicates
+        if original_file_path and original_file_path.startswith(prefix):
+            # Extract relative path (remove prefix) for arrow_name
+            rel_path = original_file_path[len(prefix):] if original_file_path.startswith(prefix) else original_file_path
+            arrow_name = rel_path
+            logger.info(f"🔄 Updating existing file at original location: {arrow_name} (original: {original_file_path}, current: {file_path})")
+        else:
+            # Create the arrow file name and determine folder structure
+            # CRITICAL: For sheets, ALWAYS use folder structure to prevent sheets from being pulled out
+            # If sheet_name exists, we MUST use folder structure regardless of use_folder_structure flag
+            # This ensures sheets NEVER appear outside folders
+            if sheet_name:
+                # ALWAYS use folder structure for sheets - this prevents them from being pulled out
+                if not use_folder_structure:
+                    logger.warning(f"⚠️ Sheet detected ({sheet_name}) but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out.")
+                use_folder_structure = True  # Force folder structure for sheets
+            
+            if use_folder_structure and sheet_name:
+                # CRITICAL: If preserve_existing_folder is True, use the existing folder path
+                # This ensures files already in folders stay in their original folder location
+                if preserve_existing_folder and existing_folder_path:
+                    # Extract just the filename from file_name (in case it has sheet info)
+                    from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
+                    normalized_sheet = normalize_sheet_name(sheet_name)
+                    # Use the existing folder path and just add the sheet filename
+                    # existing_folder_path should already include the full folder structure (e.g., "folder_name/sheets")
+                    # So we just append the normalized sheet name with .arrow extension
+                    arrow_name = f"{existing_folder_path}/{normalized_sheet}.arrow"
+                    logger.info(f"📁 Preserving existing folder structure: {arrow_name} (existing_folder: {existing_folder_path}, sheet: {sheet_name})")
+                else:
+                    # Normalize Excel folder name from base file name
+                    # Use a more robust normalization to prevent conflicts across multiple folders
+                    base_stem = Path(base_file_name).stem
+                    # Normalize: remove spaces, special chars, make it filesystem-safe
+                    excel_folder_name = base_stem.replace(' ', '_').replace('.', '_')
+                    excel_folder_name = ''.join(c for c in excel_folder_name if c.isalnum() or c in ('_', '-'))
+                    
+                    # If folder name is empty or too short, use a fallback
+                    if not excel_folder_name or len(excel_folder_name) < 2:
+                        excel_folder_name = 'Excel_File'
+                    
+                    # Normalize sheet name (remove spaces, special chars)
+                    from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
+                    normalized_sheet = normalize_sheet_name(sheet_name)
+                    
+                    # Use folder structure: {excel_folder_name}/sheets/{normalized_sheet}.arrow
+                    # This ensures sheets stay in folders and prevents conflicts
+                    arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet}.arrow"
+                    
+                    logger.info(f"📁 Using folder structure: {arrow_name} (base: {base_file_name}, sheet: {sheet_name})")
+            elif sheet_name:
+                # CRITICAL: If we have a sheet_name but use_folder_structure is False, 
+                # we MUST still use folder structure to prevent sheets from being pulled out
+                # This ensures sheets NEVER appear outside folders
+                logger.warning(f"⚠️ Sheet detected but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out: {sheet_name}")
                 base_stem = Path(base_file_name).stem
-                # Normalize: remove spaces, special chars, make it filesystem-safe
                 excel_folder_name = base_stem.replace(' ', '_').replace('.', '_')
                 excel_folder_name = ''.join(c for c in excel_folder_name if c.isalnum() or c in ('_', '-'))
-                
-                # If folder name is empty or too short, use a fallback
                 if not excel_folder_name or len(excel_folder_name) < 2:
                     excel_folder_name = 'Excel_File'
-                
-                # Normalize sheet name (remove spaces, special chars)
                 from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
                 normalized_sheet = normalize_sheet_name(sheet_name)
-                
-                # Use folder structure: {excel_folder_name}/sheets/{normalized_sheet}.arrow
-                # This ensures sheets stay in folders and prevents conflicts
                 arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet}.arrow"
-                
-                logger.info(f"📁 Using folder structure: {arrow_name} (base: {base_file_name}, sheet: {sheet_name})")
-        elif sheet_name:
-            # CRITICAL: If we have a sheet_name but use_folder_structure is False, 
-            # we MUST still use folder structure to prevent sheets from being pulled out
-            # This ensures sheets NEVER appear outside folders
-            logger.warning(f"⚠️ Sheet detected but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out: {sheet_name}")
-            base_stem = Path(base_file_name).stem
-            excel_folder_name = base_stem.replace(' ', '_').replace('.', '_')
-            excel_folder_name = ''.join(c for c in excel_folder_name if c.isalnum() or c in ('_', '-'))
-            if not excel_folder_name or len(excel_folder_name) < 2:
-                excel_folder_name = 'Excel_File'
-            from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
-            normalized_sheet = normalize_sheet_name(sheet_name)
-            arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet}.arrow"
-            logger.info(f"📁 Forced folder structure to keep sheet in folder: {arrow_name}")
-            # Update use_folder_structure flag for logging
-            use_folder_structure = True
-        else:
-            arrow_name = Path(base_file_name).stem + ".arrow"
+                logger.info(f"📁 Forced folder structure to keep sheet in folder: {arrow_name}")
+                # Update use_folder_structure flag for logging
+                use_folder_structure = True
+            else:
+                arrow_name = Path(base_file_name).stem + ".arrow"
         
-        # Upload to MinIO with proper prefix (not tmp/)
+        # Upload to MinIO with proper prefix (will overwrite if file exists)
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_object_name = result.get("object_name", "")
         

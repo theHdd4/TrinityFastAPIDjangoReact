@@ -5659,7 +5659,8 @@ async def finalize_primed_file(request: Request):
         logger.info(f"Request body: {body}")
         logger.info("=" * 80)
         
-        file_path = body.get("file_path", "")
+        file_path = body.get("file_path", "")  # Current file path (may be in tmp/ after transformations)
+        original_file_path = body.get("original_file_path", "")  # Original file path before priming (if priming existing file)
         file_name = body.get("file_name", "")
         client_name = body.get("client_name", "")
         app_name = body.get("app_name", "")
@@ -5724,10 +5725,45 @@ async def finalize_primed_file(request: Request):
         os.environ["PROJECT_NAME"] = project_name
         prefix = await get_object_prefix()
         
-        # Create the arrow file name
-        arrow_name = Path(file_name).stem + ".arrow"
+        # CRITICAL: If original_file_path is provided, use it to UPDATE the existing file at its original location
+        # This ensures primed files overwrite the original instead of creating duplicates
+        if original_file_path and original_file_path.startswith(prefix):
+            # Extract relative path (remove prefix) for arrow_name
+            rel_path = original_file_path[len(prefix):] if original_file_path.startswith(prefix) else original_file_path
+            arrow_name = rel_path
+            logger.info(f"🔄 Updating existing file at original location: {arrow_name} (original: {original_file_path}, current: {file_path})")
+        else:
+            # No original path provided - check if current file_path is already in saved location
+            tmp_prefix = prefix + "tmp/"
+            is_tmp_file = file_path.startswith(tmp_prefix) or "/tmp/" in file_path
+            
+            if not is_tmp_file and file_path.startswith(prefix):
+                # File is already in saved location - use the exact same path to overwrite it
+                rel_path = file_path[len(prefix):] if file_path.startswith(prefix) else file_path
+                arrow_name = rel_path
+                logger.info(f"🔄 Updating existing file at current location: {arrow_name} (full path: {file_path})")
+            else:
+                # File is in tmp/ or new upload - construct path preserving folder structure
+                # Extract relative path from file_path (remove prefix if present)
+                rel_path = file_path[len(prefix):] if file_path.startswith(prefix) else file_path
+                # Remove tmp/ prefix if present
+                if rel_path.startswith("tmp/"):
+                    rel_path = rel_path[4:]  # Remove "tmp/" prefix
+                path_parts = rel_path.split("/")
+                
+                # Check if this is a sheet file in folder structure: {folder_name}/sheets/{sheet_name}.arrow
+                if len(path_parts) >= 3 and path_parts[1] == "sheets":
+                    # Preserve folder structure: {folder_name}/sheets/{sheet_name}.arrow
+                    folder_name = path_parts[0]
+                    sheet_name = Path(path_parts[-1]).stem  # Remove .arrow extension
+                    arrow_name = f"{folder_name}/sheets/{sheet_name}.arrow"
+                    logger.info(f"📁 Preserving folder structure for new primed file: {arrow_name} (from tmp: {file_path})")
+                else:
+                    # Regular file - use simple name
+                    arrow_name = Path(file_name).stem + ".arrow"
+                    logger.info(f"📄 Using simple filename for new primed file: {arrow_name}")
         
-        # Upload to MinIO with proper prefix (not tmp/)
+        # Upload to MinIO with proper prefix (will overwrite if file exists)
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_object_name = result.get("object_name", "")
         

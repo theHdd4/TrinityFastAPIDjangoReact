@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, X, Maximize2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Loader2, X, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
@@ -687,38 +687,47 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
         </div>
       </div>
 
-      {/* Maximized View - Full screen Modal (using same Dialog pattern as guided mode) */}
-      <Dialog open={isMaximized} onOpenChange={(open) => !open && setIsMaximized(false)}>
-        <DialogContent 
-          className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 overflow-hidden"
-          hideCloseButton
-        >
-          <DialogHeader className="px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div>
-                <DialogTitle className="text-lg font-semibold text-gray-900">
-                  Preview of data set
-                </DialogTitle>
-                <p className="text-xs text-gray-600 mt-1">
-                  {frame.arrow_name || frame.csv_name || frame.object_name}
-                </p>
+      {/* Maximized View - Full screen Modal (using same pattern as card maximization) */}
+      {isMaximized &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-40 pointer-events-none"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="absolute inset-0 bg-black/40 pointer-events-auto"
+              aria-hidden="true"
+              onClick={() => setIsMaximized(false)}
+            />
+            <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
+                <div>
+                  <span className="text-lg font-semibold text-gray-900">
+                    Preview of data set
+                  </span>
+                  <p className="text-xs text-gray-600 mt-1">
+                    {frame.arrow_name || frame.csv_name || frame.object_name}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsMaximized(false)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Close Fullscreen"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
               </div>
-              <button
-                onClick={() => setIsMaximized(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                title="Close Fullscreen"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
+
+              {/* Fullscreen Content */}
+              <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
+                {renderPreviewContent(true)}
+              </div>
             </div>
-          </DialogHeader>
-          
-          {/* Maximized Content */}
-          <div className="flex-1 overflow-auto px-8 py-4">
-            {renderPreviewContent(true)}
-          </div>
-        </DialogContent>
-      </Dialog>
+          </div>,
+          document.body
+        )}
     </>
   );
 };
