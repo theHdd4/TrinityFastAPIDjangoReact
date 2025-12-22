@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -160,6 +159,8 @@ const MetricsInputFiles: React.FC<MetricsInputFilesProps> = ({ cardId }) => {
 
     if (checked) {
       openMetricGuidedFlow();
+      // Dispatch event to open the guided panel sidebar
+      window.dispatchEvent(new CustomEvent('open-guided-panel'));
     } else {
       closeMetricGuidedFlow();
     }

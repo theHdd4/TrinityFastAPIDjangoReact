@@ -1319,56 +1319,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     );
   };
 
-  // Helper function to render metric guided flow inline below the FIXED atom/card
-  // Position is locked to the context atom when the flow was opened
-  const renderMetricGuidedFlowInline = (atom: DroppedAtom, card: LayoutCard) => {
-    // Only render if metric guided flow is open
-    if (!isMetricGuidedFlowOpen || !activeMetricGuidedFlow) {
-      return null;
-    }
-    
-    // Use the fixed position from when the flow was opened
-    // This prevents the flow from jumping around when selecting different atoms
-    const fixedCardId = activeMetricGuidedFlow.fixedCardId;
-    const fixedAtomId = activeMetricGuidedFlow.fixedAtomId;
-    
-    // Check if this is the fixed position
-    const isFixedCard = fixedCardId && card.id === fixedCardId;
-    
-    if (!isFixedCard) {
-      return null;
-    }
-    
-    // If we have a specific fixedAtomId, render below that atom
-    // Otherwise, render below the last atom of the card
-    if (fixedAtomId) {
-      if (atom.id !== fixedAtomId) {
-        return null;
-      }
-    } else {
-      // No specific atom - render below the last atom of the card
-      const isLastAtomOfCard = card.atoms.length > 0 && atom.id === card.atoms[card.atoms.length - 1].id;
-      if (!isLastAtomOfCard) {
-        return null;
-      }
-    }
-    
-    return (
-      <div className="mt-4">
-        <MetricGuidedFlowInline
-          onComplete={(result) => {
-            console.log('[CanvasArea] MetricGuidedFlowInline completed:', result);
-          }}
-          onClose={() => {
-            closeMetricGuidedFlow();
-          }}
-          savedState={activeMetricGuidedFlow?.state}
-          initialStage={activeMetricGuidedFlow?.currentStage}
-          contextAtomId={metricsInputs.contextAtomId}
-        />
-      </div>
-    );
-  };
 
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [dragOver, setDragOver] = useState<string | null>(null);
@@ -4378,6 +4328,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     });
 
     if (card) {
+      // If this is a metric guided flow card, close the guided flow
+      if (card.isMetricGuidedFlowCard) {
+        closeMetricGuidedFlow();
+        return; // Early return - closeMetricGuidedFlow handles card removal from store
+      }
+      
       // Track card deletion for cross-collection sync
       if (card.moleculeId) {
         // If card belongs to a molecule, track all atoms in this card for deletion
@@ -5820,8 +5776,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                 
                                                 {/* Inline Guided Flow - Renders below atom when active */}
                                                 {renderInlineGuidedFlow(atom)}
-                                                {/* Metric Guided Flow - Renders below atom when active */}
-                                                {renderMetricGuidedFlowInline(atom, card)}
                                               </React.Fragment>
                                               ))}
                                             </div>
@@ -6138,8 +6092,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                 </AtomBox>
                                 {/* Inline Guided Flow - Renders below atom when active */}
                                 {renderInlineGuidedFlow(atom)}
-                                {/* Metric Guided Flow - Renders below atom when active */}
-                                {renderMetricGuidedFlowInline(atom, card)}
                               </React.Fragment>
                               ))}
                             </div>
@@ -6353,8 +6305,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                           </AtomBox>
                           {/* Inline Guided Flow - Renders below atom when active */}
                           {renderInlineGuidedFlow(atom)}
-                          {/* Metric Guided Flow - Renders below atom when active */}
-                          {renderMetricGuidedFlowInline(atom, card)}
                         </React.Fragment>
                         ))}
                       </div>
@@ -6574,7 +6524,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
                     {/* Card Content */}
             <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
-                      {card.atoms.length === 0 ? (
+                      {card.isMetricGuidedFlowCard && isMetricGuidedFlowOpen && activeMetricGuidedFlow ? (
+                        <div className="p-4">
+                          <MetricGuidedFlowInline
+                            onComplete={(result) => {
+                              console.log('[CanvasArea] MetricGuidedFlowInline completed:', result);
+                            }}
+                            onClose={() => {
+                              closeMetricGuidedFlow();
+                            }}
+                            savedState={activeMetricGuidedFlow?.state}
+                            initialStage={activeMetricGuidedFlow?.currentStage}
+                            contextAtomId={metricsInputs.contextAtomId}
+                          />
+                        </div>
+                      ) : card.atoms.length === 0 ? (
                         <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                           <AtomSuggestion
                             cardId={card.id}
@@ -6723,8 +6687,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                             </AtomBox>
                     {/* Inline Guided Flow - Renders below atom when active */}
                     {renderInlineGuidedFlow(atom)}
-                    {/* Metric Guided Flow - Renders below atom when active */}
-                    {renderMetricGuidedFlowInline(atom, card)}
                   </React.Fragment>
                           ))}
                         </div>
@@ -6928,8 +6890,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                           </AtomBox>
                           {/* Inline Guided Flow - Renders below atom when active */}
                           {renderInlineGuidedFlow(atom)}
-                          {/* Metric Guided Flow - Renders below atom when active */}
-                          {renderMetricGuidedFlowInline(atom, card)}
                         </React.Fragment>
                         ))}
                       </div>

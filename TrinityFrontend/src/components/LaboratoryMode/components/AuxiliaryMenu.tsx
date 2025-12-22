@@ -9,6 +9,7 @@ import { TrinityAIIcon, TrinityAIPanel } from '@/components/TrinityAI';
 import { Settings, Database, HelpCircle, GalleryHorizontal, Undo2, Save, Share2, List, Play, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface TrinityBackgroundStatus {
   isProcessing: boolean;
@@ -76,6 +77,9 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const controlled = activeProp !== undefined;
   const active = controlled ? activeProp : internalActive;
 
+  // Get metric guided flow state from store
+  const isMetricGuidedFlowOpen = useLaboratoryStore(state => state.isMetricGuidedFlowOpen);
+
   // Refs to track user interactions with guided workflow
   const userClosedGuidedRef = useRef(false);
   const settingsExplicitlyOpenedRef = useRef(false);
@@ -114,9 +118,17 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openGuidedWorkflow = () => setActive(active === 'guided' ? null : 'guided');
   const openMetrics = () => setActive(active === 'metrics' ? null : 'metrics');
 
-  // Keep guided workflow panel open when guided mode is enabled
+  // Keep guided workflow panel open when any guided mode is enabled (data upload or metric)
+  const anyGuidedModeActive = isGuidedModeEnabled || isMetricGuidedFlowOpen;
+  
+  // Track the previous value of anyGuidedModeActive to detect when it changes from true to false
+  const prevAnyGuidedModeActiveRef = useRef(anyGuidedModeActive);
+
   React.useEffect(() => {
-    if (isGuidedModeEnabled) {
+    const wasGuidedModeActive = prevAnyGuidedModeActiveRef.current;
+    prevAnyGuidedModeActiveRef.current = anyGuidedModeActive;
+
+    if (anyGuidedModeActive) {
       // If Settings tries to open automatically (not explicitly), redirect to Guided Workflow
       if (active === 'settings' && !settingsExplicitlyOpenedRef.current && !userClosedGuidedRef.current) {
         // Use setTimeout to avoid state update conflicts
@@ -130,14 +142,15 @@ const AuxiliaryMenu: React.FC<Props> = ({
         setActive('guided');
       }
     } else {
-      // Close guided panel when guided mode is disabled
-      if (active === 'guided') {
+      // Only close the guided panel if guided mode was previously active and is now disabled
+      // This prevents auto-closing when the user manually opens the guided panel
+      if (wasGuidedModeActive && active === 'guided') {
         setActive(null);
       }
       userClosedGuidedRef.current = false;
       settingsExplicitlyOpenedRef.current = false;
     }
-  }, [isGuidedModeEnabled, active, setActive]);
+  }, [anyGuidedModeActive, active, setActive]);
 
   const [trinityBackgroundStatus, setTrinityBackgroundStatus] = useState<TrinityBackgroundStatus>({
     isProcessing: false,
@@ -325,8 +338,8 @@ const AuxiliaryMenu: React.FC<Props> = ({
             </span>
           </button>
         </div>
-        {/* Position 4: Guided Workflow (Wrench) - Only shown when guided mode is ON */}
-        {isGuidedModeEnabled && (
+        {/* Position 4: Guided Workflow (Wrench) - Shown when global guided mode OR metric guided flow is ON */}
+        {(isGuidedModeEnabled || isMetricGuidedFlowOpen) && (
           <div className="p-3 border-b border-gray-200 flex items-center justify-center relative z-10 pointer-events-auto">
             <button
               onClick={(e) => {
