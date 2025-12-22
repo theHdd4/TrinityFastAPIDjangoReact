@@ -2679,6 +2679,19 @@ async def download_dataframe(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/load_dataframe_by_key/health")
+async def load_dataframe_by_key_health():
+    """
+    Health check endpoint to verify load_dataframe_by_key is registered.
+    """
+    return {
+        "status": "ok",
+        "endpoint": "/load_dataframe_by_key",
+        "method": "POST",
+        "message": "load_dataframe_by_key endpoint is registered and accessible"
+    }
+
+
 @router.post("/load_dataframe_by_key")
 async def load_dataframe_by_key(request: Request):
     """
@@ -2696,6 +2709,7 @@ async def load_dataframe_by_key(request: Request):
         "rows": [{"col1": "value1", "col2": "value2"}, ...]
     }
     """
+    logger.info("load_dataframe_by_key endpoint called")
     try:
         body = await request.json()
         object_name = body.get("key", "")
