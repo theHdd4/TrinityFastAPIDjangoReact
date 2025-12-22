@@ -1716,6 +1716,7 @@ export interface LayoutCard {
   betweenMolecules?: [string, string]; // [moleculeId1, moleculeId2] - card is between these two molecules
   afterLastMolecule?: boolean; // true if card is after the last molecule (converted to betweenMolecules when new molecule added)
   beforeFirstMolecule?: boolean; // true if card is before the first molecule
+  isMetricGuidedFlowCard?: boolean; // Flag to identify metric guided flow cards
 }
 
 // GroupBy Atom Settings
@@ -2030,7 +2031,8 @@ interface LaboratoryStore {
   globalGuidedModeEnabled: boolean;
   // Metric Guided Flow State
   isMetricGuidedFlowOpen: boolean;
-  activeMetricGuidedFlow: { currentStage: MetricStage; state: Partial<MetricGuidedFlowState>; fixedCardId?: string; fixedAtomId?: string; cardsCountWhenOpened?: number } | null;
+  activeMetricGuidedFlow: { currentStage: MetricStage; state: Partial<MetricGuidedFlowState> } | null;
+  metricGuidedFlowCardId?: string; // ID of the dedicated card for metric guided flow
   activeGuidedFlows: Record<string, any>;
   
   // --- Direct Review Panel State ---
@@ -2099,7 +2101,7 @@ interface LaboratoryStore {
   // --- Metric Guided Flow Actions ---
   openMetricGuidedFlow: (initialContext?: Partial<MetricGuidedFlowState>) => void;
   closeMetricGuidedFlow: () => void;
-  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>, fixedCardId?: string) => void;
+  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>) => void;
   removeActiveGuidedFlow: (atomId: string) => void;
   
   // --- Direct Review Panel Actions ---
@@ -2136,6 +2138,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   globalGuidedModeEnabled: false,
   isMetricGuidedFlowOpen: false,
   activeMetricGuidedFlow: null,
+  metricGuidedFlowCardId: undefined,
   activeGuidedFlows: {},
   directReviewTarget: null,
   setCards: (cards: LayoutCard[]) => {
@@ -2881,62 +2884,116 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   openMetricGuidedFlow: (initialContext?: Partial<MetricGuidedFlowState>) => {
     const cards = get().cards;
     const metricsInputs = get().metricsInputs;
+    const existingCardId = get().metricGuidedFlowCardId;
     
-    // Capture the current context when opened - this becomes the fixed position
-    const contextAtomId = metricsInputs.contextAtomId;
-    const contextCardId = metricsInputs.contextCardId;
-    
-    // If context is set, use it as the fixed position
-    // Otherwise, fall back to the first card
-    let fixedCardId = contextCardId;
-    let fixedAtomId = contextAtomId;
-    
-    if (!fixedCardId && cards.length > 0) {
-      // No context - use the first card's last atom
-      fixedCardId = cards[0].id;
-      if (cards[0].atoms.length > 0) {
-        fixedAtomId = cards[0].atoms[cards[0].atoms.length - 1].id;
+    // Check if card already exists
+    if (existingCardId) {
+      const existingCard = cards.find(c => c.id === existingCardId);
+      if (existingCard && existingCard.isMetricGuidedFlowCard) {
+        // Card exists, keep it in place and just update the flow state
+        console.log('[LaboratoryStore] Metric guided flow card already exists, keeping position');
+        set({
+          isMetricGuidedFlowOpen: true,
+          activeMetricGuidedFlow: {
+            currentStage: initialContext?.currentStage || get().activeMetricGuidedFlow?.currentStage || 'type',
+            state: initialContext || get().activeMetricGuidedFlow?.state || {},
+          },
+        });
+        return;
       }
     }
     
-    console.log('[LaboratoryStore] Opening metric guided flow', { 
-      initialContext, 
-      fixedCardId, 
-      fixedAtomId,
+    // Card doesn't exist, create a new one
+    const contextAtomId = metricsInputs.contextAtomId;
+    const contextCard = contextAtomId ? get().findCardByAtomId(contextAtomId) : null;
+    
+    // Create the metric guided flow card
+    const newCardId = `metric-guided-flow-${Date.now()}`;
+    const newCard: LayoutCard = {
+      id: newCardId,
+      atoms: [],
+      isExhibited: false,
+      isMetricGuidedFlowCard: true,
+      // No moleculeId - it's a standalone card
+      // Position will be set based on context card
+    };
+    
+    // Calculate position: insert after context card, or at the end
+    let updatedCards: LayoutCard[];
+    if (contextCard) {
+      const contextCardIndex = cards.findIndex(c => c.id === contextCard.id);
+      if (contextCardIndex >= 0) {
+        // Insert right after the context card
+        updatedCards = [
+          ...cards.slice(0, contextCardIndex + 1),
+          newCard,
+          ...cards.slice(contextCardIndex + 1),
+        ];
+        
+        // If context card is in a molecule, set afterMoleculeId for proper positioning
+        if (contextCard.moleculeId) {
+          newCard.afterMoleculeId = contextCard.moleculeId;
+        }
+        // For standalone cards, just insert after it in the array
+      } else {
+        // Context card not found, append to end
+        updatedCards = [...cards, newCard];
+      }
+    } else {
+      // No context atom, append to end
+      updatedCards = [...cards, newCard];
+    }
+    
+    console.log('[LaboratoryStore] Creating metric guided flow card', { 
+      cardId: newCardId,
       contextAtomId,
-      contextCardId 
+      contextCardId: contextCard?.id,
+      position: contextCard ? 'after context card' : 'at end'
     });
     
     set({
+      cards: updatedCards,
       isMetricGuidedFlowOpen: true,
+      metricGuidedFlowCardId: newCardId,
       activeMetricGuidedFlow: {
         currentStage: initialContext?.currentStage || 'type',
         state: initialContext || {},
-        fixedCardId,
-        fixedAtomId,
-        cardsCountWhenOpened: cards.length,
       },
     });
+    
+    // Scroll to the metric guided flow card after a short delay to ensure it's rendered
+    setTimeout(() => {
+      const cardElement = document.querySelector(`[data-card-id="${newCardId}"]`);
+      if (cardElement) {
+        cardElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      }
+    }, 100);
   },
   
   closeMetricGuidedFlow: () => {
     console.log('[LaboratoryStore] Closing metric guided flow');
+    const cardId = get().metricGuidedFlowCardId;
+    const cards = get().cards;
+    
+    // Remove the metric guided flow card from cards array
+    const updatedCards = cardId ? cards.filter(c => c.id !== cardId) : cards;
+    
     set({
       isMetricGuidedFlowOpen: false,
       activeMetricGuidedFlow: null,
+      metricGuidedFlowCardId: undefined,
+      cards: updatedCards,
     });
   },
   
-  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>, fixedCardId?: string) => {
-    const existingFlow = get().activeMetricGuidedFlow;
+  setActiveMetricGuidedFlow: (currentStage: MetricStage, state?: Partial<MetricGuidedFlowState>) => {
     set({
       activeMetricGuidedFlow: {
         currentStage,
         state: state || {},
-        // Preserve fixedCardId and fixedAtomId from existing flow if not explicitly provided
-        fixedCardId: fixedCardId ?? existingFlow?.fixedCardId,
-        fixedAtomId: existingFlow?.fixedAtomId,
-        cardsCountWhenOpened: existingFlow?.cardsCountWhenOpened,
       },
     });
   },
@@ -2953,6 +3010,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       globalGuidedModeEnabled: false,
       isMetricGuidedFlowOpen: false,
       activeMetricGuidedFlow: null,
+      metricGuidedFlowCardId: undefined,
       activeGuidedFlows: {},
       directReviewTarget: null,
     });

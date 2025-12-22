@@ -1,47 +1,57 @@
 import React from 'react';
-import { CheckCircle2, Circle } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { MetricStage } from './useMetricGuidedFlow';
 
 interface VerticalProgressStepperProps {
   currentStage: MetricStage;
   className?: string;
+  onStageClick?: (stage: MetricStage) => void;
 }
 
-const STAGES: Array<{ id: MetricStage; label: string; shortLabel: string; category?: string }> = [
-  { id: 'type', label: 'Select The Type Of Metric You Want To Create', shortLabel: 'Type', category: 'SETUP' },
-  { id: 'dataset', label: 'Confirm Your Data Source', shortLabel: 'Dataset', category: 'CONFIGURATION' },
-  { id: 'operations', label: 'Operations', shortLabel: 'Operations', category: 'CONFIGURATION' },
-  { id: 'preview', label: 'Complete', shortLabel: 'Complete', category: 'EXECUTION' },
+const STAGES: Array<{ id: MetricStage; label: string }> = [
+  { id: 'type', label: 'Metrics Type' },
+  { id: 'dataset', label: 'Confirm Data Source' },
+  { id: 'operations', label: 'Select Operation' },
+  { id: 'preview', label: 'Preview and Save' },
 ];
-
-const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  SETUP: { bg: 'bg-blue-500', text: 'text-white', border: 'border-blue-500' },
-  CONFIGURATION: { bg: 'bg-green-500', text: 'text-white', border: 'border-green-500' },
-  VALIDATION: { bg: 'bg-yellow-500', text: 'text-black', border: 'border-yellow-500' },
-  EXECUTION: { bg: 'bg-blue-500', text: 'text-white', border: 'border-blue-500' },
-};
 
 export const VerticalProgressStepper: React.FC<VerticalProgressStepperProps> = ({ 
   currentStage, 
-  className 
+  className,
+  onStageClick,
 }) => {
   const currentIndex = STAGES.findIndex(s => s.id === currentStage);
 
+  const handleStageClick = (stage: MetricStage, index: number) => {
+    // Allow clicking on completed stages or the current stage
+    if (onStageClick && index <= currentIndex) {
+      onStageClick(stage);
+    }
+  };
+
   return (
-    <div className={cn('flex flex-col gap-4 py-2', className)}>
+    <div className={cn('flex flex-col gap-0', className)}>
       {STAGES.map((stage, index) => {
         const isCompleted = index < currentIndex;
         const isCurrent = index === currentIndex;
         const isUpcoming = index > currentIndex;
-        const category = stage.category || 'SETUP';
-        const categoryColor = CATEGORY_COLORS[category] || CATEGORY_COLORS.SETUP;
+        const isClickable = index <= currentIndex && onStageClick;
 
         return (
-          <div key={stage.id} className="flex items-start gap-3 relative">
+          <div 
+            key={stage.id} 
+            onClick={() => handleStageClick(stage.id, index)}
+            className={cn(
+              "flex items-center gap-3 py-3 px-2 rounded-lg transition-all duration-200 relative",
+              isClickable && "cursor-pointer hover:bg-gray-50",
+              isCurrent && "bg-blue-50/50",
+              !isClickable && isUpcoming && "opacity-50"
+            )}
+          >
             {/* Vertical line connector */}
             {index < STAGES.length - 1 && (
-              <div className="absolute left-5 top-10 w-0.5 h-full -z-10">
+              <div className="absolute left-[17px] top-[36px] w-0.5 h-6">
                 <div className={cn(
                   'w-full h-full transition-all duration-300',
                   isCompleted ? 'bg-[#41C185]' : 'bg-gray-200'
@@ -49,59 +59,47 @@ export const VerticalProgressStepper: React.FC<VerticalProgressStepperProps> = (
               </div>
             )}
 
-            {/* Stage indicator circle */}
+            {/* Radio button / indicator */}
             <div className="relative z-10 flex-shrink-0">
               <div
                 className={cn(
-                  'w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300',
+                  'w-6 h-6 rounded-full flex items-center justify-center border-2 transition-all duration-300',
                   isCompleted && 'bg-[#41C185] border-[#41C185]',
-                  isCurrent && 'bg-[#458EE2] border-[#458EE2] scale-110 shadow-lg',
+                  isCurrent && 'bg-[#458EE2] border-[#458EE2] shadow-sm',
                   isUpcoming && 'bg-white border-gray-300'
                 )}
               >
                 {isCompleted ? (
-                  <CheckCircle2 className="w-6 h-6 text-white" />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                ) : isCurrent ? (
+                  <div className="w-2 h-2 rounded-full bg-white" />
                 ) : (
-                  <Circle
-                    className={cn(
-                      'w-6 h-6',
-                      isCurrent ? 'text-white fill-white' : 'text-gray-300 fill-white'
-                    )}
-                  />
+                  <div className="w-2 h-2 rounded-full bg-gray-300" />
                 )}
               </div>
             </div>
 
-            {/* Stage content */}
-            <div className="flex-1 pt-1">
-              <div className="flex items-center gap-2 mb-1">
-                <span className={cn(
-                  'px-2 py-0.5 rounded text-xs font-semibold',
-                  categoryColor.bg,
-                  categoryColor.text,
-                  categoryColor.border,
-                  'border'
-                )}>
-                  {category}
-                </span>
-                {isCompleted && (
-                  <span className="text-xs text-green-600 font-medium">✓ Complete</span>
-                )}
-              </div>
-              <div
-                className={cn(
-                  'text-sm font-medium',
-                  isCurrent && 'text-[#458EE2]',
-                  isCompleted && 'text-[#41C185]',
-                  isUpcoming && 'text-gray-400'
-                )}
-              >
-                {stage.label}
-              </div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                {stage.id}
-              </div>
+            {/* Stage label */}
+            <div
+              className={cn(
+                'text-sm font-medium flex-1',
+                isCurrent && 'text-[#458EE2] font-semibold',
+                isCompleted && 'text-[#41C185]',
+                isUpcoming && 'text-gray-400'
+              )}
+            >
+              {stage.label}
             </div>
+
+            {/* Completed indicator */}
+            {isCompleted && (
+              <span className="text-xs text-green-600 font-medium">✓</span>
+            )}
+
+            {/* Current indicator */}
+            {isCurrent && (
+              <span className="text-xs text-blue-500 font-medium bg-blue-100 px-2 py-0.5 rounded-full">Current</span>
+            )}
           </div>
         );
       })}

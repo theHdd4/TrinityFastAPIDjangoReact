@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { RotateCcw, X, Settings, ChevronRight, ChevronDown, Upload } from 'lucide-react';
+import { RotateCcw, X, Settings, ChevronRight, ChevronDown, Upload, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { VerticalProgressStepper } from '@/components/AtomList/atoms/data-upload/components/guided-upload/VerticalProgressStepper';
+import { VerticalProgressStepper as DataUploadVerticalProgressStepper } from '@/components/AtomList/atoms/data-upload/components/guided-upload/VerticalProgressStepper';
+import { VerticalProgressStepper as MetricVerticalProgressStepper } from '@/components/LaboratoryMode/components/SettingsPanel/metricstabs/metricguildeflow/VerticalProgressStepper';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import type { UploadStage } from '@/components/AtomList/atoms/data-upload/components/guided-upload/useGuidedUploadFlow';
+import type { MetricStage } from '@/components/LaboratoryMode/components/SettingsPanel/metricstabs/metricguildeflow/useMetricGuidedFlow';
 
 interface GuidedWorkflowPanelProps {
   isCollapsed: boolean;
@@ -19,12 +21,16 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
 }) => {
   // Get active guided flows from the laboratory store
   const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows || {});
+  const activeMetricGuidedFlow = useLaboratoryStore((state) => state.activeMetricGuidedFlow);
+  const isMetricGuidedFlowOpen = useLaboratoryStore((state) => state.isMetricGuidedFlowOpen);
   const getAtom = useLaboratoryStore((state) => state.getAtom);
   const updateGuidedFlowStage = useLaboratoryStore((state) => state.updateGuidedFlowStage);
+  const setActiveMetricGuidedFlow = useLaboratoryStore((state) => state.setActiveMetricGuidedFlow);
   const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
 
   // Get the first active guided flow (or allow user to select if multiple)
   const activeFlowEntries = Object.entries(activeGuidedFlows);
+  
   const [selectedAtomId, setSelectedAtomId] = useState<string | null>(
     activeFlowEntries.length > 0 ? activeFlowEntries[0][0] : null
   );
@@ -44,26 +50,53 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
   const selectedFlow = selectedAtomId ? activeGuidedFlows[selectedAtomId] : null;
   const selectedAtom = selectedAtomId ? getAtom(selectedAtomId) : null;
 
-  // State to track if progress stepper is collapsed
-  const [isProgressCollapsed, setIsProgressCollapsed] = useState(false);
+  // State to track if progress steppers are collapsed
+  const [isDataUploadProgressCollapsed, setIsDataUploadProgressCollapsed] = useState(false);
+  const [isMetricProgressCollapsed, setIsMetricProgressCollapsed] = useState(true); // Collapsed by default
 
-  // Handle clicking on a step to navigate
-  const handleStageClick = (stage: UploadStage) => {
+  // Handle clicking on a step to navigate (data upload)
+  const handleDataUploadStageClick = (stage: UploadStage) => {
     if (selectedAtomId && updateGuidedFlowStage) {
       updateGuidedFlowStage(selectedAtomId, stage);
     }
   };
 
-  // Toggle progress stepper visibility
-  const toggleProgressStepper = () => {
-    setIsProgressCollapsed(prev => !prev);
+  // Handle clicking on a step to navigate (metric)
+  const handleMetricStageClick = (stage: MetricStage) => {
+    if (activeMetricGuidedFlow) {
+      setActiveMetricGuidedFlow(stage, activeMetricGuidedFlow.state);
+    }
   };
 
-  // Handle reset - go back to step 1 (U2 - Confirm Headers)
-  const handleReset = () => {
+  // Toggle data upload progress stepper visibility
+  const toggleDataUploadProgressStepper = () => {
+    setIsDataUploadProgressCollapsed(prev => !prev);
+  };
+
+  // Toggle metric progress stepper visibility
+  const toggleMetricProgressStepper = () => {
+    setIsMetricProgressCollapsed(prev => !prev);
+  };
+
+  // Handle reset for data upload - go back to step 1
+  const handleDataUploadReset = () => {
     if (selectedAtomId && updateGuidedFlowStage) {
       // Reset to U2 (Confirm Headers) - first step in the guided flow (U1 removed)
       updateGuidedFlowStage(selectedAtomId, 'U2');
+    }
+  };
+
+  // Handle reset for metric - go back to step 1
+  const handleMetricReset = () => {
+    if (activeMetricGuidedFlow) {
+      // Reset to type stage
+      setActiveMetricGuidedFlow('type', {
+        selectedType: null,
+        dataSource: '',
+        createdVariables: [],
+        createdColumns: [],
+        createdTables: [],
+      });
     }
   };
 
@@ -92,12 +125,12 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
         </Button>
       </div>
 
-      {/* Priming Info - Made bigger and bolder */}
+      {/* Priming Info - Made bigger and bolder (Data Upload) */}
       {selectedFlow && (
         <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50/30">
           <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Priming</div>
           <button
-            onClick={toggleProgressStepper}
+            onClick={toggleDataUploadProgressStepper}
             className="w-full text-left flex items-center justify-between group hover:opacity-80 transition-opacity"
           >
             <div className="text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -114,7 +147,7 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
                 return fileName || 'No file selected';
               })()}
             </div>
-            {isProgressCollapsed ? (
+            {isDataUploadProgressCollapsed ? (
               <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
             ) : (
               <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
@@ -123,10 +156,10 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
         </div>
       )}
 
-      {/* Atom Selector (if multiple flows) */}
+      {/* Atom Selector (if multiple data upload flows) */}
       {activeFlowEntries.length > 1 && (
         <div className="p-3 border-b border-gray-200 bg-gray-50">
-          <div className="text-xs font-medium text-gray-700 mb-2">Active Flows:</div>
+          <div className="text-xs font-medium text-gray-700 mb-2">Active Data Upload Flows:</div>
           <div className="space-y-1">
             {activeFlowEntries.map(([atomId, flow]) => {
               const atom = getAtom(atomId);
@@ -149,41 +182,96 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
         </div>
       )}
 
-      {/* Steps List - Using real guided flow data */}
-      {!isProgressCollapsed && (
-        <div className="flex-1 overflow-y-auto p-4">
-          {selectedFlow ? (
-            <VerticalProgressStepper
-              currentStage={selectedFlow.currentStage}
-              onStageClick={handleStageClick}
-              className="w-full"
-            />
-          ) : (
-            <div className="text-center text-gray-500 py-8">
-              <div className="mb-4">
-                <Upload className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                <p className="text-sm">No files uploaded yet</p>
-                <p className="text-xs text-gray-400 mt-1">Use the guided upload flow to get started</p>
+      {/* Steps List - Data Upload Flow */}
+      <div className="flex-1 overflow-y-auto">
+        {!isDataUploadProgressCollapsed && (
+          <div className="p-4">
+            {selectedFlow ? (
+              <DataUploadVerticalProgressStepper
+                currentStage={selectedFlow.currentStage}
+                onStageClick={handleDataUploadStageClick}
+                className="w-full"
+              />
+            ) : (
+              <div className="text-center text-gray-500 py-8">
+                <div className="mb-4">
+                  <Upload className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                  <p className="text-sm">No files uploaded yet</p>
+                  <p className="text-xs text-gray-400 mt-1">Use the guided upload flow to get started</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Reset Button for Data Upload */}
+        {selectedFlow && !isDataUploadProgressCollapsed && (
+          <div className="px-4 pb-4">
+            <Button
+              onClick={handleDataUploadReset}
+              variant="outline"
+              className="w-full border-gray-300 hover:bg-gray-100"
+              size="sm"
+            >
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Reset Data Upload
+            </Button>
+          </div>
+        )}
+
+        {/* Metric Flow Section - Collapsible */}
+        {isMetricGuidedFlowOpen && activeMetricGuidedFlow && (
+          <>
+            <div className="border-t border-gray-200">
+              <div className="p-4">
+                <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Metric Creation</div>
+                <button
+                  onClick={toggleMetricProgressStepper}
+                  className="w-full text-left flex items-center justify-between group hover:opacity-80 transition-opacity"
+                >
+                  <div className="text-lg font-bold text-gray-900">
+                    {(() => {
+                      const dataSource = activeMetricGuidedFlow.state?.dataSource || '';
+                      if (!dataSource) return 'No data source selected';
+                      // Extract just the filename from the MinIO path
+                      const filename = dataSource.split('/').pop() || dataSource;
+                      return filename;
+                    })()}
+                  </div>
+                  {isMetricProgressCollapsed ? (
+                    <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition-colors" />
+                  )}
+                </button>
               </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* Reset Button */}
-      {selectedFlow && (
-        <div className="p-4 border-t border-gray-200 bg-gray-50/50">
-          <Button
-            onClick={handleReset}
-            variant="outline"
-            className="w-full border-gray-300 hover:bg-gray-100"
-            size="sm"
-          >
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Reset
-          </Button>
-        </div>
-      )}
+            {!isMetricProgressCollapsed && (
+              <>
+                <div className="p-4">
+                  <MetricVerticalProgressStepper
+                    currentStage={activeMetricGuidedFlow.currentStage}
+                    onStageClick={handleMetricStageClick}
+                    className="w-full"
+                  />
+                </div>
+                <div className="px-4 pb-4">
+                  <Button
+                    onClick={handleMetricReset}
+                    variant="outline"
+                    className="w-full border-gray-300 hover:bg-gray-100"
+                    size="sm"
+                  >
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Reset Metric Flow
+                  </Button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Footer */}
       <div className="p-3 border-t border-gray-200 bg-gray-100/50">

@@ -40,7 +40,7 @@ const STAGE_COMPONENTS: Record<MetricStage, React.ComponentType<any>> = {
 };
 
 const STAGE_TITLES: Record<MetricStage, string> = {
-  type: 'Select The Type Of Metric You Want To Create',
+  type: 'Select The Type Of Metrics You Want To Create',
   dataset: 'Confirm Your Data Source',
   operations: 'Select Operation',
   preview: 'Preview ans Save Your Created Metrics',
@@ -90,7 +90,7 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
   
   const flow = useMetricGuidedFlow(savedState);
   const { state, goToNextStage, goToPreviousStage, restartFlow, goToStage, setState, restoreStageSnapshot } = flow;
-  const { setActiveMetricGuidedFlow, closeMetricGuidedFlow } = useLaboratoryStore();
+  const { setActiveMetricGuidedFlow, closeMetricGuidedFlow, metricGuidedFlowCardId, activeMetricGuidedFlow } = useLaboratoryStore();
   const { toast } = useToast();
 
   // Refs to avoid excessive localStorage writes and keep last saved snapshot
@@ -132,6 +132,14 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     // Only depend on effectiveInitialStage, not state.currentStage to prevent re-running on back navigation
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveInitialStage]);
+
+  // React to external stage changes from GuidedWorkflowPanel (when user clicks a stage in the stepper)
+  useEffect(() => {
+    if (activeMetricGuidedFlow?.currentStage && activeMetricGuidedFlow.currentStage !== state.currentStage) {
+      goToStage(activeMetricGuidedFlow.currentStage);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMetricGuidedFlow?.currentStage]);
 
   // Sync state into laboratory store and localStorage for trackers & persistence
   useEffect(() => {
@@ -958,8 +966,10 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
     console.log('[MetricGuidedFlowInline] Restart button clicked - resetting to initial state');
     // Clear localStorage persistence
     const projectContext = getActiveProjectContext();
-    const storageKey = `metric-guided-flow-${projectContext.projectId || 'default'}`;
-    localStorage.removeItem(storageKey);
+    if (projectContext) {
+      const storageKey = `metric-guided-flow-${projectContext.client_name}-${projectContext.app_name}-${projectContext.project_name}`;
+      localStorage.removeItem(storageKey);
+    }
     
     // Restart flow to clear all state and go back to type stage
     // restartFlow already clears snapshots internally
@@ -977,7 +987,20 @@ export const MetricGuidedFlowInline: React.FC<MetricGuidedFlowInlineProps> = ({
       createdTables: [],
       currentStage: 'type',
     });
-  }, [restartFlow, goToStage, setActiveMetricGuidedFlow]);
+    
+    // Scroll to the top of the card when restarting
+    if (metricGuidedFlowCardId) {
+      setTimeout(() => {
+        const cardElement = document.querySelector(`[data-card-id="${metricGuidedFlowCardId}"]`);
+        if (cardElement) {
+          cardElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+      }, 100);
+    }
+  }, [restartFlow, goToStage, setActiveMetricGuidedFlow, metricGuidedFlowCardId]);
 
   // handleClose is already defined above, no need to redefine
 
