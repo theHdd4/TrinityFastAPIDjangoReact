@@ -24,6 +24,7 @@ import {
   HelpCircleIcon,
   GripVertical,
   Type,
+  Lightbulb,
 } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
@@ -6346,6 +6347,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     className="transition-transform hover:scale-110"
                   />
                 ) : null}
+                        {/* Guided Workflow toggle (bulb) - only for Data Upload card in Guided Mode */}
+                        {globalGuidedModeEnabled &&
+                          card.atoms.length > 0 &&
+                          card.atoms[0]?.atomId === 'data-upload' && (
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                window.dispatchEvent(new CustomEvent('open-guided-panel'));
+                              }}
+                              className="p-0.5 hover:bg-blue-50 rounded transition-colors"
+                              title="Show Guided Workflow"
+                            >
+                              <Lightbulb className="w-3.5 h-3.5 text-[#FFBD59]" />
+                            </button>
+                          )}
                         <button
                           onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                           className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
