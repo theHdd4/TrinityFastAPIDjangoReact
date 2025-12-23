@@ -13,10 +13,17 @@ from .schemas import (
     RunPipelineResponse,
     PipelineExecutionDocument,
 )
-from .service import save_pipeline_execution, get_pipeline_execution, record_atom_execution, get_pipeline_collection, save_column_operations, record_column_operations_execution, remove_pipeline_steps_by_card_id
+from .service import save_pipeline_execution, get_pipeline_execution, record_atom_execution, get_pipeline_collection, save_column_operations, record_column_operations_execution, remove_pipeline_steps_by_card_id, get_priming_steps, save_priming_steps
 from .atom_executors import execute_atom_step, get_atom_executor
 from app.features.project_state.routes import get_atom_list_configuration
-from app.features.data_upload_validate.app.routes import _background_auto_classify_files, get_object_prefix
+from app.features.data_upload_validate.app.routes import _background_auto_classify_files, get_object_prefix, read_minio_object
+from app.features.data_upload_validate import service as data_upload_service
+from app.features.data_upload_validate.file_ingestion import RobustFileReader
+from app.features.createcolumn.deps import minio_client, MINIO_BUCKET
+import pandas as pd
+import polars as pl
+import io
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +119,41 @@ async def save_pipeline_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/save-priming-steps")
+async def save_priming_steps_endpoint(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    mode: str = Query("laboratory", description="Mode"),
+    file_key: str = Body(..., description="File identifier"),
+    priming_steps: Dict[str, Any] = Body(..., description="Priming steps data")
+):
+    """Save priming steps (rename, dtypes, missing values) from guided flow.
+    
+    This endpoint saves priming operations performed during guided flow
+    so they can be applied to replacement files during pipeline execution.
+    """
+    try:
+        logger.info(f"🔍 [save-priming-steps] Received request: client={client_name}, app={app_name}, project={project_name}, file={file_key}")
+        logger.info(f"🔍 [save-priming-steps] Priming steps: {priming_steps}")
+        
+        result = await save_priming_steps(
+            client_name,
+            app_name,
+            project_name,
+            file_key,
+            priming_steps,
+            mode
+        )
+        
+        logger.info(f"🔍 [save-priming-steps] Result: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving priming steps: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/save-column-operations")
 async def save_column_operations_endpoint(
     client_name: str = Query(..., description="Client name"),
@@ -149,6 +191,214 @@ async def save_column_operations_endpoint(
     except Exception as e:
         logger.error(f"❌ Error saving column operations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _apply_priming_to_replacement_file(
+    replacement_file: str,
+    priming_steps: Dict[str, Any],
+    original_file: str,
+    request_client_name: str,
+    request_app_name: str,
+    request_project_name: str,
+    request_mode: str
+) -> bool:
+    """Apply priming steps to a replacement file.
+    
+    This is a separate function to avoid Python variable scoping issues
+    where later assignments in run_pipeline would shadow module-level imports.
+    
+    Args:
+        replacement_file: The replacement file to apply priming to
+        priming_steps: The priming steps to apply
+        original_file: The original file (for logging)
+        request_client_name: Client name from request
+        request_app_name: App name from request
+        request_project_name: Project name from request
+        request_mode: Mode from request
+    
+    Returns:
+        True if priming was applied successfully, False otherwise
+    """
+    try:
+        # Extract priming step components
+        columns_to_drop = priming_steps.get("columns_to_drop", [])
+        renames = priming_steps.get("renames", {})
+        dtypes = priming_steps.get("dtypes", {})
+        missing_values = priming_steps.get("missing_values", {})
+        
+        # Only apply if there are actual transformations
+        has_transformations = (
+            len(columns_to_drop) > 0 or
+            len(renames) > 0 or
+            len(dtypes) > 0 or
+            len(missing_values) > 0
+        )
+        
+        if not has_transformations:
+            logger.info(
+                f"ℹ️ No priming steps to apply for {original_file} (empty transformations)"
+            )
+            return True
+        
+        logger.info(
+            f"📋 Priming steps to apply: "
+            f"{len(columns_to_drop)} drops, "
+            f"{len(renames)} renames, "
+            f"{len(dtypes)} dtype changes, "
+            f"{len(missing_values)} missing value strategies"
+        )
+        
+        # Read file from MinIO
+        data = read_minio_object(replacement_file)
+        filename = Path(replacement_file).name
+        
+        # Parse based on file type
+        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            df_result, _ = RobustFileReader.read_file_to_pandas(
+                content=data,
+                filename=filename,
+                auto_detect_header=True,
+                return_raw=False,
+            )
+            if isinstance(df_result, dict):
+                df = list(df_result.values())[0]
+            else:
+                df = df_result
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+            df = df_pl.to_pandas()
+        else:
+            raise ValueError(f"Unsupported file type: {filename}")
+        
+        # 1. Drop columns first (before renames)
+        if columns_to_drop:
+            cols_to_drop_existing = [col for col in columns_to_drop if col in df.columns]
+            if cols_to_drop_existing:
+                df = df.drop(columns=cols_to_drop_existing)
+                logger.info(f"✅ Dropped {len(cols_to_drop_existing)} columns: {cols_to_drop_existing}")
+        
+        # 2. Apply column renames (after drops)
+        if renames:
+            valid_renames = {old: new for old, new in renames.items() if old != new and old in df.columns}
+            if valid_renames:
+                df = df.rename(columns=valid_renames)
+                logger.info(f"✅ Renamed {len(valid_renames)} columns: {valid_renames}")
+        
+        # 3. Apply missing value strategies
+        for col_name, strategy_config in missing_values.items():
+            if col_name not in df.columns:
+                continue
+            
+            strategy = strategy_config.get("strategy", "none")
+            if strategy == "none":
+                continue
+            elif strategy == "drop":
+                df = df.dropna(subset=[col_name])
+            elif strategy == "mean":
+                if pd.api.types.is_numeric_dtype(df[col_name]):
+                    df[col_name].fillna(df[col_name].mean(), inplace=True)
+            elif strategy == "median":
+                if pd.api.types.is_numeric_dtype(df[col_name]):
+                    df[col_name].fillna(df[col_name].median(), inplace=True)
+            elif strategy == "mode":
+                mode_val = df[col_name].mode()
+                if len(mode_val) > 0:
+                    df[col_name].fillna(mode_val[0], inplace=True)
+            elif strategy == "zero":
+                df[col_name].fillna(0, inplace=True)
+            elif strategy == "empty":
+                df[col_name].fillna("", inplace=True)
+            elif strategy == "custom":
+                custom_value = strategy_config.get("value", "")
+                if pd.api.types.is_numeric_dtype(df[col_name]):
+                    numeric_value = pd.to_numeric(custom_value, errors='coerce')
+                    if pd.notna(numeric_value):
+                        df[col_name].fillna(numeric_value, inplace=True)
+                else:
+                    df[col_name].fillna(str(custom_value), inplace=True)
+            elif strategy == "ffill":
+                df[col_name] = df[col_name].ffill()
+            elif strategy == "bfill":
+                df[col_name] = df[col_name].bfill()
+        
+        # 4. Apply dtype changes
+        for col_name, dtype_config in dtypes.items():
+            if col_name not in df.columns:
+                continue
+            
+            if isinstance(dtype_config, dict):
+                new_dtype = dtype_config.get('dtype')
+                datetime_format = dtype_config.get('format')
+            else:
+                new_dtype = dtype_config
+                datetime_format = None
+            
+            try:
+                if new_dtype == "int64":
+                    numeric_col = pd.to_numeric(df[col_name], errors='coerce')
+                    df[col_name] = numeric_col.round().astype('Int64')
+                elif new_dtype == "float64":
+                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
+                elif new_dtype == "object":
+                    df[col_name] = df[col_name].astype(str)
+                elif new_dtype == "datetime64":
+                    if datetime_format:
+                        df[col_name] = pd.to_datetime(df[col_name], format=datetime_format, errors='coerce')
+                    else:
+                        df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
+                elif new_dtype == "bool":
+                    df[col_name] = df[col_name].astype(bool)
+            except Exception as e:
+                logger.warning(f"Could not convert {col_name} to {new_dtype}: {str(e)}")
+        
+        # Save back to MinIO
+        buffer = io.BytesIO()
+        if filename.lower().endswith(".csv"):
+            df.to_csv(buffer, index=False)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df.to_excel(buffer, index=False)
+        elif filename.lower().endswith(".arrow"):
+            df_pl_updated = pl.from_pandas(df)
+            df_pl_updated.write_ipc(buffer)
+        
+        buffer.seek(0)
+        minio_client.put_object(
+            MINIO_BUCKET,
+            replacement_file,
+            buffer,
+            length=buffer.getbuffer().nbytes,
+            content_type="application/octet-stream",
+        )
+        
+        logger.info(
+            f"✅ Successfully applied priming steps to {replacement_file}: "
+            f"{len(columns_to_drop)} drops, "
+            f"{len(renames)} renames, "
+            f"{len(dtypes)} dtype changes, "
+            f"{len(missing_values)} missing value strategies"
+        )
+        
+        # Save priming steps with replacement file as the new file_key
+        await save_priming_steps(
+            client_name=request_client_name,
+            app_name=request_app_name,
+            project_name=request_project_name,
+            file_key=replacement_file,
+            priming_steps=priming_steps,
+            mode=request_mode
+        )
+        logger.info(
+            f"💾 Saved priming steps for replacement file {replacement_file}"
+        )
+        
+        return True
+        
+    except Exception as e:
+        logger.warning(
+            f"⚠️ Error applying priming steps to {replacement_file}: {e}. "
+            f"Continuing with pipeline execution."
+        )
+        return False
 
 
 @router.post("/run", response_model=RunPipelineResponse)
@@ -224,6 +474,38 @@ async def run_pipeline(
         # This ensures new executions replace the old data
         # NOTE: We clear it here so that as atoms execute, they create fresh execution records
         # IMPORTANT: We clear AFTER we've extracted all needed data from pipeline_data
+        # CRITICAL: Preserve data_summary section - extract it before deletion
+        # Store it in a module-level dict so record_atom_execution can access it
+        preserved_data_summary = pipeline_data.get('pipeline', {}).get('data_summary', [])
+        if preserved_data_summary:
+            logger.info(
+                f"💾 Preserving data_summary section with {len(preserved_data_summary)} entries before clearing pipeline"
+            )
+            # Store in module-level dict for access in record_atom_execution
+            if not hasattr(run_pipeline, '_preserved_data_summaries'):
+                run_pipeline._preserved_data_summaries = {}
+            run_pipeline._preserved_data_summaries[doc_id] = preserved_data_summary
+        
+        # Extract prime section (priming steps) before deletion for applying to replacement files
+        # NOTE: We don't preserve it in module-level dict - instead we save it with replacement file after applying
+        preserved_prime = pipeline_data.get('pipeline', {}).get('prime', [])
+        if preserved_prime:
+            logger.info(
+                f"📋 Found prime section with {len(preserved_prime)} entries for applying to replacement files"
+            )
+        
+        # CRITICAL: Preserve column_operations section before deletion
+        # Column operations should persist across pipeline reruns (like data_summary)
+        preserved_column_operations = pipeline_data.get('pipeline', {}).get('column_operations', [])
+        if preserved_column_operations:
+            logger.info(
+                f"💾 Preserving column_operations section with {len(preserved_column_operations)} entries before clearing pipeline"
+            )
+            # Store in module-level dict for access in record_column_operations_execution
+            if not hasattr(run_pipeline, '_preserved_column_operations'):
+                run_pipeline._preserved_column_operations = {}
+            run_pipeline._preserved_column_operations[doc_id] = preserved_column_operations
+        
         try:
             coll = await get_pipeline_collection()
             delete_result = await coll.delete_many({"_id": doc_id})
@@ -265,16 +547,99 @@ async def run_pipeline(
         }
         
         # ========================================================================
+        # UPDATE PRESERVED COLUMN OPERATIONS WITH REPLACEMENT FILES
+        # ========================================================================
+        # If we have preserved column operations and file replacements, update the input_file
+        # in preserved operations to use replacement files
+        if file_replacements and preserved_column_operations:
+            logger.info(
+                f"🔄 Updating {len(preserved_column_operations)} preserved column operations with replacement files"
+            )
+            for col_op in preserved_column_operations:
+                # CRITICAL FIX: Correct overwrite_original flag if it's inconsistent with output_file
+                # If output_file exists and is different from input_file, it's a save-as operation
+                output_file = col_op.get("output_file")
+                input_file = col_op.get("input_file")
+                overwrite_original = col_op.get("overwrite_original", True)
+                
+                # Fix inconsistency: if output_file exists and differs from input_file, it's save-as
+                if output_file and output_file != input_file:
+                    if overwrite_original:
+                        logger.warning(
+                            f"⚠️ Fixing inconsistent overwrite_original flag for {input_file}: "
+                            f"has output_file={output_file} but overwrite_original=true, setting to false"
+                        )
+                        col_op["overwrite_original"] = False
+                
+                original_input_file = col_op.get("original_input_file") or col_op.get("input_file")
+                if original_input_file in file_replacements:
+                    replacement_file = file_replacements[original_input_file]
+                    old_input_file = col_op.get("input_file")
+                    col_op["input_file"] = replacement_file
+                    logger.info(
+                        f"🔄 Updated column operation input_file: {old_input_file} -> {replacement_file} "
+                        f"(original: {original_input_file}, output: {col_op.get('output_file')})"
+                    )
+                    # Ensure original_input_file is preserved
+                    if "original_input_file" not in col_op:
+                        col_op["original_input_file"] = original_input_file
+        
+        # ========================================================================
+        # APPLY PRIMING STEPS TO REPLACEMENT FILES
+        # ========================================================================
+        # When replacement files are used, apply the priming steps that were saved
+        # for the original files (renames, dtypes, missing values, drop columns)
+        # CRITICAL: Use preserved_prime from before pipeline deletion, not database query
+        # NOTE: This is done in a separate helper function to avoid Python variable scoping issues
+        if file_replacements:
+            logger.info(f"🔧 Applying priming steps to {len(file_replacements)} replacement file(s)")
+            
+            # Build a map of file_key -> priming_steps from preserved_prime
+            priming_steps_map = {}
+            if preserved_prime:
+                for priming_entry in preserved_prime:
+                    file_key = priming_entry.get("file_key")
+                    if file_key:
+                        priming_steps_map[file_key] = priming_entry.get("priming_steps", {})
+                logger.info(f"📋 Built priming steps map with {len(priming_steps_map)} entries: {list(priming_steps_map.keys())}")
+            
+            for original_file, replacement_file in file_replacements.items():
+                # Get priming steps for the original file from preserved_prime
+                logger.info(
+                    f"🔍 Getting priming steps for original file: {original_file}"
+                )
+                
+                # Use preserved priming steps instead of database query
+                priming_steps = priming_steps_map.get(original_file)
+                
+                if priming_steps:
+                    logger.info(
+                        f"🔧 Applying priming steps from {original_file} to replacement file {replacement_file}"
+                    )
+                    # Use helper function to avoid variable scoping issues
+                    await _apply_priming_to_replacement_file(
+                        replacement_file=replacement_file,
+                        priming_steps=priming_steps,
+                        original_file=original_file,
+                        request_client_name=request.client_name,
+                        request_app_name=request.app_name,
+                        request_project_name=request.project_name,
+                        request_mode=request.mode
+                    )
+                else:
+                    logger.info(
+                        f"ℹ️ No priming steps found for original file {original_file}"
+                    )
+        
+        # ========================================================================
         # DROP COLUMNS FROM REPLACEMENT FILES THAT MATCH COLUMN OPERATION COLUMNS
         # ========================================================================
         # This ensures column operations can create columns without conflicts
         if file_replacements and column_operations:
-            from app.features.createcolumn.deps import get_minio_df, minio_client, MINIO_BUCKET
+            from app.features.createcolumn.deps import get_minio_df
             from app.features.dataframe_operations.app.routes import get_object_prefix as get_df_prefix
-            import pandas as pd
             import pyarrow as pa
             import pyarrow.ipc as ipc
-            import io
             
             prefix = await get_df_prefix(
                 client_name=request.client_name,
@@ -431,6 +796,7 @@ async def run_pipeline(
         # Include BOTH:
         # 1. Files from outputs array (from previous runs)
         # 2. Files that match patterns indicating they're saved outputs (like "groupby/", "create-data/", etc.)
+        # 3. Files that will be created by column operations (save-as operations)
         derived_files = set()
         for step in execution_graph:
             for output in step.get("outputs", []):
@@ -451,6 +817,16 @@ async def run_pipeline(
                     derived_files.add(input_file)
                     break
         
+        # CRITICAL: Add files that will be created by column operations (save-as operations)
+        # These are derived files too and should be treated as such
+        for col_op in column_operations:
+            if not col_op.get("overwrite_original", False):
+                # This is a save-as operation - it will create a new file
+                output_file = col_op.get("output_file")
+                if output_file:
+                    derived_files.add(output_file)
+                    logger.info(f"📋 Added column operation output to derived files: {output_file}")
+        
         # Separate column operations into:
         # 1. Operations on root files or existing files (execute immediately)
         # 2. Operations on derived files (execute after the file is created)
@@ -465,6 +841,19 @@ async def run_pipeline(
             # Also keep the original in case it's referenced elsewhere
             root_file_keys.add(root_file)
         
+        # CRITICAL: Build a set of all files that will be created by column operations
+        # This is needed to properly categorize chained operations (operation B depends on operation A's output)
+        files_created_by_col_ops = set()
+        for col_op in column_operations:
+            if not col_op.get("overwrite_original", False):
+                output_file = col_op.get("output_file")
+                if output_file:
+                    files_created_by_col_ops.add(output_file)
+        
+        logger.info(
+            f"📋 Files that will be created by column operations: {files_created_by_col_ops}"
+        )
+        
         immediate_col_ops = []
         deferred_col_ops = {}  # Map of file_key -> list of operations
         
@@ -478,23 +867,29 @@ async def run_pipeline(
             # to determine if it's derived, not the replacement file. The replacement only matters
             # when actually executing the operation.
             # IMPORTANT: Check if this file is derived in multiple ways:
-            # 1. It's in the derived_files set (from execution graph outputs)
+            # 1. It's in the derived_files set (from execution graph outputs OR column operation outputs)
             # 2. It's NOT in root_files (it's not an original uploaded file)
             # 3. It contains certain path patterns that indicate it's a saved/processed file
             is_root_file = original_input_file in root_file_keys
             is_in_derived_set = original_input_file in derived_files
             
             # If it's NOT a root file, treat it as derived (conservative approach)
-            # This ensures that any file created by an atom is properly deferred
+            # This ensures that any file created by an atom or column operation is properly deferred
             if is_in_derived_set or not is_root_file:
                 # Must wait for file to be created - defer this operation
                 # Use original_input_file as the key for deferred operations
                 if original_input_file not in deferred_col_ops:
                     deferred_col_ops[original_input_file] = []
                 deferred_col_ops[original_input_file].append(col_op)
+                logger.info(
+                    f"📋 Deferred column operation: {original_input_file} (is_root={is_root_file}, is_derived={is_in_derived_set})"
+                )
             else:
                 # File exists (root file) - can execute immediately
                 immediate_col_ops.append(col_op)
+                logger.info(
+                    f"📋 Immediate column operation: {original_input_file} (is_root={is_root_file})"
+                )
         
         # IMPORTANT: Sort immediate_col_ops to ensure correct execution order:
         # 1. Overwrite operations (overwrite_original: true) should execute FIRST
@@ -506,27 +901,34 @@ async def run_pipeline(
             0 if col_op.get("overwrite_original", True) else 1  # Overwrite (0) before save-as (1)
         ))
         
-        # logger.info(
-        #     f"📋 Sorted {len(immediate_col_ops)} immediate column operations: "
-        #     f"{sum(1 for op in immediate_col_ops if op.get('overwrite_original', True))} overwrite, "
-        #     f"{sum(1 for op in immediate_col_ops if not op.get('overwrite_original', True))} save-as"
-        # )
+        logger.info(
+            f"📋 Sorted {len(immediate_col_ops)} immediate column operations: "
+            f"{sum(1 for op in immediate_col_ops if op.get('overwrite_original', True))} overwrite, "
+            f"{sum(1 for op in immediate_col_ops if not op.get('overwrite_original', True))} save-as"
+        )
+        for idx, col_op in enumerate(immediate_col_ops):
+            logger.info(
+                f"📋 [COL_OP {idx}] input_file={col_op.get('input_file')}, "
+                f"original_input_file={col_op.get('original_input_file')}, "
+                f"overwrite={col_op.get('overwrite_original')}, "
+                f"output_file={col_op.get('output_file')}, "
+                f"operations={[op.get('created_column_name') for op in col_op.get('operations', [])]}"
+            )
         
         # Execute immediate column operations
         from app.features.createcolumn.task_service import submit_perform_task, submit_save_task
         from app.features.dataframe_operations.app.routes import get_object_prefix as get_df_prefix
         from app.core.task_queue import format_task_response, task_result_store
         from datetime import datetime
-        import os
         import time
         import csv
-        import io
         
         # Define MINIO connection variables once for all column operations (immediate and deferred)
-        MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
-        MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
-        MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
-        MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
+        # Use different names to avoid shadowing the module-level imports
+        COL_OPS_MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
+        COL_OPS_MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+        COL_OPS_MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
+        COL_OPS_MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
         
         # Calculate object prefix once for all column operations (immediate and deferred)
         prefix = await get_df_prefix(
@@ -798,7 +1200,17 @@ async def run_pipeline(
                     continue
                 
                 # Apply file replacements
-                actual_input_file = file_replacements.get(original_input_file, original_input_file)
+                # CRITICAL: If col_op has input_file that's different from original_input_file,
+                # it means the file was already replaced in a previous run. Use that as the base,
+                # then check file_replacements for any new replacements.
+                config_input_file = col_op.get("input_file")
+                if config_input_file and config_input_file != original_input_file:
+                    # Config already has replacement file from previous run
+                    # Check if there's a newer replacement in file_replacements
+                    actual_input_file = file_replacements.get(config_input_file, config_input_file)
+                else:
+                    # Normal case: use original_input_file and check file_replacements
+                    actual_input_file = file_replacements.get(original_input_file, original_input_file)
                 
                 operation_type = "OVERWRITE" if overwrite else "SAVE-AS"
                 # logger.info(
@@ -826,7 +1238,7 @@ async def run_pipeline(
                 
                 # Execute perform task (using globally calculated prefix)
                 perform_submission = submit_perform_task(
-                    bucket_name=MINIO_BUCKET,
+                    bucket_name=COL_OPS_MINIO_BUCKET,
                     object_name=actual_input_file,
                     object_prefix=prefix,
                     identifiers=identifiers_str,  # Pass identifiers for grouping operations
@@ -1048,6 +1460,221 @@ async def run_pipeline(
                     if overwrite:
                         # Map original file to replacement file (or itself if no replacement)
                         file_replacements[original_input_file] = actual_input_file
+                    
+                    # CRITICAL: If this was a save-as operation, check if there are deferred operations
+                    # waiting for this output file and execute them immediately (chained operations)
+                    if not overwrite and output_file:
+                        logger.info(
+                            f"🔍 Checking for chained column operations on newly created file: {output_file}"
+                        )
+                        
+                        # Check if there are deferred operations for this output file
+                        if output_file in deferred_col_ops:
+                            chained_ops = deferred_col_ops[output_file]
+                            logger.info(
+                                f"✅ Found {len(chained_ops)} chained column operation(s) for {output_file}, executing now..."
+                            )
+                            
+                            # Execute chained operations immediately
+                            # Use the same execution logic as immediate operations
+                            for chained_col_op in chained_ops:
+                                chained_execution_start_time = datetime.utcnow()
+                                try:
+                                    chained_original_input_file = chained_col_op.get("original_input_file") or chained_col_op.get("input_file")
+                                    chained_operations = chained_col_op.get("operations", [])
+                                    chained_overwrite = chained_col_op.get("overwrite_original", False)
+                                    chained_output_file = chained_col_op.get("output_file")
+                                    
+                                    if not chained_operations:
+                                        continue
+                                    
+                                    # The input file for chained operation is the output file we just created
+                                    chained_actual_input_file = output_file
+                                    
+                                    logger.info(
+                                        f"🔄 Executing chained column operation on {chained_actual_input_file}"
+                                    )
+                                    
+                                    # Build form_items
+                                    chained_form_items = build_form_items_from_operations(chained_operations)
+                                    if not chained_form_items:
+                                        continue
+                                    
+                                    # Get identifiers
+                                    chained_identifiers_list = chained_col_op.get("identifiers")
+                                    chained_identifiers_str = None
+                                    if chained_identifiers_list and isinstance(chained_identifiers_list, list) and len(chained_identifiers_list) > 0:
+                                        chained_identifiers_str = ",".join(chained_identifiers_list)
+                                        chained_form_items.append(("identifiers", chained_identifiers_str))
+                                    else:
+                                        chained_form_items.append(("identifiers", ""))
+                                    
+                                    # Execute perform task
+                                    chained_perform_submission = submit_perform_task(
+                                        bucket_name=COL_OPS_MINIO_BUCKET,
+                                        object_name=chained_actual_input_file,
+                                        object_prefix=prefix,
+                                        identifiers=chained_identifiers_str,
+                                        form_items=chained_form_items,
+                                        client_name=request.client_name,
+                                        app_name=request.app_name,
+                                        project_name=request.project_name,
+                                    )
+                                    
+                                    # Get result (same polling logic)
+                                    chained_perform_result = None
+                                    if chained_perform_submission.status == "success" and chained_perform_submission.result:
+                                        chained_perform_result = chained_perform_submission.result
+                                        if isinstance(chained_perform_result, dict):
+                                            chained_perform_result.setdefault("status", "SUCCESS")
+                                    elif chained_perform_submission.status == "pending":
+                                        max_wait = 60
+                                        wait_interval = 0.5
+                                        waited = 0
+                                        while waited < max_wait:
+                                            task_meta = task_result_store.fetch(chained_perform_submission.task_id)
+                                            if task_meta and task_meta.get("status") in ["success", "failure"]:
+                                                chained_perform_result = task_meta.get("result", {})
+                                                if task_meta.get("status") == "success":
+                                                    chained_perform_result.setdefault("status", "SUCCESS")
+                                                else:
+                                                    chained_perform_result = {"status": "FAILURE", "error": task_meta.get("error", "Task failed")}
+                                                break
+                                            await asyncio.sleep(wait_interval)
+                                            waited += wait_interval
+                                        if not chained_perform_result:
+                                            chained_perform_result = {"status": "FAILURE", "error": "Task timed out"}
+                                    else:
+                                        chained_perform_result = {"status": "FAILURE", "error": chained_perform_submission.detail or "Task submission failed"}
+                                    
+                                    if not chained_perform_result or chained_perform_result.get("status") != "SUCCESS":
+                                        logger.error(f"❌ Chained column operation failed: {chained_perform_result.get('error')}")
+                                        failed_count += 1
+                                        continue
+                                    
+                                    # Get result and save (same logic as immediate operations)
+                                    chained_result_file = chained_perform_result.get("result_file")
+                                    if not chained_result_file:
+                                        continue
+                                    
+                                    chained_final_output_file = chained_actual_input_file if chained_overwrite else (chained_output_file or chained_result_file)
+                                    
+                                    # Get CSV data
+                                    chained_results = chained_perform_result.get("results", [])
+                                    if not chained_results:
+                                        continue
+                                    
+                                    chained_csv_buffer = io.StringIO()
+                                    chained_fieldnames = list(chained_results[0].keys())
+                                    chained_writer = csv.DictWriter(chained_csv_buffer, fieldnames=chained_fieldnames)
+                                    chained_writer.writeheader()
+                                    chained_writer.writerows(chained_results)
+                                    chained_csv_data = chained_csv_buffer.getvalue()
+                                    
+                                    # Build operation details
+                                    chained_operations_list = chained_col_op.get("operations", [])
+                                    chained_operation_details_dict = {
+                                        "input_file": chained_actual_input_file,
+                                        "operations": [
+                                            {
+                                                "operation_type": op.get("type", ""),
+                                                "columns": op.get("columns", []),
+                                                "rename": op.get("rename") if op.get("rename") else None,
+                                                "param": op.get("param") if op.get("param") else None,
+                                                "created_column_name": op.get("created_column_name", "")
+                                            }
+                                            for op in chained_operations_list
+                                        ]
+                                    }
+                                    chained_operation_details_str = json.dumps(chained_operation_details_dict, default=json_serializer)
+                                    
+                                    # Determine filename for save
+                                    if chained_overwrite:
+                                        chained_save_filename = chained_actual_input_file
+                                    else:
+                                        if chained_output_file:
+                                            chained_filename_without_ext = chained_output_file.replace(".arrow", "")
+                                            if "/" in chained_filename_without_ext:
+                                                if "create-data/" in chained_filename_without_ext:
+                                                    chained_filename_without_ext = chained_filename_without_ext.split("create-data/")[-1]
+                                                else:
+                                                    chained_filename_without_ext = chained_filename_without_ext.split("/")[-1]
+                                            chained_save_filename = chained_filename_without_ext
+                                        else:
+                                            chained_save_filename = "chained_column_ops_result"
+                                    
+                                    # Save the file
+                                    chained_save_submission = submit_save_task(
+                                        csv_data=chained_csv_data,
+                                        filename=chained_save_filename,
+                                        object_prefix=prefix,
+                                        overwrite_original=chained_overwrite,
+                                        client_name=request.client_name,
+                                        app_name=request.app_name,
+                                        project_name=request.project_name,
+                                        user_id="pipeline",
+                                        project_id=None,
+                                        operation_details=chained_operation_details_str,
+                                    )
+                                    
+                                    # Get save result (same polling logic)
+                                    chained_save_result = None
+                                    if chained_save_submission.status == "success" and chained_save_submission.result:
+                                        chained_save_result = chained_save_submission.result
+                                        if isinstance(chained_save_result, dict):
+                                            chained_save_result.setdefault("status", "SUCCESS")
+                                    elif chained_save_submission.status == "pending":
+                                        max_wait = 60
+                                        wait_interval = 0.5
+                                        waited = 0
+                                        while waited < max_wait:
+                                            task_meta = task_result_store.fetch(chained_save_submission.task_id)
+                                            if task_meta and task_meta.get("status") in ["success", "failure"]:
+                                                chained_save_result = task_meta.get("result", {})
+                                                if task_meta.get("status") == "success":
+                                                    chained_save_result.setdefault("status", "SUCCESS")
+                                                else:
+                                                    chained_save_result = {"status": "FAILURE", "error": task_meta.get("error", "Task failed")}
+                                                break
+                                            await asyncio.sleep(wait_interval)
+                                            waited += wait_interval
+                                        if not chained_save_result:
+                                            chained_save_result = {"status": "FAILURE", "error": "Task timed out"}
+                                    else:
+                                        chained_save_result = {"status": "FAILURE", "error": chained_save_submission.detail or "Task submission failed"}
+                                    
+                                    if chained_save_result and chained_save_result.get("status") == "SUCCESS":
+                                        chained_execution_end_time = datetime.utcnow()
+                                        logger.info(f"✅ Chained column operation completed: {chained_actual_input_file} -> {chained_final_output_file}")
+                                        success_count += 1
+                                        
+                                        # Record to MongoDB
+                                        await record_column_operations_execution(
+                                            client_name=request.client_name,
+                                            app_name=request.app_name,
+                                            project_name=request.project_name,
+                                            input_file=chained_actual_input_file,
+                                            output_file=None if chained_overwrite else chained_final_output_file,
+                                            operations=chained_operations,
+                                            created_columns=chained_col_op.get("created_columns", []),
+                                            execution_started_at=chained_execution_start_time,
+                                            execution_completed_at=chained_execution_end_time,
+                                            execution_status="success",
+                                            execution_error=None,
+                                            identifiers=chained_col_op.get("identifiers"),
+                                            original_input_file=chained_original_input_file,
+                                            mode=request.mode
+                                        )
+                                    else:
+                                        logger.error(f"❌ Failed to save chained column operation result")
+                                        failed_count += 1
+                                        
+                                except Exception as e:
+                                    logger.error(f"❌ Error executing chained column operation: {e}")
+                                    failed_count += 1
+                            
+                            # Remove from deferred_col_ops so we don't execute them again
+                            del deferred_col_ops[output_file]
                 else:
                     execution_end_time = datetime.utcnow()
                     # logger.error(f"❌ Failed to save column operations result for {input_file}")
@@ -1183,8 +1810,9 @@ async def run_pipeline(
                     
                     # Apply file replacements to file-related params
                     # Check multiple possible param keys that might contain file paths
+                    # CRITICAL: Include "filename" for table/save endpoint which uses filename param for overwrite saves
                     file_param_keys = ["object_names", "file_key", "object_name", "source_object", "data_source", 
-                                     "input_file", "input_files", "file1", "file2", "left_file", "right_file"]
+                                     "input_file", "input_files", "file1", "file2", "left_file", "right_file", "filename"]
                     for key in file_param_keys:
                         if key in params:
                             original_file = params[key]
@@ -1462,6 +2090,7 @@ async def run_pipeline(
                     
                     # CRITICAL FIX: Also check API calls for /save responses that contain saved filenames
                     # This catches saved files that might not be in step.outputs yet
+                    # CRITICAL: Only add save-as files, NOT overwrite saves
                     step_api_calls = step.get("api_calls", [])
                     for api_call in step_api_calls:
                         endpoint = api_call.get("endpoint", "")
@@ -1470,7 +2099,18 @@ async def run_pipeline(
                         if "/save" in endpoint and response_data.get("status") == "SUCCESS":
                             saved_filename = response_data.get("filename")
                             if saved_filename and saved_filename not in output_files_to_check:
-                                output_files_to_check.insert(0, saved_filename)
+                                # Check if this is an overwrite save
+                                save_params = api_call.get("params", {})
+                                is_overwrite = save_params.get("overwrite_original", False)
+                                
+                                # Only add if NOT an overwrite save
+                                if not is_overwrite:
+                                    output_files_to_check.insert(0, saved_filename)
+                                else:
+                                    logger.info(
+                                        f"🔄 [PIPELINE] Skipping overwrite save '{saved_filename}' from step API calls "
+                                        f"(it's the same file, not a derived file)"
+                                    )
                     
                     # Check each output file for deferred column operations
                     # CRITICAL FIX: Match output files against ALL column operations (not just deferred)
@@ -1494,6 +2134,39 @@ async def run_pipeline(
                         return normalized
                     
                     for output_file in output_files_to_check:
+                        # ========================================================================
+                        # STEP 1: CHECK AND APPLY PRIMING STEPS TO OUTPUT FILE (if any)
+                        # ========================================================================
+                        # Before checking for column operations, check if this output file has
+                        # priming steps that need to be applied (similar to replacement files)
+                        logger.info(f"🔍 Checking output file '{output_file}' for priming steps...")
+                        
+                        # Get priming steps for this output file from the preserved prime section
+                        output_priming_steps = None
+                        if preserved_prime:
+                            for priming_entry in preserved_prime:
+                                if priming_entry.get("file_key") == output_file:
+                                    output_priming_steps = priming_entry.get("priming_steps")
+                                    break
+                        
+                        if output_priming_steps:
+                            logger.info(
+                                f"🔧 Found priming steps for output file {output_file}, applying..."
+                            )
+                            # Use helper function to apply priming steps
+                            await _apply_priming_to_replacement_file(
+                                replacement_file=output_file,
+                                priming_steps=output_priming_steps,
+                                original_file=output_file,  # For derived files, original = output
+                                request_client_name=request.client_name,
+                                request_app_name=request.app_name,
+                                request_project_name=request.project_name,
+                                request_mode=request.mode
+                            )
+                        
+                        # ========================================================================
+                        # STEP 2: CHECK AND APPLY COLUMN OPERATIONS TO OUTPUT FILE (if any)
+                        # ========================================================================
                         # logger.info(
                         #     f"🔍 Checking output file '{output_file}' for matching column operations..."
                         # )
@@ -1673,21 +2346,18 @@ async def run_pipeline(
                                         try:
                                             from minio import Minio
                                             from minio.error import S3Error
-                                            import io
-                                            import pandas as pd
-                                            import pyarrow as pa
                                             import pyarrow.parquet as pq
                                             
                                             # Load the result file from MinIO (it should be the transformed data)
-                                            minio_client = Minio(
-                                                MINIO_ENDPOINT,
-                                                access_key=MINIO_ACCESS_KEY,
-                                                secret_key=MINIO_SECRET_KEY,
+                                            local_minio_client = Minio(
+                                                COL_OPS_MINIO_ENDPOINT,
+                                                access_key=COL_OPS_MINIO_ACCESS_KEY,
+                                                secret_key=COL_OPS_MINIO_SECRET_KEY,
                                                 secure=False
                                             )
                                             
                                             # Get the object from MinIO
-                                            response = minio_client.get_object(MINIO_BUCKET, deferred_result_file)
+                                            response = local_minio_client.get_object(COL_OPS_MINIO_BUCKET, deferred_result_file)
                                             data_bytes = response.read()
                                             response.close()
                                             
@@ -2047,6 +2717,46 @@ async def run_pipeline(
                             # Build output files from execution result and step outputs
                             recorded_output_files = []
                             
+                            # CRITICAL: Build set of input files (including replacement files) for overwrite detection
+                            # If a saved file matches any input file, it's an overwrite save (not a derived file)
+                            # Normalize paths for comparison (remove .arrow extension, normalize separators)
+                            def normalize_file_path(path):
+                                """Normalize file path for comparison."""
+                                if not path:
+                                    return ""
+                                # Remove .arrow extension if present
+                                normalized = path.replace(".arrow", "") if path.endswith(".arrow") else path
+                                # Normalize separators
+                                normalized = normalized.replace("\\", "/")
+                                # Remove trailing slashes
+                                normalized = normalized.rstrip("/")
+                                return normalized
+                            
+                            input_files_set = set()
+                            input_files_normalized = {}  # Map normalized -> original for logging
+                            
+                            # Add updated input files (with replacements)
+                            for input_file in updated_input_files:
+                                if input_file:
+                                    input_files_set.add(input_file)
+                                    norm = normalize_file_path(input_file)
+                                    input_files_normalized[norm] = input_file
+                                    input_files_set.add(norm)  # Also add normalized version
+                            
+                            # Also add original input files from step inputs
+                            for input_file_obj in inputs:
+                                input_key = input_file_obj.get("file_key")
+                                if input_key:
+                                    input_files_set.add(input_key)
+                                    norm = normalize_file_path(input_key)
+                                    input_files_normalized[norm] = input_key
+                                    input_files_set.add(norm)  # Also add normalized version
+                            
+                            logger.info(
+                                f"🔍 [PIPELINE] Input files for overwrite detection: {list(input_files_set)[:5]}... "
+                                f"(total: {len(input_files_set)})"
+                            )
+                            
                             # Add result file if available
                             # 🔧 CRITICAL: For concat, skip result_file if it's a concat_key (auto-generated Redis cache key)
                             # concat_key pattern: 8-char hex + "_concat.arrow" (e.g., "5771ec39_concat.arrow")
@@ -2073,6 +2783,7 @@ async def run_pipeline(
                                 })
                             
                             # Add saved files from API calls (preserve save_as_name)
+                            # CRITICAL: Only add save-as files, NOT overwrite saves
                             for api_call in api_calls:
                                 endpoint = api_call.get("endpoint", "")
                                 if "/save" in endpoint:
@@ -2083,19 +2794,40 @@ async def run_pipeline(
                                             # Check if already added
                                             if not any(out.get("file_key") == saved_filename for out in recorded_output_files):
                                                 save_params = api_call.get("params", {})
-                                                recorded_output_files.append({
-                                                    "file_key": saved_filename,
-                                                    "file_path": saved_filename,
-                                                    "flight_path": saved_filename,
-                                                    "save_as_name": save_params.get("filename", "saved_file"),
-                                                    "is_default_name": save_params.get("is_default_name", True),
-                                                    "columns": [],
-                                                    "dtypes": {},
-                                                    "row_count": 0
-                                                })
+                                                # Check if this is an overwrite save
+                                                # Method 1: Check overwrite_original flag
+                                                is_overwrite = save_params.get("overwrite_original", False)
+                                                # Method 2: Check if saved file matches any input file (simpler, more reliable)
+                                                saved_filename_norm = normalize_file_path(saved_filename)
+                                                if not is_overwrite and (saved_filename in input_files_set or saved_filename_norm in input_files_set):
+                                                    is_overwrite = True
+                                                    matched_input = input_files_normalized.get(saved_filename_norm, saved_filename)
+                                                    logger.info(
+                                                        f"🔍 [PIPELINE] Detected overwrite save '{saved_filename}' "
+                                                        f"(matches input file '{matched_input}', even though overwrite_original flag may be missing)"
+                                                    )
+                                                
+                                                # Only add if NOT an overwrite save
+                                                if not is_overwrite:
+                                                    recorded_output_files.append({
+                                                        "file_key": saved_filename,
+                                                        "file_path": saved_filename,
+                                                        "flight_path": saved_filename,
+                                                        "save_as_name": save_params.get("filename", "saved_file"),
+                                                        "is_default_name": save_params.get("is_default_name", True),
+                                                        "columns": [],
+                                                        "dtypes": {},
+                                                        "row_count": 0
+                                                    })
+                                                else:
+                                                    logger.info(
+                                                        f"🔄 [PIPELINE] Skipping overwrite save '{saved_filename}' from API call response_data "
+                                                        f"(it's the same file, not a derived file)"
+                                                    )
                             
                             # Also check additional_results for saved files (from current execution)
                             # Handle both single save_result (backward compatibility) and save_results array
+                            # CRITICAL: Only add save-as files to output_files, NOT overwrite saves
                             if additional_results:
                                 # Check for save_results array (multiple saves)
                                 save_results = additional_results.get("save_results", [])
@@ -2106,26 +2838,58 @@ async def run_pipeline(
                                             if save_status == "success":
                                                 saved_file = save_result.get("result", {}).get("filename") if isinstance(save_result.get("result"), dict) else save_result.get("filename")
                                                 if saved_file and not any(out.get("file_key") == saved_file for out in recorded_output_files):
-                                                    # Try to find the corresponding save API call to get filename
+                                                    # Check if this was an overwrite save
+                                                    is_overwrite = False
                                                     save_as_name = saved_file.split("/")[-1] if "/" in saved_file else saved_file
+                                                    
+                                                    # Match the saved_file to the correct save API call
                                                     for api_call in api_calls:
                                                         if api_call.get("endpoint", "").endswith("/save"):
+                                                            save_params = api_call.get("params", {})
                                                             save_response = api_call.get("response_data", {})
-                                                            if save_response and save_response.get("filename") == saved_file:
-                                                                save_params = api_call.get("params", {})
+                                                            
+                                                            # Match by checking if saved_file matches params.filename or response_data
+                                                            params_filename = save_params.get("filename", "")
+                                                            response_filename = save_response.get("filename") or save_response.get("object_name", "")
+                                                            
+                                                            # Normalize paths for comparison
+                                                            saved_file_normalized = saved_file.replace(".arrow", "") if saved_file.endswith(".arrow") else saved_file
+                                                            params_filename_normalized = params_filename.replace(".arrow", "") if params_filename.endswith(".arrow") else params_filename
+                                                            response_filename_normalized = response_filename.replace(".arrow", "") if response_filename.endswith(".arrow") else response_filename
+                                                            
+                                                            if (params_filename and (params_filename == saved_file or params_filename_normalized == saved_file_normalized)) or \
+                                                               (response_filename and (response_filename == saved_file or response_filename_normalized == saved_file_normalized)):
                                                                 save_as_name = save_params.get("filename", save_as_name)
+                                                                is_overwrite = save_params.get("overwrite_original", False)
                                                                 break
                                                     
-                                                    recorded_output_files.append({
-                                                        "file_key": saved_file,
-                                                        "file_path": saved_file,
-                                                        "flight_path": saved_file,
-                                                        "save_as_name": save_as_name,
-                                                        "is_default_name": False,
-                                                        "columns": [],
-                                                        "dtypes": {},
-                                                        "row_count": 0
-                                                    })
+                                                    # Also check if saved file matches any input file (simpler, more reliable)
+                                                    saved_file_norm = normalize_file_path(saved_file)
+                                                    if not is_overwrite and (saved_file in input_files_set or saved_file_norm in input_files_set):
+                                                        is_overwrite = True
+                                                        matched_input = input_files_normalized.get(saved_file_norm, saved_file)
+                                                        logger.info(
+                                                            f"🔍 [PIPELINE] Detected overwrite save '{saved_file}' "
+                                                            f"(matches input file '{matched_input}', even though overwrite_original flag may be missing)"
+                                                        )
+                                                    
+                                                    # Only add if NOT an overwrite save
+                                                    if not is_overwrite:
+                                                        recorded_output_files.append({
+                                                            "file_key": saved_file,
+                                                            "file_path": saved_file,
+                                                            "flight_path": saved_file,
+                                                            "save_as_name": save_as_name,
+                                                            "is_default_name": False,
+                                                            "columns": [],
+                                                            "dtypes": {},
+                                                            "row_count": 0
+                                                        })
+                                                    else:
+                                                        logger.info(
+                                                            f"🔄 [PIPELINE] Skipping overwrite save '{saved_file}' from output_files "
+                                                            f"(save_results array)"
+                                                        )
                                 
                                 # Also check for single save_result (backward compatibility)
                                 save_result = additional_results.get("save_result")
@@ -2134,48 +2898,180 @@ async def run_pipeline(
                                     if save_status == "success":
                                         saved_file = save_result.get("result", {}).get("filename") if isinstance(save_result.get("result"), dict) else save_result.get("filename")
                                         if saved_file and not any(out.get("file_key") == saved_file for out in recorded_output_files):
-                                            recorded_output_files.append({
-                                                "file_key": saved_file,
-                                                "file_path": saved_file,
-                                                "flight_path": saved_file,
-                                                "save_as_name": saved_file.split("/")[-1] if "/" in saved_file else saved_file,
-                                                "is_default_name": False,
-                                                "columns": [],
-                                                "dtypes": {},
-                                                "row_count": 0
-                                            })
-                                
-                                # Also check for saved_files array
-                                saved_files = additional_results.get("saved_files", [])
-                                if saved_files and isinstance(saved_files, list):
-                                    for saved_file in saved_files:
-                                        if saved_file and not any(out.get("file_key") == saved_file for out in recorded_output_files):
-                                            # Try to find the corresponding save API call to get filename
-                                            save_as_name = saved_file.split("/")[-1] if "/" in saved_file else saved_file
+                                            # Check if this was an overwrite save
+                                            is_overwrite = False
+                                            
+                                            # Match the saved_file to the correct save API call
                                             for api_call in api_calls:
                                                 if api_call.get("endpoint", "").endswith("/save"):
+                                                    save_params = api_call.get("params", {})
                                                     save_response = api_call.get("response_data", {})
-                                                    if save_response and save_response.get("filename") == saved_file:
-                                                        save_params = api_call.get("params", {})
-                                                        save_as_name = save_params.get("filename", save_as_name)
+                                                    
+                                                    # Match by checking if saved_file matches params.filename or response_data
+                                                    params_filename = save_params.get("filename", "")
+                                                    response_filename = save_response.get("filename") or save_response.get("object_name", "")
+                                                    
+                                                    # Normalize paths for comparison
+                                                    saved_file_normalized = saved_file.replace(".arrow", "") if saved_file.endswith(".arrow") else saved_file
+                                                    params_filename_normalized = params_filename.replace(".arrow", "") if params_filename.endswith(".arrow") else params_filename
+                                                    response_filename_normalized = response_filename.replace(".arrow", "") if response_filename.endswith(".arrow") else response_filename
+                                                    
+                                                    if (params_filename and (params_filename == saved_file or params_filename_normalized == saved_file_normalized)) or \
+                                                       (response_filename and (response_filename == saved_file or response_filename_normalized == saved_file_normalized)):
+                                                        is_overwrite = save_params.get("overwrite_original", False)
                                                         break
                                             
-                                            recorded_output_files.append({
-                                                "file_key": saved_file,
-                                                "file_path": saved_file,
-                                                "flight_path": saved_file,
-                                                "save_as_name": save_as_name,
-                                                "is_default_name": False,
+                                            # Also check if saved file matches any input file (simpler, more reliable)
+                                            if not is_overwrite and saved_file in input_files_set:
+                                                is_overwrite = True
+                                                logger.info(
+                                                    f"🔍 [PIPELINE] Detected overwrite save '{saved_file}' "
+                                                    f"(matches input file, even though overwrite_original flag may be missing)"
+                                                )
+                                            
+                                            # Only add if NOT an overwrite save
+                                            if not is_overwrite:
+                                                recorded_output_files.append({
+                                                    "file_key": saved_file,
+                                                    "file_path": saved_file,
+                                                    "flight_path": saved_file,
+                                                    "save_as_name": saved_file.split("/")[-1] if "/" in saved_file else saved_file,
+                                                    "is_default_name": False,
                                                     "columns": [],
                                                     "dtypes": {},
                                                     "row_count": 0
                                                 })
+                                            else:
+                                                logger.info(
+                                                    f"🔄 [PIPELINE] Skipping overwrite save '{saved_file}' from output_files "
+                                                    f"(single save_result)"
+                                                )
+                                
+                                # Also check for saved_files array
+                                # CRITICAL: Only add save-as files to output_files, NOT overwrite saves
+                                # Overwrite saves should NOT be treated as derived files (they're the same file)
+                                saved_files = additional_results.get("saved_files", [])
+                                if saved_files and isinstance(saved_files, list):
+                                    for saved_file in saved_files:
+                                        if saved_file and not any(out.get("file_key") == saved_file for out in recorded_output_files):
+                                            # Check if this was an overwrite save by looking at the API call params
+                                            is_overwrite = False
+                                            save_as_name = saved_file.split("/")[-1] if "/" in saved_file else saved_file
+                                            
+                                            # Match the saved_file to the correct save API call
+                                            # Check both params.filename and response_data.filename/object_name
+                                            for api_call in api_calls:
+                                                if api_call.get("endpoint", "").endswith("/save"):
+                                                    save_params = api_call.get("params", {})
+                                                    save_response = api_call.get("response_data", {})
+                                                    
+                                                    # Match by checking if saved_file matches:
+                                                    # 1. params.filename (the file being saved to)
+                                                    # 2. response_data.filename or object_name (the saved file path)
+                                                    params_filename = save_params.get("filename", "")
+                                                    response_filename = save_response.get("filename") or save_response.get("object_name", "")
+                                                    
+                                                    # Normalize paths for comparison (remove .arrow extension if present)
+                                                    saved_file_normalized = saved_file.replace(".arrow", "") if saved_file.endswith(".arrow") else saved_file
+                                                    params_filename_normalized = params_filename.replace(".arrow", "") if params_filename.endswith(".arrow") else params_filename
+                                                    response_filename_normalized = response_filename.replace(".arrow", "") if response_filename.endswith(".arrow") else response_filename
+                                                    
+                                                    if (params_filename and (params_filename == saved_file or params_filename_normalized == saved_file_normalized)) or \
+                                                       (response_filename and (response_filename == saved_file or response_filename_normalized == saved_file_normalized)):
+                                                        save_as_name = save_params.get("filename", save_as_name)
+                                                        # Check if overwrite_original is true
+                                                        is_overwrite = save_params.get("overwrite_original", False)
+                                                        logger.info(
+                                                            f"🔍 [PIPELINE] Matched save API call for '{saved_file}': "
+                                                            f"overwrite_original={is_overwrite}, params.filename={params_filename}"
+                                                        )
+                                                        break
+                                            
+                                            # Also check if saved file matches any input file (simpler, more reliable)
+                                            if not is_overwrite and saved_file in input_files_set:
+                                                is_overwrite = True
+                                                logger.info(
+                                                    f"🔍 [PIPELINE] Detected overwrite save '{saved_file}' "
+                                                    f"(matches input file, even though overwrite_original flag may be missing)"
+                                                )
+                                            
+                                            # Only add to output_files if it's NOT an overwrite save
+                                            # Overwrite saves are the same file, not a new derived file
+                                            if not is_overwrite:
+                                                recorded_output_files.append({
+                                                    "file_key": saved_file,
+                                                    "file_path": saved_file,
+                                                    "flight_path": saved_file,
+                                                    "save_as_name": save_as_name,
+                                                    "is_default_name": False,
+                                                    "columns": [],
+                                                    "dtypes": {},
+                                                    "row_count": 0
+                                                })
+                                            else:
+                                                logger.info(
+                                                    f"🔄 [PIPELINE] Skipping overwrite save '{saved_file}' from output_files "
+                                                    f"(it's the same file, not a derived file)"
+                                                )
                             
                             # Also preserve existing outputs from step (for files that were saved in previous runs)
+                            # CRITICAL: Only preserve save-as files, NOT overwrite saves
+                            # Check API calls to determine if existing outputs are from overwrite saves
                             for existing_output in step.get("outputs", []):
                                 existing_key = existing_output.get("file_key")
                                 if existing_key and not any(out.get("file_key") == existing_key for out in recorded_output_files):
-                                    recorded_output_files.append(existing_output)
+                                    # Check if this output is from an overwrite save by matching with API calls
+                                    is_overwrite = False
+                                    for api_call in api_calls:
+                                        if api_call.get("endpoint", "").endswith("/save"):
+                                            save_params = api_call.get("params", {})
+                                            save_response = api_call.get("response_data", {})
+                                            
+                                            # Match by checking if existing_key matches params.filename or response_data
+                                            params_filename = save_params.get("filename", "")
+                                            response_filename = save_response.get("filename") or save_response.get("object_name", "")
+                                            
+                                            # Normalize paths for comparison
+                                            existing_key_normalized = existing_key.replace(".arrow", "") if existing_key.endswith(".arrow") else existing_key
+                                            params_filename_normalized = params_filename.replace(".arrow", "") if params_filename.endswith(".arrow") else params_filename
+                                            response_filename_normalized = response_filename.replace(".arrow", "") if response_filename.endswith(".arrow") else response_filename
+                                            
+                                            if (params_filename and (params_filename == existing_key or params_filename_normalized == existing_key_normalized)) or \
+                                               (response_filename and (response_filename == existing_key or response_filename_normalized == existing_key_normalized)):
+                                                is_overwrite = save_params.get("overwrite_original", False)
+                                                break
+                                    
+                                    # Also check if existing output matches any input file (simpler, more reliable)
+                                    existing_key_norm = normalize_file_path(existing_key)
+                                    if not is_overwrite and (existing_key in input_files_set or existing_key_norm in input_files_set):
+                                        is_overwrite = True
+                                        matched_input = input_files_normalized.get(existing_key_norm, existing_key)
+                                        logger.info(
+                                            f"🔍 [PIPELINE] Detected overwrite save '{existing_key}' "
+                                            f"(matches input file '{matched_input}', even though overwrite_original flag may be missing)"
+                                        )
+                                    
+                                    # Only add if NOT an overwrite save
+                                    if not is_overwrite:
+                                        recorded_output_files.append(existing_output)
+                            
+                            # 🔧 CRITICAL: Final safeguard - filter out any overwrite saves that might have slipped through
+                            # Double-check all output files against input files before recording
+                            filtered_output_files = []
+                            for output_file in recorded_output_files:
+                                output_key = output_file.get("file_key")
+                                if output_key:
+                                    output_key_norm = normalize_file_path(output_key)
+                                    # If output file matches any input file, it's an overwrite save - skip it
+                                    if output_key in input_files_set or output_key_norm in input_files_set:
+                                        matched_input = input_files_normalized.get(output_key_norm, output_key)
+                                        logger.warning(
+                                            f"⚠️ [PIPELINE] FINAL SAFEGUARD: Removing overwrite save '{output_key}' from output_files "
+                                            f"(matches input file '{matched_input}')"
+                                        )
+                                    else:
+                                        filtered_output_files.append(output_file)
+                            recorded_output_files = filtered_output_files
                             
                             # 🔧 CRITICAL: Update log_entry with output files so frontend can see them
                             log_entry["output_files"] = recorded_output_files
@@ -2245,17 +3141,15 @@ async def run_pipeline(
                 
                 # Get list of files for auto-classification
                 from app.DataStorageRetrieval.minio_utils import get_client
-                from pathlib import Path
                 from minio.error import S3Error
-                import os
                 
-                minio_client = get_client()
-                MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
+                local_minio_client = get_client()
+                local_minio_bucket = os.getenv("MINIO_BUCKET", "trinity")
                 
                 try:
                     objects = list(
-                        minio_client.list_objects(
-                            MINIO_BUCKET, prefix=prefix, recursive=True
+                        local_minio_client.list_objects(
+                            local_minio_bucket, prefix=prefix, recursive=True
                         )
                     )
                     tmp_prefix = prefix + "tmp/"

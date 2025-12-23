@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Loader2, X, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
+import { VALIDATE_API, CLASSIFIER_API, PIPELINE_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 
@@ -331,6 +331,104 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
         });
 
         if (saveRes.ok) {
+          // ========================================================================
+          // SAVE PRIMING STEPS TO PIPELINE EXECUTION
+          // ========================================================================
+          // Save priming steps (renames, dtypes, missing values, drop columns) to pipeline
+          // This ensures replacement files get the same transformations during pipeline execution
+          try {
+            // Build priming steps from instructions
+            const columnsToDrop: string[] = [];
+            const columnRenames: Record<string, string> = {};
+            const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
+            const missingValueStrategies: Record<string, { strategy: string; value?: string | number }> = {};
+
+            instructions.forEach(inst => {
+              const colName = inst.column;
+              
+              // Drop columns
+              if (inst.drop_column) {
+                columnsToDrop.push(colName);
+              }
+              
+              // Renames
+              if (inst.new_name && inst.new_name !== colName) {
+                columnRenames[colName] = inst.new_name;
+              }
+              
+              // Dtype changes
+              if (inst.dtype) {
+                if (inst.dtype === 'datetime64' && inst.datetime_format) {
+                  dtypeChanges[colName] = { dtype: 'datetime64', format: inst.datetime_format };
+                } else {
+                  dtypeChanges[colName] = inst.dtype;
+                }
+              }
+              
+              // Missing value strategies
+              if (inst.missing_strategy && inst.missing_strategy !== 'none') {
+                const strategyConfig: { strategy: string; value?: string | number } = {
+                  strategy: inst.missing_strategy,
+                };
+                if (inst.missing_strategy === 'custom' && inst.custom_value !== undefined) {
+                  strategyConfig.value = inst.custom_value;
+                }
+                missingValueStrategies[colName] = strategyConfig;
+              }
+            });
+
+            const primingSteps = {
+              renames: columnRenames,
+              dtypes: dtypeChanges,
+              missing_values: missingValueStrategies,
+              columns_to_drop: columnsToDrop,
+              stage: 'direct_review',
+              applied_at: new Date().toISOString()
+            };
+
+            const fileKey = frame.object_name || fileName || '';
+
+            if (fileKey && (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategies).length > 0)) {
+              console.log('🔍 [DirectReview] Saving priming steps to pipeline:', {
+                fileKey,
+                hasRenames: Object.keys(columnRenames).length > 0,
+                hasDtypes: Object.keys(dtypeChanges).length > 0,
+                hasMissingValues: Object.keys(missingValueStrategies).length > 0,
+                hasDrops: columnsToDrop.length > 0
+              });
+
+              const pipelineRes = await fetch(
+                `${PIPELINE_API}/save-priming-steps?client_name=${encodeURIComponent(env.CLIENT_NAME || '')}&app_name=${encodeURIComponent(env.APP_NAME || '')}&project_name=${encodeURIComponent(env.PROJECT_NAME || '')}&mode=laboratory`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'include',
+                  body: JSON.stringify({
+                    file_key: fileKey,
+                    priming_steps: primingSteps
+                  })
+                }
+              );
+
+              if (pipelineRes.ok) {
+                const result = await pipelineRes.json();
+                console.log('✅ [DirectReview] Priming steps saved to pipeline MongoDB:', result);
+              } else {
+                const errorText = await pipelineRes.text();
+                console.warn('⚠️ [DirectReview] Failed to save priming steps to pipeline MongoDB:', {
+                  status: pipelineRes.status,
+                  statusText: pipelineRes.statusText,
+                  error: errorText
+                });
+              }
+            } else {
+              console.log('ℹ️ [DirectReview] No priming steps to save (no transformations)');
+            }
+          } catch (pipelineError) {
+            console.warn('⚠️ [DirectReview] Error saving priming steps to pipeline:', pipelineError);
+            // Don't fail the save if pipeline saving fails
+          }
+
           // Mark file as primed
           if (fileName) {
             await markFileAsPrimed(fileName);

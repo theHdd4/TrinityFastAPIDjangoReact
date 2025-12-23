@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { CheckCircle2, AlertTriangle, Download, ArrowLeft, FileText, BarChart3, Users, Database, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { VALIDATE_API } from '@/lib/api';
+import { VALIDATE_API, PIPELINE_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
 
@@ -317,6 +317,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
             // Continue with original file if transformation fails
           }
         }
+        
 
         // Try to fetch file metadata for preview (use transformed file path)
         let metadataData: any = null;
@@ -717,6 +718,156 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
     console.log('Download cleaned data');
   };
 
+  const handleConfirmAndPrime = async () => {
+    console.log('🔴🔴🔴 [U6] handleConfirmAndPrime FUNCTION CALLED');
+    console.log('🔴🔴🔴 [U6] Current file:', currentFile);
+    console.log('🔴🔴🔴 [U6] PIPELINE_API:', PIPELINE_API);
+    
+    // ========================================================================
+    // SAVE PRIMING STEPS TO PIPELINE EXECUTION
+    // ========================================================================
+    // Save priming steps when user confirms/approves the dataset
+    // Similar to how column operations are saved when user saves
+    try {
+      console.log('🚀 [U6] Inside try block, getting env...');
+      const envStr = localStorage.getItem('env');
+      let env: any = {};
+      if (envStr) {
+        try {
+          env = JSON.parse(envStr);
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      // Build priming steps from current state
+      const columnsToDrop: string[] = [];
+      currentColumnEdits.forEach(edit => {
+        if (edit.keep === false) {
+          columnsToDrop.push(edit.originalName);
+        }
+      });
+
+      const columnRenames: Record<string, string> = {};
+      currentColumnEdits.forEach(edit => {
+        if (edit.keep !== false && edit.editedName && edit.editedName !== edit.originalName) {
+          columnRenames[edit.originalName] = edit.editedName;
+        }
+      });
+
+      const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
+      currentDataTypes.forEach(dt => {
+        const userSelectedType = dt.updateType || dt.selectedType;
+        if (userSelectedType && userSelectedType !== dt.detectedType) {
+          if ((userSelectedType === 'date' || userSelectedType === 'datetime') && dt.format) {
+            dtypeChanges[dt.columnName] = { dtype: 'datetime64', format: dt.format };
+          } else {
+            const backendType = userSelectedType === 'number' ? 'float64' : 
+                               userSelectedType === 'int' ? 'int64' :
+                               userSelectedType === 'float' ? 'float64' :
+                               userSelectedType === 'category' ? 'object' :
+                               userSelectedType === 'string' ? 'object' :
+                               userSelectedType === 'date' ? 'datetime64' :
+                               userSelectedType === 'datetime' ? 'datetime64' :
+                               userSelectedType === 'boolean' ? 'bool' :
+                               userSelectedType;
+            dtypeChanges[dt.columnName] = backendType;
+          }
+        }
+      });
+
+      const missingValueStrategies: Record<string, { strategy: string; value?: string | number }> = {};
+      currentStrategies.forEach(s => {
+        if (s.strategy !== 'none') {
+          const strategyConfig: { strategy: string; value?: string | number } = {
+            strategy: s.strategy,
+          };
+          if (s.strategy === 'custom' && s.value !== undefined) {
+            strategyConfig.value = s.value;
+          }
+          missingValueStrategies[s.columnName] = strategyConfig;
+        }
+      });
+
+      const primingSteps = {
+        renames: columnRenames,
+        dtypes: dtypeChanges,
+        missing_values: missingValueStrategies,
+        columns_to_drop: columnsToDrop,
+        stage: 'U6',
+        applied_at: new Date().toISOString()
+      };
+
+      // Use currentFile.path as the file_key (full MinIO path)
+      const fileKey = currentFile?.path || currentFile?.name || '';
+
+      console.log('🔍 [U6] Saving priming steps on confirm:', {
+        fileKey,
+        hasRenames: Object.keys(columnRenames).length > 0,
+        hasDtypes: Object.keys(dtypeChanges).length > 0,
+        hasMissingValues: Object.keys(missingValueStrategies).length > 0,
+        hasDrops: columnsToDrop.length > 0,
+        env: {
+          client: env.CLIENT_NAME || env.client_name,
+          app: env.APP_NAME || env.app_name,
+          project: env.PROJECT_NAME || env.project_name
+        }
+      });
+
+      if (fileKey) {
+        const url = `${PIPELINE_API}/save-priming-steps?client_name=${encodeURIComponent(env.CLIENT_NAME || env.client_name || '')}&app_name=${encodeURIComponent(env.APP_NAME || env.app_name || '')}&project_name=${encodeURIComponent(env.PROJECT_NAME || env.project_name || '')}&mode=laboratory`;
+        
+        console.log('🚀 [U6] Making fetch request to save priming steps:', url);
+        console.log('🚀 [U6] Request body:', {
+          file_key: fileKey,
+          priming_steps: primingSteps
+        });
+        
+        const pipelineRes = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            file_key: fileKey,
+            priming_steps: primingSteps
+          })
+        });
+
+        console.log('🚀 [U6] Fetch response received:', {
+          ok: pipelineRes.ok,
+          status: pipelineRes.status,
+          statusText: pipelineRes.statusText
+        });
+
+        if (pipelineRes.ok) {
+          const result = await pipelineRes.json();
+          console.log('✅ [U6] Priming steps saved to pipeline MongoDB:', result);
+        } else {
+          const errorText = await pipelineRes.text();
+          console.error('❌ [U6] Failed to save priming steps to pipeline MongoDB:', {
+            status: pipelineRes.status,
+            statusText: pipelineRes.statusText,
+            error: errorText,
+            url
+          });
+        }
+      } else {
+        console.error('❌ [U6] Cannot save priming steps: file_key is missing', {
+          currentFile: currentFile?.path || currentFile?.name,
+          uploadedFiles: uploadedFiles
+        });
+      }
+    } catch (pipelineError) {
+      console.error('❌ [U6] Error saving priming steps to pipeline:', pipelineError);
+      console.error('❌ [U6] Error stack:', pipelineError instanceof Error ? pipelineError.stack : 'No stack trace');
+      // Don't fail the flow if pipeline saving fails - still proceed to next stage
+    }
+
+    console.log('🚀 [U6] Proceeding to next stage (U7)');
+    // Proceed to next stage (U7 - completion)
+    onNext();
+  };
+
   if (loading) {
     return (
       <StageLayout
@@ -1021,7 +1172,12 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           </div>
           <div className="flex justify-end pt-4 border-t border-blue-200">
             <Button
-              onClick={onNext}
+              onClick={(e) => {
+                console.log('🔴🔴🔴 BUTTON CLICKED - Confirm & Prime Dataset');
+                e.preventDefault();
+                e.stopPropagation();
+                handleConfirmAndPrime();
+              }}
               className="bg-[#41C185] hover:bg-[#36a870] text-white"
             >
               Confirm & Prime Dataset

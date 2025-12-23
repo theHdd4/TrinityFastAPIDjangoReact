@@ -536,7 +536,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
     // Get pipeline tracking parameters
     const pipelineParams = getPipelineParams();
-    
+
     try {
       // Delete columns sequentially
       for (const column of columnsToDelete) {
@@ -658,7 +658,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
 
     const name = columnName || getNextColKey(data.columns);
     let activeTableId = settings.tableId;
-    
+
     // Get pipeline tracking parameters
     const pipelineParams = getPipelineParams();
 
@@ -751,7 +751,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId || !newName.trim()) return;
 
     let activeTableId = settings.tableId;
-    
+
     // Get pipeline tracking parameters
     const pipelineParams = getPipelineParams();
 
@@ -866,7 +866,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId) return;
 
     let activeTableId = settings.tableId;
-    
+
     // Get pipeline tracking parameters
     const pipelineParams = getPipelineParams();
 
@@ -953,7 +953,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId) return;
 
     let activeTableId = settings.tableId;
-    
+
     // Get pipeline tracking parameters
     const pipelineParams = getPipelineParams();
 
@@ -1040,7 +1040,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId) return;
 
     let activeTableId = settings.tableId;
-    
+
     // Get pipeline tracking parameters
     const pipelineParams = getPipelineParams();
 
@@ -1127,7 +1127,7 @@ const TableCanvas: React.FC<TableCanvasProps> = ({
     if (!settings.tableId || !newName.trim()) return;
 
     let activeTableId = settings.tableId;
-    
+
     // Get pipeline tracking parameters
     const pipelineParams = getPipelineParams();
 

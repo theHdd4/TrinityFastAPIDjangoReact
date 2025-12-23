@@ -2768,8 +2768,15 @@ async def _auto_classify_and_save_file(
             raise
         
         # Parse Arrow file
-        reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-        df = reader.read_all().to_pandas()
+        try:
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            df = reader.read_all().to_pandas()
+        except Exception as arrow_error:
+            logger.warning(
+                f"⚠️ Failed to read Arrow file {object_name} for auto-classification: {arrow_error}. "
+                f"File might be corrupted or in wrong format. Skipping auto-classification."
+            )
+            return
         
         # Normalize column names to lowercase
         df.columns = [str(c).strip().lower() for c in df.columns]

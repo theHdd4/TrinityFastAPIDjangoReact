@@ -2801,7 +2801,13 @@ async def _auto_classify_and_save_file(
         # Normalize column names to lowercase
         df.columns = [str(c).strip().lower() for c in df.columns]
         all_columns = df.columns.tolist()
-        column_types = {c: str(df[c].dtype) for c in df.columns}
+        
+        # Handle duplicate column names - use dtypes property which handles duplicates correctly
+        # df[c].dtype fails when there are duplicate column names because df[c] returns a DataFrame
+        column_types = {}
+        for i, c in enumerate(df.columns):
+            # Use iloc to get the column by position to avoid duplicate column issues
+            column_types[c] = str(df.iloc[:, i].dtype)
         
         # AUTO-CLASSIFY keywords (same as classify_columns endpoint)
         # identifier_keywords = [

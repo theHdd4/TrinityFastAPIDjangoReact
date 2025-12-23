@@ -143,9 +143,38 @@ def perform_groupby_task(
     )
     frame = load_dataframe(bucket_name, source_object)
 
+    # 🔧 CRITICAL: Filter identifiers to only those that exist in the dataframe (case-insensitive)
+    # Create a case-insensitive mapping of column names
+    column_lower_map = {str(col).lower(): str(col) for col in frame.columns}
+    
+    # Normalize identifiers to lowercase and filter to only existing columns
+    normalized_identifiers_list = []
+    for ident in identifiers:
+        if not isinstance(ident, str):
+            continue
+        ident_lower = ident.strip().lower()
+        if ident_lower and ident_lower in column_lower_map:
+            # Use the actual column name from the dataframe (preserves original case)
+            normalized_identifiers_list.append(column_lower_map[ident_lower])
+        else:
+            logger.warning(
+                f"⚠️ Identifier '{ident}' not found in dataframe columns. Available columns: {list(frame.columns)}"
+            )
+    
+    if not normalized_identifiers_list:
+        available_cols = list(frame.columns)
+        return {
+            "status": "FAILED",
+            "success": False,
+            "message": f"None of the requested identifiers {list(identifiers)} exist in the dataframe. Available columns: {available_cols}",
+            "result_file": None,
+            "row_count": 0,
+            "columns": available_cols,
+        }
+
     try:
         frame, normalized_identifiers, derived_from = _ensure_year_identifier(
-            frame, identifiers
+            frame, normalized_identifiers_list
         )
         if derived_from:
             logger.info(

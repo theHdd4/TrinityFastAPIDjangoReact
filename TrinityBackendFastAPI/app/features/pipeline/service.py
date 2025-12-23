@@ -39,6 +39,54 @@ async def get_pipeline_collection() -> AsyncIOMotorCollection:
     return db["pipeline_execution"]
 
 
+def _get_preserved_data_summary(doc_id: str, existing_data_summary: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Get preserved data_summary from rerun, or return existing if available.
+    
+    Args:
+        doc_id: Document ID
+        existing_data_summary: Existing data_summary from document (if available)
+    
+    Returns:
+        Preserved data_summary if available from rerun, otherwise existing data_summary
+    """
+    try:
+        from app.features.pipeline.endpoint import run_pipeline
+        if hasattr(run_pipeline, '_preserved_data_summaries'):
+            preserved = run_pipeline._preserved_data_summaries.get(doc_id, [])
+            if preserved:
+                logger.info(f"💾 Using preserved data_summary with {len(preserved)} entries for {doc_id}")
+                return preserved
+    except Exception as e:
+        logger.warning(f"⚠️ Could not access preserved data_summary: {e}")
+    
+    # Return existing data_summary if available, otherwise empty list
+    return existing_data_summary if existing_data_summary else []
+
+
+def _get_preserved_column_operations(doc_id: str, existing_column_operations: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Get preserved column_operations from rerun, or return existing if available.
+    
+    Args:
+        doc_id: Document ID
+        existing_column_operations: Existing column_operations from document (if available)
+    
+    Returns:
+        Preserved column_operations if available from rerun, otherwise existing column_operations
+    """
+    try:
+        from app.features.pipeline.endpoint import run_pipeline
+        if hasattr(run_pipeline, '_preserved_column_operations'):
+            preserved = run_pipeline._preserved_column_operations.get(doc_id, [])
+            if preserved:
+                logger.info(f"💾 Using preserved column_operations with {len(preserved)} entries for {doc_id}")
+                return preserved
+    except Exception as e:
+        logger.warning(f"⚠️ Could not access preserved column_operations: {e}")
+    
+    # Return existing column_operations if available, otherwise empty list
+    return existing_column_operations if existing_column_operations else []
+
+
 async def save_column_operations(
     client_name: str,
     app_name: str,
@@ -106,14 +154,29 @@ async def save_column_operations(
             # Normalize identifiers for comparison (sort and convert to tuple for comparison)
             new_identifiers_tuple = tuple(sorted(identifiers or []))
             
-            # FIRST: Remove operations with same created_column_name from ALL configs for this file
-            # This ensures the latest operation replaces older ones regardless of identifier group
+            # FIRST: Remove operations with same created_column_name from configs for this file
+            # BUT ONLY from configs with the SAME overwrite_original value
+            # This ensures overwrite and save-as operations remain separate
             new_created_column_names = {op.get("created_column_name", "").lower().strip() 
                                       for op in operations 
                                       if op.get("created_column_name")}
             
+            logger.info(
+                f"🔍 [SAVE_COL_OPS] Saving for input_file={input_file}, overwrite={overwrite_original}, "
+                f"new_columns={new_created_column_names}, existing_configs={len(column_operations)}"
+            )
+            
             for col_op in column_operations:
-                if col_op.get("input_file") == input_file:
+                # Only remove from configs with matching input_file AND matching overwrite_original
+                col_op_input = col_op.get("input_file")
+                col_op_overwrite = col_op.get("overwrite_original", True)
+                logger.info(
+                    f"🔍 [SAVE_COL_OPS] Checking config: input_file={col_op_input}, overwrite={col_op_overwrite}"
+                )
+                if col_op_input == input_file and col_op_overwrite == overwrite_original:
+                    logger.info(
+                        f"🔍 [SAVE_COL_OPS] MATCH - will filter operations from this config"
+                    )
                     existing_ops = col_op.get("operations", [])
                     existing_created_cols = col_op.get("created_columns", [])
                     
@@ -140,38 +203,41 @@ async def save_column_operations(
                     col_op["created_columns"] = filtered_created_cols
             
             # Clean up: Remove empty configs (configs with no operations after filtering)
+            # Only remove if it matches the same input_file AND overwrite_original
             column_operations = [col_op for col_op in column_operations 
-                               if col_op.get("operations") or col_op.get("input_file") != input_file]
+                               if col_op.get("operations") or 
+                               col_op.get("input_file") != input_file or 
+                               col_op.get("overwrite_original", True) != overwrite_original]
             
             # SECOND: Find existing column operations config for this file with matching identifiers AND overwrite_original
             # IMPORTANT: Overwrite and save-as operations should be separate configs even if they have same identifiers
-            # Also check if input_file matches any existing output_file (operation on previously created file)
+            # CRITICAL: When operating on a previously created file (input_file matches stored_output_file),
+            # ALWAYS create a new config instead of merging. This allows chained operations.
             existing_index = None
             for idx, col_op in enumerate(column_operations):
                 stored_input_file = col_op.get("input_file")
                 stored_output_file = col_op.get("output_file")
                 
-                # Match if input_file matches stored input_file OR stored output_file
-                if stored_input_file == input_file or stored_output_file == input_file:
+                # CRITICAL FIX: If input_file matches stored_output_file, this means we're operating on
+                # a previously created file. In this case, ALWAYS create a new config (don't merge).
+                # This allows chained operations: A creates file X, B operates on X, C operates on B's output, etc.
+                if stored_output_file == input_file:
+                    # Operating on a previously created file - don't match, create new entry
+                    logger.info(
+                        f"🔗 Detected chained operation: input_file={input_file} matches "
+                        f"stored_output_file={stored_output_file}, will create new config"
+                    )
+                    continue
+                
+                # Normal case: matching by input_file with matching identifiers and overwrite flag
+                # Match if input_file matches stored input_file (not output_file)
+                if stored_input_file == input_file:
                     existing_identifiers = col_op.get("identifiers") or []
                     existing_identifiers_tuple = tuple(sorted(existing_identifiers))
                     existing_overwrite = col_op.get("overwrite_original", True)
                     
-                    # If input_file matches stored_output_file, this means we're operating on a previously created file
-                    # In this case, if overwriting, we should update the previous operation
-                    # If save-as, we should create a new operation entry
-                    if stored_output_file == input_file:
-                        # Operating on a previously created file
-                        if overwrite_original:
-                            # Overwriting the previously created file - update that previous operation
-                            existing_index = idx
-                            break
-                        else:
-                            # Creating a new file from the previously created file - don't match, create new entry
-                            continue
-                    else:
-                        # Normal case: matching by input_file with matching identifiers and overwrite flag
-                        if existing_identifiers_tuple == new_identifiers_tuple and existing_overwrite == overwrite_original:
+                    # Match only if identifiers and overwrite flag match
+                    if existing_identifiers_tuple == new_identifiers_tuple and existing_overwrite == overwrite_original:
                             existing_index = idx
                             break
             
@@ -245,17 +311,25 @@ async def save_column_operations(
                 )
             
             # Update document
+            # CRITICAL: Preserve data_summary
+            existing_data_summary = pipeline.get("data_summary", [])
+            final_data_summary = _get_preserved_data_summary(doc_id, existing_data_summary)
+            
             await coll.update_one(
                 {"_id": doc_id},
                 {
                     "$set": {
                         "execution_timestamp": execution_timestamp,
-                        "pipeline.column_operations": column_operations
+                        "pipeline.column_operations": column_operations,
+                        "pipeline.data_summary": final_data_summary  # Preserve data_summary
                     }
                 }
             )
         else:
             # Create new document with column operations
+            # CRITICAL: Preserve data_summary if available from rerun
+            preserved_data_summary = _get_preserved_data_summary(doc_id)
+            
             doc = {
                 "_id": doc_id,
                 "execution_id": f"exec_{int(time.time() * 1000)}",
@@ -271,7 +345,8 @@ async def save_column_operations(
                         "nodes": [],
                         "edges": []
                     },
-                    "column_operations": [col_ops_config]
+                    "column_operations": [col_ops_config],
+                    "data_summary": preserved_data_summary  # Preserve data_summary from rerun
                 },
                 "summary": {
                     "total_atoms": 0,
@@ -481,6 +556,254 @@ async def save_data_summary(
         
     except Exception as e:
         logger.error(f"❌ Error saving data summary: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def get_priming_steps(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    file_key: str,
+    mode: str = "laboratory"
+) -> Dict[str, Any]:
+    """Get priming steps for a specific file from pipeline execution.
+    
+    Args:
+        client_name: Client identifier
+        app_name: App identifier
+        project_name: Project identifier
+        file_key: File identifier (object name in MinIO)
+        mode: Mode (laboratory, workflow, exhibition)
+    
+    Returns:
+        Result dictionary with priming steps or None if not found
+    """
+    try:
+        coll = await get_pipeline_collection()
+        
+        client_id = client_name
+        app_id = app_name
+        project_id = project_name
+        
+        # Build composite _id
+        doc_id = f"{client_id}/{app_id}/{project_id}"
+        
+        # Get pipeline execution document
+        doc = await coll.find_one({"_id": doc_id})
+        
+        if not doc:
+            return {
+                "status": "success",
+                "priming_steps": None,
+                "message": f"No pipeline document found for {doc_id}"
+            }
+        
+        # Find priming steps for this file
+        pipeline = doc.get("pipeline", {})
+        prime_section = pipeline.get("prime", [])
+        
+        for priming_entry in prime_section:
+            if priming_entry.get("file_key") == file_key:
+                return {
+                    "status": "success",
+                    "priming_steps": priming_entry.get("priming_steps"),
+                    "saved_at": priming_entry.get("saved_at")
+                }
+        
+        return {
+            "status": "success",
+            "priming_steps": None,
+            "message": f"No priming steps found for file {file_key}"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting priming steps: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "priming_steps": None
+        }
+
+
+async def save_priming_steps(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    file_key: str,
+    priming_steps: Dict[str, Any],
+    mode: str = "laboratory"
+) -> Dict[str, Any]:
+    """Save priming steps (rename, dtypes, missing values) to pipeline execution.
+    
+    This stores the priming operations performed during guided flow for later
+    application when replacement files are used in pipeline execution.
+    
+    Args:
+        client_name: Client identifier
+        app_name: App identifier
+        project_name: Project identifier
+        file_key: File identifier (object name in MinIO)
+        priming_steps: Dictionary containing priming operations:
+            - renames: Dict[str, str] - column renames (old_name -> new_name)
+            - dtypes: Dict[str, str] - column data types
+            - missing_values: Dict[str, Any] - missing value handling config
+            - columns_to_drop: List[str] - columns to drop
+            - stage: str - current guided flow stage (U0-U7)
+        mode: Mode (laboratory, workflow, exhibition)
+    
+    Returns:
+        Result dictionary with status
+    """
+    try:
+        logger.info(f"🔍 [save_priming_steps] Starting save for file_key: {file_key}")
+        logger.info(f"🔍 [save_priming_steps] Client: {client_name}, App: {app_name}, Project: {project_name}")
+        logger.info(f"🔍 [save_priming_steps] Priming steps keys: {list(priming_steps.keys())}")
+        
+        coll = await get_pipeline_collection()
+        logger.info(f"🔍 [save_priming_steps] Got pipeline collection")
+        
+        client_id = client_name
+        app_id = app_name
+        project_id = project_name
+        
+        # Build composite _id
+        doc_id = f"{client_id}/{app_id}/{project_id}"
+        logger.info(f"🔍 [save_priming_steps] Document ID: {doc_id}")
+        
+        # Get or create pipeline execution document
+        existing_doc = await coll.find_one({"_id": doc_id})
+        logger.info(f"🔍 [save_priming_steps] Existing document found: {existing_doc is not None}")
+        
+        execution_timestamp = datetime.utcnow()
+        
+        # Build priming steps entry
+        priming_entry = {
+            "file_key": file_key,
+            "priming_steps": priming_steps,
+            "saved_at": execution_timestamp
+        }
+        logger.info(f"🔍 [save_priming_steps] Built priming entry")
+        
+        if existing_doc:
+            logger.info(f"🔍 [save_priming_steps] Updating existing document")
+            # Update existing document
+            pipeline = existing_doc.get("pipeline", {})
+            prime_section = pipeline.get("prime", [])
+            logger.info(f"🔍 [save_priming_steps] Current prime section has {len(prime_section)} entries")
+            
+            # Find existing entry for this file_key to merge with
+            existing_entry = None
+            existing_entry_index = None
+            for idx, ps in enumerate(prime_section):
+                if ps.get("file_key") == file_key:
+                    existing_entry = ps
+                    existing_entry_index = idx
+                    break
+            
+            if existing_entry:
+                # MERGE priming steps instead of replacing
+                logger.info(f"🔄 [save_priming_steps] Found existing priming entry, merging...")
+                existing_priming_steps = existing_entry.get("priming_steps", {})
+                
+                # Merge each section (renames, dtypes, missing_values, columns_to_drop)
+                merged_priming_steps = {
+                    "renames": {**existing_priming_steps.get("renames", {}), **priming_steps.get("renames", {})},
+                    "dtypes": {**existing_priming_steps.get("dtypes", {}), **priming_steps.get("dtypes", {})},
+                    "missing_values": {**existing_priming_steps.get("missing_values", {}), **priming_steps.get("missing_values", {})},
+                    "columns_to_drop": list(set(existing_priming_steps.get("columns_to_drop", []) + priming_steps.get("columns_to_drop", []))),
+                    "stage": priming_steps.get("stage", existing_priming_steps.get("stage", "unknown"))
+                }
+                
+                logger.info(
+                    f"🔄 [save_priming_steps] Merged priming steps: "
+                    f"{len(merged_priming_steps.get('renames', {}))} renames, "
+                    f"{len(merged_priming_steps.get('dtypes', {}))} dtypes, "
+                    f"{len(merged_priming_steps.get('missing_values', {}))} missing_values, "
+                    f"{len(merged_priming_steps.get('columns_to_drop', []))} columns_to_drop"
+                )
+                
+                # Update the existing entry with merged priming steps
+                prime_section[existing_entry_index] = {
+                    "file_key": file_key,
+                    "priming_steps": merged_priming_steps,
+                    "saved_at": execution_timestamp
+                }
+            else:
+                # No existing entry, add new one
+                logger.info(f"➕ [save_priming_steps] No existing entry found, adding new one")
+                prime_section.append(priming_entry)
+            
+            logger.info(f"🔍 [save_priming_steps] After update, prime section has {len(prime_section)} entries")
+            
+            # Update document
+            update_result = await coll.update_one(
+                {"_id": doc_id},
+                {
+                    "$set": {
+                        "pipeline.prime": prime_section,
+                        "updated_at": execution_timestamp
+                    }
+                }
+            )
+            logger.info(f"🔍 [save_priming_steps] Update result: matched={update_result.matched_count}, modified={update_result.modified_count}")
+            
+            logger.info(
+                f"✅ Updated priming steps for file {file_key} in {doc_id} "
+                f"(stage: {priming_steps.get('stage', 'unknown')})"
+            )
+        else:
+            logger.info(f"🔍 [save_priming_steps] Creating new document")
+            # Create new document with all required fields
+            import uuid
+            execution_id = str(uuid.uuid4())
+            
+            doc = {
+                "_id": doc_id,
+                "execution_id": execution_id,
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "execution_timestamp": execution_timestamp,
+                "updated_at": execution_timestamp,
+                "user_id": "system",
+                "pipeline": {
+                    "root_files": [],
+                    "execution_graph": [],
+                    "lineage": {
+                        "nodes": [],
+                        "edges": []
+                    },
+                    "column_operations": [],
+                    "data_summary": [],
+                    "prime": [priming_entry]
+                },
+                "summary": {
+                    "total_atoms": 0,
+                    "total_files": 0,
+                    "root_files_count": 0,
+                    "derived_files_count": 0,
+                    "total_duration_ms": 0,
+                    "status": "pending"
+                }
+            }
+            
+            insert_result = await coll.insert_one(doc)
+            logger.info(f"🔍 [save_priming_steps] Insert result: {insert_result.inserted_id}")
+            
+            logger.info(
+                f"✅ Created new pipeline document with priming steps for file {file_key} in {doc_id}"
+            )
+        
+        return {
+            "status": "success",
+            "message": f"Priming steps saved for file {file_key}"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving priming steps: {e}", exc_info=True)
         return {
             "status": "error",
             "error": str(e)
@@ -876,9 +1199,13 @@ async def record_atom_execution(
                 
                 # Update only the fields that might change (configuration, api_calls, outputs, execution)
                 # Preserve step_index and other metadata
+                # CRITICAL: Preserve data_summary when updating
                 existing_step["configuration"] = configuration
                 existing_step["api_calls"] = merged_api_calls
                 existing_step["execution"] = execution_info
+                
+                # Preserve data_summary from existing document
+                preserved_data_summary = pipeline.get("data_summary", [])
                 
                 # Handle outputs: append for groupby and merge, replace for others
                 if atom_type == "groupby-wtg-avg":
@@ -1602,6 +1929,10 @@ async def record_atom_execution(
             root_files = final_root_files
             
             # Update document
+            # CRITICAL: Preserve data_summary when updating existing document
+            existing_data_summary = pipeline.get("data_summary", [])
+            final_data_summary = _get_preserved_data_summary(doc_id, existing_data_summary)
+            
             await coll.update_one(
                 {"_id": doc_id},
                 {
@@ -1611,6 +1942,7 @@ async def record_atom_execution(
                         "pipeline.root_files": root_files,
                         "pipeline.lineage.nodes": nodes,
                         "pipeline.lineage.edges": edges,
+                        "pipeline.data_summary": final_data_summary,  # Preserve data_summary
                         "summary": summary
                     }
                 }
@@ -1712,6 +2044,13 @@ async def record_atom_execution(
                 "status": execution_status
             }
             
+            # CRITICAL: Preserve data_summary if it was preserved before document deletion (during rerun)
+            preserved_data_summary = _get_preserved_data_summary(doc_id)
+            if preserved_data_summary:
+                logger.info(
+                    f"💾 Restoring preserved data_summary with {len(preserved_data_summary)} entries for {doc_id}"
+                )
+            
             doc = {
                 "_id": doc_id,
                 "execution_id": execution_id,
@@ -1726,7 +2065,8 @@ async def record_atom_execution(
                     "lineage": {
                         "nodes": nodes,
                         "edges": edges
-                    }
+                    },
+                    "data_summary": preserved_data_summary  # Preserve data_summary from previous execution
                 },
                 "summary": summary
             }
@@ -1916,12 +2256,17 @@ async def record_column_operations_execution(
                     summary["total_files"] = len(all_file_keys)
                     
                     # Update document with both column_operations, root_files, and summary
+                    # CRITICAL: Preserve data_summary
+                    existing_data_summary = pipeline.get("data_summary", [])
+                    final_data_summary = _get_preserved_data_summary(doc_id, existing_data_summary)
+                    
                     await coll.update_one(
                         {"_id": doc_id},
                         {
                             "$set": {
                                 "pipeline.column_operations": column_operations,
                                 "pipeline.root_files": root_files,
+                                "pipeline.data_summary": final_data_summary,  # Preserve data_summary
                                 "summary": summary,
                                 "execution_timestamp": execution_timestamp
                             }
@@ -1933,11 +2278,16 @@ async def record_column_operations_execution(
                     )
                 else:
                     # Just update column_operations
+                    # CRITICAL: Preserve data_summary
+                    existing_data_summary = pipeline.get("data_summary", [])
+                    final_data_summary = _get_preserved_data_summary(doc_id, existing_data_summary)
+                    
                     await coll.update_one(
                         {"_id": doc_id},
                         {
                             "$set": {
                                 "pipeline.column_operations": column_operations,
+                                "pipeline.data_summary": final_data_summary,  # Preserve data_summary
                                 "execution_timestamp": execution_timestamp
                             }
                         }
@@ -2013,12 +2363,17 @@ async def record_column_operations_execution(
                     summary["derived_files_count"] = derived_files_count
                     summary["total_files"] = len(all_file_keys)
                     
+                    # CRITICAL: Preserve data_summary
+                    existing_data_summary = pipeline.get("data_summary", [])
+                    final_data_summary = _get_preserved_data_summary(doc_id, existing_data_summary)
+                    
                     update_result = await coll.update_one(
                         {"_id": doc_id},
                         {
                             "$set": {
                                 "pipeline.column_operations": column_operations,
                                 "pipeline.root_files": root_files,
+                                "pipeline.data_summary": final_data_summary,  # Preserve data_summary
                                 "summary": summary,
                                 "execution_timestamp": execution_timestamp
                             }
@@ -2030,11 +2385,16 @@ async def record_column_operations_execution(
                         f"modified_count={update_result.modified_count}"
                     )
                 else:
+                    # CRITICAL: Preserve data_summary
+                    existing_data_summary = pipeline.get("data_summary", [])
+                    final_data_summary = _get_preserved_data_summary(doc_id, existing_data_summary)
+                    
                     update_result = await coll.update_one(
                         {"_id": doc_id},
                         {
                             "$set": {
                                 "pipeline.column_operations": column_operations,
+                                "pipeline.data_summary": final_data_summary,  # Preserve data_summary
                                 "execution_timestamp": execution_timestamp
                             }
                         }
@@ -2066,6 +2426,60 @@ async def record_column_operations_execution(
                 "execution": execution_info
             }
             
+            # CRITICAL: Preserve data_summary if available from rerun
+            preserved_data_summary = _get_preserved_data_summary(doc_id)
+            
+            # CRITICAL: Preserve column_operations if available from rerun
+            # This ensures all column operations persist across pipeline reruns
+            preserved_column_operations = _get_preserved_column_operations(doc_id)
+            
+            # If we have preserved column operations, use them and update the matching one
+            # Otherwise, start with just the new config
+            if preserved_column_operations:
+                # Find and update the matching config in preserved operations
+                col_op_index = None
+                match_input_file = original_input_file if original_input_file else input_file
+                
+                for idx, col_op in enumerate(preserved_column_operations):
+                    stored_input_file = col_op.get("input_file")
+                    stored_original_input_file = col_op.get("original_input_file")
+                    config_original_file = stored_original_input_file if stored_original_input_file else stored_input_file
+                    
+                    matches_file = (
+                        config_original_file == match_input_file or
+                        stored_input_file == match_input_file or
+                        stored_input_file == input_file or
+                        (original_input_file and config_original_file == original_input_file)
+                    )
+                    
+                    if matches_file:
+                        existing_identifiers = tuple(sorted(col_op.get("identifiers") or []))
+                        new_identifiers = tuple(sorted(identifiers or [])) if identifiers is not None else tuple()
+                        existing_overwrite = col_op.get("overwrite_original", True)
+                        new_overwrite = overwrite_original
+                        
+                        if existing_identifiers == new_identifiers and existing_overwrite == new_overwrite:
+                            col_op_index = idx
+                            break
+                
+                if col_op_index is not None:
+                    # Update the existing config
+                    preserved_column_operations[col_op_index] = new_col_op_config
+                    logger.info(
+                        f"💾 Updated preserved column operation config at index {col_op_index} for {input_file}"
+                    )
+                else:
+                    # Add new config to preserved operations
+                    preserved_column_operations.append(new_col_op_config)
+                    logger.info(
+                        f"💾 Added new column operation config to preserved operations for {input_file}"
+                    )
+                
+                final_column_operations = preserved_column_operations
+            else:
+                # No preserved operations, start fresh
+                final_column_operations = [new_col_op_config]
+            
             doc = {
                 "_id": doc_id,
                 "execution_id": execution_id,
@@ -2081,7 +2495,8 @@ async def record_column_operations_execution(
                         "nodes": [],
                         "edges": []
                     },
-                    "column_operations": [new_col_op_config]
+                    "column_operations": final_column_operations,  # Use preserved + new operations
+                    "data_summary": preserved_data_summary  # Preserve data_summary from rerun
                 },
                 "summary": {
                     "total_atoms": 0,

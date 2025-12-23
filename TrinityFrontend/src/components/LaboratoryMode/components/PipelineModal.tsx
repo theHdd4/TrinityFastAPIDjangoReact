@@ -188,11 +188,15 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
 
     try {
       // Get original file columns from pipeline data
-      const rootFiles = pipelineData?.pipeline?.root_files || [];
-      const originalFileObj = rootFiles.find((rf: any) => (rf.file_key || rf) === originalFile);
-      const originalColumns = originalFileObj?.columns || [];
+      // PRIORITY 1: First try data_summary (original columns when file was first added to pipeline)
+      let originalColumns: string[] = [];
+      const dataSummary = pipelineData?.pipeline?.data_summary || [];
+      const summaryEntry = dataSummary.find((ds: any) => (ds.file_key || ds.file_path) === originalFile);
+      if (summaryEntry?.columns && Array.isArray(summaryEntry.columns) && summaryEntry.columns.length > 0) {
+        originalColumns = summaryEntry.columns;
+      }
 
-      // If original columns are not in pipeline data, fetch them
+      // PRIORITY 2: If data_summary doesn't have columns, fetch from current file (fallback)
       let originalCols = originalColumns;
       if (originalCols.length === 0) {
         try {

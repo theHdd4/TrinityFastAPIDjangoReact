@@ -202,10 +202,54 @@ class GroupByExecutor(BaseAtomExecutor):
                     # Extract configuration from API call params (use complete if available, else start)
                     run_params = run_complete_call.get("params", {}) if run_complete_call else params
                     
-                    # Get identifiers and aggregations from this specific API call's params
+                    # 🔧 CRITICAL: Refresh identifiers from the actual file being used (case-insensitive)
+                    # This ensures identifiers match the replacement file's columns
                     identifiers = run_params.get("identifiers")
                     if not identifiers:
                         identifiers = configuration.get("identifiers", [])
+                    
+                    # 🔧 Refresh identifiers from the file's classifier config (after file replacement)
+                    # This ensures we use identifiers that actually exist in the replacement file
+                    try:
+                        from app.features.column_classifier.database import get_classifier_config_from_mongo
+                        import os
+                        client_name = run_params.get("client_name") or os.getenv("CLIENT_NAME", "")
+                        app_name = run_params.get("app_name") or os.getenv("APP_NAME", "")
+                        project_name = run_params.get("project_name") or os.getenv("PROJECT_NAME", "")
+                        
+                        if client_name and app_name and project_name and run_file:
+                            file_cfg = get_classifier_config_from_mongo(client_name, app_name, project_name, run_file)
+                            if file_cfg and file_cfg.get("identifiers"):
+                                # Use identifiers from the file's classifier config (case-insensitive matching)
+                                file_identifiers = file_cfg.get("identifiers", [])
+                                # Filter to only identifiers that were in the original request (if any)
+                                # This preserves user's selection while ensuring they exist in the file
+                                if identifiers:
+                                    # Create case-insensitive mapping
+                                    file_id_lower = {str(id).lower(): id for id in file_identifiers}
+                                    req_id_lower = {str(id).lower(): id for id in identifiers}
+                                    # Keep identifiers that exist in both (file config and original request)
+                                    refreshed_identifiers = [
+                                        file_id_lower[req_lower] 
+                                        for req_lower in req_id_lower.keys() 
+                                        if req_lower in file_id_lower
+                                    ]
+                                    if refreshed_identifiers:
+                                        identifiers = refreshed_identifiers
+                                        logger.info(
+                                            f"🔄 Refreshed identifiers from file {run_file}: {identifiers}"
+                                        )
+                                else:
+                                    # No original identifiers, use all from file
+                                    identifiers = file_identifiers
+                                    logger.info(
+                                        f"🔄 Using identifiers from file {run_file}: {identifiers}"
+                                    )
+                    except Exception as e:
+                        logger.warning(
+                            f"⚠️ Could not refresh identifiers from file {run_file}: {e}. "
+                            f"Using original identifiers: {identifiers}"
+                        )
                     
                     aggregations = run_params.get("aggregations")
                     if not aggregations:
@@ -2299,15 +2343,24 @@ class TableExecutor(BaseAtomExecutor):
                         if save_status == "success":
                             # Extract saved filename from result
                             saved_filename = save_result_dict.get("object_name")
+                            overwrite_original = save_config.get("overwrite_original", False)
+                            
                             if saved_filename:
-                                all_saved_files.append(saved_filename)
+                                # CRITICAL: Only add to all_saved_files if it's NOT an overwrite save
+                                # Overwrite saves are the same file, not a new derived file
+                                # They should NOT be tracked in saved_files to prevent removal from root_files
+                                if not overwrite_original:
+                                    all_saved_files.append(saved_filename)
+                                    logger.info(f"✅ [TABLE] SaveAs completed successfully, saved to: {saved_filename}")
+                                else:
+                                    logger.info(f"✅ [TABLE] Overwrite save completed successfully, saved to: {saved_filename} (not added to saved_files)")
+                                
                                 save_results.append(save_result_dict)
                                 result_file = saved_filename  # Update result_file to saved file
-                                logger.info(f"✅ [TABLE] SaveAs completed successfully, saved to: {saved_filename}")
                             else:
-                                logger.info(f"✅ [TABLE] SaveAs completed successfully")
+                                logger.info(f"✅ [TABLE] Save completed successfully")
                         else:
-                            logger.warning(f"⚠️ [TABLE] SaveAs failed")
+                            logger.warning(f"⚠️ [TABLE] Save failed")
                     except Exception as save_error:
                         logger.error(f"❌ Error executing table save: {save_error}", exc_info=True)
                         save_results.append({"status": "failed", "error": str(save_error)})
