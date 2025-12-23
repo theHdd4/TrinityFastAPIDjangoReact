@@ -1,5 +1,8 @@
 .table-wrapper {
   @apply relative;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .table-edge-left {
@@ -31,10 +34,12 @@
 }
 
 .table-base {
-  @apply min-w-[700px] w-full border-collapse text-xs;
+  @apply w-full border-collapse text-xs;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed !important; /* Ensure consistent column widths */
+  width: 100%;
+  max-width: 100%;
 }
 
 .table-header {

@@ -49,6 +49,9 @@ export const DataSummaryTable: React.FC<DataSummaryTableProps> = ({
   controls,
   defaultMinimized,
 }) => {
+  // Ref for table container to constrain tooltips
+  const tableContainerRef = React.useRef<HTMLDivElement>(null);
+  
   // Sorting and filtering state
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -211,6 +214,7 @@ export const DataSummaryTable: React.FC<DataSummaryTableProps> = ({
   }
 
   return (
+    <div ref={tableContainerRef} className="relative overflow-visible">
     <Table
       headers={[
         <ContextMenu key="Column">
@@ -375,9 +379,9 @@ export const DataSummaryTable: React.FC<DataSummaryTableProps> = ({
             <div className="flex items-center gap-1 min-w-0">
               <span className="truncate min-w-0">{col.column}</span>
               {/* 🎯 FIXED: Column name and icon are now adjacent with minimal gap */}
-              {col.metadata?.is_created && (
+              {(col.metadata?.is_created || col.metadata?.is_transformed) && (
                 <div className="flex-shrink-0">
-                  <ColumnInfoIcon metadata={col.metadata} />
+                  <ColumnInfoIcon metadata={col.metadata} tooltipContainer={tableContainerRef.current} />
                 </div>
               )}
             </div>
@@ -415,5 +419,6 @@ export const DataSummaryTable: React.FC<DataSummaryTableProps> = ({
         </tr>
       ))}
     </Table>
+    </div>
   );
 };

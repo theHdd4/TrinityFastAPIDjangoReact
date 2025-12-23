@@ -296,6 +296,15 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
     
     if (!fileName) return;
     
+    // Record the current dataframe selection for this atom in the laboratory store
+    try {
+      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+      const normalized = fileName.endsWith('.arrow') ? fileName : `${fileName}.arrow`;
+      setAtomCurrentDataframe(atomId, normalized);
+    } catch {
+      // best-effort; do not block scenario-planner on metrics sync
+    }
+
     setLoading(true);
     try {
       // Fetch column summary

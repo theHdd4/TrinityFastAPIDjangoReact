@@ -267,11 +267,21 @@ export const saveTable = async (
   cardId?: string,
   canvasPosition?: number
 ): Promise<TableSaveResponse> => {
+  // Get environment variables for client/app/project (same as Metrics)
+  const envStr = localStorage.getItem('env');
+  const env = envStr ? JSON.parse(envStr) : {};
+  const stored = localStorage.getItem('current-project');
+  const project = stored ? JSON.parse(stored) : {};
+  
   // Build query parameters for pipeline tracking
   const queryParams = new URLSearchParams();
   if (atomId) queryParams.append('atom_id', atomId);
   if (cardId) queryParams.append('card_id', cardId);
   if (canvasPosition !== undefined) queryParams.append('canvas_position', canvasPosition.toString());
+  // Add client/app/project to query params (same as Metrics pattern)
+  if (env.CLIENT_NAME) queryParams.append('client_name', env.CLIENT_NAME);
+  if (env.APP_NAME) queryParams.append('app_name', env.APP_NAME);
+  if (env.PROJECT_NAME) queryParams.append('project_name', env.PROJECT_NAME);
   
   const url = `${TABLE_API}/save${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
   

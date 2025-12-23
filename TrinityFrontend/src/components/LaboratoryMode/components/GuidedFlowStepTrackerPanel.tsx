@@ -1,9 +1,11 @@
 import React from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { VerticalProgressStepper } from '@/components/AtomList/atoms/data-upload/components/guided-upload/VerticalProgressStepper';
+import { VerticalProgressStepper as MetricVerticalProgressStepper } from '@/components/LaboratoryMode/components/SettingsPanel/metricstabs/metricguildeflow/VerticalProgressStepper';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import type { UploadStage } from '@/components/AtomList/atoms/data-upload/components/guided-upload/useGuidedUploadFlow';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface GuidedFlowStepTrackerPanelProps {
   isOpen: boolean;
@@ -15,10 +17,12 @@ export const GuidedFlowStepTrackerPanel: React.FC<GuidedFlowStepTrackerPanelProp
   onClose,
 }) => {
   const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows || {});
+  const activeMetricGuidedFlow = useLaboratoryStore((state) => state.activeMetricGuidedFlow);
+  const isMetricGuidedFlowOpen = useLaboratoryStore((state) => state.isMetricGuidedFlowOpen);
   const getAtom = useLaboratoryStore((state) => state.getAtom);
   const updateGuidedFlowStage = useLaboratoryStore((state) => state.updateGuidedFlowStage);
 
-  if (!isOpen || Object.keys(activeGuidedFlows).length === 0) {
+  if (!isOpen || (Object.keys(activeGuidedFlows).length === 0 && !isMetricGuidedFlowOpen)) {
     return null;
   }
 
