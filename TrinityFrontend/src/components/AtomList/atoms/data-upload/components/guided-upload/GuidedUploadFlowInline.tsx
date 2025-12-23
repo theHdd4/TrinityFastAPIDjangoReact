@@ -981,9 +981,15 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
             onNext={() => {}} 
             onBack={() => {}}
             onRestart={handleRestart}
-            onCancel={() => {}}
-            onRegisterContinueHandler={() => {}}
-            onRegisterContinueDisabled={() => () => false}
+            onCancel={handleClose}
+            // Register the same U2 handlers used in the inline footer so
+            // the fullscreen footer buttons can trigger the correct logic
+            onRegisterContinueHandler={(handler: () => void) => {
+              u2ContinueHandlerRef.current = handler;
+            }}
+            onRegisterContinueDisabled={(getDisabled: () => boolean) => {
+              u2ContinueDisabledRef.current = getDisabled;
+            }}
             isMaximized={true}
           />
         ) : stage === 'U6' ? (
@@ -1004,7 +1010,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
         )}
       </div>
     );
-  }, [flow, handleRestart, goToStage]);
+  }, [flow, handleRestart, handleClose, goToStage]);
 
   return (
     <>
@@ -1030,6 +1036,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
 
             {/* Fullscreen Content Container */}
             <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
+              {/* Fullscreen Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white shadow-sm">
                 <div className="flex items-center space-x-2">
                   <span className="text-lg font-semibold text-gray-900">
@@ -1059,6 +1066,76 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
               <div className="flex-1 overflow-auto">
                 {renderMaximizedStageContent(maximizedStage)}
               </div>
+
+              {/* Fullscreen Navigation Footer - mirrors inline footer so
+                  Continue / Cancel are always visible when maximized */}
+              {maximizedStage !== 'U6' && (
+                <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-white">
+                  <div className="flex gap-2">
+                    {/* Back button only when the maximized stage is the current one
+                        and it's not the first (U2) stage */}
+                    {maximizedStage === state.currentStage && getStageIndex(maximizedStage) > getStageIndex('U2') && (
+                      <Button
+                        variant="outline"
+                        onClick={handleBack}
+                        className="flex items-center gap-2"
+                      >
+                        <ArrowLeft className="w-4 h-4" />
+                        Back
+                      </Button>
+                    )}
+                    {maximizedStage === state.currentStage && maximizedStage !== 'U2' && (
+                      <Button
+                        variant="ghost"
+                        onClick={handleRestart}
+                        className="flex items-center gap-2 text-gray-600"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        Reset option
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={handleClose}>
+                      Cancel
+                    </Button>
+                    {!isLastStage && (
+                      <Button
+                        onClick={() => {
+                          // Use U2's custom handler if available, otherwise default next
+                          if (maximizedStage === 'U2' && u2ContinueHandlerRef.current) {
+                            u2ContinueHandlerRef.current();
+                          } else {
+                            handleNext();
+                          }
+                        }}
+                        disabled={
+                          maximizedStage === 'U2' && u2ContinueDisabledRef.current
+                            ? u2ContinueDisabledRef.current()
+                            : false
+                        }
+                        className={
+                          maximizedStage === 'U2' &&
+                          u2ContinueDisabledRef.current &&
+                          u2ContinueDisabledRef.current()
+                            ? 'bg-gray-400 hover:bg-gray-400 text-white cursor-not-allowed'
+                            : 'bg-[#458EE2] hover:bg-[#3a7bc7] text-white'
+                        }
+                      >
+                        Continue
+                      </Button>
+                    )}
+                    {isLastStage && (
+                      <Button
+                        onClick={handleNext}
+                        className="bg-[#41C185] hover:bg-[#36a870] text-white"
+                      >
+                        Proceed to Next Steps
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>,
           document.body

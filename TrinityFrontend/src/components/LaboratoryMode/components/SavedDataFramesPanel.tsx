@@ -2848,6 +2848,14 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       const isOpen = openDirs[node.path];
       // Count total sheets from children (sheets folder)
       const totalSheets = node.children?.find(c => c.isSheetsFolder)?.sheets?.length || 0;
+      // Count unprimed sheets in this folder
+      const sheetsInFolder = node.children?.find(c => c.isSheetsFolder)?.sheets || [];
+      const unprimedCount = sheetsInFolder.filter((sheet: ExcelSheet) => {
+        const sheetStatus = filePrimingStatus[sheet.object_name];
+        return !sheetStatus?.isApproved;
+      }).length;
+      const allPrimed = unprimedCount === 0 && totalSheets > 0;
+      
       return (
         <div key={node.path} style={{ marginLeft: level * 12 }} className="mt-1">
           <div className="flex items-center justify-between">
@@ -2874,6 +2882,18 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 <span className="ml-2 text-xs text-gray-500 font-normal">
                   ({totalSheets} sheet{totalSheets !== 1 ? 's' : ''})
                 </span>
+              )}
+              {/* Show unprimed count badge or green dot */}
+              {totalSheets > 0 && (
+                <>
+                  {unprimedCount > 0 ? (
+                    <span className="ml-2 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 border border-red-300">
+                      {unprimedCount} unprimed
+                    </span>
+                  ) : allPrimed ? (
+                    <span className="ml-2 inline-flex items-center justify-center w-2 h-2 rounded-full bg-green-500" title="All sheets primed" />
+                  ) : null}
+                </>
               )}
             </button>
             <Trash2

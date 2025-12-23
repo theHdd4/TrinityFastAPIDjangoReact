@@ -1355,46 +1355,41 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   const initialLoad = React.useRef(true);
   const { setCards } = useExhibitionStore();
   const { toast } = useToast();
+  const hasInitializedDataUploadRef = React.useRef(false);
   
-  // Automatically create landing card when there are no cards (only in analytics mode)
+  // Automatically create data-upload card when there are no cards (only in analytics mode)
   React.useEffect(() => {
-    // Only create landing card in analytics mode, not in dashboard mode
+    // Only create data-upload card in analytics mode, not in dashboard mode
     if (subMode !== 'analytics') {
       return;
     }
     
+    if (hasInitializedDataUploadRef.current) return;
+    
     if (!Array.isArray(layoutCards) || layoutCards.length === 0) {
-      // Check if landing card already exists
-      const hasLandingCard = Array.isArray(layoutCards) && 
+      // Check if data-upload card already exists
+      const hasDataUploadCard = Array.isArray(layoutCards) && 
         layoutCards.some(card => 
-          card.atoms?.some(atom => atom.atomId === 'landing-screen')
+          card.atoms?.some(atom => atom.atomId === 'data-upload')
         );
       
-      if (!hasLandingCard) {
-        // Create landing card with landing-screen atom
-        const landingCardId = `landing-card-${Date.now()}`;
-        const landingAtomId = `landing-atom-${Date.now()}`;
-        
-        const landingCard: LayoutCard = {
-          id: landingCardId,
-          atoms: [{
-            id: landingAtomId,
-            atomId: 'landing-screen',
-            title: 'Project Landing',
-            category: 'System',
-            color: '#458EE2',
-            settings: {},
-          }],
-          isExhibited: false,
-        };
-        
-        setLayoutCards([landingCard]);
+      if (!hasDataUploadCard) {
+        hasInitializedDataUploadRef.current = true;
+        // Create data-upload card automatically
+        addNewCardWithAtom('data-upload', undefined, 0);
+      } else {
+        hasInitializedDataUploadRef.current = true;
+      }
+    } else {
+      // If there are cards, check if any is data-upload
+      const hasDataUploadCard = layoutCards.some(card => 
+        card.atoms?.some(atom => atom.atomId === 'data-upload')
+      );
+      if (hasDataUploadCard) {
+        hasInitializedDataUploadRef.current = true;
       }
     }
-    // NOTE: Landing card should remain even when other cards are added
-    // Removed the logic that automatically removes landing card when non-landing cards exist
-    // This allows users to keep the landing card and add new cards below it
-  }, [layoutCards, setLayoutCards, subMode]);
+  }, [layoutCards, subMode]);
 
   const renderAppendedVariables = (card: LayoutCard) => {
     const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
@@ -3976,6 +3971,40 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       }
     }
   };
+
+  // Automatically create data-upload card when there are no cards (only in analytics mode)
+  React.useEffect(() => {
+    // Only create data-upload card in analytics mode, not in dashboard mode
+    if (subMode !== 'analytics') {
+      return;
+    }
+    
+    if (hasInitializedDataUploadRef.current) return;
+    
+    if (!Array.isArray(layoutCards) || layoutCards.length === 0) {
+      // Check if data-upload card already exists
+      const hasDataUploadCard = Array.isArray(layoutCards) && 
+        layoutCards.some(card => 
+          card.atoms?.some(atom => atom.atomId === 'data-upload')
+        );
+      
+      if (!hasDataUploadCard) {
+        hasInitializedDataUploadRef.current = true;
+        // Create data-upload card automatically
+        addNewCardWithAtom('data-upload', undefined, 0);
+      } else {
+        hasInitializedDataUploadRef.current = true;
+      }
+    } else {
+      // If there are cards, check if any is data-upload
+      const hasDataUploadCard = layoutCards.some(card => 
+        card.atoms?.some(atom => atom.atomId === 'data-upload')
+      );
+      if (hasDataUploadCard) {
+        hasInitializedDataUploadRef.current = true;
+      }
+    }
+  }, [layoutCards, subMode]);
 
   const handleDropNewCard = async (
     e: React.DragEvent,

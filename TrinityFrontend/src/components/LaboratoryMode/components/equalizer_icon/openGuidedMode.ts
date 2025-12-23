@@ -141,14 +141,19 @@ export const openGuidedMode = async ({
           const isInProgress = primingData?.is_in_progress;
           isPrimed = primingData?.is_primed;
           
-          // If file is fully primed, skip the guided workflow and just continue
+          // If file is fully primed, allow opening guided mode for review/modification
+          // Start at the last completed stage (U6) or current stage if available
           if (isPrimed) {
-            console.log('[openGuidedMode] File is already primed, skipping guided workflow');
-            return; // Exit early - don't show guided workflow
+            console.log('[openGuidedMode] File is already primed, opening guided workflow for review');
+            // If there's a current stage, use it; otherwise start at U6 (final stage)
+            if (currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+              startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+            } else {
+              startStage = 'U6'; // Start at final stage for fully primed files
+            }
           }
-          
           // If file is in progress (partially primed), continue from current stage
-          if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+          else if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
             startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
           }
           // If file has old stage (U0 or U1), start at U2 (U0 and U1 removed)

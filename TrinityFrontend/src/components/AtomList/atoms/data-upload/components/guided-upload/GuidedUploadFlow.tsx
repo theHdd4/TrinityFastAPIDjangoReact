@@ -535,7 +535,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
         </div>
 
         {/* Stage Content */}
-        <div className={`flex-1 overflow-y-auto ${isMinimized ? 'hidden' : ''} p-6`}>
+        <div className={`flex-1 overflow-y-auto ${isMinimized ? 'hidden' : ''} p-6 min-h-0`}>
           {state.currentStage === 'U2' ? (
             <CurrentStageComponent 
               flow={flow} 
@@ -559,7 +559,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
 
         {/* Navigation Footer - Show for U2, U3, U4, U5 in both normal and maximized mode (U6 has its own controls) */}
         {!isMinimized && ['U2', 'U3', 'U4', 'U5'].includes(state.currentStage) && (
-          <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0">
+          <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0 z-10 relative">
             <div className="flex gap-2">
               {canGoBack && (
                 <Button

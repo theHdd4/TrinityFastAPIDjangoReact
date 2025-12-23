@@ -56,6 +56,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     return settings.uploadedFiles || [];
   });
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   
   // Use ref to track if we've already synced from settings to prevent infinite loop
   const lastSyncedFilesRef = useRef<string>(JSON.stringify(settings.uploadedFiles || []));
@@ -72,6 +73,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [hasMultipleSheets, setHasMultipleSheets] = useState(false);
+  const [pendingFilesQueue, setPendingFilesQueue] = useState<File[]>([]);
   const [tempUploadMeta, setTempUploadMeta] = useState<{ 
     file_path: string; 
     file_name: string; 
@@ -107,7 +109,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
       
-      const response = await fetch(`${UPLOAD_API}/list_saved_dataframes?${params.toString()}`, {
+      const response = await fetch(`${VALIDATE_API}/list_saved_dataframes?${params.toString()}`, {
         signal: controller.signal,
         credentials: 'include',
       });
@@ -148,20 +150,43 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     return () => clearTimeout(timeoutId);
   }, [fetchSavedDataframes]);
 
-  // Listen for dataframe-saved event to refresh the list after completion
+  // Listen for dataframe-saved and dataframe-deleted events to refresh the list
   useEffect(() => {
-    const handleDataframeSaved = () => {
+    const handleDataframeSaved = (event?: Event) => {
+      console.log('[DataUploadAtom] dataframe-saved event received, refreshing...', event);
+      // Trigger reload token to force refresh
+      setReloadToken(prev => prev + 1);
       // Add a small delay to ensure backend has saved the file
       setTimeout(() => {
         fetchSavedDataframes();
       }, 500);
     };
     
+    const handleDataframeDeleted = () => {
+      console.log('[DataUploadAtom] dataframe-deleted event received, refreshing...');
+      // Trigger reload token to force refresh
+      setReloadToken(prev => prev + 1);
+      // Refresh immediately when file is deleted, then again after a delay
+      fetchSavedDataframes();
+      setTimeout(() => {
+        fetchSavedDataframes();
+      }, 300);
+    };
+    
     window.addEventListener('dataframe-saved', handleDataframeSaved);
+    window.addEventListener('dataframe-deleted', handleDataframeDeleted);
     return () => {
       window.removeEventListener('dataframe-saved', handleDataframeSaved);
+      window.removeEventListener('dataframe-deleted', handleDataframeDeleted);
     };
   }, [fetchSavedDataframes]);
+  
+  // Refresh when reloadToken changes
+  useEffect(() => {
+    if (reloadToken > 0) {
+      fetchSavedDataframes();
+    }
+  }, [reloadToken, fetchSavedDataframes]);
 
   const handleGuidedFlowComplete = (result: {
     uploadedFiles: any[];
@@ -261,6 +286,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
 
   const resetUploadState = () => {
     setPendingFile(null);
+    setPendingFilesQueue([]);
     setSheetOptions([]);
     setSelectedSheets([]);
     setUploadingFile(false);
@@ -294,7 +320,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
             form.append('file', sanitizedFile);
             appendEnvFields(form);
 
-            const res = await fetch(`${UPLOAD_API}/upload-excel-multi-sheet`, {
+            const res = await fetch(`${VALIDATE_API}/upload-excel-multi-sheet`, {
               method: 'POST',
               body: form,
               credentials: 'include'
@@ -363,7 +389,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
                 convertForm.append('use_folder_structure', 'true');
                 appendEnvFields(convertForm);
                 
-                const convertRes = await fetch(`${UPLOAD_API}/convert-session-sheet-to-arrow`, {
+                const convertRes = await fetch(`${VALIDATE_API}/convert-session-sheet-to-arrow`, {
                   method: 'POST',
                   body: convertForm,
                   credentials: 'include'
@@ -398,7 +424,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
             form.append('file', sanitizedFile);
             appendEnvFields(form);
             
-            const res = await fetch(`${UPLOAD_API}/upload-file`, {
+            const res = await fetch(`${VALIDATE_API}/upload-file`, {
               method: 'POST',
               body: form,
               credentials: 'include'
@@ -431,7 +457,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
               saveForm.append('overwrite', 'false');
               appendEnvFields(saveForm);
               
-              const saveRes = await fetch(`${UPLOAD_API}/save_dataframes`, {
+              const saveRes = await fetch(`${VALIDATE_API}/save_dataframes`, {
                 method: 'POST',
                 body: saveForm,
                 credentials: 'include'
@@ -539,7 +565,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
         form.append('file', sanitizedFile);
         appendEnvFields(form);
 
-        const res = await fetch(`${UPLOAD_API}/upload-excel-multi-sheet`, {
+        const res = await fetch(`${VALIDATE_API}/upload-excel-multi-sheet`, {
           method: 'POST',
           body: form,
           credentials: 'include'
@@ -603,7 +629,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
         const form = new FormData();
         form.append('file', sanitizedFile);
         appendEnvFields(form);
-        const res = await fetch(`${UPLOAD_API}/upload-file`, {
+        const res = await fetch(`${VALIDATE_API}/upload-file`, {
           method: 'POST',
           body: form,
           credentials: 'include'
@@ -615,6 +641,25 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
         }
         const data = await waitForTaskResult(payload);
         await finalizeSave({ file_path: data.file_path, file_name: data.file_name || sanitizedFileName });
+        
+        // Process next file in queue if any
+        setPendingFilesQueue(prev => {
+          if (prev.length > 0) {
+            const nextFile = prev[0];
+            setTimeout(() => {
+              setPendingFile(nextFile);
+              setUploadError('');
+              setSheetOptions([]);
+              setSelectedSheets([]);
+              setHasMultipleSheets(false);
+              setTempUploadMeta(null);
+              setIsUploadModalOpen(true);
+              void uploadSelectedFile(nextFile);
+            }, 100);
+            return prev.slice(1);
+          }
+          return prev;
+        });
       }
     } catch (err: any) {
       setUploadError(err.message || 'Upload failed');
@@ -625,84 +670,80 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const finalizeSave = async (meta: { file_path: string; file_name: string }) => {
     setUploadingFile(true);
     try {
-      if (globalGuidedModeEnabled) {
-        // Guided mode: Don't save yet, start guided flow at U1 (Structural Scan)
-        const fileKey = deriveFileKey(meta.file_name);
-        const uploadedFileInfo = {
-          name: meta.file_name,
-          path: meta.file_path,
-          size: pendingFile?.size || 0,
-          fileKey: fileKey,
-          processed: false,
-        };
-        
-        // Start guided flow at U1 (Structural Scan) - atom split panel is Step 1
-        setActiveGuidedFlow(atomId, 'U1', {
-          uploadedFiles: [uploadedFileInfo],
-          currentStage: 'U1',
-        });
-        
-        toast({ title: 'File uploaded', description: `${meta.file_name} is ready for processing.` });
-        resetUploadState();
-        // Refresh saved dataframes list in case backend saved it
-        fetchSavedDataframes();
-      } else {
-        // Non-guided mode: Save directly
-        const form = new FormData();
-        form.append('validator_atom_id', 'panel-upload');
-        form.append('file_paths', JSON.stringify([meta.file_path]));
-        const fileKey = deriveFileKey(meta.file_name);
-        form.append('file_keys', JSON.stringify([fileKey]));
-        form.append('overwrite', 'false');
-        const workbookPathsPayload = tempUploadMeta?.workbook_path ? [tempUploadMeta.workbook_path] : [];
-        const sheetMetadataPayload = tempUploadMeta?.workbook_path
-          ? [{ sheet_names: sheetOptions.length ? sheetOptions : selectedSheets.length > 0 ? selectedSheets : [], selected_sheet: selectedSheets.length > 0 ? selectedSheets[0] : sheetOptions[0] || '', original_filename: pendingFile?.name || tempUploadMeta.file_name || '' }]
-          : [];
-        if (workbookPathsPayload.length) {
-          form.append('workbook_paths', JSON.stringify(workbookPathsPayload));
-        }
-        if (sheetMetadataPayload.length) {
-          form.append('sheet_metadata', JSON.stringify(sheetMetadataPayload));
-        }
-        appendEnvFields(form);
-        const res = await fetch(`${UPLOAD_API}/save_dataframes`, {
-          method: 'POST',
-          body: form,
-          credentials: 'include'
-        });
-        if (!res.ok) {
-          const txt = await res.text().catch(() => '');
-          throw new Error(txt || 'Failed to save dataframe');
-        }
-        
-        const saveResult = await res.json().catch(() => null);
-        // Dispatch dataframe-saved event to trigger scenario update
-        if (saveResult?.minio_uploads && Array.isArray(saveResult.minio_uploads)) {
-          saveResult.minio_uploads.forEach((upload: any, index: number) => {
-            const objectName = upload?.minio_upload?.object_name || upload?.filename;
-            if (objectName) {
-              setTimeout(() => {
-                console.log(`[DataUploadAtom] Dispatching dataframe-saved event for ${objectName} (uploadSelectedFile)`);
-                window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-                  detail: { filePath: objectName, fileName: upload.filename || meta.file_name } 
-                }));
-              }, index * 100); // Stagger events slightly
-            }
-          });
-        } else {
-          // Fallback: dispatch event with available data
-          setTimeout(() => {
-            console.log(`[DataUploadAtom] Dispatching dataframe-saved event (fallback) for ${meta.file_name}`);
-            window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-              detail: { filePath: meta.file_path, fileName: meta.file_name } 
-            }));
-          }, 100);
-        }
-        
-        toast({ title: 'Dataframe saved', description: `${meta.file_name} uploaded successfully.` });
-        resetUploadState();
-        fetchSavedDataframes();
+      const form = new FormData();
+      form.append('validator_atom_id', 'panel-upload');
+      form.append('file_paths', JSON.stringify([meta.file_path]));
+      const fileKey = deriveFileKey(meta.file_name);
+      form.append('file_keys', JSON.stringify([fileKey]));
+      form.append('overwrite', 'false');
+      const workbookPathsPayload = tempUploadMeta?.workbook_path ? [tempUploadMeta.workbook_path] : [];
+      const sheetMetadataPayload = tempUploadMeta?.workbook_path
+        ? [{ sheet_names: sheetOptions.length ? sheetOptions : selectedSheets.length > 0 ? selectedSheets : [], selected_sheet: selectedSheets.length > 0 ? selectedSheets[0] : sheetOptions[0] || '', original_filename: pendingFile?.name || tempUploadMeta.file_name || '' }]
+        : [];
+      if (workbookPathsPayload.length) {
+        form.append('workbook_paths', JSON.stringify(workbookPathsPayload));
       }
+      if (sheetMetadataPayload.length) {
+        form.append('sheet_metadata', JSON.stringify(sheetMetadataPayload));
+      }
+      appendEnvFields(form);
+      const res = await fetch(`${VALIDATE_API}/save_dataframes`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include'
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || 'Failed to save dataframe');
+      }
+      
+      const saveResult = await res.json().catch(() => null);
+      // Dispatch dataframe-saved event to trigger scenario update
+      if (saveResult?.minio_uploads && Array.isArray(saveResult.minio_uploads)) {
+        saveResult.minio_uploads.forEach((upload: any, index: number) => {
+          const objectName = upload?.minio_upload?.object_name || upload?.filename;
+          if (objectName) {
+            setTimeout(() => {
+              console.log(`[DataUploadAtom] Dispatching dataframe-saved event for ${objectName}`);
+              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+                detail: { filePath: objectName, fileName: upload.filename || meta.file_name } 
+              }));
+            }, index * 100); // Stagger events slightly
+          }
+        });
+      } else {
+        // Fallback: dispatch event with available data
+        setTimeout(() => {
+          console.log(`[DataUploadAtom] Dispatching dataframe-saved event (fallback) for ${meta.file_name}`);
+          window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+            detail: { filePath: meta.file_path, fileName: meta.file_name } 
+          }));
+        }, 100);
+      }
+      
+      toast({ title: 'Dataframe saved', description: `${meta.file_name} uploaded successfully.` });
+      resetUploadState();
+      setReloadToken(prev => prev + 1);
+      fetchSavedDataframes();
+      
+      // Process next file in queue if any
+      setPendingFilesQueue(prev => {
+        if (prev.length > 0) {
+          const nextFile = prev[0];
+          setTimeout(() => {
+            setPendingFile(nextFile);
+            setUploadError('');
+            setSheetOptions([]);
+            setSelectedSheets([]);
+            setHasMultipleSheets(false);
+            setTempUploadMeta(null);
+            setIsUploadModalOpen(true);
+            void uploadSelectedFile(nextFile);
+          }, 100);
+          return prev.slice(1);
+        }
+        return prev;
+      });
     } catch (err: any) {
       setUploadError(err.message || 'Failed to save dataframe');
     } finally {
@@ -713,84 +754,83 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const finalizeSaveMultiSheet = async (fileName: string, uploadSessionId: string, sheetsToSave: string[]) => {
     setUploadingFile(true);
     try {
-      if (globalGuidedModeEnabled) {
-        // Guided mode: Create file info for each sheet and start guided flow at U1 (Structural Scan)
-        const uploadedFiles = sheetsToSave.map((sheetName) => {
-          const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
-          const excelFolderName = fileName.replace(/\.[^.]+$/, '').replace(/\s+/g, '_').replace(/\./g, '_');
-          return {
-            name: `${fileName} (${sheetName})`,
-            path: tempUploadMeta?.file_path || '',
-            size: pendingFile?.size || 0,
-            fileKey: `${excelFolderName}_${normalizedSheetName}`,
-            sheetNames: sheetsToSave,
-            selectedSheet: sheetName,
-            totalSheets: sheetsToSave.length,
-            processed: false,
-            uploadSessionId: uploadSessionId,
-            sheetNameMap: tempUploadMeta?.sheetNameMap,
-          };
-        });
-        
-        // Start guided flow at U1 (Structural Scan) - atom split panel is Step 1
-        setActiveGuidedFlow(atomId, 'U1', {
-          uploadedFiles: uploadedFiles,
-          currentStage: 'U1',
-        });
-        
-        toast({ title: 'Files uploaded', description: `${sheetsToSave.length} sheet(s) ready for processing.` });
-        resetUploadState();
-        // Refresh saved dataframes list in case backend saved it
-        fetchSavedDataframes();
-      } else {
-        // Non-guided mode: Save directly
-        for (const sheetName of sheetsToSave) {
-          try {
-            const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
-            const convertForm = new FormData();
-            convertForm.append('upload_session_id', uploadSessionId);
-            convertForm.append('sheet_name', normalizedSheetName);
-            convertForm.append('original_filename', fileName);
-            convertForm.append('use_folder_structure', 'true');
-            appendEnvFields(convertForm);
-            
-            const convertRes = await fetch(`${UPLOAD_API}/convert-session-sheet-to-arrow`, {
-              method: 'POST',
-              body: convertForm,
-              credentials: 'include'
-            });
-            
-            if (!convertRes.ok) {
-              const errorData = await convertRes.json().catch(() => null);
-              const errorText = errorData?.detail || await convertRes.text().catch(() => '');
-              console.warn(`Failed to convert sheet ${sheetName}:`, errorText);
-              setUploadError(`Failed to save sheet "${sheetName}": ${errorText}`);
-              continue;
-            }
-            
-            // Dispatch dataframe-saved event for successfully converted sheet
-            const convertData = await convertRes.json().catch(() => null);
-            const filePath = convertData?.file_path || convertData?.object_name;
-            if (filePath) {
-              setTimeout(() => {
-                console.log(`[DataUploadAtom] Dispatching dataframe-saved event for Excel sheet: ${filePath}`);
-                window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-                  detail: { filePath, fileName: `${fileName} (${sheetName})` } 
-                }));
-              }, 100);
-            }
-          } catch (err: any) {
-            console.error(`Error saving sheet ${sheetName}:`, err);
-            setUploadError(`Error saving sheet "${sheetName}": ${err.message || 'Unknown error'}`);
+      const excelFolderName = fileName.replace(/\.[^.]+$/, '').replace(/\s+/g, '_').replace(/\./g, '_');
+      
+      for (const sheetName of sheetsToSave) {
+        try {
+          // Get normalized sheet name from mapping or normalize it
+          const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || 
+            sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
+          
+          // Use the convert endpoint to save sheet directly
+          const convertForm = new FormData();
+          convertForm.append('upload_session_id', uploadSessionId);
+          convertForm.append('sheet_name', normalizedSheetName);
+          convertForm.append('original_filename', fileName);
+          convertForm.append('use_folder_structure', 'true');
+          appendEnvFields(convertForm);
+          
+          const convertRes = await fetch(`${VALIDATE_API}/convert-session-sheet-to-arrow`, {
+            method: 'POST',
+            body: convertForm,
+            credentials: 'include'
+          });
+          
+          if (!convertRes.ok) {
+            const errorData = await convertRes.json().catch(() => null);
+            const errorText = errorData?.detail || await convertRes.text().catch(() => '');
+            console.warn(`Failed to convert sheet ${sheetName}:`, errorText);
+            setUploadError(`Failed to save sheet "${sheetName}": ${errorText}`);
+            continue;
           }
+          
+          const convertData = await convertRes.json();
+          const sheetPath = convertData.file_path || '';
+          
+          if (!sheetPath) {
+            console.warn(`No file path returned for sheet ${sheetName}`);
+            continue;
+          }
+          
+          // Trigger refresh of SavedDataFramesPanel
+          window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+            detail: { filePath: sheetPath, fileName: `${fileName} (${sheetName})` } 
+          }));
+        } catch (err: any) {
+          console.error(`Error saving sheet ${sheetName}:`, err);
+          setUploadError(`Error saving sheet "${sheetName}": ${err.message || 'Unknown error'}`);
         }
-        
-        toast({ title: 'Files uploaded successfully', description: `Saved ${sheetsToSave.length} sheet${sheetsToSave.length > 1 ? 's' : ''} from ${fileName}.` });
-        resetUploadState();
-        fetchSavedDataframes();
       }
+      
+      toast({ 
+        title: 'Files uploaded successfully', 
+        description: `Saved ${sheetsToSave.length} sheet${sheetsToSave.length > 1 ? 's' : ''} from ${fileName}.`,
+      });
+      
+      resetUploadState();
+      setReloadToken(prev => prev + 1);
+      fetchSavedDataframes();
+      
+      // Process next file in queue if any
+      setPendingFilesQueue(prev => {
+        if (prev.length > 0) {
+          const nextFile = prev[0];
+          setTimeout(() => {
+            setPendingFile(nextFile);
+            setUploadError('');
+            setSheetOptions([]);
+            setSelectedSheets([]);
+            setHasMultipleSheets(false);
+            setTempUploadMeta(null);
+            setIsUploadModalOpen(true);
+            void uploadSelectedFile(nextFile);
+          }, 100);
+          return prev.slice(1);
+        }
+        return prev;
+      });
     } catch (err: any) {
-      setUploadError(err.message || 'Failed to save');
+      setUploadError(err.message || 'Failed to save sheets');
     } finally {
       setUploadingFile(false);
     }
@@ -799,10 +839,15 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const handleSheetConfirm = () => {
     if (!pendingFile || selectedSheets.length === 0) return;
     if (!tempUploadMeta?.upload_session_id) {
+      // Fallback to single sheet upload
       uploadSelectedFile(pendingFile, [selectedSheets[0]]);
       return;
     }
-    finalizeSaveMultiSheet(tempUploadMeta.file_name, tempUploadMeta.upload_session_id, selectedSheets);
+    finalizeSaveMultiSheet(
+      tempUploadMeta.file_name,
+      tempUploadMeta.upload_session_id,
+      selectedSheets
+    );
   };
 
   const triggerFilePicker = () => {
@@ -813,32 +858,27 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
     
-    const fileArray = Array.from(files);
-    if (fileArray.length === 1) {
-      // Single file - use existing logic
-      const firstFile = fileArray[0];
-      setPendingFile(firstFile);
-      setUploadError('');
-      setSheetOptions([]);
-      setSelectedSheets([]);
-      setHasMultipleSheets(false);
-      setTempUploadMeta(null);
-      // In guided mode, don't show modal - just upload directly
-      if (!globalGuidedModeEnabled) {
-        setIsUploadModalOpen(true);
-      }
-      void uploadSelectedFile(firstFile);
-    } else {
-      // Multiple files - upload all in parallel
-      void handleMultipleFiles(fileArray as File[]);
+    const fileArray = Array.from(files) as File[];
+    const firstFile = fileArray[0];
+    const remainingFiles = fileArray.slice(1);
+    
+    // Store remaining files in queue
+    if (remainingFiles.length > 0) {
+      setPendingFilesQueue(remainingFiles);
     }
+    
+    setPendingFile(firstFile);
+    setUploadError('');
+    setSheetOptions([]);
+    setSelectedSheets([]);
+    setHasMultipleSheets(false);
+    setTempUploadMeta(null);
+    setIsUploadModalOpen(true);
+    void uploadSelectedFile(firstFile);
     event.target.value = '';
   };
 
   const handleUploadAreaClick = () => {
-    // Always trigger file picker
-    // In guided mode, after upload completes, the guided flow will start at U1
-    // In non-guided mode, files are saved directly
     triggerFilePicker();
   };
 
