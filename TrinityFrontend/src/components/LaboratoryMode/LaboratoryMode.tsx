@@ -1230,8 +1230,11 @@ const LaboratoryMode = () => {
       </div>
 
         <div className="flex-1 flex overflow-hidden relative">
-          {/* Atoms Sidebar - Always visible, with opacity effect when guided mode is ON */}
-          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10 ${globalGuidedModeEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
+          {/* Atoms Sidebar - Always visible and interactive, even when guided mode is ON */}
+          <div
+            data-lab-sidebar="true"
+            className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}
+          >
             <AuxiliaryMenuLeft 
               onAtomDragStart={handleAtomDragStart}
               active={auxActive}
@@ -1240,7 +1243,7 @@ const LaboratoryMode = () => {
               }}
               isExhibitionOpen={isExhibitionOpen}
               setIsExhibitionOpen={setIsExhibitionOpen}
-              canEdit={canEdit && !globalGuidedModeEnabled}
+              canEdit={canEdit}
               showFloatingNavigationList={showFloatingNavigationList}
               setShowFloatingNavigationList={setShowFloatingNavigationList}
             />

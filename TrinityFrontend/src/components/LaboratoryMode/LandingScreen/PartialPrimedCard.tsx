@@ -19,11 +19,14 @@ interface PartialPrimedCardProps {
   }>;
   primingStatuses: any[];
   onAddNewCard?: () => void;
+  // Optional token that forces a stats refresh when it changes (e.g. after uploads)
+  refreshToken?: number;
 }
 
 export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
   atomId,
   onAddNewCard,
+  refreshToken,
 }) => {
   const [showWarningDialog, setShowWarningDialog] = useState(false);
   const [primingStats, setPrimingStats] = useState<{ total: number; primed: number; unprimed: number }>({ total: 0, primed: 0, unprimed: 0 });
@@ -145,11 +148,23 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
     }
   };
 
-  // Fetch stats on mount and when events fire
+  // Fetch stats on mount and when events fire or when an explicit refresh token changes
   useEffect(() => {
     fetchPrimingStats();
-    
+  }, [refreshToken]);
+
+  // Event listeners that also trigger stats + panel refresh
+  useEffect(() => {
     const handleDataframeSaved = () => {
+      // Optimistically mark that there is at least one new unprimed file
+      // so the heading switches from "All files primed" to the unprimed message
+      // immediately after upload, without needing a full page refresh.
+      setPrimingStats(prev => ({
+        total: prev.total + 1,
+        primed: prev.primed,
+        unprimed: prev.unprimed + 1,
+      }));
+
       // Force refresh of SavedDataFramesPanel by updating key
       setPanelRefreshKey(prev => prev + 1);
       // Fetch immediately, then again after a short delay to ensure backend has updated

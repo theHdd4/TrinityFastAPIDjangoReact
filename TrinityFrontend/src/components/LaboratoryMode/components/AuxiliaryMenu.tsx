@@ -250,58 +250,40 @@ const AuxiliaryMenu: React.FC<Props> = ({
 
 
       {/* Icons Column - Always visible and stays on the right */}
-      {/* Same icons in both modes - only add opacity effect on non-clickable icons when guided mode is ON */}
+      {/* In guided mode, icons remain fully interactive so users can switch panels freely */}
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
-        {/* Position 1: Trinity AI - visible but not clickable when guided mode is ON */}
-        <div className={`p-3 border-b border-gray-200 flex items-center justify-center relative ${isGuidedModeEnabled ? 'opacity-40' : ''}`}>
+        {/* Position 1: Trinity AI */}
+        <div className="p-3 border-b border-gray-200 flex items-center justify-center relative">
           <button
-            onClick={() => {
-              if (!isGuidedModeEnabled) {
-                openTrinityAI();
-              }
-            }}
-            disabled={isGuidedModeEnabled}
+            onClick={openTrinityAI}
             className={`w-9 h-9 rounded-lg transition-all group relative flex items-center justify-center ${
-              isGuidedModeEnabled 
-                ? 'cursor-not-allowed' 
-                : 'hover:bg-muted hover:scale-105 hover:shadow-lg'
+              'hover:bg-muted hover:scale-105 hover:shadow-lg'
             } ${active === 'trinity' ? 'bg-muted text-foreground' : ''}`}
             title="Trinity AI - Click to expand/collapse"
             data-trinity-ai="true"
             type="button"
           >
             <TrinityAIIcon className="text-purple-500" />
-            {!isGuidedModeEnabled && (
-              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-                Trinity AI
-              </span>
-            )}
+            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              Trinity AI
+            </span>
           </button>
         </div>
-        {/* Position 2: Settings - visible but not clickable when guided mode is ON */}
-        <div className={`p-3 border-b border-gray-200 flex items-center justify-center ${isGuidedModeEnabled ? 'opacity-40' : ''}`}>
+        {/* Position 2: Settings */}
+        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
           <button
-            onClick={() => {
-              if (!isGuidedModeEnabled) {
-                openSettings();
-              }
-            }}
-            disabled={isGuidedModeEnabled}
+            onClick={openSettings}
             className={`w-9 h-9 rounded-lg transition-all group relative flex items-center justify-center ${
-              isGuidedModeEnabled 
-                ? 'cursor-not-allowed' 
-                : 'hover:bg-muted hover:scale-105 hover:shadow-lg'
+              'hover:bg-muted hover:scale-105 hover:shadow-lg'
             } ${active === 'settings' ? 'bg-muted text-foreground' : ''}`}
             title="Settings"
             data-settings="true"
             type="button"
           >
             <Settings className="w-3.5 h-3.5" />
-            {!isGuidedModeEnabled && (
-              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-                Settings
-              </span>
-            )}
+            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              Settings
+            </span>
           </button>
         </div>
         {/* Position 3: Metrics - Always visible and clickable */}

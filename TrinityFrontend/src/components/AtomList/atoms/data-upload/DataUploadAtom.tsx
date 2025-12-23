@@ -924,13 +924,10 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   };
 
   const handleUploadAreaClick = () => {
-    // Trigger the file input from SavedDataFramesPanel instead of using local upload
-    if (panelContainerRef.current) {
-      const fileInput = panelContainerRef.current.querySelector('input[type="file"]') as HTMLInputElement;
-      if (fileInput) {
-        fileInput.click();
-      }
-    }
+    // Use the local hidden file input so uploads always go through
+    // this atom's upload pipeline (which updates reloadToken and
+    // dispatches the correct events for priming status).
+    triggerFilePicker();
   };
 
   // Handle selecting an existing dataframe in guided mode (used by properties panel, not left layout)
@@ -1037,6 +1034,17 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onUploadAreaClick={handleUploadAreaClick}
+          />
+          {/* Hidden file input used by the right-hand upload panel.
+              This ensures all uploads go through the same pipeline
+              (handleFileInput -> uploadSelectedFile/finalizeSave),
+              so reloadToken and priming status are always updated. */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            multiple
+            onChange={handleFileInput}
           />
         </div>
       </div>

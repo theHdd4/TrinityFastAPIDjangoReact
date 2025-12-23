@@ -1,5 +1,6 @@
 import { VALIDATE_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Frame {
   object_name: string;
@@ -176,12 +177,12 @@ export const openGuidedMode = async ({
       }
     }
     
-    // Enable global guided mode to ensure guided flow renders
-    console.log('[openGuidedMode] Calling setGlobalGuidedMode(true)...');
+    // Always enable global guided mode to ensure guided flow renders and can be reopened
+    console.log('[openGuidedMode] Ensuring global guided mode is enabled...');
     try {
       if (typeof setGlobalGuidedMode === 'function') {
         setGlobalGuidedMode(true);
-        console.log('[openGuidedMode] setGlobalGuidedMode called successfully');
+        console.log('[openGuidedMode] setGlobalGuidedMode(true) called successfully');
       } else {
         console.error('[openGuidedMode] setGlobalGuidedMode is not a function at call time, type:', typeof setGlobalGuidedMode);
         return;
@@ -199,7 +200,7 @@ export const openGuidedMode = async ({
       console.error('[openGuidedMode] Error dispatching open-guided-panel event:', error);
     }
     
-    // Start guided flow inline in canvas area
+    // Start or restart guided flow inline in canvas area
     // This will automatically render the guided flow in the canvas when the atom is rendered
     // The state structure:
     // - initialFile: { name, path, size } - custom property extracted by CanvasArea and passed as existingDataframe to GuidedUploadFlowInline
@@ -229,12 +230,8 @@ export const openGuidedMode = async ({
     
     try {
       if (typeof setActiveGuidedFlow === 'function') {
-        // Set the active guided flow with the initial file information
-        // This will trigger CanvasArea to:
-        // 1. Check if activeGuidedFlows[atomId] exists and isGuidedModeActiveForAtom(atomId) is true
-        // 2. Extract initialFile from flowState?.state?.initialFile
-        // 3. Render GuidedUploadFlowInline with existingDataframe prop set to initialFile
-        // 4. The GuidedUploadFlowInline will use existingDataframe to initialize the flow (skip U0, start at U1)
+        // Set (or reset) the active guided flow with the initial file information.
+        // Re-calling this when a flow already exists effectively restarts the flow from startStage.
         setActiveGuidedFlow(atomId, startStage, {
           // Custom property: initialFile is extracted by CanvasArea and passed as existingDataframe
           // This allows GuidedUploadFlowInline to skip U0 and start directly at the appropriate stage

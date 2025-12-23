@@ -3266,6 +3266,19 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }, 100);
   };
 
+  // Listen for global "add-new-card" events (e.g. from PartialPrimedCard warning dialog)
+  // and create a new empty card when they fire.
+  React.useEffect(() => {
+    const handleAddNewCardEvent = () => {
+      addNewCard();
+    };
+
+    window.addEventListener('add-new-card', handleAddNewCardEvent as EventListener);
+    return () => {
+      window.removeEventListener('add-new-card', handleAddNewCardEvent as EventListener);
+    };
+  }, [addNewCard]);
+
   // Workflow-specific addNewCard function that handles molecules and standalone cards
   const addNewCardWorkflow = (moleculeId?: string, position?: number, targetMoleculeIndex?: number, insertAfterSubOrder?: number) => {
     // Use workflowMolecules to get title (includes custom molecules) instead of molecules list
@@ -5706,7 +5719,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                   {atom.atomId === 'text-box' ? (
                                                     <TextBoxEditor textId={atom.id} />
                                                   ) : atom.atomId === 'data-upload' ? (
-                                                    <DataUploadAtom atomId={atom.id} />
+                                                    <DataUploadAtom atomId={atom.id} onAddNewCard={() => addNewCard()} />
                                                   ) : atom.atomId === 'data-validate' ? (
                                                     <DataValidateAtom atomId={atom.id} />
                                                   ) : atom.atomId === 'feature-overview' ? (
