@@ -1248,7 +1248,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     activeGuidedFlows,
     isGuidedModeActiveForAtom,
     removeActiveGuidedFlow,
-    globalGuidedModeEnabled
+    globalGuidedModeEnabled,
+    setGlobalGuidedMode,
   } = useLaboratoryStore();
 
   // Calculate allowed atom IDs based on current mode
@@ -6445,16 +6446,23 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         </button>
                       </div>
                       <div className="flex items-center space-x-1.5">
-                        {/* Guided Workflow toggle (bulb) - always shown for Data Upload card */}
+                        {/* Guided Workflow toggle (bulb) - toggle guided mode visibility while preserving state */}
                         {card.atoms.length > 0 &&
                           card.atoms[0]?.atomId === 'data-upload' && (
                             <button
                               onClick={e => {
                                 e.stopPropagation();
+                              if (globalGuidedModeEnabled) {
+                                // Hide guided mode UI but keep activeGuidedFlows state intact
+                                setGlobalGuidedMode(false);
+                              } else {
+                                // Re-enable guided mode and reopen the side panel at the last saved step
+                                setGlobalGuidedMode(true);
                                 window.dispatchEvent(new CustomEvent('open-guided-panel'));
+                              }
                               }}
                               className="p-0.5 hover:bg-blue-50 rounded transition-colors"
-                              title="Show Guided Workflow"
+                            title={globalGuidedModeEnabled ? 'Hide Guided Workflow' : 'Show Guided Workflow'}
                             >
                               <Lightbulb className="w-3.5 h-3.5 text-[#FFBD59]" />
                             </button>

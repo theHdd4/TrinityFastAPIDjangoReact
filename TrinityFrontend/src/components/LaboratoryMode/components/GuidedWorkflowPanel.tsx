@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { RotateCcw, X, Settings, ChevronRight, ChevronDown, Upload, LogOut, SlidersHorizontal } from 'lucide-react';
+import { RotateCcw, Settings, ChevronRight, ChevronDown, Upload, LogOut, SlidersHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VerticalProgressStepper } from '@/components/AtomList/atoms/data-upload/components/guided-upload/VerticalProgressStepper';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -81,22 +81,13 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
   return (
     <div className="w-80 bg-white border-l border-gray-200 shadow-lg flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+      <div className="flex items-center justify-start p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-blue-500/10 rounded-full flex items-center justify-center">
             <Settings className="w-4 h-4 text-blue-600" />
           </div>
           <h3 className="text-sm font-semibold text-gray-900">Guided Workflow</h3>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggle}
-          className="h-8 w-8 hover:bg-white/50"
-          title="Close guided workflow panel"
-        >
-          <X className="w-4 h-4" />
-        </Button>
       </div>
 
       {/* Priming Info - Made bigger and bolder */}
@@ -169,11 +160,9 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
             <div className="text-center text-gray-500 py-8">
               <div className="mb-4 flex flex-col items-center gap-2">
                 <Upload className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                <p className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                <p className="text-sm font-medium text-gray-700 flex items-center justify-center gap-2">
                   <span>Click on</span>
-                  <span className="inline-flex items-center justify-center rounded-md border border-gray-200 bg-white px-2 py-1 shadow-sm">
-                    <SlidersHorizontal className="w-4 h-4 text-gray-700" />
-                  </span>
+                  <SlidersHorizontal className="w-4 h-4 text-gray-700" />
                   <span>icon to open the guided mode</span>
                 </p>
               </div>
