@@ -171,10 +171,10 @@ const applyMetadataToSettings = (
     
     updates.cellFormatting = mergedCellFormatting;
     
-    console.log('📋 [TABLE-METADATA] Applied cell formatting:', {
-      rowCount: Object.keys(mergedCellFormatting).length,
-      totalCells: Object.values(mergedCellFormatting).reduce((sum, cols) => sum + Object.keys(cols).length, 0)
-    });
+    // console.log('📋 [TABLE-METADATA] Applied cell formatting:', {
+    //   rowCount: Object.keys(mergedCellFormatting).length,
+    //   totalCells: Object.values(mergedCellFormatting).reduce((sum, cols) => sum + Object.keys(cols).length, 0)
+    // });
   }
   
   // Apply design (theme, borderStyle, etc.) - metadata takes priority
@@ -301,12 +301,12 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
   };
   
   // Debug logging for metadata application
-  if (loadedMetadata) {
-    console.log('📋 [TABLE] Applied metadata from tableData:', {
-      design: metadataSettings.design,
-      layout: metadataSettings.layout,
-    });
-  }
+  // if (loadedMetadata) {
+  //   console.log('📋 [TABLE] Applied metadata from tableData:', {
+  //     design: metadataSettings.design,
+  //     layout: metadataSettings.layout,
+  //   });
+  // }
   
   // Effect to ensure metadata is applied when tableData changes
   useEffect(() => {
@@ -325,12 +325,12 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           JSON.stringify(frontendMetadata.layout) !== JSON.stringify(currentLayout);
         
         if (designChanged || layoutChanged) {
-          console.log('📋 [TABLE] Re-applying metadata from tableData (settings out of sync)', {
-            designChanged,
-            layoutChanged,
-            metadataDesign: frontendMetadata.design,
-            currentDesign,
-          });
+          // console.log('📋 [TABLE] Re-applying metadata from tableData (settings out of sync)', {
+          //   designChanged,
+          //   layoutChanged,
+          //   metadataDesign: frontendMetadata.design,
+          //   currentDesign,
+          // });
           const metadataUpdates = applyMetadataToSettings(frontendMetadata, currentSettings || {});
           updateSettings(atomId, metadataUpdates);
         }
@@ -393,35 +393,35 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         )
       );
       
-      console.log('📊 [TABLE-ATOM] Auto-load check:', {
-        atomId,
-        mode: settings.mode,
-        sourceFile: settings.sourceFile,
-        hasTableData,
-        loading,
-        sourceFileChanged,
-        reloadTriggerChanged,
-        tableDataCleared,
-        tableDataExplicitlyCleared,
-        pipelineExecutionChanged,
-        currentReloadTrigger: settings.reloadTrigger,
-        prevReloadTrigger: prevReloadTriggerRef.current,
-        currentPipelineTimestamp: settings.pipelineExecutionTimestamp,
-        prevPipelineTimestamp: prevPipelineExecutionTimestampRef.current,
-        currentTableData: settings.tableData === null ? 'null' : settings.tableData ? 'exists' : 'undefined',
-        prevTableData: prevTableDataRef.current === null ? 'null' : prevTableDataRef.current ? 'exists' : 'undefined',
-        shouldLoad
-      });
+      // console.log('📊 [TABLE-ATOM] Auto-load check:', {
+      //   atomId,
+      //   mode: settings.mode,
+      //   sourceFile: settings.sourceFile,
+      //   hasTableData,
+      //   loading,
+      //   sourceFileChanged,
+      //   reloadTriggerChanged,
+      //   tableDataCleared,
+      //   tableDataExplicitlyCleared,
+      //   pipelineExecutionChanged,
+      //   currentReloadTrigger: settings.reloadTrigger,
+      //   prevReloadTrigger: prevReloadTriggerRef.current,
+      //   currentPipelineTimestamp: settings.pipelineExecutionTimestamp,
+      //   prevPipelineTimestamp: prevPipelineExecutionTimestampRef.current,
+      //   currentTableData: settings.tableData === null ? 'null' : settings.tableData ? 'exists' : 'undefined',
+      //   prevTableData: prevTableDataRef.current === null ? 'null' : prevTableDataRef.current ? 'exists' : 'undefined',
+      //   shouldLoad
+      // });
       
       if (shouldLoad) {
-        console.log('🔄 [TABLE-ATOM] Auto-loading data from source:', settings.sourceFile, {
-          reason: pipelineExecutionChanged ? 'pipelineExecutionTimestamp changed (pipeline re-execution)' :
-                  reloadTriggerChanged ? 'reloadTrigger changed' : 
-                  tableDataExplicitlyCleared ? 'tableData explicitly cleared (pipeline)' :
-                  tableDataCleared ? 'tableData cleared' : 
-                  sourceFileChanged ? 'sourceFile changed' : 
-                  'no tableData'
-        });
+        // console.log('🔄 [TABLE-ATOM] Auto-loading data from source:', settings.sourceFile, {
+        //   reason: pipelineExecutionChanged ? 'pipelineExecutionTimestamp changed (pipeline re-execution)' :
+        //           reloadTriggerChanged ? 'reloadTrigger changed' : 
+        //           tableDataExplicitlyCleared ? 'tableData explicitly cleared (pipeline)' :
+        //           tableDataCleared ? 'tableData cleared' : 
+        //           sourceFileChanged ? 'sourceFile changed' : 
+        //           'no tableData'
+        // });
         setLoading(true);
         setError(null);
         try {
@@ -432,12 +432,12 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           const canvasPosition = card?.canvas_position ?? 0;
           
           const data = await loadTable(settings.sourceFile, atomId, cardId, canvasPosition);
-          console.log('✅ [TABLE-ATOM] Data loaded successfully:', {
-            tableId: data.table_id,
-            columns: data.columns?.length,
-            rows: data.rows?.length,
-            columnNames: data.columns?.slice(0, 5) // Log first 5 column names
-          });
+          // console.log('✅ [TABLE-ATOM] Data loaded successfully:', {
+          //   tableId: data.table_id,
+          //   columns: data.columns?.length,
+          //   rows: data.rows?.length,
+          //   columnNames: data.columns?.slice(0, 5) // Log first 5 column names
+          // });
           
           // ✅ Store data in Zustand settings (like DataFrame Operations)
           const settingsUpdate: Partial<TableSettings> = {
@@ -460,13 +460,13 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           // Merge metadata updates into settings update
           Object.assign(settingsUpdate, metadataUpdates);
           
-          console.log('💾 [TABLE-ATOM] Updating settings with loaded data:', {
-            hasTableData: !!settingsUpdate.tableData,
-            columnCount: settingsUpdate.visibleColumns?.length,
-            reloadTriggerCleared: settingsUpdate.reloadTrigger === undefined,
-            hasCellFormatting: !!metadataUpdates.cellFormatting,
-            cellFormattingRows: metadataUpdates.cellFormatting ? Object.keys(metadataUpdates.cellFormatting).length : 0
-          });
+          // console.log('💾 [TABLE-ATOM] Updating settings with loaded data:', {
+          //   hasTableData: !!settingsUpdate.tableData,
+          //   columnCount: settingsUpdate.visibleColumns?.length,
+          //   reloadTriggerCleared: settingsUpdate.reloadTrigger === undefined,
+          //   hasCellFormatting: !!metadataUpdates.cellFormatting,
+          //   cellFormattingRows: metadataUpdates.cellFormatting ? Object.keys(metadataUpdates.cellFormatting).length : 0
+          // });
           
           updateSettings(atomId, settingsUpdate);
           
@@ -476,7 +476,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
           prevTableDataRef.current = data;
           prevPipelineExecutionTimestampRef.current = settings.pipelineExecutionTimestamp;
           
-          console.log('✅ [TABLE-ATOM] Refs updated after successful load');
+          // console.log('✅ [TABLE-ATOM] Refs updated after successful load');
         } catch (err: any) {
           console.error('❌ [TABLE-ATOM] Auto-load error:', err);
           setError(err.message || 'Failed to load table');
@@ -490,19 +490,19 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         // Only update if values actually changed to avoid unnecessary updates
         if (prevSourceFileRef.current !== settings.sourceFile) {
           prevSourceFileRef.current = settings.sourceFile;
-          console.log('📝 [TABLE-ATOM] Updated prevSourceFileRef to:', settings.sourceFile);
+          // console.log('📝 [TABLE-ATOM] Updated prevSourceFileRef to:', settings.sourceFile);
         }
         if (prevReloadTriggerRef.current !== settings.reloadTrigger) {
           prevReloadTriggerRef.current = settings.reloadTrigger;
-          console.log('📝 [TABLE-ATOM] Updated prevReloadTriggerRef to:', settings.reloadTrigger);
+          // console.log('📝 [TABLE-ATOM] Updated prevReloadTriggerRef to:', settings.reloadTrigger);
         }
         if (prevTableDataRef.current !== settings.tableData) {
           prevTableDataRef.current = settings.tableData || null;
-          console.log('📝 [TABLE-ATOM] Updated prevTableDataRef to:', settings.tableData === null ? 'null' : settings.tableData ? 'exists' : 'undefined');
+          // console.log('📝 [TABLE-ATOM] Updated prevTableDataRef to:', settings.tableData === null ? 'null' : settings.tableData ? 'exists' : 'undefined');
         }
         if (prevPipelineExecutionTimestampRef.current !== settings.pipelineExecutionTimestamp) {
           prevPipelineExecutionTimestampRef.current = settings.pipelineExecutionTimestamp;
-          console.log('📝 [TABLE-ATOM] Updated prevPipelineExecutionTimestampRef to:', settings.pipelineExecutionTimestamp);
+          // console.log('📝 [TABLE-ATOM] Updated prevPipelineExecutionTimestampRef to:', settings.pipelineExecutionTimestamp);
         }
       }
     };
@@ -531,7 +531,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
             const restored = await restoreSession(settings.tableId, atomId);
             
             if (restored.restored && restored.data) {
-              console.log('📋 [TABLE-RESTORE] Restored data with metadata:', restored.data.metadata);
+              // console.log('📋 [TABLE-RESTORE] Restored data with metadata:', restored.data.metadata);
               
               // Update settings with restored data
               const settingsUpdate: Partial<TableSettings> = {
@@ -547,7 +547,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
               const metadataUpdates = applyMetadataToSettings(frontendMetadata, {});
               Object.assign(settingsUpdate, metadataUpdates);
               
-              console.log('📋 [TABLE-RESTORE] Applied metadata updates:', metadataUpdates);
+              // console.log('📋 [TABLE-RESTORE] Applied metadata updates:', metadataUpdates);
               
               updateSettings(atomId, settingsUpdate);
               
@@ -567,7 +567,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
                 const canvasPosition = card?.canvas_position ?? 0;
                 
                 const data = await loadTable(settings.sourceFile, atomId, cardId, canvasPosition);
-                console.log('📋 [TABLE-RESTORE] Fallback load with metadata:', data.metadata);
+                // console.log('📋 [TABLE-RESTORE] Fallback load with metadata:', data.metadata);
                 
                 const settingsUpdate: Partial<TableSettings> = {
                   tableData: data,
@@ -582,7 +582,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
                 const metadataUpdates = applyMetadataToSettings(frontendMetadata, {});
                 Object.assign(settingsUpdate, metadataUpdates);
                 
-                console.log('📋 [TABLE-RESTORE] Applied metadata updates:', metadataUpdates);
+                // console.log('📋 [TABLE-RESTORE] Applied metadata updates:', metadataUpdates);
                 
                 updateSettings(atomId, settingsUpdate);
               } else {
@@ -600,7 +600,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
                 const canvasPosition = card?.canvas_position ?? 0;
                 
                 const data = await loadTable(settings.sourceFile, atomId, cardId, canvasPosition);
-                console.log('📋 [TABLE-RESTORE] Error fallback load with metadata:', data.metadata);
+                // console.log('📋 [TABLE-RESTORE] Error fallback load with metadata:', data.metadata);
                 
                 const settingsUpdate: Partial<TableSettings> = {
                   tableData: data,
@@ -751,7 +751,7 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
       
       const data = await loadTable(settings.sourceFile, atomId, cardId, canvasPosition);
       
-      console.log('📋 [TABLE-LOAD] Manual load with metadata:', data.metadata);
+      // console.log('📋 [TABLE-LOAD] Manual load with metadata:', data.metadata);
       
       // ✅ Store data in Zustand settings (like DataFrame Operations)
       const settingsUpdate: Partial<TableSettings> = {
@@ -765,15 +765,15 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
       // Apply metadata if available (formatting, design, layout)
       // Metadata should override any existing settings
       const frontendMetadata = convertBackendMetadataToFrontend(data.metadata);
-      console.log('📋 [TABLE-LOAD] Converted metadata:', frontendMetadata);
+      // console.log('📋 [TABLE-LOAD] Converted metadata:', frontendMetadata);
       
       const metadataUpdates = applyMetadataToSettings(frontendMetadata, {});
-      console.log('📋 [TABLE-LOAD] Metadata updates to apply:', metadataUpdates);
+      // console.log('📋 [TABLE-LOAD] Metadata updates to apply:', metadataUpdates);
       
       // Merge metadata updates into settings update
       Object.assign(settingsUpdate, metadataUpdates);
       
-      console.log('📋 [TABLE-LOAD] Final settings update:', settingsUpdate);
+      // console.log('📋 [TABLE-LOAD] Final settings update:', settingsUpdate);
       
       updateSettings(atomId, settingsUpdate);
       
@@ -832,13 +832,13 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         rowHeights: settings.rowHeights,
       };
       
-      console.log('💾 [TABLE-SAVE] Saving metadata:', {
-        design: metadata.design,
-        layout: metadata.layout,
-        hasCellFormatting: !!metadata.cellFormatting,
-        columnWidthsCount: Object.keys(metadata.columnWidths || {}).length,
-        rowHeightsCount: Object.keys(metadata.rowHeights || {}).length,
-      });
+      // console.log('💾 [TABLE-SAVE] Saving metadata:', {
+      //   design: metadata.design,
+      //   layout: metadata.layout,
+      //   hasCellFormatting: !!metadata.cellFormatting,
+      //   columnWidthsCount: Object.keys(metadata.columnWidths || {}).length,
+      //   rowHeightsCount: Object.keys(metadata.rowHeights || {}).length,
+      // });
       
       // Get card_id and canvas_position for pipeline tracking
       const cards = useLaboratoryStore.getState().cards;
@@ -921,13 +921,13 @@ const TableAtom: React.FC<TableAtomProps> = ({ atomId }) => {
         rowHeights: settings.rowHeights,
       };
       
-      console.log('💾 [TABLE-SAVE-AS] Saving metadata:', {
-        design: metadata.design,
-        layout: metadata.layout,
-        hasCellFormatting: !!metadata.cellFormatting,
-        columnWidthsCount: Object.keys(metadata.columnWidths || {}).length,
-        rowHeightsCount: Object.keys(metadata.rowHeights || {}).length,
-      });
+      // console.log('💾 [TABLE-SAVE-AS] Saving metadata:', {
+      //   design: metadata.design,
+      //   layout: metadata.layout,
+      //   hasCellFormatting: !!metadata.cellFormatting,
+      //   columnWidthsCount: Object.keys(metadata.columnWidths || {}).length,
+      //   rowHeightsCount: Object.keys(metadata.rowHeights || {}).length,
+      // });
       
       // Get card_id and canvas_position for pipeline tracking
       const cards = useLaboratoryStore.getState().cards;

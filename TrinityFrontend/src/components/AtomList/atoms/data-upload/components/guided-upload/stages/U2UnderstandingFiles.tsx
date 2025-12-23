@@ -356,23 +356,35 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       // Update flow state with processed file path
       if (result.file_path && currentFile) {
         const oldFilePath = currentFile.path;
-        
-        // Save the processed file to Saved DataFrames panel
-        const savedPath = await saveFileToSavedDataFrames(
-          result.file_path,
-          currentFile.name,
-          oldFilePath
-        );
-        
-        if (savedPath) {
-          updateUploadedFilePath(currentFile.name, savedPath);
+
+        // Detect Excel-sheet-in-folder paths – they contain '/sheets/'
+        const isExcelFolderFile =
+          (oldFilePath && oldFilePath.includes('/sheets/')) ||
+          (result.file_path && result.file_path.includes('/sheets/'));
+
+        if (isExcelFolderFile) {
+          // ✅ Existing Excel sheet in a folder: do NOT re-save via save_dataframes.
+          // Keep using the exact path so the sheet stays inside its folder.
+          const newPath = result.file_path || oldFilePath;
+          updateUploadedFilePath(currentFile.name, newPath);
         } else {
-          updateUploadedFilePath(currentFile.name, result.file_path);
-          toast({
-            title: 'Warning',
-            description: 'File processed but may not be visible in Saved DataFrames panel.',
-            variant: 'destructive',
-          });
+          // Regular files: save processed file to Saved DataFrames as before
+          const savedPath = await saveFileToSavedDataFrames(
+            result.file_path,
+            currentFile.name,
+            oldFilePath
+          );
+          
+          if (savedPath) {
+            updateUploadedFilePath(currentFile.name, savedPath);
+          } else {
+            updateUploadedFilePath(currentFile.name, result.file_path);
+            toast({
+              title: 'Warning',
+              description: 'File processed but may not be visible in Saved DataFrames panel.',
+              variant: 'destructive',
+            });
+          }
         }
         
         // Save header selection

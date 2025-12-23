@@ -49,6 +49,7 @@ import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataValidateAtom from '@/components/AtomList/atoms/data-validate/DataValidateAtom';
 import DataUploadAtom from '@/components/AtomList/atoms/data-upload/DataUploadAtom';
 import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
+import { MetricGuidedFlowInline } from '../SettingsPanel/metricstabs/metricguildeflow/MetricGuidedFlowInline';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
@@ -1255,7 +1256,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     activeGuidedFlows,
     isGuidedModeActiveForAtom,
     removeActiveGuidedFlow,
-    globalGuidedModeEnabled
+    globalGuidedModeEnabled,
+    isMetricGuidedFlowOpen,
+    activeMetricGuidedFlow,
+    metricsInputs,
+    closeMetricGuidedFlow
   } = useLaboratoryStore();
 
   // Get scenario to determine landing card title
@@ -1313,6 +1318,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       </div>
     );
   };
+
+
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
@@ -4321,6 +4328,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     });
 
     if (card) {
+      // If this is a metric guided flow card, close the guided flow
+      if (card.isMetricGuidedFlowCard) {
+        closeMetricGuidedFlow();
+        return; // Early return - closeMetricGuidedFlow handles card removal from store
+      }
+      
       // Track card deletion for cross-collection sync
       if (card.moleculeId) {
         // If card belongs to a molecule, track all atoms in this card for deletion
@@ -6511,7 +6524,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
                     {/* Card Content */}
             <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
-                      {card.atoms.length === 0 ? (
+                      {card.isMetricGuidedFlowCard && isMetricGuidedFlowOpen && activeMetricGuidedFlow ? (
+                        <div className="p-4">
+                          <MetricGuidedFlowInline
+                            onComplete={(result) => {
+                              console.log('[CanvasArea] MetricGuidedFlowInline completed:', result);
+                            }}
+                            onClose={() => {
+                              closeMetricGuidedFlow();
+                            }}
+                            savedState={activeMetricGuidedFlow?.state}
+                            initialStage={activeMetricGuidedFlow?.currentStage}
+                            contextAtomId={metricsInputs.contextAtomId}
+                          />
+                        </div>
+                      ) : card.atoms.length === 0 ? (
                         <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                           <AtomSuggestion
                             cardId={card.id}

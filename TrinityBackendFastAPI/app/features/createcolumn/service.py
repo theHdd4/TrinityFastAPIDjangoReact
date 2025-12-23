@@ -131,7 +131,28 @@ def _resolve_full_object_path(object_name: str, object_prefix: str) -> str:
     return object_name
 
 
+def _normalize_saved_file_path(path: str) -> str:
+    """
+    Normalize file path for consistent storage and matching.
+    Removes leading/trailing slashes, converts to lowercase, and removes create-data/ prefix.
+    """
+    if not path:
+        return ""
+    normalized = path.strip().lower().strip("/")
+    # Remove create-data/ or create_data/ prefix for matching
+    normalized = normalized.replace("create-data/", "").replace("create_data/", "")
+    return normalized
+
+
 def _store_create_config(document_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Store or update file configuration in MongoDB.
+    
+    Key behavior:
+    - If a file entry with the same saved_file already exists, MERGE operations
+    - This ensures rename operations are combined with created column operations
+    - Prevents duplicate file entries while preserving all operation history
+    """
     try:
         client = _get_mongo_client()
         collection = client[MONGO_DB]["createandtransform_configs"]
@@ -140,15 +161,101 @@ def _store_create_config(document_id: str, payload: Dict[str, Any]) -> Dict[str,
         payload = dict(payload)
         payload.setdefault("saved_at", datetime.utcnow())
 
+        # Log rename operations being stored
+        operations = payload.get("operations", [])
+        rename_ops = [op for op in operations if op.get("operation_type") == "rename"]
+        if rename_ops:
+            # Build rename operations summary for logging
+            rename_summary = []
+            for op in rename_ops:
+                cols = op.get('columns', [])
+                old_name = cols[0] if cols else '?'
+                new_name = op.get('rename', '?')
+                rename_summary.append(f"{old_name}->{new_name}")
+            
+            # logger.info(
+            #     f"💾 [STORE-CONFIG] Storing {len(rename_ops)} rename operation(s) for document_id='{document_id}': "
+            #     f"{rename_summary}"
+            # )
+
         if existing:
             updated = dict(existing)
             updated["updated_at"] = datetime.utcnow()
             files = list(updated.get("files", []))
-            files.append(payload)
+            
+            # Get the saved_file from payload and normalize for matching
+            payload_saved_file = payload.get("saved_file", "")
+            payload_saved_file_normalized = _normalize_saved_file_path(payload_saved_file)
+            
+            # DEBUG: Log all existing file entries for comparison
+            logger.info(
+                f"🔍 [STORE-CONFIG] Looking for match: payload_saved_file='{payload_saved_file}' "
+                f"-> normalized='{payload_saved_file_normalized}'"
+            )
+            logger.info(
+                f"🔍 [STORE-CONFIG] Existing files ({len(files)} total): "
+                f"{[(f.get('saved_file', ''), _normalize_saved_file_path(f.get('saved_file', ''))) for f in files[:5]]}"
+            )
+            
+            # Find existing entry for this file (by normalized saved_file)
+            existing_idx = None
+            if payload_saved_file_normalized:
+                for idx, f in enumerate(files):
+                    existing_saved_file = f.get("saved_file", "")
+                    existing_saved_file_normalized = _normalize_saved_file_path(existing_saved_file)
+                    logger.info(
+                        f"🔍 [STORE-CONFIG] Comparing idx={idx}: "
+                        f"existing='{existing_saved_file}' -> normalized='{existing_saved_file_normalized}' "
+                        f"vs payload_normalized='{payload_saved_file_normalized}' "
+                        f"match={existing_saved_file_normalized == payload_saved_file_normalized}"
+                    )
+                    if existing_saved_file_normalized == payload_saved_file_normalized:
+                        existing_idx = idx
+                        # logger.info(f"✅ [STORE-CONFIG] Found match at idx={idx}")
+                        break
+            
+            if existing_idx is not None:
+                # MERGE: Combine operations from existing entry with new operations
+                existing_entry = files[existing_idx]
+                existing_ops = existing_entry.get("operations", [])
+                new_ops = payload.get("operations", [])
+                
+                # Merge operations: existing + new (preserves order, new ops appended)
+                merged_ops = list(existing_ops) + list(new_ops)
+                
+                logger.info(
+                    f"🔄 [STORE-CONFIG] Merging operations for file '{payload_saved_file}': "
+                    f"existing={len(existing_ops)} ops, new={len(new_ops)} ops, merged={len(merged_ops)} ops"
+                )
+                
+                # Update payload with merged operations
+                payload["operations"] = merged_ops
+                
+                # Preserve original input_file if it exists (for lineage)
+                if existing_entry.get("input_file") and not payload.get("input_file"):
+                    payload["input_file"] = existing_entry["input_file"]
+                
+                # Replace the existing entry with the merged one
+                files[existing_idx] = payload
+                operation = "merged"
+                logger.info(
+                    f"✅ [CREATE-SAVE] Merged operations into existing file entry: "
+                    f"document_id='{document_id}', saved_file='{payload_saved_file}', "
+                    f"total_ops={len(merged_ops)}"
+                )
+            else:
+                # No existing entry for this file - append new entry
+                files.append(payload)
+                operation = "appended"
+                logger.info(
+                    f"✅ [CREATE-SAVE] Appended new file entry: "
+                    f"document_id='{document_id}', saved_file='{payload_saved_file}', "
+                    f"total_files={len(files)}"
+                )
+            
             updated["files"] = files
             collection.replace_one({"_id": document_id}, updated)
-            operation = "updated"
-            logger.info(f"✅ [CREATE-SAVE] Updated MongoDB document: {document_id}")
+            logger.info(f"✅ [CREATE-SAVE] Updated MongoDB document: {document_id} (now has {len(files)} file entries)")
         else:
             document = {
                 "_id": document_id,
@@ -2430,7 +2537,17 @@ def generate_column_formula(
     if not input_columns:
         return f"{operation_type}()"
     
-    params = parameters or {}
+    # Defensive: historically we store `param` in Mongo and it may be:
+    # - a dict (preferred)
+    # - a JSON-like string / scalar (legacy or UI-provided)
+    # If it's not a dict, treat it as an unstructured value so formula generation
+    # never crashes and wipes metadata for an entire file.
+    if parameters is None:
+        params: Dict[str, Any] = {}
+    elif isinstance(parameters, dict):
+        params = parameters
+    else:
+        params = {"value": parameters}
     
     # Map operation types to formula templates
     if operation_type == "add":
@@ -2477,7 +2594,11 @@ def generate_column_formula(
     elif operation_type == "cumprod":
         return f"cumprod({input_columns[0]})"
     elif operation_type == "pct_change":
-        period = params.get("period", 1)
+        # pct_change in this codebase is a 2-column operation; keep a stable display.
+        if len(input_columns) >= 2:
+            return f"pct_change({input_columns[0]}, {input_columns[1]})"
+        # Legacy/edge: fall back to a 1-col representation, optionally using param.
+        period = params.get("period", params.get("value", 1))
         return f"pct_change({input_columns[0]}, {period})"
     else:
         # Generic fallback
@@ -2522,96 +2643,432 @@ def get_column_metadata_for_file(
         # Find configuration where saved_file matches object_name
         # Note: object_name might be a full path, saved_file might be relative or vice versa
         files = config.get("files", [])
-        matching_file_config = None
+        matching_file_configs: List[Dict[str, Any]] = []
+
+        # ---------------------------------------------------------------------
+        # Helpers
+        #
+        # We support three matching strategies (existing behavior):
+        # - normalized full path match
+        # - filename match (path differs)
+        # - "cleaned" match (remove create-data/ prefix differences)
+        #
+        # For Save (overwrite): multiple entries can exist for the same saved_file,
+        # so we merge all matching entries.
+        #
+        # For Save As: we treat `input_file` as a parent pointer and walk lineage,
+        # unioning created columns from ancestors so created columns persist across
+        # Save As hops (File1 -> File2 -> File3).
+        # ---------------------------------------------------------------------
+
+        def _normalize_path(path: str) -> str:
+            return (path or "").strip().lower().strip("/")
+
+        def _filename(path: str) -> str:
+            p = (path or "").strip()
+            if "/" in p:
+                return p.split("/")[-1].lower().strip()
+            return p.lower().strip()
+
+        def _clean_prefix(path: str) -> str:
+            return _normalize_path(path).replace("create-data/", "").replace("create_data/", "")
+
+        def _logical_match(saved_file: str, target_object_name: str) -> bool:
+            a_norm = _normalize_path(saved_file)
+            b_norm = _normalize_path(target_object_name)
+            if a_norm and a_norm == b_norm:
+                return True
+            a_file = _filename(saved_file)
+            b_file = _filename(target_object_name)
+            if a_file and a_file == b_file:
+                return True
+            a_clean = _clean_prefix(saved_file)
+            b_clean = _clean_prefix(target_object_name)
+            return bool(a_clean and a_clean == b_clean)
+
+        def _find_matching_file_configs(target_object_name: str) -> List[Tuple[int, Dict[str, Any]]]:
+            matches: List[Tuple[int, Dict[str, Any]]] = []
+            for idx, file_config in enumerate(files):
+                saved_file = file_config.get("saved_file", "")
+                if _logical_match(saved_file, target_object_name):
+                    matches.append((idx, file_config))
+            return matches
         
-        logger.info(f"🔍 [COLUMN-METADATA] Looking for file: {object_name}")
-        logger.info(f"🔍 [COLUMN-METADATA] Total files in config: {len(files)}")
-        logger.info(f"🔍 [COLUMN-METADATA] Available saved_file paths: {[f.get('saved_file', '') for f in files[:5]]}")
+        # logger.info(f"🔍 [COLUMN-METADATA] Looking for file: {object_name}")
+        # logger.info(f"🔍 [COLUMN-METADATA] Total files in config: {len(files)}")
+        # logger.info(f"🔍 [COLUMN-METADATA] Available saved_file paths: {[f.get('saved_file', '') for f in files[:5]]}")
         
-        for idx, file_config in enumerate(files):
-            saved_file = file_config.get("saved_file", "")
-            # Normalize paths for comparison (remove leading/trailing slashes, lowercase)
-            saved_file_normalized = saved_file.strip().lower().strip('/')
-            object_name_normalized = object_name.strip().lower().strip('/')
-            
-            logger.debug(f"🔍 [COLUMN-METADATA] Comparing file {idx}: saved_file='{saved_file}' (normalized: '{saved_file_normalized}') vs object_name='{object_name}' (normalized: '{object_name_normalized}')")
-            
-            # Try exact match first (normalized)
-            if saved_file_normalized == object_name_normalized:
-                matching_file_config = file_config
-                logger.info(f"✅ [COLUMN-METADATA] Exact match found (normalized): {saved_file} == {object_name}")
-                break
-            
-            # Try matching by filename (in case paths differ)
-            saved_filename = saved_file.split('/')[-1].lower().strip() if '/' in saved_file else saved_file.lower().strip()
-            object_filename = object_name.split('/')[-1].lower().strip() if '/' in object_name else object_name.lower().strip()
-            if saved_filename == object_filename and saved_filename:
-                matching_file_config = file_config
-                logger.info(f"✅ [COLUMN-METADATA] Filename match found: {saved_file} == {object_name}")
-                break
-            
-            # Try matching by removing common prefixes (create-data/, etc.)
-            saved_file_clean = saved_file_normalized.replace('create-data/', '').replace('create_data/', '')
-            object_name_clean = object_name_normalized.replace('create-data/', '').replace('create_data/', '')
-            if saved_file_clean == object_name_clean and saved_file_clean:
-                matching_file_config = file_config
-                logger.info(f"✅ [COLUMN-METADATA] Clean path match found: {saved_file} == {object_name}")
-                break
+        # Resolve all matching entries for this object_name (overwrite support).
+        initial_matches = _find_matching_file_configs(object_name)
+        matching_file_configs = [fc for _, fc in initial_matches]
         
-        if not matching_file_config:
+        logger.info(
+            f"🔍 [COLUMN-METADATA] Found {len(matching_file_configs)} matching file config(s) for: {object_name}"
+        )
+        
+        if not matching_file_configs:
             logger.warning(f"⚠️ [COLUMN-METADATA] No matching file config found for: {object_name}")
-            logger.warning(f"⚠️ [COLUMN-METADATA] Available files: {[f.get('saved_file', '') for f in files]}")
-        
-        if not matching_file_config:
+            logger.warning(f"⚠️ [COLUMN-METADATA] Available files ({len(files)} total): {[f.get('saved_file', '') for f in files[:10]]}")
             return {}
         
-        # Extract operations array
-        operations = matching_file_config.get("operations", [])
-        if not operations:
+        # Log details of matching entries
+        for idx, fc in enumerate(matching_file_configs):
+            logger.info(
+                f"🔍 [COLUMN-METADATA] Matching entry {idx}: saved_file='{fc.get('saved_file', '')}', "
+                f"operations_count={len(fc.get('operations', []))}, "
+                f"operation_types={[op.get('operation_type', 'unknown') for op in fc.get('operations', [])[:5]]}"
+            )
+        
+        # ---------------------------------------------------------------------
+        # Build lineage-aware created-column map
+        #
+        # - Overwrite: merge all matching entries for the same saved_file/object_name.
+        # - Save As: walk up `input_file` chain and union created columns from ancestors.
+        #   Closest descendant wins if a column name appears multiple times.
+        # - Rename aliasing: if a created column is later renamed, attach metadata
+        #   to the renamed column name by following rename operations in this same
+        #   lineage (supports A->B->C; descendant rename wins; loop protected).
+        # ---------------------------------------------------------------------
+        created_operation_by_col: Dict[str, Dict[str, Any]] = {}
+        rename_map_by_old: Dict[str, str] = {}  # normalized old -> normalized new
+
+        visited: set[str] = set()
+        current_object = object_name
+
+        while True:
+            current_key = _clean_prefix(current_object)
+            if not current_key:
+                break
+            if current_key in visited:
+                logger.warning(f"⚠️ [COLUMN-METADATA] Lineage cycle detected at '{current_object}' (key='{current_key}'); stopping traversal")
+                break
+            visited.add(current_key)
+
+            matches = _find_matching_file_configs(current_object)
+            if not matches:
+                logger.info(
+                    f"🧭 [COLUMN-METADATA] No Mongo file entries matched for '{current_object}' "
+                    f"(chain_key='{current_key}'); stopping lineage traversal"
+                )
+                break
+
+            logger.info(
+                f"🧭 [COLUMN-METADATA] Hop match: object='{current_object}' "
+                f"matched_entries={len(matches)} idxs={[i for i, _ in matches]}"
+            )
+
+            # Merge operations for this hop (overwrite support).
+            hop_ops: List[Dict[str, Any]] = []
+            for _, fc in matches:
+                ops = fc.get("operations", [])
+                if isinstance(ops, list) and ops:
+                    hop_ops.extend([op for op in ops if isinstance(op, dict)])
+
+            # Build a hop-local created map where later saves win (files[] is append-only).
+            hop_created: Dict[str, Dict[str, Any]] = {}
+            hop_rename: Dict[str, str] = {}
+            
+            # Log all operations in this hop for debugging
+            logger.info(
+                f"🔍 [COLUMN-METADATA] Hop operations ({len(hop_ops)} total): "
+                f"{[op.get('operation_type', 'unknown') for op in hop_ops]}"
+            )
+            # CRITICAL DEBUG: Log detailed operation info for rename debugging
+            rename_ops_in_hop = [op for op in hop_ops if op.get('operation_type') == 'rename']
+            created_ops_in_hop = [op for op in hop_ops if op.get('operation_type') != 'rename' and op.get('created_column_name')]
+            if rename_ops_in_hop:
+                logger.info(
+                    f"🔁 [COLUMN-METADATA] Found {len(rename_ops_in_hop)} rename operation(s) in this hop: "
+                    f"{[(op.get('columns'), op.get('rename')) for op in rename_ops_in_hop]}"
+                )
+            if created_ops_in_hop:
+                logger.info(
+                    f"🔍 [COLUMN-METADATA] Found {len(created_ops_in_hop)} created column operation(s) in this hop: "
+                    f"{[op.get('created_column_name') for op in created_ops_in_hop]}"
+                )
+            
+            # First pass: Process rename operations to build rename map
+            for op_idx, operation in enumerate(hop_ops):
+                op_type = (operation.get("operation_type") or "").strip()
+                if op_type == "rename":
+                    cols = operation.get("columns", [])
+                    rename_val = operation.get("rename")
+                    logger.info(
+                        f"🔁 [COLUMN-METADATA] Processing rename operation {op_idx}: columns={cols}, rename={rename_val}"
+                    )
+                    if isinstance(cols, list) and cols:
+                        old_cols = [str(c).strip() for c in cols if c]
+                        old_norms = [c.lower().strip() for c in old_cols if c]
+
+                        if isinstance(rename_val, dict):
+                            # Dict form: {"0": "newA", "1": "newB"}
+                            for i, old_norm in enumerate(old_norms):
+                                new_name = rename_val.get(str(i))
+                                if isinstance(new_name, str) and new_name.strip():
+                                    hop_rename[old_norm] = new_name.strip().lower()
+                                    logger.info(
+                                        f"🔁 [COLUMN-METADATA] Added rename mapping: '{old_norm}' -> '{new_name.strip().lower()}'"
+                                    )
+                        elif isinstance(rename_val, str) and rename_val.strip():
+                            rename_str = rename_val.strip()
+                            if len(old_norms) == 1:
+                                hop_rename[old_norms[0]] = rename_str.lower()
+                                logger.info(
+                                    f"🔁 [COLUMN-METADATA] Added rename mapping: '{old_norms[0]}' -> '{rename_str.lower()}'"
+                                )
+                            else:
+                                # Multi-column rename: comma-separated maps 1:1; else follow backend base_i convention.
+                                if "," in rename_str:
+                                    parts = [p.strip() for p in rename_str.split(",")]
+                                    for i, old_norm in enumerate(old_norms):
+                                        if i < len(parts) and parts[i]:
+                                            hop_rename[old_norm] = parts[i].lower()
+                                            logger.info(
+                                                f"🔁 [COLUMN-METADATA] Added rename mapping: '{old_norm}' -> '{parts[i].lower()}'"
+                                            )
+                                else:
+                                    for i, old_norm in enumerate(old_norms):
+                                        new_name_value = f"{rename_str}_{i}".lower()
+                                        hop_rename[old_norm] = new_name_value
+                                        logger.info(
+                                            f"🔁 [COLUMN-METADATA] Added rename mapping: '{old_norm}' -> '{new_name_value}'"
+                                        )
+                    else:
+                        logger.warning(
+                            f"⚠️ [COLUMN-METADATA] Rename operation {op_idx} has invalid columns: {cols}"
+                        )
+            
+            # Second pass: Process created columns (skip rename operations)
+            for op_idx, operation in enumerate(hop_ops):
+                op_type = (operation.get("operation_type") or "").strip()
+
+                # Skip rename operations (already processed in first pass)
+                if op_type == "rename":
+                    continue
+
+                created_column_name = operation.get("created_column_name")
+                if not created_column_name:
+                    logger.warning(f"⚠️ [COLUMN-METADATA] Operation {op_idx} missing 'created_column_name': {operation}")
+                    continue
+                col_key = str(created_column_name).lower().strip()
+                if not col_key:
+                    continue
+                hop_created[col_key] = operation
+
+            if hop_rename:
+                logger.info(
+                    f"🔁 [COLUMN-METADATA] Hop rename map extracted ({len(hop_rename)}): "
+                    f"{list(hop_rename.items())[:10]}"
+                )
+            else:
+                # This is the key debug signal for your current scenario:
+                # if you renamed a column via Table atom and it isn't stored into createandtransform_configs,
+                # we will not see any rename operations here.
+                logger.info(
+                    f"🔁 [COLUMN-METADATA] Hop rename map extracted: 0 "
+                    f"(no operation_type=='rename' found in stored operations for this hop)"
+                )
+
+            # Merge into global map with descendant precedence:
+            # For overwrite (same saved_file), later entries win (files[] is append-only).
+            # For Save As (different saved_file), descendant wins.
+            for col_key, operation in hop_created.items():
+                if col_key not in created_operation_by_col:
+                    created_operation_by_col[col_key] = operation
+                # For overwrite: allow later operations to override (latest wins)
+                elif current_object == object_name:  # Same file = overwrite
+                    created_operation_by_col[col_key] = operation
+                    logger.info(
+                        f"🔄 [COLUMN-METADATA] Overwriting created column '{col_key}' "
+                        f"(overwrite: same saved_file)"
+                    )
+            for old_key, new_key in hop_rename.items():
+                if old_key and new_key:
+                    if old_key not in rename_map_by_old:
+                        rename_map_by_old[old_key] = new_key
+                    # For overwrite: allow later renames to override (latest wins)
+                    elif current_object == object_name:  # Same file = overwrite
+                        old_new = rename_map_by_old[old_key]
+                        rename_map_by_old[old_key] = new_key
+                        logger.info(
+                            f"🔄 [COLUMN-METADATA] Overwriting rename mapping '{old_key}': "
+                            f"'{old_new}' -> '{new_key}' (overwrite: same saved_file)"
+                        )
+
+            # Determine parent pointer (Save As lineage):
+            # choose the latest matching entry for current_object, then follow its input_file.
+            latest_idx, latest_fc = max(matches, key=lambda x: x[0])
+            parent = latest_fc.get("input_file") or ""
+            logger.info(
+                f"🧭 [COLUMN-METADATA] Hop parent pointer: latest_idx={latest_idx} "
+                f"saved_file='{latest_fc.get('saved_file', '')}' input_file='{parent}'"
+            )
+
+            if not parent:
+                break
+
+            # Stop if input_file points back to the same logical file (overwrite/self).
+            if _logical_match(parent, current_object):
+                break
+
+            current_object = str(parent)
+
+        if not created_operation_by_col:
             return {}
+
+        def _resolve_rename_chain(name: str) -> str:
+            """
+            Follow rename chains using rename_map_by_old (A->B->C), stop on loops.
+            We intentionally do not require existence here; cardinality will only
+            attach metadata to columns that exist in the dataframe.
+            """
+            current = (name or "").lower().strip()
+            if not current:
+                return current
+            seen: set[str] = set()
+            while True:
+                if current in seen:
+                    return current  # cycle
+                seen.add(current)
+                nxt = rename_map_by_old.get(current)
+                if not nxt:
+                    return current
+                nxt_norm = nxt.lower().strip()
+                if not nxt_norm or nxt_norm == current:
+                    return current
+                current = nxt_norm
         
         # Get original columns from input_file
+        # Prefer original columns from the earliest matching entry for the requested file,
+        # but keep behavior backward compatible if not present.
         original_columns = set()
-        original_columns_list = matching_file_config.get("original_columns", [])
-        if original_columns_list:
-            original_columns = set(col.lower().strip() for col in original_columns_list)
+        try:
+            earliest = matching_file_configs[0]
+            original_columns_list = earliest.get("original_columns", [])
+            if original_columns_list:
+                original_columns = set(col.lower().strip() for col in original_columns_list)
+        except Exception:
+            original_columns = set()
         
         # Build column metadata map
         column_metadata: Dict[str, Dict[str, Any]] = {}
         
-        logger.info(f"🔍 [COLUMN-METADATA] Processing {len(operations)} operations")
+        logger.info(
+            f"🔍 [COLUMN-METADATA] Lineage resolved: {len(created_operation_by_col)} created columns "
+            f"from {len(visited)} file(s) in chain"
+        )
+        logger.info(
+            f"🔁 [COLUMN-METADATA] Final rename map size: {len(rename_map_by_old)} "
+            f"sample={list(rename_map_by_old.items())[:10]}"
+        )
+        logger.info(
+            f"🔍 [COLUMN-METADATA] Created columns before rename resolution: {list(created_operation_by_col.keys())}"
+        )
         
-        for idx, operation in enumerate(operations):
-            created_column_name = operation.get("created_column_name")
-            if not created_column_name:
-                logger.warning(f"⚠️ [COLUMN-METADATA] Operation {idx} missing 'created_column_name': {operation}")
-                continue
+        # CRITICAL DEBUG: Log if we have created columns but no rename map (or vice versa)
+        if created_operation_by_col and not rename_map_by_old:
+            logger.warning(
+                f"⚠️ [COLUMN-METADATA] Found {len(created_operation_by_col)} created columns "
+                f"but NO rename mappings. This is normal if no renames occurred."
+            )
+        elif rename_map_by_old and not created_operation_by_col:
+            logger.warning(
+                f"⚠️ [COLUMN-METADATA] Found {len(rename_map_by_old)} rename mappings "
+                f"but NO created columns. This suggests a data inconsistency."
+            )
+        elif created_operation_by_col and rename_map_by_old:
+            # Check if any created columns match rename map keys
+            created_keys = set(created_operation_by_col.keys())
+            rename_keys = set(rename_map_by_old.keys())
+            matching = created_keys & rename_keys
+            if matching:
+                logger.info(
+                    f"✅ [COLUMN-METADATA] Found {len(matching)} created columns that match rename map keys: {list(matching)}"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ [COLUMN-METADATA] Created columns {list(created_keys)} do NOT match "
+                    f"rename map keys {list(rename_keys)}. This may indicate a normalization mismatch!"
+                )
+
+        for col_key, operation in created_operation_by_col.items():
+            created_column_name = operation.get("created_column_name") or col_key
+            normalized_name = str(created_column_name).lower().strip()
             
-            # Normalize column name (lowercase, strip)
-            normalized_name = created_column_name.lower().strip()
+            # Log before resolution
+            logger.info(
+                f"🔍 [COLUMN-METADATA] Processing created column: original_key='{col_key}', "
+                f"created_column_name='{created_column_name}', normalized='{normalized_name}'"
+            )
             
+            resolved_name = _resolve_rename_chain(normalized_name)
+            
+            # Enhanced logging for rename resolution
+            if resolved_name != normalized_name:
+                logger.info(
+                    f"✅ [COLUMN-METADATA] Resolved rename chain: '{normalized_name}' -> '{resolved_name}' "
+                    f"(operation_type={operation.get('operation_type')})"
+                )
+            elif normalized_name in rename_map_by_old:
+                # This shouldn't happen if resolution worked, but log it for debugging
+                logger.warning(
+                    f"⚠️ [COLUMN-METADATA] Created column '{normalized_name}' exists in rename map "
+                    f"but resolution didn't change it. Map entry: '{normalized_name}' -> '{rename_map_by_old[normalized_name]}'"
+                )
+            else:
+                logger.info(
+                    f"ℹ️ [COLUMN-METADATA] Created column '{normalized_name}' has no rename mapping "
+                    f"(will use original name)"
+                )
+
             operation_type = operation.get("operation_type", "")
             input_columns = operation.get("columns", [])
             parameters = operation.get("param")
-            
-            # Generate formula
+            is_transformed = operation.get("is_transformed", False)
+
             formula = generate_column_formula(operation_type, input_columns, parameters)
             
-            column_metadata[normalized_name] = {
-                "is_created": True,
+            # Determine is_created: if is_transformed is True, then is_created is False
+            # Otherwise, is_created is True (default behavior for backward compatibility)
+            is_created = not is_transformed
+
+            # Prefer closest descendant on conflicts: if a descendant already attached
+            # metadata to the resolved name, do not override it with an ancestor op.
+            target_key = resolved_name or normalized_name
+            
+            if target_key in column_metadata:
+                logger.info(
+                    f"ℹ️ [COLUMN-METADATA] Skipping duplicate metadata for '{target_key}' "
+                    f"(already exists from descendant)"
+                )
+                continue
+
+            logger.info(
+                f"✅ [COLUMN-METADATA] Attaching metadata to column '{target_key}' "
+                f"(resolved from '{normalized_name}')"
+            )
+
+            column_metadata[target_key] = {
+                "is_created": is_created,
+                "is_transformed": is_transformed,
                 "operation_type": operation_type,
                 "input_columns": input_columns,
                 "parameters": parameters if parameters else None,
                 "formula": formula,
                 "created_column_name": created_column_name,
             }
-            
-            logger.info(f"✅ [COLUMN-METADATA] Operation {idx}: Added metadata for column '{created_column_name}' (normalized: '{normalized_name}') -> {formula}")
         
         # Debug: Log all created column names
-        logger.info(f"📋 [COLUMN-METADATA] All created columns (normalized): {list(column_metadata.keys())}")
+        # logger.info(f"📋 [COLUMN-METADATA] All created columns (normalized, after rename resolution): {list(column_metadata.keys())}")
         
-        logger.info(f"📊 [COLUMN-METADATA] Total columns with metadata: {len(column_metadata)}")
+        # Log detailed info for each column with metadata
+        # for col_name, meta in column_metadata.items():
+        #     logger.info(
+        #         f"📋 [COLUMN-METADATA] Column '{col_name}': is_created={meta.get('is_created')}, "
+        #         f"operation_type={meta.get('operation_type')}, formula={meta.get('formula')}"
+        #     )
+        
+        # logger.info(f"📊 [COLUMN-METADATA] Total columns with metadata: {len(column_metadata)}")
         return column_metadata
         
     except Exception as e:
@@ -2692,11 +3149,13 @@ def cardinality_task(
                 "operation_type": None,
                 "formula": None,
             }
-            # Debug: Log if this is a column we're looking for (like "price")
-            if normalized_col == "price":
-                logger.warning(f"⚠️ [CARDINALITY] PRICE column '{col}' (normalized: '{normalized_col}') NOT found in column_metadata!")
+            # Enhanced debug: Log if this column might be a renamed column we're looking for
+            # Check common rename patterns (renametrial, volumesales1, etc.)
+            if normalized_col in ["renametrial", "volumesales1", "salesvalue_plus_volume"] or "rename" in normalized_col:
+                logger.warning(f"⚠️ [CARDINALITY] Column '{col}' (normalized: '{normalized_col}') NOT found in column_metadata!")
                 logger.warning(f"⚠️ [CARDINALITY] Available metadata keys: {list(column_metadata.keys())}")
                 logger.warning(f"⚠️ [CARDINALITY] Total metadata entries: {len(column_metadata)}")
+                logger.warning(f"⚠️ [CARDINALITY] This column might be a renamed column that wasn't resolved correctly")
             elif normalized_col in ["d1", "d2", "d3", "d4", "d5", "d6", "av1", "av2", "av3", "av4", "av5", "av6", "ev1", "ev2", "ev3", "ev4", "ev5", "ev6"]:
                 logger.debug(f"📝 [CARDINALITY] Column '{col}' (normalized: '{normalized_col}') not in metadata - likely original column")
             else:

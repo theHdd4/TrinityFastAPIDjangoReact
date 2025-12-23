@@ -3175,6 +3175,75 @@ async def download_dataframe_direct(object_name: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@router.get("/load_dataframe_by_key/health")
+async def load_dataframe_by_key_health():
+    """
+    Health check endpoint to verify load_dataframe_by_key is registered.
+    """
+    return {
+        "status": "ok",
+        "endpoint": "/load_dataframe_by_key",
+        "method": "POST",
+        "message": "load_dataframe_by_key endpoint is registered and accessible"
+    }
+
+
+@router.post("/load_dataframe_by_key")
+async def load_dataframe_by_key(request: Request):
+    """
+    Load dataframe data from Arrow Flight and return as JSON (headers and rows).
+    """
+    logger.info("load_dataframe_by_key endpoint called")
+    try:
+        body = await request.json()
+        object_name = body.get("key", "")
+        
+        if not object_name:
+            raise HTTPException(status_code=400, detail="key is required")
+        
+        # Decode URL-encoded object_name if needed
+        object_name = unquote(object_name)
+        
+        # Validate object_name ends with .arrow
+        if not object_name.endswith(".arrow"):
+            raise HTTPException(status_code=400, detail="Only .arrow files are supported")
+        
+        # Validate object_name is within the allowed prefix
+        prefix = await get_object_prefix()
+        if not object_name.startswith(prefix):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid object name: file must be within the current project prefix"
+            )
+        
+        # Load dataframe from Arrow Flight
+        try:
+            data = download_table_bytes(object_name)
+            df = pl.read_ipc(io.BytesIO(data))
+        except Exception as e:
+            logger.error(f"Failed to load dataframe '{object_name}': {str(e)}")
+            raise HTTPException(status_code=404, detail=f"Failed to load dataframe: {str(e)}")
+        
+        # Convert to the expected format
+        headers = list(df.columns)
+        rows = df.to_dicts()
+        
+        logger.info(
+            f"data_upload.load_dataframe_by_key.success object_name={object_name} rows={len(rows)} cols={len(headers)}"
+        )
+        
+        return {
+            "headers": headers,
+            "rows": rows
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"data_upload.load_dataframe_by_key.error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error loading dataframe: {str(e)}")
+
 @router.post("/load-saved-dataframe")
 async def load_saved_dataframe(
     request: Request,
@@ -3446,6 +3515,30 @@ async def delete_dataframe(object_name: str):
         remove_arrow_object(object_name)
         await delete_arrow_dataset(object_name)
         mark_operation_log_deleted(object_name)
+        
+        # Clear priming status from Redis when file is deleted
+        # This prevents re-uploaded files from showing as primed
+        try:
+            env = await get_env_vars()
+            client_name = env.get("CLIENT_NAME", "") if env else os.getenv("CLIENT_NAME", "")
+            app_name = env.get("APP_NAME", "") if env else os.getenv("APP_NAME", "")
+            project_name = env.get("PROJECT_NAME", "") if env else os.getenv("PROJECT_NAME", "")
+            
+            # Use the full object_name as file_name to match how it's stored in Redis
+            file_name = object_name
+            primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+            redis_client.delete(primed_key_parts)
+            logger.info(f"🗑️ Cleared priming status for deleted file: {file_name}")
+            
+            # Also try with just the filename (without path) in case it was stored that way
+            filename_only = Path(object_name).name
+            if filename_only != file_name:
+                primed_key_parts_filename = ("primed_files", client_name, app_name, project_name, filename_only)
+                redis_client.delete(primed_key_parts_filename)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to clear priming status for {object_name}: {e}")
+            # Don't fail the delete operation if clearing priming status fails
+        
         return {"deleted": object_name}
     except S3Error as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -3459,6 +3552,12 @@ async def delete_all_dataframes():
     prefix = await get_object_prefix()
     deleted = []
     try:
+        # Get environment variables for clearing priming status
+        env = await get_env_vars()
+        client_name = env.get("CLIENT_NAME", "") if env else os.getenv("CLIENT_NAME", "")
+        app_name = env.get("APP_NAME", "") if env else os.getenv("APP_NAME", "")
+        project_name = env.get("PROJECT_NAME", "") if env else os.getenv("PROJECT_NAME", "")
+        
         objects = list(minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True))
         for obj in objects:
             obj_name = obj.object_name
@@ -3468,6 +3567,20 @@ async def delete_all_dataframes():
                 if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                     raise
             redis_client.delete(obj_name)
+            
+            # Clear priming status for each deleted file
+            try:
+                file_name = obj_name
+                primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+                redis_client.delete(primed_key_parts)
+                # Also try with just the filename
+                filename_only = Path(obj_name).name
+                if filename_only != file_name:
+                    primed_key_parts_filename = ("primed_files", client_name, app_name, project_name, filename_only)
+                    redis_client.delete(primed_key_parts_filename)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to clear priming status for {obj_name}: {e}")
+            
             if obj_name.endswith('.arrow'):
                 remove_arrow_object(obj_name)
                 await delete_arrow_dataset(obj_name)
@@ -5519,10 +5632,11 @@ async def check_priming_status(
         
         current_stage = None
         completed_steps: list[str] = []
-        all_steps = ["U0", "U1", "U2", "U3", "U4", "U5", "U6", "U7"]
+        all_steps = ["U2", "U3", "U4", "U5", "U6"]
         
-        if flow_state and isinstance(flow_state, dict):
-            current_stage = flow_state.get("currentStage")
+        # Only check flow state if file is NOT primed - if primed, we know it's U6
+        # This prevents incorrectly assigning current_stage from a flow state for a different file
+        if flow_state and isinstance(flow_state, dict) and not is_primed:
             # Check if this file is in the uploaded files
             uploaded_files = flow_state.get("uploadedFiles", [])
             file_in_flow = any(
@@ -5530,6 +5644,7 @@ async def check_priming_status(
                 for f in uploaded_files
             )
             
+            # Only set current_stage if the file is actually in this flow state
             if file_in_flow:
                 current_stage = flow_state.get("currentStage")
                 # Determine completed steps based on current stage
@@ -5538,26 +5653,26 @@ async def check_priming_status(
                     if stage_index >= 0:
                         # All steps up to and including current stage are completed
                         completed_steps = all_steps[:stage_index + 1]
-                    elif current_stage == "U7":
-                        # All steps completed
+                    elif current_stage == "U6":
+                        # All steps completed (U6 is the final step)
                         completed_steps = all_steps
                 else:
-                    # If no current stage but file is in flow, assume U0 completed
-                    completed_steps = ["U0"]
+                    # If no current stage but file is in flow, assume U2 completed
+                    completed_steps = ["U2"]
         
-        # If primed flag exists, all steps are completed
+        # If primed flag exists, all steps are completed and current_stage is U6
         if is_primed:
             completed_steps = all_steps
-            current_stage = "U7"
+            current_stage = "U6"
         
         # Determine completion status
-        completed = bool(is_primed) or (current_stage == "U7")
+        completed = bool(is_primed) or (current_stage == "U6")
         missing_steps = [s for s in all_steps if s not in completed_steps]
         # Status colors:
-        # - Red: U0 or U1 (step 1 or earlier) - not in progress
-        # - Yellow: U2-U6 (step 2 to step 7) - in progress
-        # - Green: U7 (step 8 - completed) - primed
-        is_in_progress = bool(current_stage) and current_stage not in ["U0", "U1", "U7"]
+        # - Red: No stage or not started - not in progress
+        # - Yellow: U2-U5 (steps 1 to 4) - in progress
+        # - Green: U6 (step 5 - completed) - primed
+        is_in_progress = bool(current_stage) and current_stage not in ["U6"]
         
         return {
             "completed": completed,
@@ -5613,7 +5728,8 @@ async def finalize_primed_file(request: Request):
         logger.info(f"Request body: {body}")
         logger.info("=" * 80)
         
-        file_path = body.get("file_path", "")
+        file_path = body.get("file_path", "")  # Current file path (may be in tmp/ after transformations)
+        original_file_path = body.get("original_file_path", "")  # Original file path before priming (if priming existing file)
         file_name = body.get("file_name", "")
         client_name = body.get("client_name", "")
         app_name = body.get("app_name", "")
@@ -5678,10 +5794,45 @@ async def finalize_primed_file(request: Request):
         os.environ["PROJECT_NAME"] = project_name
         prefix = await get_object_prefix()
         
-        # Create the arrow file name
-        arrow_name = Path(file_name).stem + ".arrow"
+        # CRITICAL: If original_file_path is provided, use it to UPDATE the existing file at its original location
+        # This ensures primed files overwrite the original instead of creating duplicates
+        if original_file_path and original_file_path.startswith(prefix):
+            # Extract relative path (remove prefix) for arrow_name
+            rel_path = original_file_path[len(prefix):] if original_file_path.startswith(prefix) else original_file_path
+            arrow_name = rel_path
+            logger.info(f"🔄 Updating existing file at original location: {arrow_name} (original: {original_file_path}, current: {file_path})")
+        else:
+            # No original path provided - check if current file_path is already in saved location
+            tmp_prefix = prefix + "tmp/"
+            is_tmp_file = file_path.startswith(tmp_prefix) or "/tmp/" in file_path
+            
+            if not is_tmp_file and file_path.startswith(prefix):
+                # File is already in saved location - use the exact same path to overwrite it
+                rel_path = file_path[len(prefix):] if file_path.startswith(prefix) else file_path
+                arrow_name = rel_path
+                logger.info(f"🔄 Updating existing file at current location: {arrow_name} (full path: {file_path})")
+            else:
+                # File is in tmp/ or new upload - construct path preserving folder structure
+                # Extract relative path from file_path (remove prefix if present)
+                rel_path = file_path[len(prefix):] if file_path.startswith(prefix) else file_path
+                # Remove tmp/ prefix if present
+                if rel_path.startswith("tmp/"):
+                    rel_path = rel_path[4:]  # Remove "tmp/" prefix
+                path_parts = rel_path.split("/")
+                
+                # Check if this is a sheet file in folder structure: {folder_name}/sheets/{sheet_name}.arrow
+                if len(path_parts) >= 3 and path_parts[1] == "sheets":
+                    # Preserve folder structure: {folder_name}/sheets/{sheet_name}.arrow
+                    folder_name = path_parts[0]
+                    sheet_name = Path(path_parts[-1]).stem  # Remove .arrow extension
+                    arrow_name = f"{folder_name}/sheets/{sheet_name}.arrow"
+                    logger.info(f"📁 Preserving folder structure for new primed file: {arrow_name} (from tmp: {file_path})")
+                else:
+                    # Regular file - use simple name
+                    arrow_name = Path(file_name).stem + ".arrow"
+                    logger.info(f"📄 Using simple filename for new primed file: {arrow_name}")
         
-        # Upload to MinIO with proper prefix (not tmp/)
+        # Upload to MinIO with proper prefix (will overwrite if file exists)
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_object_name = result.get("object_name", "")
         

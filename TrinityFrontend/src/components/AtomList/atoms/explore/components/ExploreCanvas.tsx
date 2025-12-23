@@ -3868,7 +3868,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     <td className="table-cell">
                       <div className="flex items-center gap-2">
                         <span>{col.column || col.Column || ''}</span>
-                        {col.metadata?.is_created && (
+                        {(col.metadata?.is_created || col.metadata?.is_transformed) && (
                           <ColumnInfoIcon metadata={col.metadata} />
                         )}
                       </div>

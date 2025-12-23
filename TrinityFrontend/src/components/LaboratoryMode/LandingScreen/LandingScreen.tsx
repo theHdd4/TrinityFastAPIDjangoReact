@@ -37,15 +37,9 @@ export const LandingScreen: React.FC = () => {
 
   if (scenarioData.scenario === 'B') {
     // Partial data primed (mixed state)
-    return (
-      <PartialPrimedCard
-        files={scenarioData.files}
-        primingStatuses={scenarioData.primingStatuses}
-        primedCount={primedCount}
-        unprimedCount={totalUnprimed}
-        inProgressCount={inProgressCount}
-      />
-    );
+    // Priming UI is now integrated into the Data Upload atom,
+    // so we skip rendering the legacy landing card here.
+    return null;
   }
 
   // Scenario 'C' or 'D' - All data primed (ready state)
@@ -60,6 +54,7 @@ export const LandingScreen: React.FC = () => {
     />
   );
 };
+
 
 
 

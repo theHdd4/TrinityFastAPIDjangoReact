@@ -10,7 +10,7 @@ interface VerticalProgressStepperProps {
   onStageClick?: (stage: UploadStage) => void;
 }
 
-// Steps U2-U6 are shown in the side panel stepper (U1 and U7 removed)
+// Steps U2-U6 are shown in the side panel stepper (U0, U1, and U7 removed)
 const STAGES: Array<{ id: UploadStage; label: string }> = [
   { id: 'U2', label: 'Confirm Headers' },
   { id: 'U3', label: 'Column Names' },

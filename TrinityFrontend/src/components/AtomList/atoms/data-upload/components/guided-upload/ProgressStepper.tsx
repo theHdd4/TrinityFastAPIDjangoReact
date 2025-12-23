@@ -9,16 +9,13 @@ interface ProgressStepperProps {
   hideStages?: UploadStage[];
 }
 
-// Step 1 (Atom): Split panel for file selection/upload - NOT shown in stepper
-// Steps 2-7 (U2-U7) are shown in the panel stepper (U1 removed)
+// Only U2-U6 are shown in the panel stepper (U0, U1, and U7 removed)
 const STAGES: Array<{ id: UploadStage; label: string; shortLabel: string; stepNumber: number }> = [
-  { id: 'U0', label: 'Upload Dataset', shortLabel: 'Upload', stepNumber: 1 }, // Handled by atom (hidden)
-  { id: 'U2', label: 'Confirm Headers', shortLabel: 'Headers', stepNumber: 2 },
-  { id: 'U3', label: 'Column Names', shortLabel: 'Columns', stepNumber: 3 },
-  { id: 'U4', label: 'Data Types', shortLabel: 'Types', stepNumber: 4 },
-  { id: 'U5', label: 'Missing Values', shortLabel: 'Missing', stepNumber: 5 },
-  { id: 'U6', label: 'Final Preview', shortLabel: 'Preview', stepNumber: 6 },
-  { id: 'U7', label: 'Complete', shortLabel: 'Complete', stepNumber: 7 },
+  { id: 'U2', label: 'Confirm Headers', shortLabel: 'Headers', stepNumber: 1 },
+  { id: 'U3', label: 'Column Names', shortLabel: 'Columns', stepNumber: 2 },
+  { id: 'U4', label: 'Data Types', shortLabel: 'Types', stepNumber: 3 },
+  { id: 'U5', label: 'Missing Values', shortLabel: 'Missing', stepNumber: 4 },
+  { id: 'U6', label: 'Final Preview', shortLabel: 'Preview', stepNumber: 5 },
 ];
 
 export const ProgressStepper: React.FC<ProgressStepperProps> = ({ currentStage, className, hideStages = [] }) => {

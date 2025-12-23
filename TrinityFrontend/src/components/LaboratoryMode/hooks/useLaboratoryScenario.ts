@@ -160,19 +160,24 @@ export function useLaboratoryScenario(): ScenarioData {
 
             if (flowStateRes.ok) {
               const flowStateData = await flowStateRes.json();
-              hasCompletedFlow = flowStateData?.completed === true;
               currentStage = flowStateData?.current_stage;
+              // Check if flow has been completed - only trust if current_stage is U6 (final step)
+              // Don't use completed flag as it can be true even if file hasn't been primed
+              hasCompletedFlow = flowStateData?.current_stage === 'U6';
               // Check the is_primed flag from Redis (set when file is approved via processing modal)
               // This is the authoritative source for priming status
-              isPrimedFromAPI = flowStateData?.is_primed === true || flowStateData?.completed === true;
+              // Only trust is_primed flag, not completed flag - completed can be true if stage is U6
+              // but that doesn't mean the file has actually been primed/approved
+              isPrimedFromAPI = flowStateData?.is_primed === true;
             }
           } catch (err) {
             console.warn('Failed to check flow state for', fileName, err);
           }
 
-          // Prioritize is_primed flag from API, but also check classifier config for consistency
-          // If API says it's primed, trust that. Otherwise, require both classifier config and completed flow
-          const isPrimed = isPrimedFromAPI || (hasClassifierConfig && hasCompletedFlow);
+          // ONLY trust is_primed flag from API - this is the authoritative source
+          // Do NOT use fallback logic as it can incorrectly mark files as primed
+          // A file is only primed if the is_primed flag is explicitly set to true
+          const isPrimed = isPrimedFromAPI;
 
           statusChecks.push({
             object_name: file.object_name,
@@ -203,7 +208,7 @@ export function useLaboratoryScenario(): ScenarioData {
 
           if (savedStateRes.ok) {
             const savedStateData = await savedStateRes.json();
-            if (savedStateData?.state && savedStateData.state.currentStage && savedStateData.state.currentStage !== 'U7') {
+            if (savedStateData?.state && savedStateData.state.currentStage && savedStateData.state.currentStage !== 'U6') {
               // Flow state exists and is incomplete
               if (!cancelled) {
                 setSavedFlowState(savedStateData.state);
@@ -218,7 +223,7 @@ export function useLaboratoryScenario(): ScenarioData {
 
         // Step 4: Determine scenario based on priming statuses
         const unprimedFiles = statusChecks.filter(s => !s.isPrimed && !s.currentStage);
-        const inProgressFiles = statusChecks.filter(s => s.currentStage && s.currentStage !== 'U7');
+        const inProgressFiles = statusChecks.filter(s => s.currentStage && s.currentStage !== 'U6');
         const primedFiles = statusChecks.filter(s => s.isPrimed);
 
         if (!cancelled) {
@@ -322,7 +327,7 @@ export function useLaboratoryScenario(): ScenarioData {
   }, []);
 
   const unprimedFiles = primingStatuses.filter(s => !s.isPrimed && !s.currentStage);
-  const inProgressFiles = primingStatuses.filter(s => s.currentStage && s.currentStage !== 'U7');
+  const inProgressFiles = primingStatuses.filter(s => s.currentStage && s.currentStage !== 'U6');
   const primedFiles = primingStatuses.filter(s => s.isPrimed);
 
   return {

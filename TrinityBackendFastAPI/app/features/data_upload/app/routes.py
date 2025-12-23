@@ -3419,6 +3419,30 @@ async def delete_dataframe(object_name: str):
         remove_arrow_object(object_name)
         await delete_arrow_dataset(object_name)
         mark_operation_log_deleted(object_name)
+        
+        # Clear priming status from Redis when file is deleted
+        # This prevents re-uploaded files from showing as primed
+        try:
+            env = await get_env_vars()
+            client_name = env.get("CLIENT_NAME", "") if env else os.getenv("CLIENT_NAME", "")
+            app_name = env.get("APP_NAME", "") if env else os.getenv("APP_NAME", "")
+            project_name = env.get("PROJECT_NAME", "") if env else os.getenv("PROJECT_NAME", "")
+            
+            # Use the full object_name as file_name to match how it's stored in Redis
+            file_name = object_name
+            primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+            redis_client.delete(primed_key_parts)
+            logger.info(f"🗑️ Cleared priming status for deleted file: {file_name}")
+            
+            # Also try with just the filename (without path) in case it was stored that way
+            filename_only = Path(object_name).name
+            if filename_only != file_name:
+                primed_key_parts_filename = ("primed_files", client_name, app_name, project_name, filename_only)
+                redis_client.delete(primed_key_parts_filename)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to clear priming status for {object_name}: {e}")
+            # Don't fail the delete operation if clearing priming status fails
+        
         return {"deleted": object_name}
     except S3Error as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -3432,6 +3456,12 @@ async def delete_all_dataframes():
     prefix = await get_object_prefix()
     deleted = []
     try:
+        # Get environment variables for clearing priming status
+        env = await get_env_vars()
+        client_name = env.get("CLIENT_NAME", "") if env else os.getenv("CLIENT_NAME", "")
+        app_name = env.get("APP_NAME", "") if env else os.getenv("APP_NAME", "")
+        project_name = env.get("PROJECT_NAME", "") if env else os.getenv("PROJECT_NAME", "")
+        
         objects = list(minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True))
         for obj in objects:
             obj_name = obj.object_name
@@ -3441,6 +3471,20 @@ async def delete_all_dataframes():
                 if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                     raise
             redis_client.delete(obj_name)
+            
+            # Clear priming status for each deleted file
+            try:
+                file_name = obj_name
+                primed_key_parts = ("primed_files", client_name, app_name, project_name, file_name)
+                redis_client.delete(primed_key_parts)
+                # Also try with just the filename
+                filename_only = Path(obj_name).name
+                if filename_only != file_name:
+                    primed_key_parts_filename = ("primed_files", client_name, app_name, project_name, filename_only)
+                    redis_client.delete(primed_key_parts_filename)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to clear priming status for {obj_name}: {e}")
+            
             if obj_name.endswith('.arrow'):
                 remove_arrow_object(obj_name)
                 await delete_arrow_dataset(obj_name)
@@ -5483,10 +5527,11 @@ async def check_priming_status(
         
         current_stage = None
         completed_steps: list[str] = []
-        all_steps = ["U0", "U1", "U2", "U3", "U4", "U5", "U6", "U7"]
+        all_steps = ["U2", "U3", "U4", "U5", "U6"]
         
-        if flow_state and isinstance(flow_state, dict):
-            current_stage = flow_state.get("currentStage")
+        # Only check flow state if file is NOT primed - if primed, we know it's U6
+        # This prevents incorrectly assigning current_stage from a flow state for a different file
+        if flow_state and isinstance(flow_state, dict) and not is_primed:
             # Check if this file is in the uploaded files
             uploaded_files = flow_state.get("uploadedFiles", [])
             file_in_flow = any(
@@ -5494,6 +5539,7 @@ async def check_priming_status(
                 for f in uploaded_files
             )
             
+            # Only set current_stage if the file is actually in this flow state
             if file_in_flow:
                 current_stage = flow_state.get("currentStage")
                 # Determine completed steps based on current stage
@@ -5502,31 +5548,31 @@ async def check_priming_status(
                     if stage_index >= 0:
                         # All steps up to and including current stage are completed
                         completed_steps = all_steps[:stage_index + 1]
-                    elif current_stage == "U7":
-                        # All steps completed
+                    elif current_stage == "U6":
+                        # All steps completed (U6 is the final step)
                         completed_steps = all_steps
                 else:
-                    # If no current stage but file is in flow, assume U0 completed
-                    completed_steps = ["U0"]
+                    # If no current stage but file is in flow, assume U2 completed
+                    completed_steps = ["U2"]
         
-        # If primed flag exists, all steps are completed
+        # If primed flag exists, all steps are completed and current_stage is U6
         if is_primed:
             completed_steps = all_steps
-            current_stage = "U7"
+            current_stage = "U6"
         
         # Determine completion status
-        completed = bool(is_primed) or (current_stage == "U7")
+        completed = bool(is_primed) or (current_stage == "U6")
         missing_steps = [s for s in all_steps if s not in completed_steps]
         # Status colors (proper encoding):
-        # - Red: File not approved/not primed (no guided mode started OR U0/U1 - not started)
-        # - Yellow: File has started guided mode but not completed (U2-U6 - in progress)
-        # - Green: File is fully primed/approved (U7 - completed)
-        # is_in_progress means: guided mode has started (U2-U6) but not completed (not primed)
+        # - Red: File not approved/not primed (no guided mode started - not started)
+        # - Yellow: File has started guided mode but not completed (U2-U5 - in progress)
+        # - Green: File is fully primed/approved (U6 - completed)
+        # is_in_progress means: guided mode has started (U2-U5) but not completed (not primed)
         is_in_progress = (
             not is_primed and 
             bool(current_stage) and 
-            current_stage not in ["U0", "U1", "U7"] and
-            current_stage in ["U2", "U3", "U4", "U5", "U6"]
+            current_stage not in ["U6"] and
+            current_stage in ["U2", "U3", "U4", "U5"]
         )
         
         return {
@@ -5583,7 +5629,8 @@ async def finalize_primed_file(request: Request):
         logger.info(f"Request body: {body}")
         logger.info("=" * 80)
         
-        file_path = body.get("file_path", "")
+        file_path = body.get("file_path", "")  # Current file path (may be in tmp/ after transformations)
+        original_file_path = body.get("original_file_path", "")  # Original file path before priming (if priming existing file)
         file_name = body.get("file_name", "")
         selected_sheet = body.get("selected_sheet")  # For Excel sheets
         use_folder_structure = body.get("use_folder_structure", False)  # For multi-sheet Excel files
@@ -5611,6 +5658,7 @@ async def finalize_primed_file(request: Request):
         
         # CRITICAL: If file is already in a folder (not in tmp/), preserve the existing folder structure
         # Extract folder path from file_path if it's already in a saved location
+        # This is especially important for files in sheets/ folder structure
         if not preserve_existing_folder and file_path and '/' in file_path and not file_path.startswith(prefix + "tmp/") and "/tmp/" not in file_path:
             # File is already in a saved folder location, extract the folder path
             # file_path format: prefix + folder_path + filename
@@ -5622,12 +5670,28 @@ async def finalize_primed_file(request: Request):
             if len(folder_parts) > 1:
                 existing_folder_path = '/'.join(folder_parts[:-1])  # All parts except the filename
                 preserve_existing_folder = True
-                logger.info(f"📁 Detected existing folder structure in file_path: {existing_folder_path} (from {file_path})")
+                # If this is a sheets/ folder structure, ensure we preserve it
+                if "/sheets/" in file_path or existing_folder_path.endswith("/sheets"):
+                    logger.info(f"📁 Detected sheets/ folder structure in file_path: {existing_folder_path} (from {file_path})")
+                else:
+                    logger.info(f"📁 Detected existing folder structure in file_path: {existing_folder_path} (from {file_path})")
         
         # Handle sheet files: file_name format is "fileName (sheetName)"
         # Extract base filename and sheet name for proper arrow file naming
         base_file_name = base_file_name_param or file_name
         sheet_name = None
+        
+        # CRITICAL: First check if file_path contains sheets/ folder structure
+        # If so, extract sheet name from the path itself
+        file_path_without_prefix = file_path[len(prefix):] if file_path.startswith(prefix) else file_path
+        path_parts = file_path_without_prefix.split("/")
+        if len(path_parts) >= 3 and path_parts[1] == "sheets":
+            # This is a sheet file in folder structure: {folder_name}/sheets/{sheet_name}.arrow
+            sheet_name_from_path = Path(path_parts[-1]).stem  # Remove .arrow extension
+            if not selected_sheet:
+                sheet_name = sheet_name_from_path
+                logger.info(f"📁 Extracted sheet name from file_path: {sheet_name} (from {file_path})")
+        
         if selected_sheet:
             sheet_name = selected_sheet
             # If file_name contains sheet info like "file.xlsx (Sheet1)", extract base name
@@ -5637,7 +5701,7 @@ async def finalize_primed_file(request: Request):
                 base_file_name = base_file_name_param or sheet_match.group(1).strip()
                 if not sheet_name:
                     sheet_name = sheet_match.group(2).strip()
-        elif '(' in file_name and ')' in file_name:
+        elif not sheet_name and '(' in file_name and ')' in file_name:
             # Extract sheet name from file_name format "fileName (sheetName)"
             import re
             sheet_match = re.match(r'^(.+?)\s*\(([^)]+)\)$', file_name)
@@ -5689,69 +5753,77 @@ async def finalize_primed_file(request: Request):
             writer.write(arrow_table)
         arrow_bytes = arrow_buf.getvalue()
         
-        # Create the arrow file name and determine folder structure
-        # CRITICAL: For sheets, ALWAYS use folder structure to prevent sheets from being pulled out
-        # If sheet_name exists, we MUST use folder structure regardless of use_folder_structure flag
-        # This ensures sheets NEVER appear outside folders
-        if sheet_name:
-            # ALWAYS use folder structure for sheets - this prevents them from being pulled out
-            if not use_folder_structure:
-                logger.warning(f"⚠️ Sheet detected ({sheet_name}) but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out.")
-            use_folder_structure = True  # Force folder structure for sheets
-        
-        if use_folder_structure and sheet_name:
-            # CRITICAL: If preserve_existing_folder is True, use the existing folder path
-            # This ensures files already in folders stay in their original folder location
-            if preserve_existing_folder and existing_folder_path:
-                # Extract just the filename from file_name (in case it has sheet info)
-                from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
-                normalized_sheet = normalize_sheet_name(sheet_name)
-                # Use the existing folder path and just add the sheet filename
-                # existing_folder_path should already include the full folder structure (e.g., "folder_name/sheets")
-                # So we just append the normalized sheet name with .arrow extension
-                arrow_name = f"{existing_folder_path}/{normalized_sheet}.arrow"
-                logger.info(f"📁 Preserving existing folder structure: {arrow_name} (existing_folder: {existing_folder_path}, sheet: {sheet_name})")
-            else:
-                # Normalize Excel folder name from base file name
-                # Use a more robust normalization to prevent conflicts across multiple folders
+        # CRITICAL: If original_file_path is provided, use it to UPDATE the existing file at its original location
+        # This ensures primed files overwrite the original instead of creating duplicates
+        if original_file_path and original_file_path.startswith(prefix):
+            # Extract relative path (remove prefix) for arrow_name
+            rel_path = original_file_path[len(prefix):] if original_file_path.startswith(prefix) else original_file_path
+            arrow_name = rel_path
+            logger.info(f"🔄 Updating existing file at original location: {arrow_name} (original: {original_file_path}, current: {file_path})")
+        else:
+            # Create the arrow file name and determine folder structure
+            # CRITICAL: For sheets, ALWAYS use folder structure to prevent sheets from being pulled out
+            # If sheet_name exists, we MUST use folder structure regardless of use_folder_structure flag
+            # This ensures sheets NEVER appear outside folders
+            if sheet_name:
+                # ALWAYS use folder structure for sheets - this prevents them from being pulled out
+                if not use_folder_structure:
+                    logger.warning(f"⚠️ Sheet detected ({sheet_name}) but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out.")
+                use_folder_structure = True  # Force folder structure for sheets
+            
+            if use_folder_structure and sheet_name:
+                # CRITICAL: If preserve_existing_folder is True, use the existing folder path
+                # This ensures files already in folders stay in their original folder location
+                if preserve_existing_folder and existing_folder_path:
+                    # Extract just the filename from file_name (in case it has sheet info)
+                    from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
+                    normalized_sheet = normalize_sheet_name(sheet_name)
+                    # Use the existing folder path and just add the sheet filename
+                    # existing_folder_path should already include the full folder structure (e.g., "folder_name/sheets")
+                    # So we just append the normalized sheet name with .arrow extension
+                    arrow_name = f"{existing_folder_path}/{normalized_sheet}.arrow"
+                    logger.info(f"📁 Preserving existing folder structure: {arrow_name} (existing_folder: {existing_folder_path}, sheet: {sheet_name})")
+                else:
+                    # Normalize Excel folder name from base file name
+                    # Use a more robust normalization to prevent conflicts across multiple folders
+                    base_stem = Path(base_file_name).stem
+                    # Normalize: remove spaces, special chars, make it filesystem-safe
+                    excel_folder_name = base_stem.replace(' ', '_').replace('.', '_')
+                    excel_folder_name = ''.join(c for c in excel_folder_name if c.isalnum() or c in ('_', '-'))
+                    
+                    # If folder name is empty or too short, use a fallback
+                    if not excel_folder_name or len(excel_folder_name) < 2:
+                        excel_folder_name = 'Excel_File'
+                    
+                    # Normalize sheet name (remove spaces, special chars)
+                    from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
+                    normalized_sheet = normalize_sheet_name(sheet_name)
+                    
+                    # Use folder structure: {excel_folder_name}/sheets/{normalized_sheet}.arrow
+                    # This ensures sheets stay in folders and prevents conflicts
+                    arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet}.arrow"
+                    
+                    logger.info(f"📁 Using folder structure: {arrow_name} (base: {base_file_name}, sheet: {sheet_name})")
+            elif sheet_name:
+                # CRITICAL: If we have a sheet_name but use_folder_structure is False, 
+                # we MUST still use folder structure to prevent sheets from being pulled out
+                # This ensures sheets NEVER appear outside folders
+                logger.warning(f"⚠️ Sheet detected but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out: {sheet_name}")
                 base_stem = Path(base_file_name).stem
-                # Normalize: remove spaces, special chars, make it filesystem-safe
                 excel_folder_name = base_stem.replace(' ', '_').replace('.', '_')
                 excel_folder_name = ''.join(c for c in excel_folder_name if c.isalnum() or c in ('_', '-'))
-                
-                # If folder name is empty or too short, use a fallback
                 if not excel_folder_name or len(excel_folder_name) < 2:
                     excel_folder_name = 'Excel_File'
-                
-                # Normalize sheet name (remove spaces, special chars)
                 from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
                 normalized_sheet = normalize_sheet_name(sheet_name)
-                
-                # Use folder structure: {excel_folder_name}/sheets/{normalized_sheet}.arrow
-                # This ensures sheets stay in folders and prevents conflicts
                 arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet}.arrow"
-                
-                logger.info(f"📁 Using folder structure: {arrow_name} (base: {base_file_name}, sheet: {sheet_name})")
-        elif sheet_name:
-            # CRITICAL: If we have a sheet_name but use_folder_structure is False, 
-            # we MUST still use folder structure to prevent sheets from being pulled out
-            # This ensures sheets NEVER appear outside folders
-            logger.warning(f"⚠️ Sheet detected but use_folder_structure=False. Forcing folder structure to prevent sheet from being pulled out: {sheet_name}")
-            base_stem = Path(base_file_name).stem
-            excel_folder_name = base_stem.replace(' ', '_').replace('.', '_')
-            excel_folder_name = ''.join(c for c in excel_folder_name if c.isalnum() or c in ('_', '-'))
-            if not excel_folder_name or len(excel_folder_name) < 2:
-                excel_folder_name = 'Excel_File'
-            from app.features.data_upload.app.minio_sheet_utils import normalize_sheet_name
-            normalized_sheet = normalize_sheet_name(sheet_name)
-            arrow_name = f"{excel_folder_name}/sheets/{normalized_sheet}.arrow"
-            logger.info(f"📁 Forced folder structure to keep sheet in folder: {arrow_name}")
-            # Update use_folder_structure flag for logging
-            use_folder_structure = True
-        else:
-            arrow_name = Path(base_file_name).stem + ".arrow"
+                logger.info(f"📁 Forced folder structure to keep sheet in folder: {arrow_name}")
+                # Update use_folder_structure flag for logging
+                use_folder_structure = True
+            else:
+                arrow_name = Path(base_file_name).stem + ".arrow"
         
-        # Upload to MinIO with proper prefix (not tmp/)
+        # Upload to MinIO with proper prefix (will overwrite if file exists)
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_object_name = result.get("object_name", "")
         

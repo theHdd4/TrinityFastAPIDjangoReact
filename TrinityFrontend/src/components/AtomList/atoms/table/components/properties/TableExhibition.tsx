@@ -41,7 +41,7 @@ const TableExhibition: React.FC<Props> = ({ atomId }) => {
       theme: 'plain',
       borderStyle: 'all',
     },
-    conditionalFormats: [],
+    //conditionalFormats: [],
     ...baseSettings,
     conditionalFormats: baseSettings.conditionalFormats || [],
   };

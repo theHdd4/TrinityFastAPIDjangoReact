@@ -48,6 +48,18 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({ atomId 
         ...settings,
         ...newSettings
       });
+
+      // Record the current dataframe selection for this atom in the laboratory store
+      if (newSettings.selectedFile) {
+        try {
+          const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+          const fileId = newSettings.selectedFile;
+          const normalized = fileId.endsWith('.arrow') ? fileId : `${fileId}.arrow`;
+          setAtomCurrentDataframe(atomId, normalized);
+        } catch {
+          // best-effort; do not block KPI dashboard on metrics sync
+        }
+      }
     },
     [atomId, settings, updateSettings]
   );

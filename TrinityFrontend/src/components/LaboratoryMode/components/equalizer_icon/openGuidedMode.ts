@@ -12,7 +12,7 @@ interface Frame {
 interface OpenGuidedModeParams {
   frame: Frame;
   findOrCreateDataUploadAtom: () => string;
-  setActiveGuidedFlow: (atomId: string, currentStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7', state?: any) => void;
+  setActiveGuidedFlow: (atomId: string, currentStage: 'U2' | 'U3' | 'U4' | 'U5' | 'U6', state?: any) => void;
   setGlobalGuidedMode: (enabled: boolean) => void;
   // Optional: Direct dependencies in case the function approach fails
   cards?: any[];
@@ -56,36 +56,56 @@ export const openGuidedMode = async ({
       return;
     }
 
-    // Find the landing card atom instead of creating a new data-upload atom
-    // The landing card should host the guided flow
-    console.log('[openGuidedMode] Looking for landing card atom...');
+    // Find or create a data-upload atom to host the guided flow
+    // The function will search for existing atoms first, then create one if needed
+    console.log('[openGuidedMode] Looking for or creating data-upload atom...');
     console.log('[openGuidedMode] Cards available:', Array.isArray(cards) ? cards.length : 'not an array');
     let atomId: string = '';
     
-    // Look for landing-screen atom in cards
+    // Look for data-upload atom first (new integrated approach), then landing-screen atom (legacy)
     if (Array.isArray(cards)) {
+      // First pass: look for data-upload atom (integrated in Upload atom)
       for (const card of cards) {
         if (card?.atoms && Array.isArray(card.atoms)) {
           console.log('[openGuidedMode] Checking card:', card.id, 'with', card.atoms.length, 'atoms');
           for (const atom of card.atoms) {
             console.log('[openGuidedMode] Checking atom:', atom.atomId, atom.id);
-            // Use landing-screen atom if it exists
-            if (atom?.atomId === 'landing-screen' && atom?.id) {
+            if (atom?.atomId === 'data-upload' && atom?.id) {
               atomId = atom.id;
-              console.log('[openGuidedMode] ✅ Found landing card atom:', atomId);
+              console.log('[openGuidedMode] ✅ Found data-upload atom (integrated):', atomId);
               break;
             }
           }
           if (atomId) break;
         }
       }
+      
+      // Second pass: fallback to landing-screen atom (legacy)
+      if (!atomId) {
+        for (const card of cards) {
+          if (card?.atoms && Array.isArray(card.atoms)) {
+            for (const atom of card.atoms) {
+              if (atom?.atomId === 'landing-screen' && atom?.id) {
+                atomId = atom.id;
+                console.log('[openGuidedMode] ✅ Found landing-screen atom (legacy):', atomId);
+                break;
+              }
+            }
+            if (atomId) break;
+          }
+        }
+      }
     }
     
-    // If no landing card found, try the function approach as fallback
+    // If no atom found, create a new data-upload atom
+    // This handles the case where the upload atom was deleted from the canvas
     if (!atomId && typeof findOrCreateDataUploadAtom === 'function') {
       try {
         atomId = findOrCreateDataUploadAtom();
-        console.log('[openGuidedMode] Got atomId from function (fallback):', atomId);
+        console.log('[openGuidedMode] Created/found atomId from function:', atomId);
+        if (atomId) {
+          console.log('[openGuidedMode] ✅ Successfully created new data-upload atom for guided mode');
+        }
       } catch (error) {
         console.error('[openGuidedMode] Error calling findOrCreateDataUploadAtom:', error);
       }
@@ -102,7 +122,8 @@ export const openGuidedMode = async ({
     // Check priming status to determine initial stage
     const projectContext = getActiveProjectContext();
     // Default to U2 (Confirm Headers) for files uploaded directly from Saved DataFrames (U1 removed)
-    let startStage: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7' = 'U2';
+    let startStage: 'U2' | 'U3' | 'U4' | 'U5' | 'U6' = 'U2';
+    let isPrimed = false;
     
     if (projectContext) {
       try {
@@ -122,18 +143,24 @@ export const openGuidedMode = async ({
           const primingData = await primingCheckRes.json();
           const currentStage = primingData?.current_stage;
           const isInProgress = primingData?.is_in_progress;
-          const isPrimed = primingData?.is_primed;
+          isPrimed = primingData?.is_primed;
           
-          // If file is fully primed, start at U2 to allow re-processing
+          // If file is fully primed, allow opening guided mode for review/modification
+          // Start at the last completed stage (U6) or current stage if available
           if (isPrimed) {
-            startStage = 'U2';
+            console.log('[openGuidedMode] File is already primed, opening guided workflow for review');
+            // If there's a current stage, use it; otherwise start at U6 (final stage)
+            if (currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
+              startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
+            } else {
+              startStage = 'U6'; // Start at final stage for fully primed files
+            }
           }
           // If file is in progress (partially primed), continue from current stage
-          // Skip U1 if it was the current stage, go to U2 instead
           else if (isInProgress && currentStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(currentStage)) {
             startStage = currentStage as 'U2' | 'U3' | 'U4' | 'U5' | 'U6';
           }
-          // If file has started but not in progress (U0 or U1), start at U2 (U1 removed)
+          // If file has old stage (U0 or U1), start at U2 (U0 and U1 removed)
           else if (currentStage === 'U0' || currentStage === 'U1') {
             startStage = 'U2';
           }

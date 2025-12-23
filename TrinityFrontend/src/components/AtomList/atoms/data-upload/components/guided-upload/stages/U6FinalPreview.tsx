@@ -565,6 +565,16 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
             console.error('❌ [U6FinalPreview] Cannot mark file as primed - path is missing!');
           }
 
+          // After successful save, update col.name to col.newName for all renamed columns
+          // This makes the renamed value become the new "original" name
+          setColumns(prev => prev.map(col => {
+            const trimmedNewName = col.newName?.trim();
+            if (trimmedNewName && trimmedNewName !== col.name) {
+              return { ...col, name: trimmedNewName };
+            }
+            return col;
+          }));
+
           // Close guided mode (exactly like Direct Review mode calls onClose)
           setSaving(false);
           setTimeout(() => {
@@ -629,7 +639,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
           <div 
             className="overflow-x-auto" 
             style={{ 
-              maxHeight: '8.75rem',
+              maxHeight: isMaximized ? 'calc(100vh - 300px)' : '8.75rem',
               overflowY: 'auto',
               scrollbarGutter: 'stable'
             }}
@@ -707,10 +717,10 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
                       className={col.dropColumn ? 'bg-gray-50 opacity-60 hover:bg-gray-50' : 'hover:bg-gray-50'}
                       style={{ height: '1.75rem' }}
                     >
-                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={col.newName}>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={col.name}>
                         <div className="truncate">
                           <div className="text-gray-700 text-[10px] leading-tight truncate">
-                            {col.newName}
+                            {col.name}
                           </div>
                           {uniqueSampleValues.length === 0 ? (
                             <div className="text-gray-400 text-[9px] leading-tight truncate">No samples</div>

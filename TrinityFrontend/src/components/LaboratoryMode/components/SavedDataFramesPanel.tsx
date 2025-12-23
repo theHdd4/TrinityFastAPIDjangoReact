@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X, Wrench, FileText } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X, Wrench, FileText, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API, CLASSIFIER_API, SHARE_LINKS_API } from '@/lib/api';
@@ -31,9 +31,10 @@ import {
 import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore, createDefaultDataUploadSettings, DroppedAtom } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { openGuidedMode } from './equalizer_icon';
+import { atoms as allAtoms } from '@/components/AtomList/data';
 
 interface Props {
   isOpen: boolean;
@@ -170,6 +171,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     children?: TreeNode[];
     frame?: Frame;
     isExcelFolder?: boolean;
+    isSheetsFolder?: boolean;
     sheets?: ExcelSheet[];
   }
 
@@ -265,24 +267,54 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const updateCard = useLaboratoryStore((state) => state.updateCard);
   const setCards = useLaboratoryStore((state) => state.setCards);
   const addAtom = useLaboratoryStore((state) => (state as any).addAtom); // May not exist, used only for debugging
+  const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows);
+  const removeActiveGuidedFlow = useLaboratoryStore((state) => state.removeActiveGuidedFlow);
+  const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
+  
+  // State for mode switching confirmation dialog
+  const [modeSwitchConfirmation, setModeSwitchConfirmation] = useState<{
+    show: boolean;
+    fromMode: 'direct' | 'guided';
+    toMode: 'direct' | 'guided';
+    frame: Frame | null;
+    onConfirm: () => void;
+  }>({
+    show: false,
+    fromMode: 'direct',
+    toMode: 'guided',
+    frame: null,
+    onConfirm: () => {},
+  });
   
   // Hook for marking files as primed
   const { markFileAsPrimed } = useGuidedFlowPersistence();
 
-  // Helper function to find the landing card atom (not create a new one)
+  // Helper function to find or create a data-upload atom
   // Use useCallback to ensure stable function reference
+  // Priority: data-upload atom (new integrated approach) > landing-screen atom (legacy) > create new data-upload atom
   const findOrCreateDataUploadAtom = useCallback(() => {
     try {
-      console.log('[findOrCreateDataUploadAtom] Looking for landing card atom, cards type:', Array.isArray(cards) ? `array(${cards.length})` : typeof cards);
+      console.log('[findOrCreateDataUploadAtom] Looking for data-upload or landing card atom, cards type:', Array.isArray(cards) ? `array(${cards.length})` : typeof cards);
       
-      // Look for landing-screen atom (the landing card)
       if (Array.isArray(cards)) {
+        // First, look for data-upload atom (new integrated approach in Upload atom)
         for (const card of cards) {
           if (card?.atoms && Array.isArray(card.atoms)) {
             for (const atom of card.atoms) {
-              // Use landing-screen atom instead of creating data-upload atom
+              if (atom?.atomId === 'data-upload' && atom?.id) {
+                console.log('[findOrCreateDataUploadAtom] Found data-upload atom (integrated):', atom.id);
+                return atom.id;
+              }
+            }
+          }
+        }
+        
+        // Fallback: look for landing-screen atom (legacy approach)
+        for (const card of cards) {
+          if (card?.atoms && Array.isArray(card.atoms)) {
+            for (const atom of card.atoms) {
               if (atom?.atomId === 'landing-screen' && atom?.id) {
-                console.log('[findOrCreateDataUploadAtom] Found landing card atom:', atom.id);
+                console.log('[findOrCreateDataUploadAtom] Found landing-screen atom (legacy):', atom.id);
                 return atom.id;
               }
             }
@@ -290,19 +322,58 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         }
       }
 
-      console.error('[findOrCreateDataUploadAtom] Landing card atom not found');
-      return '';
+      // No existing atom found - create a new data-upload atom
+      console.log('[findOrCreateDataUploadAtom] No existing data-upload atom found, creating a new one...');
+      
+      // Get atom information from allAtoms
+      const atomInfo = allAtoms.find(a => a.id === 'data-upload');
+      if (!atomInfo) {
+        console.error('[findOrCreateDataUploadAtom] data-upload atom not found in allAtoms');
+        return '';
+      }
+
+      // Generate unique IDs
+      const generateId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const newAtomId = generateId('data-upload');
+      const newCardId = generateId('card');
+
+      // Create new atom with proper structure
+      const newAtom: DroppedAtom = {
+        id: newAtomId,
+        atomId: 'data-upload',
+        title: atomInfo.title || 'Data Upload',
+        category: atomInfo.category || 'Data Sources',
+        color: atomInfo.color || 'bg-blue-500',
+        source: 'manual',
+        settings: createDefaultDataUploadSettings(),
+      };
+
+      // Create new card with the atom
+      const newCard = {
+        id: newCardId,
+        atoms: [newAtom],
+        isExhibited: false,
+        variables: [],
+      };
+
+      // Add the new card to the cards array
+      const currentCards = Array.isArray(cards) ? cards : [];
+      setCards([...currentCards, newCard]);
+
+      console.log('[findOrCreateDataUploadAtom] Created new data-upload atom:', newAtomId, 'in card:', newCardId);
+      return newAtomId;
     } catch (error) {
       console.error('[findOrCreateDataUploadAtom] Error:', error);
       return '';
     }
-  }, [cards]);
+  }, [cards, setCards]);
+  
   const [viewColumns, setViewColumns] = useState<ProcessingColumnConfig[]>([]);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError, setViewError] = useState('');
   const [isGuidedUploadFlowOpen, setIsGuidedUploadFlowOpen] = useState(false);
   const [guidedFlowInitialFile, setGuidedFlowInitialFile] = useState<{ name: string; path: string; size?: number } | undefined>(undefined);
-  const [guidedFlowInitialStage, setGuidedFlowInitialStage] = useState<'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'U6' | 'U7'>('U1');
+  const [guidedFlowInitialStage, setGuidedFlowInitialStage] = useState<'U2' | 'U3' | 'U4' | 'U5' | 'U6'>('U2');
 
   const getProcessingDtypeOptions = (currentDtype: string) => {
     const baseOptions = [
@@ -2245,18 +2316,21 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     }
   }, [markFileAsPrimed, toast]);
 
-  useEffect(() => {
-    // Auto-approve files instead of opening preview modal
-    if (processingTarget || pendingProcessFiles.length === 0 || !files.length) return;
-    
-    const nextFileToProcess = pendingProcessFiles[0];
-    const frame = files.find(f => f.object_name === nextFileToProcess);
-    if (frame) {
-      // Remove this file from the queue and auto-approve
-      setPendingProcessFiles(prev => prev.slice(1));
-      void autoApproveFile(frame);
-    }
-  }, [files, pendingProcessFiles, processingTarget, autoApproveFile]);
+  // DISABLED: Auto-approve files after upload
+  // Files should only be primed when explicitly approved by the user through the guided workflow
+  // This prevents files from being automatically primed without user confirmation
+  // useEffect(() => {
+  //   // Auto-approve files instead of opening preview modal
+  //   if (processingTarget || pendingProcessFiles.length === 0 || !files.length) return;
+  //   
+  //   const nextFileToProcess = pendingProcessFiles[0];
+  //   const frame = files.find(f => f.object_name === nextFileToProcess);
+  //   if (frame) {
+  //     // Remove this file from the queue and auto-approve
+  //     setPendingProcessFiles(prev => prev.slice(1));
+  //     void autoApproveFile(frame);
+  //   }
+  // }, [files, pendingProcessFiles, processingTarget, autoApproveFile]);
 
   const handleOpen = (obj: string) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
@@ -2750,21 +2824,34 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   // Build tree from regular files
   const tree = buildTree(files, prefix);
   
-  // Add Excel folders to the tree
-  const excelFolderNodes: TreeNode[] = excelFolders.map(folder => ({
-    name: folder.name,
-    path: folder.path,
-    isExcelFolder: true,
-    sheets: folder.sheets.map(sheet => ({
-      object_name: sheet.object_name,
-      sheet_name: sheet.sheet_name,
-      arrow_name: sheet.arrow_name,
-      csv_name: sheet.csv_name,
-      last_modified: sheet.last_modified,
-      size: sheet.size,
-    })),
-    children: []
-  }));
+  // Add Excel folders to the tree with sheets/ folder as intermediate node
+  const excelFolderNodes: TreeNode[] = excelFolders.map(folder => {
+    // Create a sheets folder node as a child
+    const sheetsFolderPath = `${folder.path}sheets/`;
+    const sheetsFolderNode: TreeNode = {
+      name: 'sheets',
+      path: sheetsFolderPath,
+      isExcelFolder: false,
+      isSheetsFolder: true,
+      sheets: folder.sheets.map(sheet => ({
+        object_name: sheet.object_name,
+        sheet_name: sheet.sheet_name,
+        arrow_name: sheet.arrow_name,
+        csv_name: sheet.csv_name,
+        last_modified: sheet.last_modified,
+        size: sheet.size,
+      })),
+      children: []
+    };
+    
+    return {
+      name: folder.name,
+      path: folder.path,
+      isExcelFolder: true,
+      sheets: [], // Sheets are now in the sheets folder node
+      children: [sheetsFolderNode] // Add sheets folder as child
+    };
+  });
   
   // Combine regular tree with Excel folders
   const combinedTree = [...tree, ...excelFolderNodes];
@@ -2776,14 +2863,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   // Helper function to get step name
   const getStepName = (step: string): string => {
     const stepNames: Record<string, string> = {
-      'U0': 'Upload',
-      'U1': 'Scan',
-      'U2': 'Understand',
-      'U3': 'Headers',
-      'U4': 'Columns',
-      'U5': 'Types',
-      'U6': 'Missing',
-      'U7': 'Summary',
+      'U2': 'Step 1',
+      'U3': 'Step 2',
+      'U4': 'Step 3',
+      'U5': 'Step 4',
+      'U6': 'Step 5',
     };
     return stepNames[step] || step;
   };
@@ -2798,9 +2882,19 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   };
 
   const renderNode = (node: TreeNode, level = 0): React.ReactNode => {
-    // Handle Excel folders with expandable sheets
-    if (node.isExcelFolder && node.sheets) {
+    // Handle Excel folders - show children (sheets folder)
+    if (node.isExcelFolder) {
       const isOpen = openDirs[node.path];
+      // Count total sheets from children (sheets folder)
+      const totalSheets = node.children?.find(c => c.isSheetsFolder)?.sheets?.length || 0;
+      // Count unprimed sheets in this folder
+      const sheetsInFolder = node.children?.find(c => c.isSheetsFolder)?.sheets || [];
+      const unprimedCount = sheetsInFolder.filter((sheet: ExcelSheet) => {
+        const sheetStatus = filePrimingStatus[sheet.object_name];
+        return !sheetStatus?.isApproved;
+      }).length;
+      const allPrimed = unprimedCount === 0 && totalSheets > 0;
+      
       return (
         <div key={node.path} style={{ marginLeft: level * 12 }} className="mt-1">
           <div className="flex items-center justify-between">
@@ -2823,9 +2917,23 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 <ChevronRight className="w-3.5 h-3.5 mr-1" />
               )}
               <span>{node.name}</span>
-              <span className="ml-2 text-xs text-gray-500 font-normal">
-                ({node.sheets.length} sheet{node.sheets.length !== 1 ? 's' : ''})
-              </span>
+              {totalSheets > 0 && (
+                <span className="ml-2 text-xs text-gray-500 font-normal">
+                  ({totalSheets} sheet{totalSheets !== 1 ? 's' : ''})
+                </span>
+              )}
+              {/* Show unprimed count badge or green dot */}
+              {totalSheets > 0 && (
+                <>
+                  {unprimedCount > 0 ? (
+                    <span className="ml-2 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 border border-red-300">
+                      {unprimedCount} unprimed
+                    </span>
+                  ) : allPrimed ? (
+                    <span className="ml-2 inline-flex items-center justify-center w-2 h-2 rounded-full bg-green-500" title="All sheets primed" />
+                  ) : null}
+                </>
+              )}
             </button>
             <Trash2
               className="w-3.5 h-3.5 text-gray-400 cursor-pointer ml-2 hover:text-red-500"
@@ -2834,6 +2942,36 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 promptDeleteFolder(node.path);
               }}
             />
+          </div>
+          {isOpen && node.children && (
+            <div className="ml-4 mt-1">
+              {node.children.map(child => renderNode(child, level + 1))}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    // Handle sheets folder with expandable sheets
+    if (node.isSheetsFolder && node.sheets) {
+      const isOpen = openDirs[node.path];
+      return (
+        <div key={node.path} style={{ marginLeft: level * 12 }} className="mt-1">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => toggleDir(node.path)}
+              className="flex items-center text-xs text-gray-700 hover:text-gray-900 font-medium"
+            >
+              {isOpen ? (
+                <ChevronDown className="w-3.5 h-3.5 mr-1" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 mr-1" />
+              )}
+              <span>{node.name}</span>
+              <span className="ml-2 text-xs text-gray-500 font-normal">
+                ({node.sheets.length} sheet{node.sheets.length !== 1 ? 's' : ''})
+              </span>
+            </button>
           </div>
           {isOpen && (
             <div className="ml-4 mt-1 space-y-0.5">
@@ -4544,18 +4682,45 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   e.stopPropagation();
                   const target = modeSelectionTarget;
                   if (target) {
-                    try {
-                      // Ensure handleOpenGuidedFlow is a function before calling
-                      if (typeof handleOpenGuidedFlow === 'function') {
-                        await handleOpenGuidedFlow(target);
-                      } else {
-                        console.error('[SavedDataFramesPanel] handleOpenGuidedFlow is not a function, type:', typeof handleOpenGuidedFlow);
+                    // Check if Direct mode is currently active
+                    if (directReviewTarget) {
+                      // Show confirmation dialog before switching from Direct to Guided mode
+                      setModeSwitchConfirmation({
+                        show: true,
+                        fromMode: 'direct',
+                        toMode: 'guided',
+                        frame: target,
+                        onConfirm: async () => {
+                          // Clear Direct mode
+                          setDirectReviewTarget(null);
+                          // Proceed with Guided mode activation
+                          try {
+                            if (typeof handleOpenGuidedFlow === 'function') {
+                              await handleOpenGuidedFlow(target);
+                            } else {
+                              console.error('[SavedDataFramesPanel] handleOpenGuidedFlow is not a function, type:', typeof handleOpenGuidedFlow);
+                            }
+                          } catch (error) {
+                            console.error('[SavedDataFramesPanel] Error opening guided flow:', error);
+                          }
+                          setModeSelectionTarget(null);
+                          setModeSwitchConfirmation({ show: false, fromMode: 'direct', toMode: 'guided', frame: null, onConfirm: () => {} });
+                        },
+                      });
+                    } else {
+                      // No Direct mode active, proceed directly
+                      try {
+                        if (typeof handleOpenGuidedFlow === 'function') {
+                          await handleOpenGuidedFlow(target);
+                        } else {
+                          console.error('[SavedDataFramesPanel] handleOpenGuidedFlow is not a function, type:', typeof handleOpenGuidedFlow);
+                        }
+                      } catch (error) {
+                        console.error('[SavedDataFramesPanel] Error opening guided flow:', error);
                       }
-                    } catch (error) {
-                      console.error('[SavedDataFramesPanel] Error opening guided flow:', error);
+                      setModeSelectionTarget(null);
                     }
                   }
-                  setModeSelectionTarget(null);
                 }}
               >
                 <div className="flex items-center gap-3 mb-2 w-full">
@@ -4577,11 +4742,44 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   e.stopPropagation();
                   const target = modeSelectionTarget;
                   if (target) {
-                    openProcessingModal(target).catch((error) => {
-                      console.error('[SavedDataFramesPanel] Error opening processing modal:', error);
-                    });
+                    // Check if Guided mode is active (if globally enabled, show confirmation)
+                    if (globalGuidedModeEnabled) {
+                      // Get the landing atom ID to clear the flow
+                      const atomId = findOrCreateDataUploadAtom();
+                      // Show confirmation dialog before switching from Guided to Direct mode
+                      setModeSwitchConfirmation({
+                        show: true,
+                        fromMode: 'guided',
+                        toMode: 'direct',
+                        frame: target,
+                        onConfirm: async () => {
+                          // Clear Guided mode state for the landing atom
+                          if (atomId) {
+                            removeActiveGuidedFlow(atomId);
+                            // Check if there are any other active guided flows, if not, disable global guided mode
+                            // Use getState() to get fresh state
+                            const currentFlows = useLaboratoryStore.getState().activeGuidedFlows;
+                            const remainingFlows = Object.keys(currentFlows).filter(id => id !== atomId);
+                            if (remainingFlows.length === 0) {
+                              setGlobalGuidedMode(false);
+                            }
+                          }
+                          // Proceed with Direct mode activation
+                          openProcessingModal(target).catch((error) => {
+                            console.error('[SavedDataFramesPanel] Error opening processing modal:', error);
+                          });
+                          setModeSelectionTarget(null);
+                          setModeSwitchConfirmation({ show: false, fromMode: 'guided', toMode: 'direct', frame: null, onConfirm: () => {} });
+                        },
+                      });
+                    } else {
+                      // No Guided mode active, proceed directly
+                      openProcessingModal(target).catch((error) => {
+                        console.error('[SavedDataFramesPanel] Error opening processing modal:', error);
+                      });
+                      setModeSelectionTarget(null);
+                    }
                   }
-                  setModeSelectionTarget(null);
                 }}
               >
                 <div className="flex items-center gap-3 mb-2 w-full">
@@ -4604,6 +4802,37 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           </DialogContent>
         </Dialog>
       )}
+      
+      {/* Mode Switch Confirmation Dialog */}
+      <ConfirmationDialog
+        open={modeSwitchConfirmation.show}
+        onOpenChange={(open) => {
+          if (!open) {
+            setModeSwitchConfirmation({ show: false, fromMode: 'direct', toMode: 'guided', frame: null, onConfirm: () => {} });
+          }
+        }}
+        onConfirm={() => {
+          modeSwitchConfirmation.onConfirm();
+        }}
+        onCancel={() => {
+          setModeSwitchConfirmation({ show: false, fromMode: 'direct', toMode: 'guided', frame: null, onConfirm: () => {} });
+        }}
+        title={
+          modeSwitchConfirmation.fromMode === 'direct'
+            ? 'Switch to Guided Mode?'
+            : 'Switch to Direct Review?'
+        }
+        description={
+          modeSwitchConfirmation.fromMode === 'direct'
+            ? 'You are currently in Direct Review mode. Switching to Guided Mode will replace the Direct Review panel. Do you want to continue?'
+            : 'You are currently in Guided Mode. Switching to Direct Review will exit the Guided Mode workflow. Do you want to continue?'
+        }
+        icon={<AlertCircle className="w-5 h-5 text-white" />}
+        confirmLabel="Yes, Switch"
+        cancelLabel="Cancel"
+        iconBgClass="bg-blue-500"
+        confirmButtonClass="bg-blue-500 hover:bg-blue-600"
+      />
     </div>
   );
 };

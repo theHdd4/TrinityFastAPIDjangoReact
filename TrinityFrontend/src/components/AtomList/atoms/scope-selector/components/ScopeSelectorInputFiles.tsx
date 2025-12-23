@@ -173,6 +173,14 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
         measures: settings.measures || [],
       });
     }
+
+    // Record the current dataframe selection for this atom in the laboratory store
+    try {
+      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+      setAtomCurrentDataframe(atomId, val);
+    } catch {
+      // best-effort; do not block scope-selector on metrics sync
+    }
   };
 
   useEffect(() => {

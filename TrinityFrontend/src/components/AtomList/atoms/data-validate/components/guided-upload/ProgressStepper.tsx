@@ -9,15 +9,13 @@ interface ProgressStepperProps {
   hideStages?: UploadStage[];
 }
 
+// Only U2-U6 are shown (U0, U1, and U7 removed)
 const STAGES: Array<{ id: UploadStage; label: string; shortLabel: string }> = [
-  { id: 'U0', label: 'Upload Dataset', shortLabel: 'Upload' },
-  { id: 'U1', label: 'Structural Scan', shortLabel: 'Scan' },
   { id: 'U2', label: 'Confirm Headers', shortLabel: 'Headers' },
   { id: 'U3', label: 'Column Names', shortLabel: 'Columns' },
   { id: 'U4', label: 'Data Types', shortLabel: 'Types' },
   { id: 'U5', label: 'Missing Values', shortLabel: 'Missing' },
   { id: 'U6', label: 'Final Preview', shortLabel: 'Preview' },
-  { id: 'U7', label: 'Complete', shortLabel: 'Complete' },
 ];
 
 export const ProgressStepper: React.FC<ProgressStepperProps> = ({ currentStage, className, hideStages = [] }) => {

@@ -526,49 +526,8 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
     );
   };
 
-  // AI suggestion logic: suggests treatments based on data type, role, and missing percentage
+  // AI suggestion logic: default strategy is to leave missing
   const suggestTreatment = (col: ColumnMissingInfo): MissingValueStrategy['strategy'] => {
-    const { dataType, columnRole, missingPercent } = col;
-    const isNumeric = dataType === 'number';
-    const isCategory = dataType === 'category';
-    const isText = dataType === 'text';
-    const isDate = dataType === 'date';
-    const isIdentifier = columnRole === 'identifier';
-
-    // High missingness (>40%) - suggest drop for most cases
-    if (missingPercent > 40) {
-      return 'drop';
-    }
-
-    // Numeric measures
-    if (isNumeric && !isIdentifier) {
-      if (missingPercent <= 5) return 'zero';
-      if (missingPercent <= 20) return 'mean';
-      return 'median';
-    }
-
-    // Category/Text identifiers
-    if ((isCategory || isText) && isIdentifier) {
-      if (missingPercent <= 10) return 'mode'; // highest-frequency
-      return 'custom'; // Unknown
-    }
-
-    // Numeric identifiers
-    if (isNumeric && isIdentifier) {
-      if (missingPercent <= 10) return 'mode';
-      return 'custom';
-    }
-
-    // Dates
-    if (isDate) {
-      return 'ffill';
-    }
-
-    // Text measures
-    if (isText && !isIdentifier) {
-      return 'custom'; // Not provided
-    }
-
     // Default: leave missing
     return 'none';
   };

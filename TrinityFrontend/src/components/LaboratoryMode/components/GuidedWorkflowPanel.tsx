@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { RotateCcw, X, Settings, ChevronRight, ChevronDown, Upload } from 'lucide-react';
+import { RotateCcw, X, Settings, ChevronRight, ChevronDown, Upload, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VerticalProgressStepper } from '@/components/AtomList/atoms/data-upload/components/guided-upload/VerticalProgressStepper';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -22,6 +22,7 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
   const getAtom = useLaboratoryStore((state) => state.getAtom);
   const updateGuidedFlowStage = useLaboratoryStore((state) => state.updateGuidedFlowStage);
   const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
+  const setGlobalGuidedMode = useLaboratoryStore((state) => state.setGlobalGuidedMode);
 
   // Get the first active guided flow (or allow user to select if multiple)
   const activeFlowEntries = Object.entries(activeGuidedFlows);
@@ -65,6 +66,12 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
       // Reset to U2 (Confirm Headers) - first step in the guided flow (U1 removed)
       updateGuidedFlowStage(selectedAtomId, 'U2');
     }
+  };
+
+  // Handle exit workflow mode - disable guided mode and close panel
+  const handleExitWorkflowMode = () => {
+    setGlobalGuidedMode(false);
+    onToggle(); // Close the panel
   };
 
   if (isCollapsed) {
@@ -172,7 +179,7 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
 
       {/* Reset Button */}
       {selectedFlow && (
-        <div className="p-4 border-t border-gray-200 bg-gray-50/50">
+        <div className="p-4 border-t border-gray-200 bg-gray-50/50 space-y-2">
           <Button
             onClick={handleReset}
             variant="outline"
@@ -181,6 +188,30 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
           >
             <RotateCcw className="w-4 h-4 mr-2" />
             Reset
+          </Button>
+          <Button
+            onClick={handleExitWorkflowMode}
+            variant="outline"
+            className="w-full border-gray-300 hover:bg-red-50 hover:border-red-300 hover:text-red-600"
+            size="sm"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Exit
+          </Button>
+        </div>
+      )}
+
+      {/* Exit Workflow Mode Button - shown even when no flow is selected */}
+      {!selectedFlow && (
+        <div className="p-4 border-t border-gray-200 bg-gray-50/50">
+          <Button
+            onClick={handleExitWorkflowMode}
+            variant="outline"
+            className="w-full border-gray-300 hover:bg-red-50 hover:border-red-300 hover:text-red-600"
+            size="sm"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Exit
           </Button>
         </div>
       )}
