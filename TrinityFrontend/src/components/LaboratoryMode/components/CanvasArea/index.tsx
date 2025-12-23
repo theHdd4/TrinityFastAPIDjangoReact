@@ -6445,9 +6445,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         </button>
                       </div>
                       <div className="flex items-center space-x-1.5">
-                        {/* Guided Workflow toggle (bulb) - only for Data Upload card in Guided Mode */}
-                        {globalGuidedModeEnabled &&
-                          card.atoms.length > 0 &&
+                        {/* Guided Workflow toggle (bulb) - always shown for Data Upload card */}
+                        {card.atoms.length > 0 &&
                           card.atoms[0]?.atomId === 'data-upload' && (
                             <button
                               onClick={e => {
