@@ -10,6 +10,7 @@ import { UNPIVOT_API } from '@/lib/api';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 
 interface UnpivotAtomProps {
   atomId: string;
@@ -18,6 +19,7 @@ interface UnpivotAtomProps {
 const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const { toast } = useToast();
   const settings: UnpivotSettings = {
     ...DEFAULT_UNPIVOT_SETTINGS,
     ...(atom?.settings as UnpivotSettings),
@@ -26,6 +28,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
   const [isComputing, setIsComputing] = React.useState(false);
   const [computeError, setComputeError] = React.useState<string | null>(null);
   const [manualRefreshToken, setManualRefreshToken] = React.useState(0);
+  const [previewToken, setPreviewToken] = React.useState(0);
   const [isSaving, setIsSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saveMessage, setSaveMessage] = React.useState<string | null>(null);
@@ -227,9 +230,14 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     [atomId, updateSettings]
   );
 
-  // Manual apply handler - triggers computation
+  // Manual apply handler - triggers full computation
   const handleApply = React.useCallback(() => {
     setManualRefreshToken((prev) => prev + 1);
+  }, []);
+
+  // Preview handler - triggers preview computation (100 rows)
+  const handlePreview = React.useCallback(() => {
+    setPreviewToken((prev) => prev + 1);
   }, []);
 
   // Compute ONLY when Apply button is clicked (manualRefreshToken or lastApplyTrigger changes)
@@ -265,7 +273,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
 
       try {
         // First, update properties via PATCH
-        const updatePayload = {
+        const updatePayload: any = {
           id_vars: settings.idVars,
           value_vars: settings.valueVars,
           variable_column_name: settings.variableColumnName || undefined,
@@ -274,6 +282,11 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
           post_filters: settings.postFilters,
           auto_refresh: settings.autoRefresh,
         };
+        
+        // Include variable_decoder if configured
+        if (settings.variableDecoder) {
+          updatePayload.variable_decoder = settings.variableDecoder;
+        }
 
         // Ensure backend atom exists (create or recreate if expired)
         const currentAtomId = await ensureBackendAtom();
@@ -401,6 +414,176 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     // We read settings values inside the effect, but don't trigger on their changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [atomId, manualRefreshToken, (settings as any).lastApplyTrigger, updateSettings]);
+
+  // Preview computation effect - computes only 100 rows for preview
+  React.useEffect(() => {
+    // Only compute if previewToken is > 0 (Preview button was clicked) OR lastPreviewTrigger changed
+    const lastPreviewTrigger = (settings as any).lastPreviewTrigger || 0;
+    if (previewToken === 0 && lastPreviewTrigger === 0) {
+      return;
+    }
+
+    setSaveMessage(null);
+    setSaveError(null);
+
+    const readyForCompute =
+      !!settings.datasetPath &&
+      (settings.idVars.length > 0 || settings.valueVars.length > 0);
+
+    if (!readyForCompute) {
+      setIsComputing(false);
+      setComputeError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const runPreview = async () => {
+      setIsComputing(true);
+      setComputeError(null);
+      updateSettings(atomId, {
+        unpivotStatus: 'pending',
+        unpivotError: null,
+      });
+
+      try {
+        // First, update properties via PATCH
+        const updatePayload: any = {
+          id_vars: settings.idVars,
+          value_vars: settings.valueVars,
+          variable_column_name: settings.variableColumnName || undefined,
+          value_column_name: settings.valueColumnName || undefined,
+          pre_filters: settings.preFilters,
+          post_filters: settings.postFilters,
+          auto_refresh: settings.autoRefresh,
+        };
+        
+        // Include variable_decoder if configured
+        if (settings.variableDecoder) {
+          updatePayload.variable_decoder = settings.variableDecoder;
+        }
+
+        // Ensure backend atom exists (create or recreate if expired)
+        const currentAtomId = await ensureBackendAtom();
+
+        // Update properties
+        const updateResponse = await fetch(
+          `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/properties`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatePayload),
+            signal: controller.signal,
+          }
+        );
+
+        if (!updateResponse.ok) {
+          if (updateResponse.status === 404) {
+            const recreatedAtomId = await ensureBackendAtom();
+            const retryResponse = await fetch(
+              `${UNPIVOT_API}/${encodeURIComponent(recreatedAtomId)}/properties`,
+              {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatePayload),
+                signal: controller.signal,
+              }
+            );
+            if (!retryResponse.ok) {
+              const text = await retryResponse.text();
+              throw new Error(text || `Properties update failed (${retryResponse.status})`);
+            }
+          } else {
+            const text = await updateResponse.text();
+            throw new Error(text || `Properties update failed (${updateResponse.status})`);
+          }
+        }
+
+        // Compute preview (only 100 rows)
+        let computeAtomId = currentAtomId;
+        const computeResponse = await fetch(
+          `${UNPIVOT_API}/${encodeURIComponent(computeAtomId)}/compute`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force_recompute: true, preview_limit: 100 }),
+            signal: controller.signal,
+          }
+        );
+
+        if (!computeResponse.ok) {
+          if (computeResponse.status === 404) {
+            computeAtomId = await ensureBackendAtom();
+            const retryComputeResponse = await fetch(
+              `${UNPIVOT_API}/${encodeURIComponent(computeAtomId)}/compute`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ force_recompute: true, preview_limit: 100 }),
+                signal: controller.signal,
+              }
+            );
+            if (!retryComputeResponse.ok) {
+              const text = await retryComputeResponse.text().catch(() => '');
+              throw new Error(text || `Preview compute failed (${retryComputeResponse.status})`);
+            }
+            const retryResult = await retryComputeResponse.json().catch((err) => {
+              throw new Error(`Failed to parse preview response: ${err.message}`);
+            });
+            updateSettings(atomId, {
+              unpivotStatus: 'success',
+              unpivotError: null,
+              unpivotResults: retryResult.dataframe || [],
+              unpivotRowCount: retryResult.row_count || 0,
+              unpivotSummary: retryResult.summary || {},
+              unpivotUpdatedAt: retryResult.updated_at,
+              computationTime: retryResult.computation_time,
+            });
+            return;
+          }
+          const text = await computeResponse.text().catch(() => '');
+          throw new Error(text || `Preview compute failed (${computeResponse.status})`);
+        }
+
+        const result = await computeResponse.json().catch((err) => {
+          throw new Error(`Failed to parse preview response: ${err.message}`);
+        });
+        updateSettings(atomId, {
+          unpivotResults: result?.dataframe ?? [],
+          unpivotStatus: result?.status ?? 'success',
+          unpivotError: null,
+          unpivotUpdatedAt: result?.updated_at,
+          unpivotRowCount: result?.row_count,
+          unpivotSummary: result?.summary ?? {},
+          computationTime: result?.computation_time,
+        });
+        setIsComputing(false);
+        setComputeError(null);
+      } catch (error) {
+        if ((error as any)?.name === 'AbortError') {
+          return;
+        }
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Preview computation failed. Please try again.';
+        setIsComputing(false);
+        setComputeError(message);
+        updateSettings(atomId, {
+          unpivotStatus: 'failed',
+          unpivotError: message,
+        });
+      }
+    };
+
+    runPreview();
+
+    return () => {
+      controller.abort();
+    };
+    // Only trigger when Preview button is clicked (previewToken or lastPreviewTrigger changes)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [atomId, previewToken, (settings as any).lastPreviewTrigger, updateSettings]);
 
   const handleRefresh = React.useCallback(() => {
     setManualRefreshToken((prev) => prev + 1);
@@ -535,6 +718,10 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
           });
           setShowSaveAsModal(false);
           setSaveAsFileName('');
+          toast({
+            title: 'Success',
+            description: message,
+          });
           return;
         }
         const text = await response.text().catch(() => '');
@@ -553,14 +740,23 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         unpivotLastSavedPath: result?.minio_path ?? null,
         unpivotLastSavedAt: result?.updated_at ?? null,
       });
+      toast({
+        title: 'Success',
+        description: message,
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unable to save result. Please try again.';
       setSaveError(message);
+      toast({
+        title: 'Error',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setIsSaving(false);
     }
-  }, [atomId, settings.datasetPath, settings.unpivotResults, saveAsFileName, ensureBackendAtom, updateSettings]);
+  }, [atomId, settings.datasetPath, settings.unpivotResults, saveAsFileName, ensureBackendAtom, updateSettings, toast]);
 
   const readinessMessage = React.useMemo(() => {
     if (!settings.datasetPath) {
@@ -590,7 +786,6 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
             : null)
         }
         onRefresh={handleRefresh}
-        onSave={handleSave}
         onSaveAs={handleSaveAs}
       />
 
@@ -646,7 +841,4 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
 
 export { UnpivotProperties };
 export default UnpivotAtom;
-
-
-
 

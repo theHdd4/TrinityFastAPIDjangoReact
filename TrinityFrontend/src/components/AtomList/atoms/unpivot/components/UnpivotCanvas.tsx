@@ -50,7 +50,6 @@ interface UnpivotCanvasProps {
   saveError: string | null;
   saveMessage: string | null;
   onRefresh: () => void;
-  onSave: () => void;
   onSaveAs: () => void;
   atomId?: string;
 }
@@ -72,7 +71,6 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
   saveError,
   saveMessage,
   onRefresh,
-  onSave,
   onSaveAs,
   atomId,
 }) => {
@@ -754,24 +752,6 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
       {/* Toolbar */}
       <div className="flex flex-col gap-2 border-t border-border px-4 py-3 md:flex-row md:items-center md:justify-end">
         <div className="flex items-center gap-2">
-          <Button
-            onClick={onSave}
-            disabled={isSaving || results.length === 0 || isLoading}
-            className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2 px-4"
-            data-lab-save="true"
-          >
-            {isSaving ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                <span>Saving...</span>
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                <span>Save</span>
-              </>
-            )}
-          </Button>
           <Button
             onClick={onSaveAs}
             disabled={isSaving || results.length === 0 || isLoading}

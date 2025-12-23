@@ -12,10 +12,11 @@ import UnpivotInputFiles from './UnpivotInputFiles';
 interface UnpivotPropertiesProps {
   atomId: string;
   onApply?: () => void;
+  onPreview?: () => void;
   isComputing?: boolean;
 }
 
-const UnpivotProperties: React.FC<UnpivotPropertiesProps> = ({ atomId, onApply, isComputing: externalIsComputing = false }) => {
+const UnpivotProperties: React.FC<UnpivotPropertiesProps> = ({ atomId, onApply, onPreview, isComputing: externalIsComputing = false }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const [tab, setTab] = useState<'inputs' | 'settings'>('inputs');
@@ -51,6 +52,24 @@ const UnpivotProperties: React.FC<UnpivotPropertiesProps> = ({ atomId, onApply, 
       });
     }
   }, [atomId, onApply, updateSettings]);
+  
+  // Internal preview handler that triggers preview computation
+  const handlePreview = useCallback(() => {
+    if (onPreview) {
+      // Use external handler if provided (from UnpivotAtom)
+      onPreview();
+    } else {
+      // If no external handler (when used in SettingsPanel), trigger via setting update
+      const latestAtom = useLaboratoryStore.getState().getAtom(atomId);
+      const latestSettings: UnpivotSettingsType =
+        (latestAtom?.settings as UnpivotSettingsType) || { ...DEFAULT_UNPIVOT_SETTINGS };
+      updateSettings(atomId, {
+        ...latestSettings,
+        // Trigger preview by updating a timestamp-like field that UnpivotAtom watches
+        lastPreviewTrigger: Date.now(),
+      });
+    }
+  }, [atomId, onPreview, updateSettings]);
   
   // Check if computing from atom status
   const isComputing = externalIsComputing || data.unpivotStatus === 'pending';
@@ -95,6 +114,7 @@ const UnpivotProperties: React.FC<UnpivotPropertiesProps> = ({ atomId, onApply, 
               data={data} 
               onDataChange={handleDataChange}
               onApply={handleApply}
+              onPreview={handlePreview}
               isComputing={isComputing}
             />
           </div>
