@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ProgressStepper } from './ProgressStepper';
@@ -11,8 +11,6 @@ import { U6FinalPreview } from './stages/U6FinalPreview';
 import { ArrowLeft, RotateCcw, X, Minimize2, Maximize2 } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { GuidedUploadFlowState } from '../../../data-validate/components/guided-upload';
-import { UPLOAD_API } from '@/lib/api';
-import { getActiveProjectContext } from '@/utils/projectEnv';
 
 interface GuidedUploadFlowProps {
   open: boolean;
@@ -66,10 +64,6 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
   const flow = useGuidedUploadFlow(savedState);
   const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage } = flow;
   const { saveState } = useGuidedFlowPersistence();
-  
-  // Track registered continue handlers from stage components
-  const registeredContinueHandlerRef = useRef<(() => void | Promise<void>) | null>(null);
-  const continueDisabledRef = useRef<(() => boolean) | null>(null);
 
   // Determine initial stage - always start from U2 (U0 handled by atom, U1 removed)
   const effectiveInitialStage: UploadStage = (initialStage && ['U2', 'U3', 'U4', 'U5', 'U6'].includes(initialStage))
@@ -96,7 +90,6 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
         name: existingDataframe.name,
         path: existingDataframe.path,
         size: existingDataframe.size || 0,
-        originalPath: existingDataframe.path,  // Store original path for later use when finalizing
       }]);
     }
 
@@ -115,21 +108,259 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
 
   // No need to mark as primed here - U6FinalPreview handles it
 
-  // Reset registered handlers when stage changes
-  React.useEffect(() => {
-    registeredContinueHandlerRef.current = null;
-    continueDisabledRef.current = null;
-  }, [state.currentStage]);
-
-  // Internal handler that actually moves to next stage (called by stage components after their work is done)
-  const handleNextInternal = React.useCallback(async () => {
-
+  const handleNext = async () => {
     if (state.currentStage === 'U6') {
       // U6FinalPreview's handleSave already handles everything:
       // - process_saved_dataframe (overwrites file in-place with exact MinIO path)
       // - save_config (saves classifications)
       // - mark as primed
-      // Flow is complete - call onComplete and close panel
+      // Flow is complete - call onComplete
+      onComplete?.({
+        uploadedFiles: state.uploadedFiles,
+        headerSelections: state.headerSelections,
+        columnNameEdits: state.columnNameEdits,
+        dataTypeSelections: state.dataTypeSelections,
+        missingValueStrategies: state.missingValueStrategies,
+      });
+    } else {
+      // Move to next stage (U2->U3->U4->U5->U6)
+      goToNextStage();
+    }
+  };
+
+  const handleBack = () => {
+    // U2 is the first stage - if at U2, close the dialog
+    if (state.currentStage === 'U2') {
+      onOpenChange(false);
+    } else {
+      goToPreviousStage();
+    }
+  };
+
+  const handleRestart = () => {
+    restartFlow();
+  };
+
+  const handleCancel = () => {
+    onOpenChange(false);
+  };
+
+  const CurrentStageComponent = STAGE_COMPONENTS[state.currentStage];
+  // U2 is the first stage in the panel
+  const canGoBack = state.currentStage !== 'U2';
+  const isLastStage = state.currentStage === 'U6';
+  
+  // Only U2-U6 are visible (U0 handled by atom, U1 and U7 removed)
+  const visibleStages: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
+
+  const toggleMinimize = () => {
+    setIsMinimized(!isMinimized);
+    if (isMinimized) {
+      setIsMaximized(true); // When restoring, go back to maximized
+    }
+  };
+
+  const toggleMaximize = () => {
+    setIsMaximized(!isMaximized);
+    setIsMinimized(false); // Can't be minimized and maximized at the same time
+  };
+
+  const dialogClassName = isMinimized
+    ? "max-w-md h-auto max-h-[200px] bottom-4 right-4 top-auto left-auto translate-x-0 translate-y-0"
+    : isMaximized
+    ? "max-w-[100vw] max-h-[100vh] w-full h-full top-0 left-0 translate-x-0 translate-y-0 rounded-none"
+    : "max-w-6xl max-h-[95vh] w-[95vw] h-[95vh]";
+
+  return (
+          
+          // Build column_renames from columnNameEdits (U3) - only for kept columns
+          const columnRenames: Record<string, string> = {};
+          currentColumnEdits.forEach(edit => {
+            if (edit.keep !== false && edit.editedName && edit.editedName !== edit.originalName) {
+              columnRenames[edit.originalName] = edit.editedName;
+            }
+          });
+          
+          // Build dtype_changes from dataTypeSelections (U4)
+          const dtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
+          currentDataTypes.forEach(dt => {
+            // Use updateType (user's selection from U4) instead of selectedType
+            const userSelectedType = dt.updateType || dt.selectedType;
+            if (userSelectedType && userSelectedType !== dt.detectedType) {
+              if ((userSelectedType === 'date' || userSelectedType === 'datetime') && dt.format) {
+                dtypeChanges[dt.columnName] = { dtype: 'datetime64', format: dt.format };
+              } else {
+                // Map frontend types to backend types
+                const backendType = userSelectedType === 'number' ? 'float64' : 
+                                   userSelectedType === 'int' ? 'int64' :
+                                   userSelectedType === 'float' ? 'float64' :
+                                   userSelectedType === 'category' ? 'object' :
+                                   userSelectedType === 'string' ? 'object' :
+                                   userSelectedType === 'date' ? 'datetime64' :
+                                   userSelectedType === 'datetime' ? 'datetime64' :
+                                   userSelectedType === 'boolean' ? 'bool' :
+                                   userSelectedType;
+                dtypeChanges[dt.columnName] = backendType;
+              }
+            }
+          });
+          
+          // Build missing_value_strategies from missingValueStrategies (U5)
+          const missingValueStrategiesPayload: Record<string, { strategy: string; value?: string | number }> = {};
+          currentStrategies.forEach(s => {
+            if (s.strategy !== 'none') {
+              const strategyConfig: { strategy: string; value?: string | number } = {
+                strategy: s.strategy,
+              };
+              if (s.strategy === 'custom' && s.value !== undefined) {
+                strategyConfig.value = s.value;
+              }
+              missingValueStrategiesPayload[s.columnName] = strategyConfig;
+            }
+          });
+          
+          // Apply transformations if there are any changes
+          if (columnsToDrop.length > 0 || Object.keys(columnRenames).length > 0 || Object.keys(dtypeChanges).length > 0 || Object.keys(missingValueStrategiesPayload).length > 0) {
+            console.log('🔄 Applying final transformations before completion:', { columnsToDrop, columnRenames, dtypeChanges, missingValueStrategiesPayload });
+            
+            const transformRes = await fetch(`${UPLOAD_API}/apply-data-transformations`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                file_path: currentFile.path,
+                columns_to_drop: columnsToDrop,
+                column_renames: columnRenames,
+                dtype_changes: dtypeChanges,
+                missing_value_strategies: missingValueStrategiesPayload,
+              }),
+            });
+            
+            if (transformRes.ok) {
+              console.log('✅ Transformations applied successfully before completion');
+            } else {
+              console.warn('⚠️ Failed to apply transformations before completion');
+            }
+          }
+        } catch (error) {
+          console.error('Error applying transformations before completion:', error);
+        }
+      }
+      
+      // Complete the flow
+      const projectContext = getActiveProjectContext();
+      if (projectContext && state.uploadedFiles.length > 0) {
+        for (const file of state.uploadedFiles) {
+          // Finalize the primed file - save transformed data to saved dataframes location
+          try {
+            console.log('🔄 Finalizing primed file:', file.path || file.name);
+            
+            // Get column classifications from dataTypeSelections (U4 stage)
+            const dataTypes = state.dataTypeSelections[file.name] || [];
+            const columnClassifications = dataTypes.map(dt => ({
+              columnName: dt.columnName,
+              columnRole: dt.columnRole || 'identifier', // Default to identifier if not set
+            }));
+            
+            console.log('📊 Sending column classifications:', columnClassifications);
+            
+            const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                file_path: file.path,
+                file_name: file.name,
+                client_name: projectContext.client_name || '',
+                app_name: projectContext.app_name || '',
+                project_name: projectContext.project_name || '',
+                validator_atom_id: 'guided-upload',
+                column_classifications: columnClassifications,
+              }),
+            });
+            
+            if (finalizeRes.ok) {
+              const result = await finalizeRes.json();
+              console.log('✅ File finalized successfully:', result);
+              // Trigger refresh of SavedDataFramesPanel
+              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+                detail: { filePath: result.saved_path, fileName: file.name } 
+              }));
+            } else {
+              console.warn('⚠️ Failed to finalize file:', await finalizeRes.text());
+              // Fallback to just marking as primed
+              await markFileAsPrimed(file.path || file.name);
+            }
+          } catch (error) {
+            console.error('Error finalizing primed file:', error);
+            // Fallback to just marking as primed
+            await markFileAsPrimed(file.path || file.name);
+          }
+        }
+      }
+      
+      onComplete?.({
+        uploadedFiles: state.uploadedFiles,
+        headerSelections: state.headerSelections,
+        columnNameEdits: state.columnNameEdits,
+        dataTypeSelections: state.dataTypeSelections,
+        missingValueStrategies: state.missingValueStrategies,
+      });
+      
+      // Don't remove flow - keep it open per user preference
+      // Flow complete - finalize and save primed files
+      const projectContext = getActiveProjectContext();
+      if (projectContext && state.uploadedFiles.length > 0) {
+        for (const file of state.uploadedFiles) {
+          // Finalize the primed file - save transformed data to saved dataframes location
+          try {
+            console.log('🔄 Finalizing primed file:', file.path || file.name);
+            
+            // Get column classifications from dataTypeSelections (U4 stage)
+            const dataTypes = state.dataTypeSelections[file.name] || [];
+            const columnClassifications = dataTypes.map(dt => ({
+              columnName: dt.columnName,
+              columnRole: dt.columnRole || 'identifier', // Default to identifier if not set
+            }));
+            
+            console.log('📊 Sending column classifications:', columnClassifications);
+            
+            const finalizeRes = await fetch(`${UPLOAD_API}/finalize-primed-file`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                file_path: file.path,
+                file_name: file.name,
+                client_name: projectContext.client_name || '',
+                app_name: projectContext.app_name || '',
+                project_name: projectContext.project_name || '',
+                validator_atom_id: 'guided-upload',
+                column_classifications: columnClassifications,
+              }),
+            });
+            
+            if (finalizeRes.ok) {
+              const result = await finalizeRes.json();
+              console.log('✅ File finalized successfully:', result);
+              // Trigger refresh of SavedDataFramesPanel
+              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+                detail: { filePath: result.saved_path, fileName: file.name } 
+              }));
+            } else {
+              console.warn('⚠️ Failed to finalize file:', await finalizeRes.text());
+              // Fallback to just marking as primed
+              await markFileAsPrimed(file.path || file.name);
+            }
+          } catch (error) {
+            console.error('Error finalizing primed file:', error);
+            // Fallback to just marking as primed
+            await markFileAsPrimed(file.path || file.name);
+          }
+        }
+      }
+      
+      // Flow complete
       onComplete?.({
         uploadedFiles: state.uploadedFiles,
         headerSelections: state.headerSelections,
@@ -140,6 +371,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
       onOpenChange(false);
     } else if (state.currentStage === 'U5') {
       // Apply missing value transformations when leaving U5
+      // Using the same API as SavedDataFramesPanel (/process_saved_dataframe) which works correctly
       const chosenIndex = state.selectedFileIndex !== undefined && state.selectedFileIndex < state.uploadedFiles.length 
         ? state.selectedFileIndex : 0;
       const currentFile = state.uploadedFiles[chosenIndex];
@@ -147,7 +379,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
       if (currentFile?.path) {
         const currentStrategies = state.missingValueStrategies[currentFile.name] || [];
         
-        // Build instructions array
+        // Build instructions array in the same format as SavedDataFramesPanel
         const instructions: Array<{ column: string; missing_strategy?: string; custom_value?: string | number }> = [];
         
         currentStrategies.forEach(s => {
@@ -193,23 +425,9 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
       
       goToNextStage();
     } else {
-      // Move to next stage (U2->U3->U4->U5->U6)
       goToNextStage();
     }
-  }, [state.currentStage, state.uploadedFiles, state.selectedFileIndex, state.missingValueStrategies, goToNextStage, onComplete, onOpenChange]);
-
-  // Public handleNext that checks for registered handlers first
-  const handleNext = React.useCallback(async () => {
-    // Check if there's a registered continue handler (e.g., from U2 stage)
-    // This allows stage components to do their work before proceeding
-    if (registeredContinueHandlerRef.current) {
-      await registeredContinueHandlerRef.current();
-      return;
-    }
-    
-    // If no registered handler, proceed with normal flow
-    await handleNextInternal();
-  }, [handleNextInternal]);
+  };
 
   const handleBack = () => {
     // U2 is the first stage - if at U2, close the dialog
@@ -253,68 +471,6 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
     : isMaximized
     ? "max-w-[100vw] max-h-[100vh] w-full h-full top-0 left-0 translate-x-0 translate-y-0 rounded-none"
     : "max-w-6xl max-h-[95vh] w-[95vw] h-[95vh]";
-
-  const handleBack = () => {
-    // U2 is the first stage - if at U2, close the dialog
-    if (state.currentStage === 'U2') {
-      onOpenChange(false);
-    } else {
-      goToPreviousStage();
-    }
-  };
-
-  const handleRestart = () => {
-    restartFlow();
-  };
-
-  const handleCancel = () => {
-    onOpenChange(false);
-  };
-
-  const CurrentStageComponent = STAGE_COMPONENTS[state.currentStage];
-  // U2 is the first stage in the panel
-  const canGoBack = state.currentStage !== 'U2';
-  const isLastStage = state.currentStage === 'U6';
-  
-  // Only U2-U6 are visible (U0 handled by atom, U1 and U7 removed)
-  const visibleStages: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
-
-  const toggleMinimize = () => {
-    setIsMinimized(!isMinimized);
-    if (isMinimized) {
-      setIsMaximized(true); // When restoring, go back to maximized
-    }
-  };
-
-  // Callbacks to register/unregister continue handlers from stage components
-  // We wrap the handler to prevent infinite loops: when the handler calls onNext,
-  // we temporarily clear the registration so handleNext doesn't call it again
-  const registerContinueHandler = React.useCallback((handler: () => void | Promise<void>) => {
-    registeredContinueHandlerRef.current = async () => {
-      // Temporarily clear the handler to prevent infinite loop when handler calls onNext
-      registeredContinueHandlerRef.current = null;
-      // Call the original handler, which will do its work and then call onNext
-      await handler();
-    };
-  }, []);
-
-  const registerContinueDisabled = React.useCallback((getDisabled: () => boolean) => {
-    continueDisabledRef.current = getDisabled;
-  }, []);
-
-  const toggleMaximize = () => {
-    setIsMaximized(!isMaximized);
-    setIsMinimized(false); // Can't be minimized and maximized at the same time
-  };
-
-  const dialogClassName = isMinimized
-    ? "max-w-md h-auto max-h-[200px] bottom-4 right-4 top-auto left-auto translate-x-0 translate-y-0"
-    : isMaximized
-    ? "max-w-[100vw] max-h-[100vh] w-full h-full top-0 left-0 translate-x-0 translate-y-0 rounded-none"
-    : "max-w-6xl max-h-[95vh] w-[95vw] h-[95vh]";
-
-  // Check if Continue button should be disabled
-  const isContinueDisabled = continueDisabledRef.current ? continueDisabledRef.current() : false;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -368,7 +524,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
         </div>
 
         {/* Stage Content */}
-        <div className={`flex-1 overflow-y-auto ${isMinimized ? 'hidden' : ''} p-6 min-h-0`}>
+        <div className={`flex-1 overflow-y-auto ${isMinimized ? 'hidden' : ''} p-6`}>
           {state.currentStage === 'U2' ? (
             <CurrentStageComponent 
               flow={flow} 
@@ -376,30 +532,6 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
               onBack={handleBack}
               onRestart={handleRestart}
               onCancel={handleCancel}
-              onRegisterContinueHandler={registerContinueHandler}
-              onRegisterContinueDisabled={registerContinueDisabled}
-              isMaximized={isMaximized}
-            />
-          ) : state.currentStage === 'U3' ? (
-            <CurrentStageComponent 
-              flow={flow} 
-              onNext={handleNext} 
-              onBack={handleBack}
-              isMaximized={isMaximized}
-            />
-          ) : state.currentStage === 'U4' ? (
-            <CurrentStageComponent 
-              flow={flow} 
-              onNext={handleNext} 
-              onBack={handleBack}
-              isMaximized={isMaximized}
-            />
-          ) : state.currentStage === 'U5' ? (
-            <CurrentStageComponent 
-              flow={flow} 
-              onNext={handleNext} 
-              onBack={handleBack}
-              isMaximized={isMaximized}
             />
           ) : state.currentStage === 'U6' ? (
             <CurrentStageComponent 
@@ -407,16 +539,15 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
               onNext={handleNext} 
               onBack={handleBack}
               onGoToStage={goToStage}
-              isMaximized={isMaximized}
             />
           ) : (
             <CurrentStageComponent flow={flow} onNext={handleNext} onBack={handleBack} />
           )}
         </div>
 
-        {/* Navigation Footer - Show for U2, U3, U4, U5 in both normal and maximized mode (U6 has its own controls) */}
-        {!isMinimized && ['U2', 'U3', 'U4', 'U5'].includes(state.currentStage) && (
-          <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0 z-10 relative">
+        {/* Navigation Footer - Consistent across all stages (hidden for U2 and U6 as they have their own controls) */}
+        {!isMinimized && !['U2', 'U6'].includes(state.currentStage) && (
+          <div className="flex items-center justify-between pt-4 px-6 pb-4 border-t bg-gray-50 flex-shrink-0">
             <div className="flex gap-2">
               {canGoBack && (
                 <Button
@@ -444,8 +575,7 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
               {!isLastStage && (
                 <Button
                   onClick={handleNext}
-                  disabled={isContinueDisabled}
-                  className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="bg-[#458EE2] hover:bg-[#3a7bc7] text-white"
                 >
                   Continue
                 </Button>

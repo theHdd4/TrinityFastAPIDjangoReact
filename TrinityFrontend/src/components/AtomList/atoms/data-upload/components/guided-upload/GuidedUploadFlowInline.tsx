@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useGuidedUploadFlow, type UploadStage, type GuidedUploadFlowState } from './useGuidedUploadFlow';
 import { U2UnderstandingFiles } from './stages/U2UnderstandingFiles';
 import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
 import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
 import { U5MissingValues } from './stages/U5MissingValues';
 import { U6FinalPreview } from './stages/U6FinalPreview';
-import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Maximize2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Maximize2, Minimize2, X } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -22,13 +22,13 @@ interface GuidedUploadFlowInlineProps {
     dataTypeSelections: Record<string, any[]>;
     missingValueStrategies: Record<string, any[]>;
   }) => void;
-  /** If provided, start from an existing dataframe */
+  /** If provided, start from an existing dataframe (skip U0) */
   existingDataframe?: {
     name: string;
     path: string;
     size?: number;
   };
-  /** Initial stage to start from (default: U2 - U0 and U1 removed) */
+  /** Initial stage to start from (default: U0 or U1 if existingDataframe) */
   initialStage?: UploadStage;
   /** Saved state to restore (for resuming) */
   savedState?: Partial<GuidedUploadFlowState>;
@@ -36,7 +36,7 @@ interface GuidedUploadFlowInlineProps {
   onClose?: () => void;
 }
 
-// Only U2-U6 are used now (U0, U1, and U7 removed)
+// Only U2-U6 are used now (U0 handled by atom, U1 and U7 removed)
 const STAGE_COMPONENTS: Partial<Record<UploadStage, React.ComponentType<any>>> = {
   U2: U2UnderstandingFiles,
   U3: U3ReviewColumnNames,
@@ -53,7 +53,7 @@ const STAGE_TITLES: Partial<Record<UploadStage, string>> = {
   U6: 'Final Preview Before Priming', // U6 handles priming - no U7 needed
 };
 
-// Stage order: only U2-U6 (U0, U1, and U7 removed)
+// Stage order: only U2-U6 (U0 handled by atom, U1 and U7 removed)
 const STAGE_ORDER: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
 
 // All stages are visible in the inline flow
@@ -164,7 +164,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     Object.keys(state.missingValueStrategies).length,
   ]);
 
-  // Determine initial stage - always start from U2 now (U0 and U1 removed)
+  // Determine initial stage - always start from U2 now (U0 is handled by atom, U1 removed)
   const effectiveInitialStage = initialStage || 'U2';
 
   // Track if we've already initialized from savedState to prevent re-initialization
@@ -509,6 +509,9 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   // Track if current stage is collapsed
   const [isCurrentStageCollapsed, setIsCurrentStageCollapsed] = useState(false);
   
+  // Track which stage is maximized (null if none)
+  const [maximizedStage, setMaximizedStage] = useState<UploadStage | null>(null);
+
   // Handle when user makes changes on an expanded completed stage
   const handleCompletedStageChange = useCallback((stage: UploadStage) => {
     // Only handle if this is a completed stage that's expanded but not current
@@ -607,7 +610,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
       headerBg = 'bg-gray-50';
       borderColor = 'border-gray-200';
     } else if (isCurrent) {
-      // Get the display step number (U2=1, U3=2, etc. since U0 and U1 are removed)
+      // Get the display step number (U2=1, U3=2, etc. since U1 is removed)
       const stepNumber = getDisplayStepNumber(stage);
       statusIcon = (
         <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold flex-shrink-0">
@@ -654,18 +657,16 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (typeof window !== 'undefined') {
-                    window.dispatchEvent(
-                      new CustomEvent('laboratory-card-expand', {
-                        detail: { atomId },
-                      }),
-                    );
-                  }
+                  setMaximizedStage(maximizedStage === stage ? null : stage);
                 }}
                 className="p-1.5 hover:bg-gray-200 rounded transition-colors"
-                title="Maximize Card"
+                title={maximizedStage === stage ? "Exit Fullscreen" : "Maximize Stage"}
               >
-                <Maximize2 className="w-4 h-4 text-gray-600" />
+                {maximizedStage === stage ? (
+                  <Minimize2 className="w-4 h-4 text-gray-600" />
+                ) : (
+                  <Maximize2 className="w-4 h-4 text-gray-600" />
+                )}
               </button>
               {isExpanded ? (
                 <ChevronUp className="w-4 h-4 text-gray-500" />
@@ -708,18 +709,16 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (typeof window !== 'undefined') {
-                      window.dispatchEvent(
-                        new CustomEvent('laboratory-card-expand', {
-                          detail: { atomId },
-                        }),
-                      );
-                    }
+                    setMaximizedStage(maximizedStage === stage ? null : stage);
                   }}
                   className="p-1.5 hover:bg-gray-200 rounded transition-colors"
-                  title="Maximize Card"
+                  title={maximizedStage === stage ? "Exit Fullscreen" : "Maximize Stage"}
                 >
-                  <Maximize2 className="w-4 h-4 text-gray-600" />
+                  {maximizedStage === stage ? (
+                    <Minimize2 className="w-4 h-4 text-gray-600" />
+                  ) : (
+                    <Maximize2 className="w-4 h-4 text-gray-600" />
+                  )}
                 </button>
               )}
               {isCurrent && (
@@ -918,10 +917,11 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       <Button variant="outline" onClick={handleClose}>
                         Cancel
                       </Button>
-                      <Button
-                        onClick={() => {
-                          // Make this stage current first
-                          goToStage(stage);
+                      {stage !== 'U6' && (
+                        <Button
+                          onClick={() => {
+                            // Make this stage current first
+                            goToStage(stage);
                             // Collapse all stages from current onwards when navigating forward
                             setExpandedCompletedStages(prev => {
                               const next = new Set(prev);
@@ -945,6 +945,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                         >
                           Continue
                         </Button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -982,15 +983,9 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
             onNext={() => {}} 
             onBack={() => {}}
             onRestart={handleRestart}
-            onCancel={handleClose}
-            // Register the same U2 handlers used in the inline footer so
-            // the fullscreen footer buttons can trigger the correct logic
-            onRegisterContinueHandler={(handler: () => void) => {
-              u2ContinueHandlerRef.current = handler;
-            }}
-            onRegisterContinueDisabled={(getDisabled: () => boolean) => {
-              u2ContinueDisabledRef.current = getDisabled;
-            }}
+            onCancel={() => {}}
+            onRegisterContinueHandler={() => {}}
+            onRegisterContinueDisabled={() => () => false}
             isMaximized={true}
           />
         ) : stage === 'U6' ? (
@@ -1011,7 +1006,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
         )}
       </div>
     );
-  }, [flow, handleRestart, handleClose, goToStage]);
+  }, [flow, handleRestart, goToStage]);
 
   return (
     <>
@@ -1019,6 +1014,44 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
         {/* Render only visible stages (U2-U6) */}
         {VISIBLE_STAGES.map(stage => renderStageItem(stage))}
       </div>
+      
+      {/* Maximized Stage Dialog */}
+      {maximizedStage && (
+        <Dialog open={!!maximizedStage} onOpenChange={(open) => !open && setMaximizedStage(null)}>
+          <DialogContent 
+            className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 overflow-hidden"
+            hideCloseButton
+          >
+            <DialogHeader className="px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <DialogTitle className="text-lg font-semibold text-gray-900">
+                    {STAGE_TITLES[maximizedStage]}
+                  </DialogTitle>
+                  {maximizedStage === state.currentStage && (
+                    <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Current</span>
+                  )}
+                  {isStageCompleted(maximizedStage, state.currentStage) && (
+                    <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">Completed</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setMaximizedStage(null)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Close Fullscreen"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+            </DialogHeader>
+            
+            {/* Maximized Content */}
+            <div className="flex-1 overflow-auto">
+              {renderMaximizedStageContent(maximizedStage)}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 };

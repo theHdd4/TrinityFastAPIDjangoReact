@@ -50,9 +50,8 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      // Use the same endpoint as Saved DataFrames panel so results stay in sync
-      const response = await fetch(`${VALIDATE_API}/list_saved_dataframes?${params.toString()}`, {
+      
+      const response = await fetch(`${UPLOAD_API}/list_saved_dataframes?${params.toString()}`, {
         signal: controller.signal,
         credentials: 'include',
       });
@@ -72,29 +71,13 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
     }
   }, []);
 
-  // Initial fetch when guided mode is active
+  // Initial fetch
   useEffect(() => {
     if (hasFetchedRef.current || !globalGuidedModeEnabled) return;
     hasFetchedRef.current = true;
     const timeoutId = setTimeout(() => fetchSavedDataframes(), 100);
     return () => clearTimeout(timeoutId);
   }, [fetchSavedDataframes, globalGuidedModeEnabled]);
-
-  // Keep list in sync with uploads/deletes from other parts of the UI
-  useEffect(() => {
-    const handleDataframeChanged = () => {
-      // Always use the latest handler
-      fetchSavedDataframes();
-    };
-
-    window.addEventListener('dataframe-saved', handleDataframeChanged);
-    window.addEventListener('dataframe-deleted', handleDataframeChanged);
-
-    return () => {
-      window.removeEventListener('dataframe-saved', handleDataframeChanged);
-      window.removeEventListener('dataframe-deleted', handleDataframeChanged);
-    };
-  }, [fetchSavedDataframes]);
 
   // Refresh when the component becomes visible/active (focus)
   useEffect(() => {
@@ -163,10 +146,10 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
         processed: false,
       };
       
-      // Start guided flow at U2 (U0 and U1 removed)
-      setActiveGuidedFlow(atomId, 'U2', {
+      // Start guided flow at U1 (Structural Scan) - atom split panel is Step 1
+      setActiveGuidedFlow(atomId, 'U1', {
         uploadedFiles: [uploadedFileInfo],
-        currentStage: 'U2',
+        currentStage: 'U1',
       });
       
       toast({ title: 'File uploaded', description: `${data.file_name || sanitizedFileName} is ready for processing.` });
@@ -189,10 +172,10 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
       processed: true,
     };
     
-    // Start guided flow at U2 (U0 and U1 removed)
-    setActiveGuidedFlow(atomId, 'U2', {
+    // Start guided flow at U1 (Structural Scan) - atom split panel is Step 1
+    setActiveGuidedFlow(atomId, 'U1', {
       uploadedFiles: [uploadedFileInfo],
-      currentStage: 'U2',
+      currentStage: 'U1',
     });
     
     toast({
@@ -341,6 +324,21 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
               <p className="text-xs text-gray-400 mt-1">CSV, XLSX, XLS files</p>
             </div>
           )}
+        </Card>
+      )}
+
+      {/* Uploaded Files Summary */}
+      {settings.uploadedFiles && settings.uploadedFiles.length > 0 && (
+        <Card className="p-4">
+          <h4 className="font-medium text-gray-700 mb-2">Primed Files</h4>
+          <div className="space-y-2">
+            {settings.uploadedFiles.map((file, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 px-3 py-2 rounded">
+                <Sparkles className="w-4 h-4 text-green-500" />
+                <span>{file}</span>
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 

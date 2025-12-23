@@ -769,10 +769,10 @@ const TableElement: React.FC<TableElementProps> = ({
   })();
 
   // Render the table in a constrained container with pagination
-  // CRITICAL: The 'group/table' class on this container ensures hover is strictly scoped to this table element only
+  // CRITICAL: The 'group' class on this container ensures hover is strictly scoped to this table element only
   // Hovering elsewhere on the canvas will NOT trigger pagination visibility
   return (
-    <div className="group/table relative w-full h-full flex flex-col overflow-hidden bg-white rounded-xl border border-slate-200 shadow-lg" style={{ maxHeight: height, maxWidth: width }}>
+    <div className="group relative w-full h-full flex flex-col overflow-hidden bg-white rounded-xl border border-slate-200 shadow-lg" style={{ maxHeight: height, maxWidth: width }}>
       {/* Table Canvas with horizontal and vertical scrolling */}
       {/* CRITICAL: Use overflow-hidden like TableAtom to ensure proper toolbar/portal rendering */}
       {/* CRITICAL: Pass atomId in spread like TableAtom does */}
@@ -789,9 +789,9 @@ const TableElement: React.FC<TableElementProps> = ({
       </div>
       
       {/* Pagination - only for load mode, hidden by default, shown on hover */}
-      {/* CRITICAL: group-hover/table only triggers when hovering within the table container (group/table parent) */}
+      {/* CRITICAL: group-hover only triggers when hovering within the table container (group parent) */}
       {tableSettings.mode === 'load' && tableSettings.tableData?.row_count && (
-        <div className="max-h-0 overflow-hidden opacity-0 group-hover/table:max-h-[200px] group-hover/table:opacity-100 transition-all duration-300 ease-in-out pointer-events-none group-hover/table:pointer-events-auto">
+        <div className="max-h-0 overflow-hidden opacity-0 group-hover:max-h-[200px] group-hover:opacity-100 transition-all duration-300 ease-in-out pointer-events-none group-hover:pointer-events-auto">
           <TablePagination
             currentPage={tableSettings.currentPage || 1}
             pageSize={tableSettings.pageSize || 50}

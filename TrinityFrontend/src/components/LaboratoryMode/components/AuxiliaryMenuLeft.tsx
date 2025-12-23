@@ -6,9 +6,9 @@ import { useLaboratoryStore, DASHBOARD_ALLOWED_ATOMS } from '../store/laboratory
 
 interface Props {
   onAtomDragStart?: (e: React.DragEvent, atomId: string) => void;
-  active?: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | 'guided' | 'metrics' | null;
+  active?: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null;
   onActiveChange?: (
-    active: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | 'guided' | 'metrics' | null,
+    active: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null,
   ) => void;
   isExhibitionOpen?: boolean;
   setIsExhibitionOpen?: (open: boolean) => void;

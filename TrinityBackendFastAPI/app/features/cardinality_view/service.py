@@ -42,29 +42,6 @@ def unified_cardinality_task(
     logger.info(f"🔍 [UNIFIED-CARDINALITY] Metadata params: client={client_name}, app={app_name}, project={project_name}")
     
     try:
-        # Extract project context from object_name path if not provided (fallback)
-        # Path format: client_name/app_name/project_name/filename.arrow
-        # Also handles: client_name/app_name/project_name/create-data/filename.arrow
-        path_parts = [p for p in (object_name or "").strip("/").split("/") if p]  # Filter empty parts
-        extracted_client = path_parts[0] if len(path_parts) > 0 and path_parts[0] else ""
-        extracted_app = path_parts[1] if len(path_parts) > 1 and path_parts[1] else ""
-        extracted_project = path_parts[2] if len(path_parts) > 2 and path_parts[2] else ""
-        
-        # If we have create-data/ prefix, adjust indices (skip it)
-        if len(path_parts) > 3 and path_parts[3] in ["create-data", "create_data"]:
-            # Path is: client/app/project/create-data/file.arrow
-            # We already have the right values, but log it
-            logger.info(f"🔍 [UNIFIED-CARDINALITY] Detected create-data prefix in path")
-        
-        # Use provided params, fallback to extracted from path, then to environment
-        import os
-        final_client_name = (client_name or extracted_client or os.getenv("CLIENT_NAME", "")).strip()
-        final_app_name = (app_name or extracted_app or os.getenv("APP_NAME", "")).strip()
-        final_project_name = (project_name or extracted_project or os.getenv("PROJECT_NAME", "")).strip()
-        
-        logger.info(f"🔍 [UNIFIED-CARDINALITY] Final context: client={final_client_name}, app={final_app_name}, project={final_project_name}")
-        logger.info(f"🔍 [UNIFIED-CARDINALITY] Context source breakdown: provided=({client_name}, {app_name}, {project_name}), extracted=({extracted_client}, {extracted_app}, {extracted_project})")
-        
         # 1. Load dataframe and get basic cardinality
         dataframe = get_minio_df(bucket_name, object_name)
         dataframe.columns = dataframe.columns.str.strip().str.lower()
@@ -76,15 +53,14 @@ def unified_cardinality_task(
         column_metadata = {}
         metadata_available = False
         
-        if final_client_name and final_app_name and final_project_name:
-            logger.info(f"✅ [UNIFIED-CARDINALITY] All context values present - proceeding with metadata lookup")
+        if client_name and app_name and project_name:
             try:
                 logger.info(f"🔍 [UNIFIED-CARDINALITY] Fetching column metadata...")
                 column_metadata = get_column_metadata_for_file(
                     object_name=object_name,
-                    client_name=final_client_name,
-                    app_name=final_app_name,
-                    project_name=final_project_name,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
                 )
                 metadata_available = True
                 logger.info(f"✅ [UNIFIED-CARDINALITY] Retrieved {len(column_metadata)} columns with metadata")
@@ -93,11 +69,7 @@ def unified_cardinality_task(
                 logger.warning(f"⚠️ [UNIFIED-CARDINALITY] Failed to get column metadata: {e}")
                 # Continue without metadata (graceful fallback)
         else:
-            logger.warning(
-                f"⚠️ [UNIFIED-CARDINALITY] Missing metadata params - skipping metadata lookup. "
-                f"Context: client='{final_client_name}', app='{final_app_name}', project='{final_project_name}'. "
-                f"At least one is empty/missing."
-            )
+            logger.info(f"⚠️ [UNIFIED-CARDINALITY] Missing metadata params - skipping metadata lookup")
         
         # 3. Generate cardinality data for each column
         for col in dataframe.columns:

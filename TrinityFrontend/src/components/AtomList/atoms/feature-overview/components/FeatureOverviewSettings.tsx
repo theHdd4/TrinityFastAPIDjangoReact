@@ -153,14 +153,6 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       frameList.find(f => f.object_name === normalized)?.csv_name ||
       activeSource;
 
-    // Record the current dataframe selection for this atom in the laboratory store
-    try {
-      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
-      setAtomCurrentDataframe(atomId, activeSource);
-    } catch {
-      // best-effort; do not break feature overview if store access fails
-    }
-
     onSettingsChange({
       dataSource: activeSource,
       csvDisplay,
@@ -284,18 +276,18 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
             ))}
           </SelectContent>
         </Select>
-        
+
         {/* Data Summary Toggle - Only when data source is selected (chartmaker pattern) */}
         {settings.dataSource && (
-        <div className="flex items-center justify-between pt-4 border-t mt-4">
-          <Label className="text-xs">Show Data Summary</Label>
-          <Switch
-            checked={settings.showDataSummary || false}
-            onCheckedChange={(checked) => {
-              updateSettings(atomId, { showDataSummary: !!checked });
-            }}
-          />
-        </div>
+          <div className="flex items-center justify-between pt-4 border-t mt-4">
+            <Label className="text-xs">Show Data Summary</Label>
+            <Switch
+              checked={settings.showDataSummary || false}
+              onCheckedChange={(checked) => {
+                updateSettings(atomId, { showDataSummary: !!checked });
+              }}
+            />
+          </div>
         )}
       </Card>
 

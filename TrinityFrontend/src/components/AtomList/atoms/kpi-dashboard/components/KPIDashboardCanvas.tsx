@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowLeft, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown, MoreVertical, Filter, Eye, EyeOff, Minus, Upload } from 'lucide-react';
+import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowLeft, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown, MoreVertical, Filter, Eye, EyeOff, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -214,12 +214,6 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [variables, setVariables] = useState<ConfigVariable[]>([]);
   const metricsInputs = useLaboratoryStore(state => state.metricsInputs);
-  
-  // State for deletion confirmation dialog
-  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
-  const [deleteType, setDeleteType] = useState<'row' | 'element' | null>(null);
-  const [pendingDeleteLayoutId, setPendingDeleteLayoutId] = useState<string | null>(null);
-  const [pendingDeleteBoxId, setPendingDeleteBoxId] = useState<string | null>(null);
   
   // Load layouts from settings on mount
   useEffect(() => {
@@ -620,110 +614,39 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
   };
 
   const handleDeleteLayout = (layoutId: string) => {
-    setPendingDeleteLayoutId(layoutId);
-    setPendingDeleteBoxId(null);
-    setDeleteType('row');
-    setShowDeleteConfirmation(true);
-  };
-
-  const confirmDeleteLayout = () => {
-    if (pendingDeleteLayoutId) {
-      setLayouts(layouts.filter(layout => layout.id !== pendingDeleteLayoutId));
-    }
-    setShowDeleteConfirmation(false);
-    setPendingDeleteLayoutId(null);
-    setDeleteType(null);
-  };
-
-  const handleAddRowAbove = (layoutId: string) => {
-    setLayouts((currentLayouts) => {
-      const layoutIndex = currentLayouts.findIndex(layout => layout.id === layoutId);
-      if (layoutIndex === -1) return currentLayouts;
-
-      const referenceLayout = currentLayouts[layoutIndex];
-      const newLayout: Layout = {
-        id: `layout-${Date.now()}`,
-        type: referenceLayout.type,
-        boxes: Array.from({ length: getBoxCount(referenceLayout.type) }, (_, idx) => ({
-          id: `box-${Date.now()}-${idx}`,
-          elementType: undefined,
-          width: getDefaultWidth(referenceLayout.type)
-        })),
-        height: referenceLayout.height || 220
-      };
-
-      const newLayouts = [...currentLayouts];
-      newLayouts.splice(layoutIndex, 0, newLayout);
-      return newLayouts;
-    });
-  };
-
-  const handleAddRowBelow = (layoutId: string) => {
-    setLayouts((currentLayouts) => {
-      const layoutIndex = currentLayouts.findIndex(layout => layout.id === layoutId);
-      if (layoutIndex === -1) return currentLayouts;
-
-      const referenceLayout = currentLayouts[layoutIndex];
-      const newLayout: Layout = {
-        id: `layout-${Date.now()}`,
-        type: referenceLayout.type,
-        boxes: Array.from({ length: getBoxCount(referenceLayout.type) }, (_, idx) => ({
-          id: `box-${Date.now()}-${idx}`,
-          elementType: undefined,
-          width: getDefaultWidth(referenceLayout.type)
-        })),
-        height: referenceLayout.height || 220
-      };
-
-      const newLayouts = [...currentLayouts];
-      newLayouts.splice(layoutIndex + 1, 0, newLayout);
-      return newLayouts;
-    });
+    setLayouts(layouts.filter(layout => layout.id !== layoutId));
   };
 
   const handleDeleteBox = (layoutId: string, boxId: string) => {
-    setPendingDeleteLayoutId(layoutId);
-    setPendingDeleteBoxId(boxId);
-    setDeleteType('element');
-    setShowDeleteConfirmation(true);
-  };
-
-  const confirmDeleteBox = () => {
-    if (pendingDeleteLayoutId && pendingDeleteBoxId) {
-      setLayouts((currentLayouts) => {
-        const updatedLayouts = currentLayouts.map(layout => {
-          if (layout.id === pendingDeleteLayoutId) {
-            const updatedBoxes = layout.boxes.filter(box => box.id !== pendingDeleteBoxId);
-            // If no boxes left, remove the entire layout
-            if (updatedBoxes.length === 0) {
-              return null; // Will be filtered out
-            }
-            // Redistribute widths evenly to fill available space
-            const redistributedBoxes = redistributeBoxWidths(updatedBoxes);
-            return {
-              ...layout,
-              boxes: redistributedBoxes
-            };
+    setLayouts((currentLayouts) => {
+      const updatedLayouts = currentLayouts.map(layout => {
+        if (layout.id === layoutId) {
+          const updatedBoxes = layout.boxes.filter(box => box.id !== boxId);
+          // If no boxes left, remove the entire layout
+          if (updatedBoxes.length === 0) {
+            return null; // Will be filtered out
           }
-          return layout;
-        }).filter(layout => layout !== null) as Layout[];
-        return updatedLayouts;
+          // Redistribute widths evenly to fill available space
+          const redistributedBoxes = redistributeBoxWidths(updatedBoxes);
+          return {
+            ...layout,
+            boxes: redistributedBoxes
+          };
+        }
+        return layout;
+      }).filter(layout => layout !== null) as Layout[];
+      return updatedLayouts;
+    });
+    
+    // Clear selection if deleted box was selected
+    const selectedBoxIds = settings.selectedBoxIds || [];
+    if (selectedBoxIds.includes(boxId)) {
+      const updatedSelectedBoxIds = selectedBoxIds.filter(id => id !== boxId);
+      onSettingsChange({ 
+        selectedBoxIds: updatedSelectedBoxIds.length > 0 ? updatedSelectedBoxIds : undefined,
+        selectedBoxId: settings.selectedBoxId === boxId ? undefined : settings.selectedBoxId
       });
-      
-      // Clear selection if deleted box was selected
-      const selectedBoxIds = settings.selectedBoxIds || [];
-      if (selectedBoxIds.includes(pendingDeleteBoxId)) {
-        const updatedSelectedBoxIds = selectedBoxIds.filter(id => id !== pendingDeleteBoxId);
-        onSettingsChange({ 
-          selectedBoxIds: updatedSelectedBoxIds.length > 0 ? updatedSelectedBoxIds : undefined,
-          selectedBoxId: settings.selectedBoxId === pendingDeleteBoxId ? undefined : settings.selectedBoxId
-        });
-      }
     }
-    setShowDeleteConfirmation(false);
-    setPendingDeleteLayoutId(null);
-    setPendingDeleteBoxId(null);
-    setDeleteType(null);
   };
 
   const handleDeleteSelectedBoxes = () => {
@@ -754,40 +677,13 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     });
   };
 
-  const handleAddElement = (layoutId: string, boxId: string, position: 'left' | 'right' | 'above' | 'below') => {
+  const handleAddElement = (layoutId: string, boxId: string, position: 'left' | 'right') => {
     setLayouts((currentLayouts) => {
-      const layoutIndex = currentLayouts.findIndex(layout => layout.id === layoutId);
-      if (layoutIndex === -1) return currentLayouts;
+      return currentLayouts.map(layout => {
+        if (layout.id === layoutId) {
+          const boxIndex = layout.boxes.findIndex(box => box.id === boxId);
+          if (boxIndex === -1) return layout;
 
-      const layout = currentLayouts[layoutIndex];
-      const boxIndex = layout.boxes.findIndex(box => box.id === boxId);
-      if (boxIndex === -1) return currentLayouts;
-
-      // Handle above/below positions - create new row
-      if (position === 'above' || position === 'below') {
-        const newLayout: Layout = {
-          id: `layout-${Date.now()}`,
-          type: layout.type,
-          boxes: Array.from({ length: getBoxCount(layout.type) }, (_, idx) => ({
-            id: `box-${Date.now()}-${idx}`,
-            elementType: undefined,
-            width: getDefaultWidth(layout.type)
-          })),
-          height: layout.height || 220
-        };
-
-        const newLayouts = [...currentLayouts];
-        if (position === 'above') {
-          newLayouts.splice(layoutIndex, 0, newLayout);
-        } else {
-          newLayouts.splice(layoutIndex + 1, 0, newLayout);
-        }
-        return newLayouts;
-      }
-
-      // Handle left/right positions - add to same row
-      return currentLayouts.map(l => {
-        if (l.id === layoutId) {
           const defaultWidth = getDefaultWidth(layout.type);
           const newBox: LayoutBox = {
             id: `box-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -810,7 +706,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
             boxes: redistributedBoxes
           };
         }
-        return l;
+        return layout;
       });
     });
   };
@@ -969,51 +865,14 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                   className="relative bg-transparent border border-gray-200/30 rounded-xl shadow-sm hover:shadow-md transition-all duration-300 p-1 flex flex-col"
                   style={{ height: `${layout.height || 220}px`, overflow: 'visible' }}
                 >
-                  {/* Row menu dropdown for the entire layout */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        className="absolute top-1 right-1 p-1.5 rounded-lg hover:bg-gray-50 transition-colors opacity-0 group-hover:opacity-100 z-30"
-                        title="Row options"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreVertical className="w-3.5 h-3.5 text-gray-500 hover:text-gray-700" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAddRowAbove(layout.id);
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <ArrowUp className="w-4 h-4" />
-                        <span>Add Row Above</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAddRowBelow(layout.id);
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <ArrowDown className="w-4 h-4" />
-                        <span>Add Row Below</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteLayout(layout.id);
-                        }}
-                        className="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        <span>Delete Row</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  {/* Delete button for the entire layout */}
+                  <button
+                    onClick={() => handleDeleteLayout(layout.id)}
+                    className="absolute top-1 right-1 p-1.5 rounded-lg hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 z-30"
+                    title="Delete this layout"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-500 hover:text-red-700" />
+                  </button>
 
                   {/* Row Content */}
                   <div className="grid grid-cols-12 gap-2" style={{ height: 'calc(100% - 8px)', overflow: 'visible', minWidth: 0, width: '100%' }}>
@@ -1105,53 +964,6 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
           </div>
         )}
       </div>
-
-      {/* Deletion Confirmation Dialog */}
-      <Dialog open={showDeleteConfirmation} onOpenChange={(open) => {
-        setShowDeleteConfirmation(open);
-        if (!open) {
-          // Reset state when dialog is closed (via Cancel, X, or clicking outside)
-          setPendingDeleteLayoutId(null);
-          setPendingDeleteBoxId(null);
-          setDeleteType(null);
-        }
-      }}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>
-              {deleteType === 'row' ? 'Delete row?' : 'Delete element?'}
-            </DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this {deleteType === 'row' ? 'row' : 'element'}? This will remove it and all its associated content. This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowDeleteConfirmation(false);
-                setPendingDeleteLayoutId(null);
-                setPendingDeleteBoxId(null);
-                setDeleteType(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (deleteType === 'row') {
-                  confirmDeleteLayout();
-                } else if (deleteType === 'element') {
-                  confirmDeleteBox();
-                }
-              }}
-            >
-              Yes, delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
@@ -1172,7 +984,7 @@ interface ElementBoxProps {
   data: KPIDashboardData | null;
   atomId: string; // CRITICAL: Required for TableElement to work correctly
   onDeleteBox: (layoutId: string, boxId: string) => void;
-  onAddElement: (layoutId: string, boxId: string, position: 'left' | 'right' | 'above' | 'below') => void;
+  onAddElement: (layoutId: string, boxId: string, position: 'left' | 'right') => void;
   boxesInRow: number; // Number of boxes in the current row
   isFirstElement?: boolean; // Whether this is the first element on the dashboard
   formattedGlobalFilters?: string | null; // Formatted global filters string
@@ -1313,11 +1125,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   const [isResizing, setIsResizing] = useState(false);
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const imageRef = useRef<HTMLImageElement>(null);
-  const [isImageHovered, setIsImageHovered] = useState(false);
-  // Image upload state (only for image elements)
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
-  const imageFileInputRef = useRef<HTMLInputElement>(null);
   
   // Metric card filter state - moved to top level to avoid conditional hook calls
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
@@ -5065,27 +4872,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     <ArrowRight className="w-4 h-4" />
                     <span>Add to the Right</span>
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAddElement(layoutId, boxId, 'above');
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <ArrowUp className="w-4 h-4" />
-                    <span>Add Above</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAddElement(layoutId, boxId, 'below');
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <ArrowDown className="w-4 h-4" />
-                    <span>Add Below</span>
-                  </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSeparator />
@@ -5503,107 +5289,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         }
       };
 
-      const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        // Validate file type
-        if (!file.type.startsWith('image/')) {
-          setImageUploadError('Please select a valid image file');
-          return;
-        }
-
-        // Validate file size (max 10MB)
-        if (file.size > 10 * 1024 * 1024) {
-          setImageUploadError('Image size must be less than 10MB');
-          return;
-        }
-
-        setUploadingImage(true);
-        setImageUploadError(null);
-
-        try {
-          const projectContext = getActiveProjectContext();
-          if (!projectContext) {
-            throw new Error('Project context not available');
-          }
-
-          const formData = new FormData();
-          formData.append('file', file);
-          formData.append('client_name', projectContext.client_name);
-          formData.append('app_name', projectContext.app_name);
-          formData.append('project_name', projectContext.project_name);
-
-          const response = await fetch(`${IMAGES_API}/upload`, {
-            method: 'POST',
-            body: formData,
-            credentials: 'include',
-          });
-
-          if (!response.ok) {
-            let errorMessage = 'Failed to upload image';
-            try {
-              const errorData = await response.json();
-              errorMessage = errorData.detail || errorMessage;
-            } catch {
-              // Ignore JSON parse errors
-            }
-            throw new Error(errorMessage);
-          }
-
-          const result = await response.json();
-          console.log('📸 Image upload response:', result);
-          
-          // Always use object_name to construct the content URL (consistent with Exhibition mode)
-          const objectName = result.image?.object_name;
-          
-          if (!objectName) {
-            throw new Error('Upload response did not include object_name');
-          }
-          
-          // Construct the display URL using the content endpoint
-          const encoded = encodeURIComponent(objectName);
-          const imageUrl = `${IMAGES_API}/content?object_name=${encoded}`;
-          
-          console.log('📸 Object name:', objectName);
-          console.log('📸 Final image URL:', imageUrl);
-
-          // Update the image box with the uploaded image URL
-          const updatedLayouts = settings.layouts?.map(layout => ({
-            ...layout,
-            boxes: layout.boxes.map(b =>
-              b.id === boxId
-                ? {
-                    ...b,
-                    imageUrl: imageUrl,
-                    imageAlt: file.name || 'Uploaded image',
-                    imageWidth: '100%',
-                    imageHeight: 'auto',
-                    imageObjectFit: 'contain',
-                    imageBorderRadius: '8px',
-                  }
-                : b
-            )
-          }));
-
-          onSettingsChange({ layouts: updatedLayouts });
-        } catch (error: any) {
-          console.error('Image upload error:', error);
-          setImageUploadError(error.message || 'Failed to upload image');
-        } finally {
-          setUploadingImage(false);
-          // Reset file input
-          if (imageFileInputRef.current) {
-            imageFileInputRef.current.value = '';
-          }
-        }
-      };
-
-      const handleUploadButtonClick = (e: React.MouseEvent) => {
-        e.stopPropagation(); // Prevent box selection when clicking upload button
-        imageFileInputRef.current?.click();
-      };
-
       return (
         <div 
           className={`relative group/box ${selectionClass}`}
@@ -5620,141 +5305,56 @@ const ElementBox: React.FC<ElementBoxProps> = ({
             onAddElement={onAddElement}
             selectedBoxIds={settings.selectedBoxIds}
             boxesInRow={boxesInRow}
-            box={box}
-            settings={settings}
-            onSettingsChange={onSettingsChange}
           />
 
           <div className="relative w-full h-full rounded-xl overflow-hidden border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-purple-100/50 shadow-md hover:shadow-lg transition-all">
-            {/* Hidden file input for image upload */}
-            <input
-              ref={imageFileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleImageUpload}
-            />
-            
             {imageUrl && imageUrl.trim() !== '' ? (
-              <div 
-                className="relative w-full h-full flex items-center justify-center p-4"
-                onMouseEnter={() => setIsImageHovered(true)}
-                onMouseLeave={() => setIsImageHovered(false)}
-              >
-                <div className="relative inline-block">
-                  <img
-                    ref={imageRef}
-                    src={imageUrl}
-                    alt={imageAlt}
-                    style={{
-                      width: imageWidth === '100%' ? '100%' : imageWidth,
-                      height: imageHeight === 'auto' ? 'auto' : imageHeight,
-                      objectFit: imageObjectFit,
-                      borderRadius: imageBorderRadius,
-                      maxWidth: '100%',
-                      maxHeight: '100%',
-                      cursor: isResizing ? 'nwse-resize' : (isImageHovered ? 'move' : 'default'),
-                      display: 'block',
-                    }}
-                    className="select-none"
-                    draggable={false}
-                    onError={(e) => {
-                      console.error('❌ Image failed to load:', imageUrl);
-                      console.error('❌ Error details:', e);
-                      console.error('❌ Image element:', e.target);
-                      // Don't hide the image, let the browser show the broken image icon or alt text
-                    }}
-                    onLoad={() => {
-                      console.log('✅ Image loaded successfully:', imageUrl);
-                    }}
-                  />
-                  {/* Hover-based resize handles - only visible on hover, positioned relative to image */}
-                  {isImageHovered && imageRef.current && (
-                    <>
-                      {/* Corner handles */}
-                      {/* Top-left */}
-                      <div
-                        className="absolute top-0 left-0 w-3 h-3 cursor-nwse-resize resize-handle border-2 border-purple-500 bg-purple-500/30 hover:bg-purple-500/60 transition-colors z-10 rounded-sm"
-                        style={{ transform: 'translate(-50%, -50%)' }}
-                        onMouseDown={handleImageResizeStart}
-                        title="Resize"
-                      />
-                      {/* Top-right */}
-                      <div
-                        className="absolute top-0 right-0 w-3 h-3 cursor-nesw-resize resize-handle border-2 border-purple-500 bg-purple-500/30 hover:bg-purple-500/60 transition-colors z-10 rounded-sm"
-                        style={{ transform: 'translate(50%, -50%)' }}
-                        onMouseDown={handleImageResizeStart}
-                        title="Resize"
-                      />
-                      {/* Bottom-left */}
-                      <div
-                        className="absolute bottom-0 left-0 w-3 h-3 cursor-nesw-resize resize-handle border-2 border-purple-500 bg-purple-500/30 hover:bg-purple-500/60 transition-colors z-10 rounded-sm"
-                        style={{ transform: 'translate(-50%, 50%)' }}
-                        onMouseDown={handleImageResizeStart}
-                        title="Resize"
-                      />
-                      {/* Bottom-right */}
-                      <div
-                        className="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize resize-handle border-2 border-purple-500 bg-purple-500/30 hover:bg-purple-500/60 transition-colors z-10 rounded-sm"
-                        style={{ transform: 'translate(50%, 50%)' }}
-                        onMouseDown={handleImageResizeStart}
-                        title="Resize"
-                      />
-                      {/* Edge handles */}
-                      {/* Top */}
-                      <div
-                        className="absolute top-0 left-1/2 w-3 h-3 cursor-ns-resize resize-handle border-2 border-purple-500 bg-purple-500/30 hover:bg-purple-500/60 transition-colors z-10 rounded-sm"
-                        style={{ transform: 'translate(-50%, -50%)' }}
-                        onMouseDown={handleImageResizeStart}
-                        title="Resize"
-                      />
-                      {/* Right */}
-                      <div
-                        className="absolute right-0 top-1/2 w-3 h-3 cursor-ew-resize resize-handle border-2 border-purple-500 bg-purple-500/30 hover:bg-purple-500/60 transition-colors z-10 rounded-sm"
-                        style={{ transform: 'translate(50%, -50%)' }}
-                        onMouseDown={handleImageResizeStart}
-                        title="Resize"
-                      />
-                      {/* Bottom */}
-                      <div
-                        className="absolute bottom-0 left-1/2 w-3 h-3 cursor-ns-resize resize-handle border-2 border-purple-500 bg-purple-500/30 hover:bg-purple-500/60 transition-colors z-10 rounded-sm"
-                        style={{ transform: 'translate(-50%, 50%)' }}
-                        onMouseDown={handleImageResizeStart}
-                        title="Resize"
-                      />
-                      {/* Left */}
-                      <div
-                        className="absolute left-0 top-1/2 w-3 h-3 cursor-ew-resize resize-handle border-2 border-purple-500 bg-purple-500/30 hover:bg-purple-500/60 transition-colors z-10 rounded-sm"
-                        style={{ transform: 'translate(-50%, -50%)' }}
-                        onMouseDown={handleImageResizeStart}
-                        title="Resize"
-                      />
-                    </>
-                  )}
-                </div>
+              <div className="relative w-full h-full flex items-center justify-center p-4">
+                <img
+                  ref={imageRef}
+                  src={imageUrl}
+                  alt={imageAlt}
+                  style={{
+                    width: imageWidth === '100%' ? '100%' : imageWidth,
+                    height: imageHeight === 'auto' ? 'auto' : imageHeight,
+                    objectFit: imageObjectFit,
+                    borderRadius: imageBorderRadius,
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    cursor: isResizing ? 'nwse-resize' : 'default',
+                    display: 'block',
+                  }}
+                  className="select-none"
+                  draggable={false}
+                  onError={(e) => {
+                    console.error('❌ Image failed to load:', imageUrl);
+                    console.error('❌ Error details:', e);
+                    console.error('❌ Image element:', e.target);
+                    // Don't hide the image, let the browser show the broken image icon or alt text
+                  }}
+                  onLoad={() => {
+                    console.log('✅ Image loaded successfully:', imageUrl);
+                  }}
+                />
+                {/* Resize handle - bottom right corner */}
+                {isSelected && (
+                  <div
+                    className="absolute bottom-2 right-2 w-6 h-6 bg-purple-500 rounded-full border-2 border-white shadow-lg cursor-nwse-resize resize-handle flex items-center justify-center hover:bg-purple-600 transition-colors z-10"
+                    onMouseDown={handleImageResizeStart}
+                    title="Drag to resize"
+                  >
+                    <div className="w-3 h-3 border-t-2 border-r-2 border-white transform rotate-45" />
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center h-full p-4 space-y-4">
+              <div className="flex flex-col items-center justify-center h-full p-4 space-y-3">
                 <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-purple-100 to-purple-50 flex items-center justify-center border-2 border-purple-200">
                   <ImageIcon className="w-8 h-8 text-purple-500" />
                 </div>
                 <p className="text-sm font-medium text-foreground">Image</p>
-                <Button
-                  type="button"
-                  onClick={handleUploadButtonClick}
-                  disabled={uploadingImage}
-                  className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white"
-                >
-                  <Upload className="w-4 h-4" />
-                  {uploadingImage ? 'Uploading...' : 'Choose Image'}
-                </Button>
-                {imageUploadError && (
-                  <p className="text-xs text-red-600 text-center px-4">
-                    {imageUploadError}
-                  </p>
-                )}
                 <p className="text-xs text-muted-foreground text-center px-4">
-                  Supported formats: JPG, PNG, GIF. Max size: 10MB
+                  Upload an image from the settings panel
                 </p>
               </div>
             )}
@@ -6280,6 +5880,18 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
           onClick={handleTableClick}
         >
+          {/* Three-dots menu - visible on hover */}
+          <ElementMenuDropdown
+            elementTypes={elementTypes}
+            onElementChange={handleElementChange}
+            boxId={boxId}
+            layoutId={layoutId}
+            onDeleteBox={onDeleteBox}
+            onAddElement={onAddElement}
+            selectedBoxIds={settings.selectedBoxIds}
+            boxesInRow={boxesInRow}
+          />
+
           {/* Edit Interactions Controls - visible when Edit Interactions mode is enabled */}
           {settings.editInteractionsMode && (
             <div 
@@ -6333,19 +5945,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           )}
 
           {/* Table Container */}
-          <div className="relative w-full h-full rounded-xl overflow-hidden bg-white border-2 border-teal-200 shadow-lg group/tablecontainer" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
-            {/* Three-dots menu - positioned relative to Table Container, visible on hover */}
-            <ElementMenuDropdown
-              elementTypes={elementTypes}
-              onElementChange={handleElementChange}
-              boxId={boxId}
-              layoutId={layoutId}
-              onDeleteBox={onDeleteBox}
-              onAddElement={onAddElement}
-              selectedBoxIds={settings.selectedBoxIds}
-              boxesInRow={boxesInRow}
-              containerClassName="group-hover/tablecontainer:opacity-100"
-            />
+          <div className="w-full h-full rounded-xl overflow-hidden bg-white border-2 border-teal-200 shadow-lg" style={{ maxHeight: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
             <TableElement 
               tableSettings={tableSettings}
               width={undefined}

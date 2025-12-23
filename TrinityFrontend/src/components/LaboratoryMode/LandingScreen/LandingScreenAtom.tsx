@@ -86,9 +86,17 @@ export const LandingScreenAtom: React.FC<LandingScreenAtomProps> = ({
     );
   }
 
-  // Case 2: Files uploaded - priming UI is now owned by the Upload atom.
-  // We no longer render the separate landing card here to avoid duplication.
-  return null;
+  // Case 2: Files uploaded - show tabs for primed and non-primed files
+  // This includes scenarios B (partial primed), C (in progress), and D (all primed)
+  return (
+    <PartialPrimedCard
+      atomId={atomId}
+      cardId={cardId}
+      files={scenarioData.files}
+      primingStatuses={scenarioData.primingStatuses}
+      onAddNewCard={onAddNewCard}
+    />
+  );
 };
 
 

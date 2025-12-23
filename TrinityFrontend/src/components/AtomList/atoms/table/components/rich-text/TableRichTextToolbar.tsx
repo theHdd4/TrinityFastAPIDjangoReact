@@ -313,8 +313,3 @@ export default TableRichTextToolbar;
 
 
 
-
-
-
-
-

@@ -237,11 +237,10 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
       
       const isExcelFile = sanitizedFileName.toLowerCase().endsWith('.xlsx') || 
                          sanitizedFileName.toLowerCase().endsWith('.xls');
-
-      // Use the same upload endpoints as the Saved DataFrames panel
+      
       const endpoint = isExcelFile 
-        ? `${VALIDATE_API}/upload-excel-multi-sheet`
-        : `${VALIDATE_API}/upload-file`;
+        ? `${UPLOAD_API}/upload-excel-multi-sheet`
+        : `${UPLOAD_API}/upload-file`;
       
       const form = new FormData();
       form.append('file', sanitizedFile);

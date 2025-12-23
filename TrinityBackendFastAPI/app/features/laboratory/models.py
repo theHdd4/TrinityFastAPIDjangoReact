@@ -229,17 +229,8 @@ class VariableComputeRequest(BaseModel):
     app_name: Optional[str] = Field(default=None, alias="appName", description="App name")
     project_name: Optional[str] = Field(default=None, alias="projectName", description="Project name")
     confirmOverwrite: Optional[bool] = Field(default=False, alias="confirmOverwrite", description="Confirm overwriting existing variables")
-    preview: Optional[bool] = Field(default=False, description="If True, compute values without saving to MongoDB")
 
     model_config = ConfigDict(populate_by_name=True)
-
-
-class ComputedVariableValue(BaseModel):
-    """Schema for a computed variable value (used in preview mode)."""
-    
-    name: str = Field(..., description="Variable name")
-    value: str = Field(..., description="Computed value as string")
-    operationDetails: Optional[dict] = Field(default=None, alias="operationDetails", description="Operation details for this variable")
 
 
 class VariableComputeResponse(BaseModel):
@@ -249,7 +240,6 @@ class VariableComputeResponse(BaseModel):
     new_columns: List[str] = Field(default_factory=list, alias="newColumns", description="List of newly created variable names")
     error: Optional[str] = Field(default=None, description="Error message if computation failed")
     existingVariables: Optional[List[str]] = Field(default=None, alias="existingVariables", description="List of existing variable names that would be overwritten")
-    computedValues: Optional[List[ComputedVariableValue]] = Field(default=None, alias="computedValues", description="Computed variable values (only returned in preview mode)")
 
     model_config = ConfigDict(populate_by_name=True)
 

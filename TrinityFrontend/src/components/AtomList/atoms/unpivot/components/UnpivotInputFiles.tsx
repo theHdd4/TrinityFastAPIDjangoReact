@@ -196,14 +196,6 @@ const UnpivotInputFiles: React.FC<UnpivotInputFilesProps> = ({ atomId }) => {
     } finally {
       setIsLoading(false);
     }
-
-    // Record the current dataframe selection for this atom in the laboratory store
-    try {
-      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
-      setAtomCurrentDataframe(atomId, normalized);
-    } catch {
-      // best-effort; do not block unpivot on metrics sync
-    }
   }, [atomId, updateSettings]);
 
   useEffect(() => {

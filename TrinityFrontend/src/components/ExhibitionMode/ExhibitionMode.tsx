@@ -195,7 +195,7 @@ const ExhibitionMode = () => {
       console.error('[ExhibitionMode] Collaborative sync error:', error);
     },
     onConnected: () => {
-      // console.log('[ExhibitionMode] Collaborative sync connected');
+      console.log('[ExhibitionMode] Collaborative sync connected');
       toast({
         title: 'Real-time collaboration active',
         description: 'Your changes are now synced with other users.',
@@ -203,10 +203,10 @@ const ExhibitionMode = () => {
       });
     },
     onDisconnected: () => {
-      // console.log('[ExhibitionMode] Collaborative sync disconnected');
+      console.log('[ExhibitionMode] Collaborative sync disconnected');
     },
     onUsersChanged: (users) => {
-      // console.log('[ExhibitionMode] Active users:', users.length);
+      console.log('[ExhibitionMode] Active users:', users.length);
     },
   });
 
@@ -1083,12 +1083,12 @@ const ExhibitionMode = () => {
 
     // Debounce autosave to avoid too frequent saves
     const autosaveTimer = setTimeout(async () => {
-      // console.log('🔄 [EXHIBITION AUTOSAVE] Triggering autosave...');
+      console.log('🔄 [EXHIBITION AUTOSAVE] Triggering autosave...');
 
       try {
         const context = getActiveProjectContext();
         if (!context) {
-          // console.warn('[EXHIBITION AUTOSAVE] No project context available');
+          console.warn('[EXHIBITION AUTOSAVE] No project context available');
           return;
         }
 
@@ -1109,7 +1109,7 @@ const ExhibitionMode = () => {
         });
 
         persistCardsLocally(cardsToPersist);
-        // console.log('✅ [EXHIBITION AUTOSAVE] Configuration saved successfully');
+        console.log('✅ [EXHIBITION AUTOSAVE] Configuration saved successfully');
       } catch (error) {
         console.error('[EXHIBITION AUTOSAVE] Autosave error:', error);
       }

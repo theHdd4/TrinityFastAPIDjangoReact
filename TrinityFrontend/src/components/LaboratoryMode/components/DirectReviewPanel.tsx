@@ -331,16 +331,6 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
         });
 
         if (saveRes.ok) {
-          // After successful save, update col.name to col.newName for all renamed columns
-          // This makes the renamed value become the new "original" name
-          setColumns(prev => prev.map(col => {
-            const trimmedNewName = col.newName?.trim();
-            if (trimmedNewName && trimmedNewName !== col.name) {
-              return { ...col, name: trimmedNewName };
-            }
-            return col;
-          }));
-
           // Mark file as primed
           if (fileName) {
             await markFileAsPrimed(fileName);
@@ -468,10 +458,10 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
                       className={col.dropColumn ? 'bg-gray-50 opacity-60 hover:bg-gray-50' : 'hover:bg-gray-50'}
                       style={{ height: '1.75rem' }}
                     >
-                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={col.name}>
+                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={col.newName}>
                         <div className="truncate">
                           <div className="text-gray-700 text-[10px] leading-tight truncate">
-                            {col.name}
+                            {col.newName}
                           </div>
                           {uniqueSampleValues.length === 0 ? (
                             <div className="text-gray-400 text-[9px] leading-tight truncate">No samples</div>

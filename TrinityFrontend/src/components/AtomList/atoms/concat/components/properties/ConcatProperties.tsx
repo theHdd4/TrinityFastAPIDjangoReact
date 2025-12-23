@@ -26,18 +26,6 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
       direction: newSettings.direction || settings.direction || DEFAULT_CONCAT_SETTINGS.direction
     };
     updateSettings(atomId, updatedSettings);
-
-    // Record the current dataframe selection for this atom in the laboratory store.
-    // For multi-file operations, always use the first input (file1) as the metrics context.
-    const firstInput = updatedSettings.file1;
-    if (firstInput && typeof firstInput === 'string') {
-      try {
-        const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
-        setAtomCurrentDataframe(atomId, firstInput);
-      } catch {
-        // best-effort; do not block concat on metrics sync
-      }
-    }
   };
 
   // Helper function to check if all required options are selected

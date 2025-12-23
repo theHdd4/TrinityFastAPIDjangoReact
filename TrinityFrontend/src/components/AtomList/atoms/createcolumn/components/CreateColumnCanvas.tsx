@@ -159,42 +159,24 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   // Helper to get the output column name for an operation
   const getOutputColName = (op: Operation) => {
     if (op.rename && op.rename.trim()) return op.rename.trim();
-    // IMPORTANT: These names must match the backend naming in service.py
     const columns = op.columns?.filter(Boolean) || [];
     switch (op.type) {
-      // Backend: "_plus_".join(columns)
       case 'add': return columns.join('_plus_');
-      // Backend: "_minus_".join(columns)
       case 'subtract': return columns.join('_minus_');
-      // Backend: "_x_".join(columns)
-      case 'multiply': return columns.join('_x_');
-      // Backend: "_div_".join(columns)
-      case 'divide': return columns.join('_div_');
-      // Backend: f"Res_{y_var}"
+      case 'multiply': return columns.join('_times_');
+      case 'divide': return columns.join('_dividedby_');
       case 'residual': return `Res_${columns[0] || ''}`;
-      // Backend: f"{col}_dummy"
       case 'dummy': return columns.length > 0 ? `${columns[0]}_dummy` : 'dummy';
-      // Backend: f"{col}_log"
       case 'log': return columns.length > 0 ? `${columns[0]}_log` : 'log';
-      // Backend: f"{col}_sqrt"
       case 'sqrt': return columns.length > 0 ? `${columns[0]}_sqrt` : 'sqrt';
-      // Backend: f"{col}_exp"
       case 'exp': return columns.length > 0 ? `${columns[0]}_exp` : 'exp';
-      // Backend: f"{col}_power{param}"
       case 'power': return columns.length > 0 && op.param ? `${columns[0]}_power${op.param}` : 'power';
-      // Backend: f"{col}_zscore_scaled"
       case 'standardize_zscore': return columns.length > 0 ? `${columns[0]}_zscore_scaled` : 'zscore_scaled';
-      // Backend: f"{col}_minmax_scaled"
       case 'standardize_minmax': return columns.length > 0 ? `${columns[0]}_minmax_scaled` : 'minmax_scaled';
-      // Backend: f"{col}_logistic"
       case 'logistic': return columns.length > 0 ? `${columns[0]}_logistic` : 'logistic';
-      // Backend: f"{col}_detrended"
       case 'detrend': return columns.length > 0 ? `${columns[0]}_detrended` : 'detrended';
-      // Backend: f"{col}_deseasonalized"
       case 'deseasonalize': return columns.length > 0 ? `${columns[0]}_deseasonalized` : 'deseasonalized';
-      // Backend: f"{col}_detrend_deseasonalized"
       case 'detrend_deseasonalize': return columns.length > 0 ? `${columns[0]}_detrend_deseasonalized` : 'detrend_deseasonalized';
-      // Backend: f"{date_col}_year", f"{date_col}_month", etc.
       case 'datetime': {
         if (columns.length > 0 && op.param) {
           const dateCol = columns[0];
@@ -706,8 +688,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
             switch (op.type) {
               case 'add': created_column_name = columns.join('_plus_'); break;
               case 'subtract': created_column_name = columns.join('_minus_'); break;
-              case 'multiply': created_column_name = columns.join('_x_'); break;
-              case 'divide': created_column_name = columns.join('_div_'); break;
+              case 'multiply': created_column_name = columns.join('_times_'); break;
+              case 'divide': created_column_name = columns.join('_dividedby_'); break;
               case 'residual': created_column_name = `Res_${columns[0] || ''}`; break;
               case 'dummy': created_column_name = columns.length > 0 ? `${columns[0]}_dummy` : 'dummy'; break;
               case 'log': created_column_name = columns.length > 0 ? `${columns[0]}_log` : 'log'; break;
@@ -838,8 +820,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
             switch (op.type) {
               case 'add': created_column_name = columns.join('_plus_'); break;
               case 'subtract': created_column_name = columns.join('_minus_'); break;
-              case 'multiply': created_column_name = columns.join('_x_'); break;
-              case 'divide': created_column_name = columns.join('_div_'); break;
+              case 'multiply': created_column_name = columns.join('_times_'); break;
+              case 'divide': created_column_name = columns.join('_dividedby_'); break;
               case 'residual': created_column_name = `Res_${columns[0] || ''}`; break;
               case 'dummy': created_column_name = columns.length > 0 ? `${columns[0]}_dummy` : 'dummy'; break;
               case 'log': created_column_name = columns.length > 0 ? `${columns[0]}_log` : 'log'; break;

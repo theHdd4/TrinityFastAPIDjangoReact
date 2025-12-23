@@ -91,17 +91,6 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   const handleDataUpload = async (data: ChartData | null, fileId: string, dataSource?: string, preserveCharts: boolean = false) => {
-    // Record the current dataframe selection for this atom in the laboratory store
-    if (dataSource) {
-      try {
-        const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
-        const normalized = dataSource.endsWith('.arrow') ? dataSource : `${dataSource}.arrow`;
-        setAtomCurrentDataframe(atomId, normalized);
-      } catch {
-        // best-effort; do not block chart-maker on metrics sync
-      }
-    }
-
     try {
       setError(undefined);
 

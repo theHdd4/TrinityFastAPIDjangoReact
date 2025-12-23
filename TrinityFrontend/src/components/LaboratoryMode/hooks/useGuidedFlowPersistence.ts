@@ -132,7 +132,7 @@ export function useGuidedFlowPersistence() {
     }
   }, []);
 
-  // Mark file as primed (completed U6 - final step)
+  // Mark file as primed (completed U7)
   const markFileAsPrimed = useCallback(async (fileName: string) => {
     const context = projectContextRef.current || getActiveProjectContext();
     if (!context) return;
@@ -208,7 +208,7 @@ export function useGuidedFlowPersistence() {
     localStorage.removeItem(key);
     // Also clear from backend
     saveToBackend({
-      currentStage: 'U2',
+      currentStage: 'U0',
       uploadedFiles: [],
       headerSelections: {},
       columnNameEdits: {},

@@ -52,14 +52,6 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
     setSavedId(value);
     // Update validatorId in settings so it syncs properly
     updateSettings(atomId, { validatorId: value });
-
-    // Record the current dataframe selection for this atom in the laboratory store
-    try {
-      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
-      setAtomCurrentDataframe(atomId, value);
-    } catch {
-      // best-effort; do not block classifier on metrics sync
-    }
   };
 
   const { requestChange: confirmSavedIdChange, dialog } = useDataSourceChangeWarning(async value => {
@@ -230,18 +222,18 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
         >
           Classify Columns
         </Button>
-        
+
         {/* Data Summary Toggle - Only when data source is selected (chartmaker pattern) */}
         {savedId && (
-        <div className="flex items-center justify-between pt-4 border-t mt-4">
-          <Label className="text-xs">Show Data Summary</Label>
-          <Switch
-            checked={settings.showDataSummary || false}
-            onCheckedChange={(checked) => {
-              updateSettings(atomId, { showDataSummary: !!checked });
-            }}
-          />
-        </div>
+          <div className="flex items-center justify-between pt-4 border-t mt-4">
+            <Label className="text-xs">Show Data Summary</Label>
+            <Switch
+              checked={settings.showDataSummary || false}
+              onCheckedChange={(checked) => {
+                updateSettings(atomId, { showDataSummary: !!checked });
+              }}
+            />
+          </div>
         )}
       </Card>
 

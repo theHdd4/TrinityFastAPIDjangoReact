@@ -46,112 +46,8 @@ from .service import (
     queue_draft_save,
     restore_session_from_draft,
     clear_draft,
-    mark_changes_applied,
 )
 from app.features.data_upload_validate.app.routes import get_object_prefix
-
-
-async def _persist_rename_operations(
-    *,
-    object_name: str,
-    rename_pairs: List[Tuple[str, str]],
-    df: pl.DataFrame,
-    client_name: str,
-    app_name: str,
-    project_name: str,
-) -> bool:
-    """
-    Persist rename operations into createandtransform_configs
-    so rename lineage is file-based and survives table sessions.
-    
-    Args:
-        object_name: File path in MinIO
-        rename_pairs: List of (old_name, new_name) tuples
-        df: Current dataframe (for file_columns and file_shape)
-        client_name: Client name for MongoDB document
-        app_name: App name for MongoDB document
-        project_name: Project name for MongoDB document
-    
-    Returns:
-        True if successful, False otherwise
-    """
-    if not rename_pairs or not object_name:
-        logger.warning(
-            f"⚠️ [TABLE-RENAME-COLUMN] _persist_rename_operations: Missing inputs - "
-            f"rename_pairs={rename_pairs}, object_name='{object_name}'"
-        )
-        return False
-    
-    try:
-        operations: List[Dict[str, Any]] = []
-        for old_name, new_name in rename_pairs:
-            if not isinstance(old_name, str) or not old_name.strip():
-                logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Invalid old_name: {old_name}")
-                continue
-            if not isinstance(new_name, str) or not new_name.strip():
-                logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Invalid new_name: {new_name}")
-                continue
-            operations.append({
-                "operation_type": "rename",
-                "columns": [old_name.strip()],
-                "rename": new_name.strip(),
-                "param": None,
-                # Note: rename operations don't have created_column_name
-                # They are mappings, not created columns
-            })
-            # logger.info(
-            #     f"📝 [TABLE-RENAME-COLUMN] Prepared rename operation: '{old_name.strip()}' -> '{new_name.strip()}'"
-            # )
-        
-        if not operations:
-            logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] No valid operations to persist")
-            return False
-        
-        # Normalize object_name for consistent storage (remove leading/trailing slashes)
-        # This ensures the stored path matches what get_column_metadata_for_file expects
-        normalized_object_name = object_name.strip().strip("/")
-        
-        # For overwrite, point input_file to self to stop lineage traversal
-        operation_payload: Dict[str, Any] = {
-            "input_file": normalized_object_name,  # Overwrite: points to self
-            "operations": operations,
-            "saved_file": normalized_object_name,  # Use normalized path for consistent matching
-            "file_columns": list(df.columns),
-            "file_shape": [df.height, df.width],
-            "client_name": client_name,
-            "app_name": app_name,
-            "project_name": project_name,
-            "user_id": os.getenv("USER_ID", "unknown"),
-            "project_id": None,
-        }
-        
-        # logger.info(
-        #     f"💾 [TABLE-RENAME-COLUMN] Storing rename operations: "
-        #     f"object_name='{object_name}' -> normalized='{normalized_object_name}', "
-        #     f"document_id='{client_name}/{app_name}/{project_name}', "
-        #     f"operations={operations}, "
-        #     f"saved_file='{normalized_object_name}'"
-        # )
-        
-        from app.features.createcolumn.service import _store_create_config  # local import avoids cycles
-        
-        document_id = f"{client_name}/{app_name}/{project_name}"
-        _store_create_config(document_id, operation_payload)
-        
-        # Build operations summary for logging
-        operations_summary = [f"{op['columns'][0]}->{op['rename']}" for op in operations]
-        
-        # logger.info(
-        #     f"✅ [TABLE-RENAME-COLUMN] Stored {len(operations)} rename op(s) in createandtransform_configs "
-        #     f"for saved_file='{normalized_object_name}' document_id='{document_id}' "
-        #     f"(operations: {operations_summary})"
-        # )
-        return True
-    except Exception as e:
-        logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Failed to persist rename operations: {e}")
-        import traceback
-        logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Traceback: {traceback.format_exc()}")
-        return False
 
 
 def normalize_table_settings_for_pipeline(settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -937,11 +833,6 @@ async def save_table(
     try:
         import io
         import re
-
-        # Capture source file BEFORE we overwrite session metadata.
-        # This is the parent pointer used to preserve create-column metadata across table saves.
-        session_meta_before = await get_session_metadata(request.table_id)
-        source_object_name = (session_meta_before or {}).get("object_name") or ""
         
         # Process header row if enabled (for blank tables)
         if request.use_header_row:
@@ -1154,171 +1045,9 @@ async def save_table(
             "timestamp": execution_started_at.isoformat()
         }]
         
-        # Use the source file captured before save.
-        original_object_name = source_object_name
-
-        # ------------------------------------------------------------------
-        # Persist rename lineage into create-column metadata store
-        #
-        # Table renames change column names in the saved file. If we don't record
-        # those renames into createandtransform_configs, created-column icons
-        # cannot be preserved across renames in downstream table loads.
-        #
-        # We record rename operations (old->new) using the existing operations[]
-        # schema used by create-column, without changing schema or UI behavior.
-        # ------------------------------------------------------------------
-        try:
-            # Extract client/app/project with fallback chain:
-            # 1. From file path (object_name is typically "client/app/project/...")
-            # 2. From query params (if frontend sends them)
-            # 3. From environment variables
-            path_parts = (object_name or "").strip("/").split("/")
-            extracted_client = path_parts[0] if len(path_parts) > 0 and path_parts[0] else ""
-            extracted_app = path_parts[1] if len(path_parts) > 1 and path_parts[1] else ""
-            extracted_project = path_parts[2] if len(path_parts) > 2 and path_parts[2] else ""
-            
-            final_client_name = (
-                client_name or 
-                extracted_client or 
-                os.getenv("CLIENT_NAME", "")
-            )
-            final_app_name = (
-                app_name or 
-                extracted_app or 
-                os.getenv("APP_NAME", "")
-            )
-            final_project_name = (
-                project_name or 
-                extracted_project or 
-                os.getenv("PROJECT_NAME", "")
-            )
-            
-            logger.info(
-                f"🔍 [TABLE-SAVE] Context extraction for rename persistence: "
-                f"object_name='{object_name}' -> "
-                f"extracted=({extracted_client}/{extracted_app}/{extracted_project}), "
-                f"query=({client_name}/{app_name}/{project_name}), "
-                f"final=({final_client_name}/{final_app_name}/{final_project_name})"
-            )
-
-            if final_client_name and final_app_name and final_project_name:
-                logger.info(
-                    f"🔍 [TABLE-SAVE] Retrieving change log for table_id='{request.table_id}' "
-                    f"(applied=False)"
-                )
-                changes = await get_change_log(request.table_id, applied=False)
-                logger.info(
-                    f"🔍 [TABLE-SAVE] Change log retrieved: total_changes={len(changes or [])}, "
-                    f"table_id='{request.table_id}', "
-                    f"all_change_types={[c.get('change_type') for c in (changes or [])]}"
-                )
-                
-                rename_changes = [
-                    c for c in (changes or [])
-                    if c.get("change_type") == "rename_column" and isinstance(c.get("change_data"), dict)
-                ]
-                
-                logger.info(
-                    f"🔍 [TABLE-SAVE] Rename changes found: {len(rename_changes)} "
-                    f"(details: {[c.get('change_data', {}) for c in rename_changes[:3]]})"
-                )
-
-                if rename_changes:
-                    operations: List[Dict[str, Any]] = []
-                    for ch in rename_changes:
-                        data = ch.get("change_data") or {}
-                        old_name = data.get("old_name")
-                        new_name = data.get("new_name")
-                        if not isinstance(old_name, str) or not old_name.strip():
-                            continue
-                        if not isinstance(new_name, str) or not new_name.strip():
-                            continue
-                        operations.append(
-                            {
-                                "operation_type": "rename",
-                                "columns": [old_name],
-                                "rename": new_name,
-                                "param": None,
-                                # Note: rename operations don't have created_column_name
-                                # They are mappings, not created columns
-                            }
-                        )
-
-                    if operations:
-                        # For overwrite, point input_file to self to stop lineage traversal.
-                        input_file = original_object_name
-                        if request.overwrite_original or not input_file:
-                            input_file = object_name
-
-                        operation_payload: Dict[str, Any] = {
-                            "input_file": input_file,
-                            "operations": operations,
-                            "saved_file": object_name,
-                            "file_columns": list(df.columns),
-                            "file_shape": [df.height, df.width],
-                            "client_name": final_client_name,
-                            "app_name": final_app_name,
-                            "project_name": final_project_name,
-                            "user_id": os.getenv("USER_ID", "unknown"),
-                            "project_id": None,
-                        }
-
-                        from app.features.createcolumn.service import _store_create_config  # local import avoids cycles
-
-                        document_id = f"{final_client_name}/{final_app_name}/{final_project_name}"
-                        _store_create_config(document_id, operation_payload)
-                        # logger.info(
-                        #     f"✅ [TABLE-SAVE] Stored {len(operations)} rename ops in createandtransform_configs "
-                        #     f"for saved_file='{object_name}' input_file='{input_file}' "
-                        #     f"document_id='{document_id}'"
-                        # )
-                        # Mark that we stored operations (for lineage check below)
-                        stored_operations = True
-                else:
-                    logger.info(
-                        f"ℹ️ [TABLE-SAVE] No rename operations to store (rename_changes was empty)"
-                    )
-                    stored_operations = False
-                
-                # ------------------------------------------------------------------
-                # CRITICAL FIX: For "Save As" (new file), always create a lineage entry
-                # even if there are no rename operations. This ensures metadata from
-                # the source file is accessible via lineage traversal.
-                # ------------------------------------------------------------------
-                if not request.overwrite_original and original_object_name and original_object_name != object_name:
-                    # Check if we already stored operations above (don't duplicate)
-                    if not stored_operations:
-                        lineage_payload: Dict[str, Any] = {
-                            "input_file": original_object_name,  # Source file (for lineage)
-                            "saved_file": object_name,            # New file
-                            "operations": [],                      # No operations, just lineage pointer
-                            "file_columns": list(df.columns),
-                            "file_shape": [df.height, df.width],
-                            "client_name": final_client_name,
-                            "app_name": final_app_name,
-                            "project_name": final_project_name,
-                            "user_id": os.getenv("USER_ID", "unknown"),
-                            "project_id": None,
-                        }
-                        
-                        from app.features.createcolumn.service import _store_create_config
-                        
-                        document_id = f"{final_client_name}/{final_app_name}/{final_project_name}"
-                        _store_create_config(document_id, lineage_payload)
-                        # logger.info(
-                        #     f"✅ [TABLE-SAVE] Created lineage entry for Save As: "
-                        #     f"'{original_object_name}' -> '{object_name}' "
-                        #     f"(document_id='{document_id}')"
-                        # )
-            else:
-                logger.warning(
-                    f"⚠️ [TABLE-SAVE] Skipping rename persistence: missing context "
-                    f"(client='{final_client_name}', app='{final_app_name}', project='{final_project_name}')"
-                )
-        except Exception as e:
-            logger.warning(f"⚠️ [TABLE-SAVE] Failed to persist rename lineage (non-critical): {e}")
-            import traceback
-            logger.warning(f"⚠️ [TABLE-SAVE] Traceback: {traceback.format_exc()}")
+        # Get original object_name from metadata for input file
+        original_metadata = await get_session_metadata(request.table_id)
+        original_object_name = original_metadata.get("object_name") if original_metadata else ""
         
         # Build configuration
         configuration = {
@@ -1409,12 +1138,6 @@ async def save_table(
             # Don't fail the request if pipeline recording fails
             logger.warning(f"Failed to record table save execution for pipeline: {e}")
         
-        # Mark any pending table changes (including rename_column) as applied after successful save.
-        try:
-            await mark_changes_applied(request.table_id)
-        except Exception as e:
-            logger.warning(f"⚠️ [TABLE-SAVE] Failed to mark changes as applied (non-critical): {e}")
-
         return TableSaveResponse(
             object_name=object_name,
             status="success",
@@ -1916,7 +1639,7 @@ async def rename_column(
     Returns:
         Updated table data
     """
-    # logger.info(f"✏️ [TABLE-RENAME-COLUMN] Renaming '{old_name}' to '{new_name}'")
+    logger.info(f"✏️ [TABLE-RENAME-COLUMN] Renaming '{old_name}' to '{new_name}'")
     
     # Get DataFrame from session
     df = SESSIONS.get(table_id)
@@ -1931,125 +1654,10 @@ async def rename_column(
         # Rename the column
         df = df.rename({old_name: new_name})
         
-        # logger.info(f"✅ [TABLE-RENAME-COLUMN] Column renamed successfully")
+        logger.info(f"✅ [TABLE-RENAME-COLUMN] Column renamed successfully")
         
         # Update session
         SESSIONS[table_id] = df
-
-        # Log rename so /table/save can persist lineage metadata.
-        # This is backend-owned and avoids relying on UI state.
-        try:
-            meta = await get_session_metadata(table_id)
-            atom_id = (meta or {}).get("atom_id") or "table"
-            logger.info(
-                f"📝 [TABLE-RENAME-COLUMN] Logging rename change: table_id='{table_id}', "
-                f"atom_id='{atom_id}', old_name='{old_name}', new_name='{new_name}'"
-            )
-            success = await save_change_log(
-                table_id=table_id,
-                atom_id=atom_id,
-                change_type="rename_column",
-                change_data={"old_name": old_name, "new_name": new_name},
-            )
-            if success:
-                # logger.info(f"✅ [TABLE-RENAME-COLUMN] Rename change logged successfully")
-                pass
-            else:
-                logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] save_change_log returned False")
-        except Exception as e:
-            logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Failed to log rename change (non-critical): {e}")
-            import traceback
-            logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Traceback: {traceback.format_exc()}")
-        
-        # NEW: Immediately persist rename to createandtransform_configs (file-based)
-        # This makes rename lineage persistent across table sessions
-        try:
-            meta = await get_session_metadata(table_id)
-            object_name = (meta or {}).get("object_name") if meta else None
-            
-            logger.info(
-                f"🔍 [TABLE-RENAME-COLUMN] Attempting immediate rename persistence: "
-                f"table_id='{table_id}', has_meta={meta is not None}, object_name='{object_name}'"
-            )
-            
-            if object_name:
-                # Normalize object_name to handle potential path variations
-                # Remove leading/trailing slashes and normalize
-                normalized_object_name = object_name.strip().strip("/")
-                
-                # Extract client/app/project with fallback chain (same as /table/save):
-                # 1. From file path (object_name is typically "client/app/project/...")
-                # 2. From query params (if frontend sends them - not available in rename endpoint)
-                # 3. From environment variables
-                path_parts = normalized_object_name.split("/")
-                extracted_client = path_parts[0] if len(path_parts) > 0 and path_parts[0] else ""
-                extracted_app = path_parts[1] if len(path_parts) > 1 and path_parts[1] else ""
-                extracted_project = path_parts[2] if len(path_parts) > 2 and path_parts[2] else ""
-                
-                final_client_name = (
-                    extracted_client or 
-                    os.getenv("CLIENT_NAME", "")
-                ).strip()
-                final_app_name = (
-                    extracted_app or 
-                    os.getenv("APP_NAME", "")
-                ).strip()
-                final_project_name = (
-                    extracted_project or 
-                    os.getenv("PROJECT_NAME", "")
-                ).strip()
-                
-                logger.info(
-                    f"🔍 [TABLE-RENAME-COLUMN] Context extraction: "
-                    f"object_name='{object_name}' -> normalized='{normalized_object_name}', "
-                    f"extracted=({extracted_client}/{extracted_app}/{extracted_project}), "
-                    f"final=({final_client_name}/{final_app_name}/{final_project_name})"
-                )
-                
-                if final_client_name and final_app_name and final_project_name:
-                    logger.info(
-                        f"🔍 [TABLE-RENAME-COLUMN] Persisting rename immediately: "
-                        f"object_name='{normalized_object_name}', "
-                        f"context=({final_client_name}/{final_app_name}/{final_project_name}), "
-                        f"rename='{old_name}' -> '{new_name}'"
-                    )
-                    
-                    # Persist rename operation immediately (file-based)
-                    # Use normalized object_name for consistent storage
-                    success = await _persist_rename_operations(
-                        object_name=normalized_object_name,
-                        rename_pairs=[(old_name, new_name)],
-                        df=df,
-                        client_name=final_client_name,
-                        app_name=final_app_name,
-                        project_name=final_project_name,
-                    )
-                    
-                    if success:
-                        logger.info(
-                            f"✅ [TABLE-RENAME-COLUMN] Rename persistence successful: "
-                            f"'{old_name}' -> '{new_name}' stored for '{normalized_object_name}'"
-                        )
-                    else:
-                        logger.warning(
-                            f"⚠️ [TABLE-RENAME-COLUMN] Rename persistence returned False "
-                            f"(check logs above for details)"
-                        )
-                else:
-                    logger.warning(
-                        f"⚠️ [TABLE-RENAME-COLUMN] Skipping immediate rename persistence: missing context "
-                        f"(client='{final_client_name}', app='{final_app_name}', project='{final_project_name}')"
-                    )
-            else:
-                logger.info(
-                    f"ℹ️ [TABLE-RENAME-COLUMN] No object_name in session metadata, "
-                    f"skipping immediate rename persistence (will rely on /table/save fallback)"
-                )
-        except Exception as e:
-            # CRITICAL: Rename must never fail because of metadata persistence
-            logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Failed to persist rename immediately (non-critical): {e}")
-            import traceback
-            logger.warning(f"⚠️ [TABLE-RENAME-COLUMN] Traceback: {traceback.format_exc()}")
         
         # Return updated data
         response = dataframe_to_response(df, table_id)

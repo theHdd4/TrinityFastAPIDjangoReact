@@ -24,11 +24,14 @@ interface UpdateStageDialogProps {
 }
 
 const STAGE_LABELS: Record<UploadStage, string> = {
+  U0: 'Choose Your Data Source',
+  U1: 'Structural Scan',
   U2: 'Confirm Your Column Headers',
   U3: 'Review Your Column Names',
   U4: 'Review Your Column Types',
   U5: 'Review Missing Values',
   U6: 'Final Preview Before Priming',
+  U7: 'Your Data Is Ready',
 };
 
 export const UpdateStageDialog: React.FC<UpdateStageDialogProps> = ({

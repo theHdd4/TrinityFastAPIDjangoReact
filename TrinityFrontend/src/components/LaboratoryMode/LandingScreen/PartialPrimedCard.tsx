@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowRight, AlertTriangle, Upload, SlidersHorizontal } from 'lucide-react';
+import { ArrowRight, AlertTriangle, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import SavedDataFramesPanel from '@/components/LaboratoryMode/components/SavedDataFramesPanel';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { DirectReviewPanel } from '@/components/LaboratoryMode/components/DirectReviewPanel';
 
 interface PartialPrimedCardProps {
   atomId: string;
@@ -29,12 +31,32 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
   const [primingStats, setPrimingStats] = useState<{ total: number; primed: number; unprimed: number }>({ total: 0, primed: 0, unprimed: 0 });
   const isCheckingRef = useRef(false);
   const panelContainerRef = useRef<HTMLDivElement>(null);
-  const [panelRefreshKey, setPanelRefreshKey] = useState(0);
   
-  // Note: We still access store state to update it when needed (e.g., when "Direct review" is chosen),
-  // but we don't render DirectReviewPanel or GuidedUploadFlowInline here anymore.
-  // Those are now rendered in DataUploadAtom.tsx as separate bottom row.
+  // Check if guided mode is active for this landing card atom
+  const activeGuidedFlows = useLaboratoryStore((state) => state.activeGuidedFlows || {});
+  const isGuidedModeActiveForAtom = useLaboratoryStore((state) => state.isGuidedModeActiveForAtom);
+  const globalGuidedModeEnabled = useLaboratoryStore((state) => state.globalGuidedModeEnabled);
+  const removeActiveGuidedFlow = useLaboratoryStore((state) => state.removeActiveGuidedFlow);
+  const updateAtomSettings = useLaboratoryStore((state) => state.updateAtomSettings);
+  const directReviewTarget = useLaboratoryStore((state) => state.directReviewTarget);
   const setDirectReviewTarget = useLaboratoryStore((state) => state.setDirectReviewTarget);
+  
+  // Check if this atom has an active guided flow
+  const hasActiveGuidedFlow = activeGuidedFlows[atomId] && isGuidedModeActiveForAtom(atomId);
+  const flowState = activeGuidedFlows[atomId];
+  const existingDataframe = flowState?.state?.initialFile as { name: string; path: string; size?: number } | undefined;
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('[PartialPrimedCard] Guided mode check:', {
+      atomId,
+      hasActiveGuidedFlow,
+      globalGuidedModeEnabled,
+      flowState: !!flowState,
+      existingDataframe: !!existingDataframe,
+      activeGuidedFlowsKeys: Object.keys(activeGuidedFlows),
+    });
+  }, [atomId, hasActiveGuidedFlow, globalGuidedModeEnabled, flowState, existingDataframe, activeGuidedFlows]);
 
   // Fetch priming stats for heading
   const fetchPrimingStats = async () => {
@@ -94,10 +116,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           let isPrimed = false;
           if (primingRes.ok) {
             const primingData = await primingRes.json();
-            // Only trust is_primed flag - don't use completed flag as it can be true even if file hasn't been primed
-            // Check if flow has been completed by checking if current_stage is U6 (final step)
-            const hasCompletedFlow = primingData?.current_stage === 'U6';
-            const isPrimedFromAPI = primingData?.is_primed === true;
+            const completed = primingData?.completed === true || primingData?.is_primed === true;
             
             // Check classifier config
             try {
@@ -119,10 +138,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
                 if (configData?.data) {
                   const hasIdentifiers = Array.isArray(configData.data.identifiers) && configData.data.identifiers.length > 0;
                   const hasMeasures = Array.isArray(configData.data.measures) && configData.data.measures.length > 0;
-                  const hasClassifierConfig = hasIdentifiers || hasMeasures;
-                  // ONLY trust is_primed flag from API - this is the authoritative source
-                  // Do NOT use fallback logic as it can incorrectly mark files as primed
-                  isPrimed = isPrimedFromAPI;
+                  isPrimed = completed && (hasIdentifiers || hasMeasures);
                 }
               }
             } catch (err) {
@@ -150,39 +166,21 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
     fetchPrimingStats();
     
     const handleDataframeSaved = () => {
-      // Force refresh of SavedDataFramesPanel by updating key
-      setPanelRefreshKey(prev => prev + 1);
       // Fetch immediately, then again after a short delay to ensure backend has updated
       fetchPrimingStats();
-      setTimeout(() => {
-        fetchPrimingStats();
-        setPanelRefreshKey(prev => prev + 1); // Force another refresh after delay
-      }, 500);
+      setTimeout(() => fetchPrimingStats(), 500);
     };
     const handlePrimingStatusChange = () => {
-      // Force refresh of SavedDataFramesPanel by updating key
-      setPanelRefreshKey(prev => prev + 1);
       // Fetch immediately, then again after a short delay to ensure backend has updated
       fetchPrimingStats();
-      setTimeout(() => {
-        fetchPrimingStats();
-        setPanelRefreshKey(prev => prev + 1); // Force another refresh after delay
-      }, 500);
+      setTimeout(() => fetchPrimingStats(), 500);
     };
     const handleDataframeDeleted = () => {
-      // Force refresh of SavedDataFramesPanel by updating key
-      setPanelRefreshKey(prev => prev + 1);
       // Fetch immediately when file is deleted to update status text
       fetchPrimingStats();
       // Also fetch after a short delay to ensure backend has updated
-      setTimeout(() => {
-        fetchPrimingStats();
-        setPanelRefreshKey(prev => prev + 1); // Force another refresh after delay
-      }, 300);
-      setTimeout(() => {
-        fetchPrimingStats();
-        setPanelRefreshKey(prev => prev + 1); // Force another refresh after delay
-      }, 700);
+      setTimeout(() => fetchPrimingStats(), 300);
+      setTimeout(() => fetchPrimingStats(), 700);
     };
     
     window.addEventListener('dataframe-saved', handleDataframeSaved);
@@ -240,10 +238,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           let isPrimed = false;
           if (primingRes.ok) {
             const primingData = await primingRes.json();
-            // Only trust is_primed flag - don't use completed flag as it can be true even if file hasn't been primed
-            // Check if flow has been completed by checking if current_stage is U6 (final step)
-            const hasCompletedFlow = primingData?.current_stage === 'U6';
-            const isPrimedFromAPI = primingData?.is_primed === true;
+            const completed = primingData?.completed === true || primingData?.is_primed === true;
             
             // Check classifier config
             try {
@@ -265,10 +260,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
                 if (configData?.data) {
                   const hasIdentifiers = Array.isArray(configData.data.identifiers) && configData.data.identifiers.length > 0;
                   const hasMeasures = Array.isArray(configData.data.measures) && configData.data.measures.length > 0;
-                  const hasClassifierConfig = hasIdentifiers || hasMeasures;
-                  // ONLY trust is_primed flag from API - this is the authoritative source
-                  // Do NOT use fallback logic as it can incorrectly mark files as primed
-                  isPrimed = isPrimedFromAPI;
+                  isPrimed = completed && (hasIdentifiers || hasMeasures);
                 }
               }
             } catch (err) {
@@ -319,19 +311,17 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
   };
 
   return (
-    <div className="w-full flex flex-col" style={{ height: '100%', overflowY: 'auto' }}>
+    <div className="w-full flex flex-col" style={{ minHeight: '100%' }}>
       {/* Priming Status Heading */}
       {primingStats.total > 0 && (
         <div className="px-6 pt-1 pb-0">
-          <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+          <h3 className="text-base font-semibold text-gray-800">
             {primingStats.unprimed > 0 
-              ? (
-                  <>
-                    <span>Unprimed files detected. Click on</span>
-                    <SlidersHorizontal className="w-4 h-4 text-gray-700" />
-                    <span>icon to prime them</span>
-                  </>
-                )
+              ? (primingStats.total === 1 && primingStats.unprimed === 1
+                  ? `Status : File need to be prime`
+                  : primingStats.unprimed === primingStats.total
+                  ? `Status : All file need to prime`
+                  : `Status : ${primingStats.unprimed} out of ${primingStats.total} files yet to be primed`)
               : `Status : All files primed`
             }
           </h3>
@@ -379,7 +369,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           border-bottom: none !important;
         }
         
-        /* Make file list container use grid layout - 2 files per row, full width, limit to 4 rows with scroll */
+        /* Make file list container use grid layout - 2 files per row, full width */
         [data-saved-dataframes-panel] .flex-1.overflow-y-auto.p-3 {
           display: grid !important;
           grid-template-columns: repeat(2, minmax(250px, 1fr)) !important;
@@ -391,9 +381,6 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           align-items: start !important;
           padding: 0.25rem 0.5rem !important;
           padding-top: 0.25rem !important;
-          max-height: calc((4 * 3.5rem) + (3 * 0.5rem)) !important; /* 4 rows: 4 cards at 3.5rem each + 3 gaps at 0.5rem each = 15.5rem */
-          overflow-y: auto !important;
-          overflow-x: hidden !important;
         }
         
         /* Target ALL direct children - make them grid items, remove all margins */
@@ -424,7 +411,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           margin-left: 0 !important;
         }
         
-        /* Target file entry cards - ensure they fit grid cells perfectly, blue box styling, fixed height */
+        /* Target file entry cards - ensure they fit grid cells perfectly, blue box styling */
         [data-saved-dataframes-panel] .flex.items-center.justify-between.border {
           width: 100% !important;
           min-width: 0 !important;
@@ -439,8 +426,6 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           justify-content: space-between !important;
           flex-wrap: nowrap !important;
           padding: 0.5rem !important;
-          min-height: 3.5rem !important;
-          max-height: 3.5rem !important;
         }
         
         [data-saved-dataframes-panel] .flex.items-center.justify-between.border.p-1\\.5 {
@@ -504,9 +489,9 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           max-width: 100% !important;
         }
       `}</style>
-      {/* Saved DataFrames Panel - Always visible */}
-      <div className="overflow-y-auto w-full flex flex-col flex-1 min-h-0" data-saved-dataframes-panel ref={panelContainerRef}>
-        <div className="w-full" key={panelRefreshKey}>
+      {/* Saved DataFrames Panel - Always visible, but limit height when guided mode is active */}
+      <div className={`overflow-y-auto w-full flex flex-col ${hasActiveGuidedFlow ? 'flex-shrink-0' : 'flex-1 min-h-0'}`} data-saved-dataframes-panel ref={panelContainerRef} style={{ maxHeight: hasActiveGuidedFlow ? '300px' : 'none' }}>
+        <div className="w-full">
           <SavedDataFramesPanel 
             isOpen={true} 
             onToggle={() => {}} 
@@ -515,8 +500,15 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
         </div>
       </div>
 
-      {/* Action Buttons - Only Continue (upload handled by Upload atom) */}
+      {/* Action Buttons - Blue with text, right side - Always visible */}
       <div className="flex items-center justify-end gap-3 px-3 pt-2 pb-2 border-t border-gray-200 flex-shrink-0 bg-white">
+        <Button
+          onClick={handleUploadMore}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2"
+        >
+          <Upload className="w-4 h-4 mr-2" />
+          Upload More
+        </Button>
         <Button
           onClick={handleContinue}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2"
@@ -525,6 +517,58 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           <ArrowRight className="w-4 h-4 ml-2" />
         </Button>
       </div>
+
+      {/* Direct Review Panel - Show BELOW the buttons when Directly Review is clicked */}
+      {directReviewTarget && (
+        <DirectReviewPanel
+          frame={directReviewTarget}
+          onClose={() => {
+            setDirectReviewTarget(null);
+          }}
+          onSave={() => {
+            // Refresh priming stats after save
+            fetchPrimingStats();
+          }}
+        />
+      )}
+
+      {/* Guided Flow Steps - Show BELOW the buttons, extending the card downward */}
+      {/* Only show for the selected file (existingDataframe must match the clicked file) */}
+      {hasActiveGuidedFlow && globalGuidedModeEnabled && flowState && existingDataframe && (
+        <div className="w-full border-t-2 border-blue-200 bg-white flex-shrink-0" style={{ minHeight: '400px', maxHeight: '70vh', overflowY: 'auto' }}>
+          <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50 sticky top-0 z-10">
+            <h3 className="text-base font-semibold text-gray-800">Guided Priming Workflow</h3>
+            <p className="text-xs text-gray-600 mt-1">
+              Priming file: <span className="font-medium text-blue-700">{existingDataframe.name}</span>
+            </p>
+          </div>
+          <div className="p-4">
+            <GuidedUploadFlowInline
+              atomId={atomId}
+              onComplete={(result) => {
+                // Handle completion - update atom settings
+                // Only process the selected file (existingDataframe)
+                const fileNames = result.uploadedFiles.map((f: any) => f.name);
+                const filePathMap: Record<string, string> = {};
+                result.uploadedFiles.forEach((f: any) => {
+                  filePathMap[f.name] = f.path;
+                });
+                
+                updateAtomSettings(atomId, {
+                  uploadedFiles: fileNames,
+                  filePathMap: filePathMap,
+                });
+              }}
+              onClose={() => {
+                removeActiveGuidedFlow(atomId);
+              }}
+              savedState={flowState.state}
+              initialStage={flowState.currentStage}
+              existingDataframe={existingDataframe}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Warning Dialog */}
       <ConfirmationDialog

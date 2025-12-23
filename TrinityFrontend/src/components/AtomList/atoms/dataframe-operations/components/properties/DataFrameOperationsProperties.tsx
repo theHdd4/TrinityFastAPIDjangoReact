@@ -158,14 +158,6 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
     setLoading(true);
     setError(null);
     try {
-      // Record the current dataframe selection for this atom in the laboratory store
-      try {
-        const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
-        setAtomCurrentDataframe(atomId, fileId);
-      } catch {
-        // best-effort; do not block file selection on metrics sync
-      }
-
       const framesRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
       const framesData = await framesRes.json();
       const frames = Array.isArray(framesData.files)

@@ -1206,18 +1206,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                       updateSettings(atomId, { selectedMasterFile: value });
                     }
                     setSelectedMasterFile(value);
-
-                    // Record the current dataframe selection for this atom in the laboratory store.
-                    // Map the logical master file name to its underlying object_name using allAvailableFiles.
-                    try {
-                      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
-                      const meta = allAvailableFiles.find(f => f.name === value);
-                      const objectName = meta?.original || value;
-                      const normalized = objectName.endsWith('.arrow') ? objectName : `${objectName}.arrow`;
-                      setAtomCurrentDataframe(atomId, normalized);
-                    } catch {
-                      // best-effort; do not block data-validate on metrics sync
-                    }
                   }}
                 >
                   <SelectTrigger className="bg-white border-gray-300">

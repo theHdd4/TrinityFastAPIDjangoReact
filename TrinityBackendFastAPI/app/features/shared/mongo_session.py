@@ -80,7 +80,7 @@ async def save_session_metadata(
         )
         
         logger.info(f"💾 [SESSION] Saved metadata for {session_type} session {session_id}")
-        client.close()
+        await client.close()
         return True
     except Exception as e:
         logger.error(f"❌ [SESSION] Failed to save metadata for {session_id}: {e}")
@@ -104,7 +104,7 @@ async def get_session_metadata(session_id: str, session_type: str) -> Optional[D
         coll = db[f"{session_type}_sessions"]
         
         doc = await coll.find_one({"_id": session_id})
-        client.close()
+        await client.close()
         
         if doc:
             result = {
@@ -138,7 +138,7 @@ async def update_session_access_time(session_id: str, session_type: str) -> bool
             {"$set": {"last_accessed": datetime.utcnow()}}
         )
         
-        client.close()
+        await client.close()
         return True
     except Exception as e:
         logger.error(f"❌ [SESSION] Failed to update access time for {session_id}: {e}")
@@ -180,7 +180,7 @@ async def save_change_log(
             "applied": False
         })
         
-        client.close()
+        await client.close()
         logger.debug(f"📝 [CHANGE] Logged {change_type} for {session_type} session {session_id}")
         return True
     except Exception as e:
@@ -200,7 +200,7 @@ async def mark_changes_applied(session_id: str, session_type: str) -> bool:
             {"$set": {"applied": True}}
         )
         
-        client.close()
+        await client.close()
         logger.info(f"✅ [CHANGE] Marked changes as applied for {session_type} session {session_id}")
         return True
     except Exception as e:
@@ -327,7 +327,7 @@ async def clear_draft(session_id: str, session_type: str, minio_client: Any, buc
         # Mark changes as applied
         await mark_changes_applied(session_id, session_type)
         
-        client.close()
+        await client.close()
         logger.info(f"✅ [DRAFT] Cleared draft for {session_type} session {session_id}")
         return True
     except Exception as e:

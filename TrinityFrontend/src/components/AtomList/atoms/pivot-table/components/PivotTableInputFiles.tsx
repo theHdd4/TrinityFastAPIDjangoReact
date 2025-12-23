@@ -153,14 +153,6 @@ const PivotTableInputFiles: React.FC<PivotTableInputFilesProps> = ({ atomId }) =
     } finally {
       setIsLoading(false);
     }
-
-    // Record the current dataframe selection for this atom in the laboratory store
-    try {
-      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
-      setAtomCurrentDataframe(atomId, normalized);
-    } catch {
-      // best-effort; do not block pivot-table on metrics sync
-    }
   };
 
   const currentFileLabel = useMemo(() => {

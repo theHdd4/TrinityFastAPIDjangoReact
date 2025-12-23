@@ -162,17 +162,44 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
 
   // Load dataframe data when file is selected
   const handleFileSelect = async (fileId: string) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:164',message:'handleFileSelect entry',data:{fileId,onDataUploadType:typeof onDataUpload,onDataUploadIsFunc:typeof onDataUpload==='function',onSettingsChangeType:typeof onSettingsChange,onSettingsChangeIsFunc:typeof onSettingsChange==='function'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     setSelectedFile(fileId);
     setLoadingDataSource(true);
     setDataSourceError(null);
 
     try {
-      // Use Chart Maker's load-saved-dataframe endpoint which returns full dataframe data
-      const uploadResponse = await chartMakerApi.loadSavedDataframe(fileId);
-      
+      const response = await fetch(`${VALIDATE_API}/load_dataframe_by_key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ key: fileId })
+      });
+
+      if (!response.ok) {
+        // Try to get the actual error message from the backend
+        let errorMessage = 'Failed to load dataframe';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.message || errorMessage;
+        } catch {
+          // If response is not JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const responseData = await response.json();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:190',message:'Response data received',data:{hasHeaders:!!responseData.headers,headersType:typeof responseData.headers,headersIsArray:Array.isArray(responseData.headers),headersLength:Array.isArray(responseData.headers)?responseData.headers.length:'N/A',hasRows:!!responseData.rows,rowsType:typeof responseData.rows,rowsIsArray:Array.isArray(responseData.rows),rowsLength:Array.isArray(responseData.rows)?responseData.rows.length:'N/A',responseDataKeys:Object.keys(responseData)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       const frame = frames.find(f => f.object_name === fileId);
       const fileName = frame?.arrow_name?.split('/').pop() || fileId;
       
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:195',message:'Before onSettingsChange call',data:{fileName,onSettingsChangeType:typeof onSettingsChange,onSettingsChangeIsFunc:typeof onSettingsChange==='function'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       // Save selected file to settings so it's available for chart rendering
       onSettingsChange({ 
         ...settings,
@@ -180,16 +207,24 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
         dataSource: fileName
       } as any);
       
-      // Use Chart Maker's response format (columns and sample_data)
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:201',message:'Before onDataUpload call',data:{onDataUploadType:typeof onDataUpload,onDataUploadIsFunc:typeof onDataUpload==='function',uploadDataHeaders:Array.isArray(responseData.headers)?responseData.headers.length:'N/A',uploadDataRows:Array.isArray(responseData.rows)?responseData.rows.length:'N/A',fileName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       onDataUpload({
-        headers: uploadResponse.columns || [],
-        rows: uploadResponse.sample_data || [],
+        headers: responseData.headers || [],
+        rows: responseData.rows || [],
         fileName: fileName,
         metrics: []
       });
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:207',message:'After onDataUpload call',data:{success:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
 
       setLoadingDataSource(false);
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardChartConfig.tsx:209',message:'Error in handleFileSelect',data:{errorType:err instanceof Error?err.constructor.name:'unknown',errorMessage:err instanceof Error?err.message:String(err),errorStack:err instanceof Error?err.stack:'N/A'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
       console.error('Error loading dataframe:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to load dataframe';
       setDataSourceError(errorMessage);
