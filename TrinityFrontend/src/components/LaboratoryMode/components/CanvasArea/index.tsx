@@ -1262,7 +1262,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
   // Helper function to render inline guided flow for an atom
   const renderInlineGuidedFlow = (atom: DroppedAtom) => {
-    if (!activeGuidedFlows[atom.id] || !isGuidedModeActiveForAtom(atom.id)) {
+    // Do not render inline guided workflow when global guided mode is turned off
+    if (
+      !globalGuidedModeEnabled ||
+      !activeGuidedFlows[atom.id] ||
+      !isGuidedModeActiveForAtom(atom.id)
+    ) {
       return null;
     }
     

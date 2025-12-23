@@ -171,27 +171,29 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
         </div>
       )}
 
-      {/* Reset Button */}
+      {/* Reset / Collapse Buttons */}
       {selectedFlow && (
-        <div className="p-4 border-t border-gray-200 bg-gray-50/50 space-y-2">
-          <Button
-            onClick={handleReset}
-            variant="outline"
-            className="w-full border-gray-300 hover:bg-gray-100"
-            size="sm"
-          >
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Reset
-          </Button>
-          <Button
-            onClick={handleExitWorkflowMode}
-            variant="outline"
-            className="w-full border-gray-300 hover:bg-red-50 hover:border-red-300 hover:text-red-600"
-            size="sm"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            Exit
-          </Button>
+        <div className="p-4 border-t border-gray-200 bg-gray-50/50">
+          <div className="flex gap-2">
+            <Button
+              onClick={handleReset}
+              variant="outline"
+              className="flex-1 border-gray-300 hover:bg-gray-100"
+              size="sm"
+            >
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Reset
+            </Button>
+            <Button
+              onClick={handleExitWorkflowMode}
+              variant="outline"
+              className="flex-1 border-gray-300 hover:bg-red-50 hover:border-red-300 hover:text-red-600"
+              size="sm"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Collapse
+            </Button>
+          </div>
         </div>
       )}
 
