@@ -874,15 +874,6 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
     return activeFilterValues.length > 0 ? activeFilterValues.join(' | ') : null;
   };
 
-  // Check if first element is a text box
-  const isFirstElementTextBox = (): boolean => {
-    if (layouts.length === 0) return false;
-    const firstLayout = layouts[0];
-    if (!firstLayout.boxes || firstLayout.boxes.length === 0) return false;
-    const firstBox = firstLayout.boxes[0];
-    return firstBox.elementType === 'text-box';
-  };
-
   return (
     <div className="h-full w-full overflow-y-auto p-8 bg-gradient-to-br from-background via-muted/5 to-background relative" style={{ minWidth: 0, minHeight: 0 }}>
       <div className="w-full space-y-6" style={{ minWidth: 0, width: '100%' }}>
@@ -936,8 +927,8 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
           </div>
         )}
 
-        {/* Global Filters Display - Top Right (when first element is not a text box) */}
-        {layouts.length > 0 && !isFirstElementTextBox() && getFormattedGlobalFilters() && (
+        {/* Global Filters Display - Top Right */}
+        {layouts.length > 0 && getFormattedGlobalFilters() && (
           <div className="absolute top-8 right-8 z-40">
             <div 
               className="text-gray-600"
@@ -956,7 +947,7 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
 
         {/* Layout Rows */}
         {layouts.length > 0 && (
-          <div className="space-y-4" style={{ paddingTop: '16px' }}>
+          <div className="space-y-4" style={{ paddingTop: '2px' }}>
             {layouts.map((layout, rowIndex) => (
               <div
                 key={layout.id}
@@ -1038,7 +1029,6 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
                         onAddElement={handleAddElement}
                         boxesInRow={layout.boxes.length}
                         isFirstElement={rowIndex === 0 && boxIndex === 0}
-                        formattedGlobalFilters={getFormattedGlobalFilters()}
                       />
                     ))}
                   </div>
@@ -1175,7 +1165,6 @@ interface ElementBoxProps {
   onAddElement: (layoutId: string, boxId: string, position: 'left' | 'right' | 'above' | 'below') => void;
   boxesInRow: number; // Number of boxes in the current row
   isFirstElement?: boolean; // Whether this is the first element on the dashboard
-  formattedGlobalFilters?: string | null; // Formatted global filters string
 }
 
 const ElementBox: React.FC<ElementBoxProps> = ({ 
@@ -1189,7 +1178,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   onTextBoxUpdate,
   variables = [],
   isFirstElement = false,
-  formattedGlobalFilters = null,
   defaultValueFormat = 'none',
   settings,
   onSettingsChange,
@@ -1199,6 +1187,55 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   onAddElement,
   boxesInRow
 }) => {
+  // Determine dropdown alignment based on available space (for metric cards)
+  // Hooks must be at the top level, not conditionally
+  const [dropdownAlign, setDropdownAlign] = useState<'start' | 'end'>('end');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  const calculateAlignment = useRef(() => {
+    if (!menuButtonRef.current) return;
+    
+    const buttonRect = menuButtonRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const settingsPanelWidth = 320; // Settings panel width when expanded
+    const dropdownWidth = 192; // w-48 = 12rem = 192px
+    const padding = 16; // Extra padding for safety
+    
+    // Calculate available space on the right
+    const availableSpaceRight = viewportWidth - buttonRect.right;
+    
+    // If there's not enough space on the right (accounting for Settings panel), align to start
+    if (availableSpaceRight < dropdownWidth + settingsPanelWidth + padding) {
+      setDropdownAlign('start');
+    } else {
+      setDropdownAlign('end');
+    }
+  });
+
+  useEffect(() => {
+    // Only calculate alignment for metric cards
+    if (box.elementType === 'metric-card') {
+      calculateAlignment.current();
+      window.addEventListener('resize', calculateAlignment.current);
+      
+      return () => {
+        window.removeEventListener('resize', calculateAlignment.current);
+      };
+    }
+  }, [boxesInRow, box.elementType]);
+
+  // Recalculate alignment when dropdown opens (for metric cards)
+  useEffect(() => {
+    if (dropdownOpen && box.elementType === 'metric-card') {
+      // Small delay to ensure button is visible and positioned
+      const timer = setTimeout(() => {
+        calculateAlignment.current();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [dropdownOpen, box.elementType]);
+
   // Multi-selection handler
   const handleBoxClick = (e: React.MouseEvent) => {
     // Don't handle selection if clicking on buttons or inputs
@@ -1247,6 +1284,14 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   const [showInsightsToolbar, setShowInsightsToolbar] = useState(false);
   const [showLogoControls, setShowLogoControls] = useState(false);
   const [currentCursorStyle, setCurrentCursorStyle] = useState<TextStyleOption>(box.textStyle || 'paragraph');
+  // Formatting state tracking for text box
+  const [textBoxBold, setTextBoxBold] = useState(false);
+  const [textBoxItalic, setTextBoxItalic] = useState(false);
+  const [textBoxUnderline, setTextBoxUnderline] = useState(false);
+  const [textBoxStrikethrough, setTextBoxStrikethrough] = useState(false);
+  const [textBoxAlign, setTextBoxAlign] = useState<'left' | 'center' | 'right'>(box.align || 'left');
+  const [textBoxColor, setTextBoxColor] = useState(box.color || '#111827');
+  const [textBoxBackgroundColor, setTextBoxBackgroundColor] = useState(box.backgroundColor || 'transparent');
   const [headingCursorStyle, setHeadingCursorStyle] = useState<TextStyleOption>('header');
   const [contentCursorStyle, setContentCursorStyle] = useState<TextStyleOption>('paragraph');
   // Q&A formatting states - Question
@@ -1440,7 +1485,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
     }
   }, [showVariableDialog, box.elementType]);
   
-  // Track cursor position and update current style
+  // Track cursor position and update current style and formatting state
   const updateCursorStyleFromSelection = () => {
     if (!textRef.current) return;
     
@@ -1463,6 +1508,75 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       } else {
         setCurrentCursorStyle('paragraph');
       }
+      
+      // Update formatting state from selection
+      try {
+        // Check bold, italic, underline, strikethrough using queryCommandState
+        setTextBoxBold(document.queryCommandState('bold'));
+        setTextBoxItalic(document.queryCommandState('italic'));
+        setTextBoxUnderline(document.queryCommandState('underline'));
+        setTextBoxStrikethrough(document.queryCommandState('strikeThrough'));
+        
+        // Get alignment - check element first, then parent (contentEditable div)
+        let textAlign = computedStyle.textAlign;
+        if (textAlign === 'start' || textAlign === '') {
+          // Check parent element alignment
+          const parentAlign = textRef.current ? window.getComputedStyle(textRef.current).textAlign : '';
+          if (parentAlign && parentAlign !== 'start' && parentAlign !== '') {
+            textAlign = parentAlign;
+          }
+        }
+        if (textAlign === 'center') {
+          setTextBoxAlign('center');
+        } else if (textAlign === 'right') {
+          setTextBoxAlign('right');
+        } else {
+          setTextBoxAlign('left');
+        }
+        
+        // Helper function to convert RGB/RGBA to hex
+        const rgbToHex = (rgb: string): string | null => {
+          const rgbMatch = rgb.match(/\d+/g);
+          if (rgbMatch && rgbMatch.length >= 3) {
+            const r = parseInt(rgbMatch[0]).toString(16).padStart(2, '0');
+            const g = parseInt(rgbMatch[1]).toString(16).padStart(2, '0');
+            const b = parseInt(rgbMatch[2]).toString(16).padStart(2, '0');
+            return `#${r}${g}${b}`;
+          }
+          return null;
+        };
+        
+        // Get color from computed style
+        const color = computedStyle.color;
+        if (color && color !== 'rgb(0, 0, 0)' && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
+          const hexColor = rgbToHex(color);
+          if (hexColor) {
+            setTextBoxColor(hexColor);
+          }
+        }
+        
+        // Get background color from computed style
+        const bgColor = computedStyle.backgroundColor;
+        if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+          const hexBgColor = rgbToHex(bgColor);
+          if (hexBgColor) {
+            setTextBoxBackgroundColor(hexBgColor);
+          } else {
+            setTextBoxBackgroundColor('transparent');
+          }
+        } else {
+          setTextBoxBackgroundColor('transparent');
+        }
+      } catch (e) {
+        // Fallback: use box state if queryCommandState fails
+        setTextBoxBold(box.bold || false);
+        setTextBoxItalic(box.italic || false);
+        setTextBoxUnderline(box.underline || false);
+        setTextBoxStrikethrough(box.strikethrough || false);
+        setTextBoxAlign(box.align || 'left');
+        setTextBoxColor(box.color || '#111827');
+        setTextBoxBackgroundColor(box.backgroundColor || 'transparent');
+      }
     }
   };
 
@@ -1483,8 +1597,29 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   useEffect(() => {
     if (box.elementType === 'text-box' && textRef.current && !isEditing && !box.isTextSaved) {
       const content = box.text || '';
-      if (textRef.current.innerHTML !== content) {
-        textRef.current.innerHTML = content;
+      // If content is empty, set default placeholder text that is editable
+      if (!content || content.trim() === '') {
+        const placeholderHTML = `
+          <div style="font-size: 36px; font-weight: bold; color: #111827; font-family: DM Sans; margin-bottom: 4px; letter-spacing: -0.02em; line-height: 1.1;">
+            For your title, select Header in the formatting options
+          </div>
+          <div style="font-size: 22px; font-weight: bold; color: #111827; font-family: DM Sans; margin-bottom: 6px; letter-spacing: -0.01em; line-height: 1.2;">
+            If you want a sub-header, select Sub Header in the options
+          </div>
+          <div style="font-size: 16px; font-weight: normal; color: #6B7280; font-family: DM Sans; letter-spacing: -0.01em; line-height: 1.5;">
+            For your primary context, select Paragraph. And yes, these are the only 3 font size options for now.
+          </div>
+        `;
+        const currentHTML = textRef.current.innerHTML.trim();
+        const placeholderTrimmed = placeholderHTML.trim();
+        // Only update if current content is empty or doesn't match placeholder
+        if (!currentHTML || (currentHTML !== placeholderTrimmed && !box.text)) {
+          textRef.current.innerHTML = placeholderTrimmed;
+        }
+      } else {
+        if (textRef.current.innerHTML !== content) {
+          textRef.current.innerHTML = content;
+        }
       }
     }
   }, [box.text, box.elementType, isEditing, box.isTextSaved]);
@@ -1495,6 +1630,19 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       setCurrentCursorStyle(box.textStyle);
     }
   }, [box.textStyle]);
+
+  // Initialize formatting state from box properties
+  useEffect(() => {
+    if (box.elementType === 'text-box') {
+      setTextBoxBold(box.bold || false);
+      setTextBoxItalic(box.italic || false);
+      setTextBoxUnderline(box.underline || false);
+      setTextBoxStrikethrough(box.strikethrough || false);
+      setTextBoxAlign(box.align || 'left');
+      setTextBoxColor(box.color || '#111827');
+      setTextBoxBackgroundColor(box.backgroundColor || 'transparent');
+    }
+  }, [box.elementType, box.bold, box.italic, box.underline, box.strikethrough, box.align, box.color, box.backgroundColor]);
 
   // Initialize content HTML for insights panel, Q&A, caption, and interactive blocks
   useEffect(() => {
@@ -2075,23 +2223,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                 dangerouslySetInnerHTML={{ __html: box.text || 'No text entered' }}
               />
             </div>
-            {/* Global Filters Display - Below Text Box on Right (when first element) */}
-            {isFirstElement && formattedGlobalFilters && (
-              <div className="w-full flex justify-end mt-2 pr-4">
-                <div 
-                  className="text-gray-600"
-                  style={{
-                    fontSize: '22px',
-                    fontFamily: 'DM Sans, sans-serif',
-                    fontWeight: 'bold',
-                    letterSpacing: '-0.01em',
-                    lineHeight: '1.2'
-                  }}
-                >
-                  {formattedGlobalFilters}
-                </div>
-              </div>
-            )}
           </div>
         );
       }
@@ -2102,6 +2233,10 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       const applyFormatToSelection = (command: string, value?: string) => {
         document.execCommand(command, false, value);
         handleTextInput(); // Save changes
+        // Update formatting state after applying command
+        setTimeout(() => {
+          updateCursorStyleFromSelection();
+        }, 10);
       };
 
       // Get default size based on current style
@@ -2210,75 +2345,79 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           {/* Toolbar - visible only when text box is focused */}
           {showTextBoxToolbar && (
             <div className="absolute left-0 right-0 flex items-center gap-2 bg-white rounded-lg shadow-2xl p-2 border border-gray-200" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
-            <div className="flex-1 overflow-x-auto">
+            <div className="flex-1 overflow-x-auto min-w-0">
+              <div className="inline-flex">
               <TextBoxToolbar
                 textStyle={currentCursorStyle}
                 onTextStyleChange={handleStyleChangeForSelection}
                 fontFamily={box.fontFamily || 'DM Sans'}
-                onFontFamilyChange={(font) => applyFormatToSelection('fontName', font)}
+                onFontFamilyChange={(font) => {
+                  applyFormatToSelection('fontName', font);
+                  updateCursorStyleFromSelection();
+                }}
                 fontSize={box.fontSize || currentDefaultSize}
-                onIncreaseFontSize={() => {
-                  const selection = window.getSelection();
-                  if (selection && selection.toString()) {
-                    // If text is selected, increase size of selection
-                    const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || currentDefaultSize;
-                    applyFormatToSelection('fontSize', `${currentSize + 1}px`);
-                  } else {
-                    // Manually increase from current size
-                    onTextBoxUpdate({ fontSize: (box.fontSize || currentDefaultSize) + 1 });
-                  }
-                }}
-                onDecreaseFontSize={() => {
-                  const selection = window.getSelection();
-                  if (selection && selection.toString()) {
-                    // If text is selected, decrease size of selection
-                    const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || currentDefaultSize;
-                    applyFormatToSelection('fontSize', `${Math.max(currentSize - 1, 8)}px`);
-                  } else {
-                    // Manually decrease from current size
-                    onTextBoxUpdate({ fontSize: Math.max((box.fontSize || currentDefaultSize) - 1, 8) });
-                  }
-                }}
+                onIncreaseFontSize={() => {}} // Removed - font sizes are hardcoded
+                onDecreaseFontSize={() => {}} // Removed - font sizes are hardcoded
                 onApplyTextStyle={handleApplyTextStyle}
-                bold={box.bold || false}
-                italic={box.italic || false}
-                underline={box.underline || false}
-                strikethrough={box.strikethrough || false}
-                onToggleBold={() => applyFormatToSelection('bold')}
-                onToggleItalic={() => applyFormatToSelection('italic')}
-                onToggleUnderline={() => applyFormatToSelection('underline')}
-                onToggleStrikethrough={() => applyFormatToSelection('strikeThrough')}
-                align={box.align || 'left'}
-                onAlign={(align) => {
-                  applyFormatToSelection('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'));
+                bold={textBoxBold}
+                italic={textBoxItalic}
+                underline={textBoxUnderline}
+                strikethrough={textBoxStrikethrough}
+                onToggleBold={() => {
+                  applyFormatToSelection('bold');
+                  setTimeout(updateCursorStyleFromSelection, 10);
                 }}
-                color={box.color || '#111827'}
-                onColorChange={(color) => applyFormatToSelection('foreColor', color)}
-                backgroundColor={box.backgroundColor || 'transparent'}
-                onBackgroundColorChange={(backgroundColor) => applyFormatToSelection('backColor', backgroundColor)}
+                onToggleItalic={() => {
+                  applyFormatToSelection('italic');
+                  setTimeout(updateCursorStyleFromSelection, 10);
+                }}
+                onToggleUnderline={() => {
+                  applyFormatToSelection('underline');
+                  setTimeout(updateCursorStyleFromSelection, 10);
+                }}
+                onToggleStrikethrough={() => {
+                  applyFormatToSelection('strikeThrough');
+                  setTimeout(updateCursorStyleFromSelection, 10);
+                }}
+                align={textBoxAlign}
+                onAlign={(align) => {
+                  // Apply alignment to the entire contentEditable div
+                  if (textRef.current) {
+                    textRef.current.style.textAlign = align;
+                    onTextBoxUpdate({ align });
+                  }
+                  // Also try to apply via execCommand for selected text
+                  applyFormatToSelection('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'));
+                  setTimeout(() => {
+                    setTextBoxAlign(align);
+                    updateCursorStyleFromSelection();
+                  }, 10);
+                }}
+                color={textBoxColor}
+                onColorChange={(color) => {
+                  applyFormatToSelection('foreColor', color);
+                  setTimeout(() => {
+                    setTextBoxColor(color);
+                    updateCursorStyleFromSelection();
+                  }, 10);
+                }}
+                backgroundColor={textBoxBackgroundColor}
+                onBackgroundColorChange={(backgroundColor) => {
+                  applyFormatToSelection('backColor', backgroundColor);
+                  setTimeout(() => {
+                    setTextBoxBackgroundColor(backgroundColor);
+                    updateCursorStyleFromSelection();
+                  }, 10);
+                }}
                 onDelete={handleDoubleClick}
               />
+              </div>
             </div>
             </div>
           )}
           
           {/* Text box ONLY - no border, completely separate from toolbar */}
           <div className="w-full flex-1 rounded-xl overflow-hidden bg-white relative">
-            {/* Custom formatted placeholder - only showing Header and Sub-Header styles */}
-            {(!box.text || box.text === '') && (
-              <div className="absolute inset-0 p-4 pointer-events-none">
-                <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#111827', fontFamily: 'DM Sans', marginBottom: '4px', letterSpacing: '-0.02em', lineHeight: '1.1' }}>
-                  For your title, select Header in the formatting options
-                </div>
-                <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#111827', fontFamily: 'DM Sans', marginBottom: '6px', letterSpacing: '-0.01em', lineHeight: '1.2' }}>
-                  If you want a sub-header, select Sub Header in the options
-                </div>
-                <div style={{ fontSize: '16px', fontWeight: 'normal', color: '#6B7280', fontFamily: 'DM Sans', letterSpacing: '-0.01em', lineHeight: '1.5' }}>
-                  For your primary context, select Paragraph. And yes, these are the only 3 font size options for now.
-                </div>
-              </div>
-            )}
-            
             <div 
               ref={textRef}
               contentEditable
@@ -2294,6 +2433,22 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               onFocus={(e) => {
                 setIsEditing(true);
                 setShowTextBoxToolbar(true);
+                // Update formatting state from selection on focus
+                setTimeout(() => {
+                  updateCursorStyleFromSelection();
+                }, 10);
+                // If content is empty or just the placeholder, select all on focus
+                if (textRef.current && (!box.text || box.text.trim() === '' || textRef.current.textContent?.trim() === '')) {
+                  setTimeout(() => {
+                    const selection = window.getSelection();
+                    if (selection && textRef.current) {
+                      const range = document.createRange();
+                      range.selectNodeContents(textRef.current);
+                      selection.removeAllRanges();
+                      selection.addRange(range);
+                    }
+                  }, 0);
+                }
               }}
               onBlur={(e) => {
                 const relatedTarget = e.relatedTarget as HTMLElement;
@@ -2353,23 +2508,6 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               suppressContentEditableWarning
             />
           </div>
-          {/* Global Filters Display - Below Text Box on Right (when first element) */}
-          {isFirstElement && formattedGlobalFilters && (
-            <div className="w-full flex justify-end mt-2 pr-4">
-              <div 
-                className="text-gray-600"
-                style={{
-                  fontSize: '22px',
-                  fontFamily: 'DM Sans, sans-serif',
-                  fontWeight: 'bold',
-                  letterSpacing: '-0.01em',
-                  lineHeight: '1.2'
-                }}
-              >
-                {formattedGlobalFilters}
-              </div>
-            </div>
-          )}
         </div>
       );
     }
@@ -4928,9 +5066,10 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           onClick={handleMetricCardClick}
         >
           {/* Three-dots menu - visible on hover */}
-          <DropdownMenu>
+          <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
             <DropdownMenuTrigger asChild>
               <button
+                ref={menuButtonRef}
                 onClick={(e) => e.stopPropagation()}
                 className="absolute top-2 right-2 z-20 p-1.5 bg-white rounded-full shadow-md border border-gray-200 text-gray-600 hover:bg-gray-50 transition-opacity opacity-0 group-hover/box:opacity-100 flex items-center justify-center"
                 title="More options"
@@ -4938,7 +5077,13 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                 <MoreVertical className="w-4 h-4" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuContent 
+              align={dropdownAlign}
+              className="w-48" 
+              onClick={(e) => e.stopPropagation()}
+              side="bottom"
+              collisionPadding={320}
+            >
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger onClick={(e) => e.stopPropagation()}>
                   Change Element

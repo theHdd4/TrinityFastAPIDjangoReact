@@ -723,6 +723,7 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
       {(() => {
         // Get all identifiers from availableColumns (data source columns)
         // Convert to lowercase for consistency and remove duplicates
+        // IMPORTANT: Always use all availableColumns regardless of selected element type
         const allAvailableIdentifiers = Array.from(new Set(
           (availableColumns || []).map(col => col.toLowerCase())
         )).sort();
@@ -731,6 +732,7 @@ const KPIDashboardSettings: React.FC<KPIDashboardSettingsProps> = ({
         const knownIdentifierTypes = ['brand', 'channel', 'year', 'month', 'week', 'region', 'category', 'segment'];
         
         // Merge available columns with known identifiers (union)
+        // This identifierTypes is used in the dialog and should always show ALL available identifiers
         const identifierTypes = Array.from(new Set([
           ...allAvailableIdentifiers,
           ...knownIdentifierTypes
