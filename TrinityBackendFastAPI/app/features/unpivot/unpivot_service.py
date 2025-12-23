@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -35,6 +36,8 @@ from .unpivot_models import (
     UnpivotDatasetUpdatedRequest,
     UnpivotAutosaveResponse,
     UnpivotCacheResponse,
+    VariableDecoderConfig,
+    VariableDecoderMapping,
 )
 from .unpivot_utils import (
     apply_filters,
@@ -347,10 +350,237 @@ async def get_unpivot_metadata(atom_id: str) -> UnpivotMetadataResponse:
         pre_filters=metadata.get("pre_filters", []),
         post_filters=metadata.get("post_filters", []),
         auto_refresh=metadata.get("auto_refresh", True),
+        variable_decoder=metadata.get("variable_decoder"),
         created_at=created_at,
         updated_at=updated_at,
         last_computed_at=last_computed_at,
     )
+
+
+def _validate_decoder_config(df: pd.DataFrame, variable_col: str, config: VariableDecoderConfig) -> Tuple[bool, List[str]]:
+    """Validate variable decoder configuration."""
+    errors = []
+    
+    if not config.enabled:
+        return True, []
+    
+    if not config.mappings:
+        errors.append("Decoder enabled but no mappings configured")
+        return False, errors
+    
+    # Check for duplicate output column names
+    output_columns = [m.column for m in config.mappings]
+    if len(output_columns) != len(set(output_columns)):
+        errors.append("Duplicate output column names in mappings")
+    
+    # Check for column name conflicts with existing columns
+    existing_columns = set(df.columns)
+    for mapping in config.mappings:
+        if mapping.column in existing_columns:
+            errors.append(f"Output column '{mapping.column}' conflicts with existing column")
+    
+    if config.type == "delimiter":
+        if not config.delimiter:
+            errors.append("Delimiter type requires delimiter to be specified")
+        else:
+            # For delimiter, check if indices are reasonable (we'll check against actual data during execution)
+            max_index = max([m.index for m in config.mappings], default=-1)
+            if max_index < 0:
+                errors.append("No valid mapping indices found")
+    
+    elif config.type == "regex":
+        if not config.regex:
+            errors.append("Regex type requires regex pattern to be specified")
+        else:
+            # Validate regex pattern
+            try:
+                pattern = re.compile(config.regex)
+                # Check if pattern has named groups (for regex mode)
+                if not pattern.groupindex:
+                    errors.append("Regex pattern must contain named capture groups")
+            except re.error as e:
+                errors.append(f"Invalid regex pattern: {str(e)}")
+    
+    return len(errors) == 0, errors
+
+
+def _apply_delimiter_decoder(df: pd.DataFrame, variable_col: str, config: VariableDecoderConfig) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Apply delimiter-based decoder to split variable column into dimensions."""
+    if variable_col not in df.columns:
+        logger.warning("Variable column '%s' not found in dataframe", variable_col)
+        return df, {"matched_rows": 0, "failed_rows": len(df), "match_rate": 0.0}
+    
+    # Normalize delimiter
+    delimiter_map = {
+        "space": " ",
+        "underscore": "_",
+        "hyphen": "-",
+    }
+    delimiter = delimiter_map.get(config.delimiter, config.delimiter) if config.delimiter else None
+    
+    if not delimiter:
+        logger.warning("No delimiter specified for delimiter decoder")
+        return df, {"matched_rows": 0, "failed_rows": len(df), "match_rate": 0.0}
+    
+    result_df = df.copy()
+    matched_count = 0
+    failed_count = 0
+    
+    # Initialize new columns with None
+    for mapping in config.mappings:
+        result_df[mapping.column] = None
+    
+    # Process each row
+    for idx, row in result_df.iterrows():
+        variable_value = str(row[variable_col]) if pd.notna(row[variable_col]) else ""
+        
+        if not variable_value:
+            failed_count += 1
+            continue
+        
+        # Split by delimiter
+        segments = variable_value.split(delimiter)
+        
+        # Extract segments based on mappings
+        all_matched = True
+        for mapping in config.mappings:
+            segment_index = mapping.index
+            if segment_index < len(segments):
+                segment_value = segments[segment_index].strip()
+                
+                # Convert dtype
+                if mapping.dtype == "int":
+                    try:
+                        segment_value = int(segment_value)
+                    except (ValueError, TypeError):
+                        segment_value = None
+                        all_matched = False
+                elif mapping.dtype == "category":
+                    segment_value = str(segment_value) if segment_value else None
+                else:  # string
+                    segment_value = str(segment_value) if segment_value else None
+                
+                result_df.at[idx, mapping.column] = segment_value
+            else:
+                result_df.at[idx, mapping.column] = None
+                all_matched = False
+        
+        if all_matched and len(segments) >= max([m.index for m in config.mappings], default=-1) + 1:
+            matched_count += 1
+        else:
+            failed_count += 1
+    
+    match_rate = (matched_count / len(result_df)) * 100.0 if len(result_df) > 0 else 0.0
+    
+    stats = {
+        "matched_rows": matched_count,
+        "failed_rows": failed_count,
+        "match_rate": match_rate
+    }
+    
+    logger.info("Delimiter decoder applied: %d matched, %d failed (%.2f%%)", matched_count, failed_count, match_rate)
+    
+    return result_df, stats
+
+
+def _apply_regex_decoder(df: pd.DataFrame, variable_col: str, config: VariableDecoderConfig) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Apply regex-based decoder to extract dimensions from variable column."""
+    if variable_col not in df.columns:
+        logger.warning("Variable column '%s' not found in dataframe", variable_col)
+        return df, {"matched_rows": 0, "failed_rows": len(df), "match_rate": 0.0}
+    
+    if not config.regex:
+        logger.warning("No regex pattern specified for regex decoder")
+        return df, {"matched_rows": 0, "failed_rows": len(df), "match_rate": 0.0}
+    
+    try:
+        pattern = re.compile(config.regex)
+    except re.error as e:
+        logger.error("Invalid regex pattern: %s", e)
+        return df, {"matched_rows": 0, "failed_rows": len(df), "match_rate": 0.0}
+    
+    result_df = df.copy()
+    matched_count = 0
+    failed_count = 0
+    
+    # Initialize new columns with None
+    for mapping in config.mappings:
+        result_df[mapping.column] = None
+    
+    # Create mapping from column name to group name (for regex named groups)
+    # For regex, we'll use the mapping's column name to find the corresponding group
+    # The regex pattern should have named groups matching the column names
+    group_to_column = {}
+    for mapping in config.mappings:
+        # Try to find a group with the same name as the column, or use index
+        # For simplicity, we'll assume the regex has named groups matching column names
+        group_to_column[mapping.column] = mapping
+    
+    # Process each row
+    for idx, row in result_df.iterrows():
+        variable_value = str(row[variable_col]) if pd.notna(row[variable_col]) else ""
+        
+        if not variable_value:
+            failed_count += 1
+            continue
+        
+        # Apply regex
+        match = pattern.search(variable_value)
+        
+        if match:
+            # Extract groups
+            groups = match.groupdict()
+            
+            # Map groups to columns
+            all_matched = True
+            for mapping in config.mappings:
+                # Try to find group by column name first, then by index
+                group_value = None
+                
+                # Check if there's a named group matching the column name
+                if mapping.column in groups:
+                    group_value = groups[mapping.column]
+                elif str(mapping.index) in groups:
+                    group_value = groups[str(mapping.index)]
+                elif mapping.index < len(match.groups()):
+                    group_value = match.group(mapping.index + 1)  # +1 because group(0) is full match
+                
+                if group_value is not None:
+                    # Convert dtype
+                    if mapping.dtype == "int":
+                        try:
+                            group_value = int(group_value)
+                        except (ValueError, TypeError):
+                            group_value = None
+                            all_matched = False
+                    elif mapping.dtype == "category":
+                        group_value = str(group_value) if group_value else None
+                    else:  # string
+                        group_value = str(group_value) if group_value else None
+                    
+                    result_df.at[idx, mapping.column] = group_value
+                else:
+                    result_df.at[idx, mapping.column] = None
+                    all_matched = False
+            
+            if all_matched:
+                matched_count += 1
+            else:
+                failed_count += 1
+        else:
+            failed_count += 1
+    
+    match_rate = (matched_count / len(result_df)) * 100.0 if len(result_df) > 0 else 0.0
+    
+    stats = {
+        "matched_rows": matched_count,
+        "failed_rows": failed_count,
+        "match_rate": match_rate
+    }
+    
+    logger.info("Regex decoder applied: %d matched, %d failed (%.2f%%)", matched_count, failed_count, match_rate)
+    
+    return result_df, stats
 
 
 async def update_unpivot_properties(atom_id: str, payload: UnpivotPropertiesUpdate) -> UnpivotMetadataResponse:
@@ -374,6 +604,20 @@ async def update_unpivot_properties(atom_id: str, payload: UnpivotPropertiesUpda
         metadata["post_filters"] = [f.dict() for f in payload.post_filters]
     if payload.auto_refresh is not None:
         metadata["auto_refresh"] = payload.auto_refresh
+    
+    # Handle variable_decoder
+    if payload.variable_decoder is not None:
+        # Validate decoder config if enabled
+        if payload.variable_decoder.enabled:
+            # We need to validate against the dataframe, but we don't have it here
+            # So we'll do basic validation and defer full validation to compute time
+            if not payload.variable_decoder.mappings:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Variable decoder enabled but no mappings configured"
+                )
+        
+        metadata["variable_decoder"] = payload.variable_decoder.dict() if payload.variable_decoder else None
     
     metadata["updated_at"] = datetime.now(timezone.utc).isoformat()
     
@@ -400,18 +644,25 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
     if not metadata:
         raise HTTPException(status_code=404, detail=f"Unpivot atom '{atom_id}' not found")
     
-    # Check cache if not forcing recompute
-    if not payload.force_recompute:
+    # Check cache if not forcing recompute and not in preview mode
+    # Preview mode always computes fresh (no cache)
+    if not payload.force_recompute and not (payload.preview_limit and payload.preview_limit > 0):
         cached = await _load_result(atom_id)
         if cached:
             logger.info("Returning cached result for atom: %s", atom_id)
             updated_at = datetime.fromisoformat(cached["updated_at"]) if isinstance(cached.get("updated_at"), str) else datetime.now(timezone.utc)
+            
+            # Cached result already contains preview data if it was large
+            # The dataframe field will be preview (1000 rows) for very large results,
+            # or full data for small results
+            dataframe = cached.get("dataframe", [])
+            
             return UnpivotComputeResponse(
                 atom_id=atom_id,
                 status="success",
                 updated_at=updated_at,
-                row_count=cached.get("row_count", 0),
-                dataframe=cached.get("dataframe", []),
+                row_count=cached.get("row_count", 0),  # Total count (may be larger than dataframe length)
+                dataframe=dataframe,  # Preview or full based on cache
                 summary=cached.get("summary", {}),
                 computation_time=cached.get("computation_time", 0.0),
             )
@@ -471,7 +722,7 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
         # Perform melt (unpivot)
         variable_col = metadata.get("variable_column_name", "variable")
         value_col = metadata.get("value_column_name", "value")
-        
+
         unpivoted_df = pd.melt(
             filtered_df,
             id_vars=id_vars,
@@ -484,9 +735,47 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
         logger.exception("Unpivot computation failed for atom %s", atom_id)
         raise HTTPException(status_code=400, detail=f"Unpivot computation failed: {exc}")
     
+    # Apply variable decoder if enabled (after unpivot, before post-filters)
+    decoder_stats = {}
+    decoder_config_dict = metadata.get("variable_decoder")
+    if decoder_config_dict and isinstance(decoder_config_dict, dict) and decoder_config_dict.get("enabled"):
+        try:
+            decoder_config = VariableDecoderConfig(**decoder_config_dict)
+            
+            # Validate decoder config
+            is_valid, errors = _validate_decoder_config(unpivoted_df, variable_col, decoder_config)
+            if not is_valid:
+                logger.warning("Variable decoder validation failed: %s", ", ".join(errors))
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Variable decoder validation failed: {', '.join(errors)}"
+                )
+            
+            # Apply decoder based on type
+            if decoder_config.type == "delimiter":
+                unpivoted_df, decoder_stats = _apply_delimiter_decoder(unpivoted_df, variable_col, decoder_config)
+            elif decoder_config.type == "regex":
+                unpivoted_df, decoder_stats = _apply_regex_decoder(unpivoted_df, variable_col, decoder_config)
+            
+            logger.info("Variable decoder applied successfully: %s", decoder_stats)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Variable decoder failed for atom %s: %s", atom_id, exc)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Variable decoder failed: {exc}"
+            )
+    
     # Apply post-filters
     post_filters = metadata.get("post_filters", [])
     unpivoted_df = apply_filters(unpivoted_df, post_filters)
+    
+    # Apply preview limit if specified (for preview mode)
+    full_unpivoted_rows = len(unpivoted_df)
+    if payload.preview_limit and payload.preview_limit > 0:
+        unpivoted_df = unpivoted_df.head(payload.preview_limit)
+        logger.info("Preview mode: limiting to %d rows (full dataset has %d rows)", payload.preview_limit, full_unpivoted_rows)
     
     # Convert to records (needed for API response and storage decision)
     records = [convert_numpy(record) for record in unpivoted_df.to_dict(orient="records")]
@@ -495,15 +784,35 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
     summary = {
         "original_rows": len(filtered_df),
         "original_columns": len(filtered_df.columns),
-        "unpivoted_rows": len(unpivoted_df),
+        "unpivoted_rows": full_unpivoted_rows,  # Total rows (before preview limit)
         "unpivoted_columns": len(unpivoted_df.columns),
         "id_vars_count": len(id_vars),
         "value_vars_count": len(value_vars),
     }
     
+    # Add decoder stats if decoder was applied
+    if decoder_stats:
+        decoder_config_dict = metadata.get("variable_decoder")
+        if decoder_config_dict and isinstance(decoder_config_dict, dict):
+            summary["decoder_enabled"] = True
+            summary["decoder_type"] = decoder_config_dict.get("type", "unknown")
+            summary["decoder_matched_rows"] = decoder_stats.get("matched_rows", 0)
+            summary["decoder_failed_rows"] = decoder_stats.get("failed_rows", 0)
+            summary["decoder_match_rate"] = decoder_stats.get("match_rate", 0.0)
+        else:
+            summary["decoder_enabled"] = False
+    else:
+        summary["decoder_enabled"] = False
+    
+    # Mark as preview in summary if preview_limit was used
+    if payload.preview_limit and payload.preview_limit > 0:
+        summary["is_preview"] = True
+        summary["preview_limit"] = payload.preview_limit
+        summary["preview_rows"] = len(records)  # Actual rows returned
+    
     computation_time = time.time() - start_time
     
-    # Store result
+    # Store result (but don't cache preview results - compute fresh each time)
     result = {
         "atom_id": atom_id,
         "status": "success",
@@ -514,7 +823,11 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
         "computation_time": computation_time,
     }
     
-    await _store_result(atom_id, result)
+    # Only store full results in cache, not preview results
+    if not (payload.preview_limit and payload.preview_limit > 0):
+        await _store_result(atom_id, result)
+    else:
+        logger.info("Preview mode: skipping cache storage for atom %s", atom_id)
     
     # Update metadata with last computed time
     metadata["last_computed_at"] = datetime.now(timezone.utc).isoformat()
@@ -522,15 +835,66 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
     
     logger.info("Computed unpivot for atom %s: %d rows in %.2f seconds", atom_id, len(records), computation_time)
     
-    return UnpivotComputeResponse(
-        atom_id=atom_id,
-        status="success",
-        updated_at=datetime.now(timezone.utc),
-        row_count=len(records),
-        dataframe=records,
-        summary=summary,
-        computation_time=computation_time,
-    )
+    # Determine if result is large and should return preview only
+    # Calculate approximate size of the result
+    result_bytes = _ensure_redis_json(result)
+    result_size = len(result_bytes)
+    
+    # Thresholds for returning preview vs full data
+    SMALL_RESULT_THRESHOLD = 20 * 1024 * 1024  # 20MB
+    VERY_LARGE_THRESHOLD = 100 * 1024 * 1024  # 100MB
+    
+    # For large results, return only preview data to prevent frontend crashes
+    # Full data is already stored in MinIO via _store_result()
+    if result_size > VERY_LARGE_THRESHOLD:
+        # Very large results (>100MB): Return preview (first 1000 rows)
+        preview_records = records[:1000] if len(records) > 1000 else records
+        logger.info(
+            "Result size %d bytes exceeds %d bytes threshold. Returning preview (%d rows) instead of full data (%d rows)",
+            result_size,
+            VERY_LARGE_THRESHOLD,
+            len(preview_records),
+            len(records),
+        )
+        return UnpivotComputeResponse(
+            atom_id=atom_id,
+            status="success",
+            updated_at=datetime.now(timezone.utc),
+            row_count=len(records),  # Total count
+            dataframe=preview_records,  # Preview only (first 1000 rows)
+            summary=summary,
+            computation_time=computation_time,
+        )
+    elif result_size > SMALL_RESULT_THRESHOLD:
+        # Large results (20-100MB): Return preview (first 5000 rows)
+        preview_records = records[:5000] if len(records) > 5000 else records
+        logger.info(
+            "Result size %d bytes exceeds %d bytes threshold. Returning preview (%d rows) instead of full data (%d rows)",
+            result_size,
+            SMALL_RESULT_THRESHOLD,
+            len(preview_records),
+            len(records),
+        )
+        return UnpivotComputeResponse(
+            atom_id=atom_id,
+            status="success",
+            updated_at=datetime.now(timezone.utc),
+            row_count=len(records),  # Total count
+            dataframe=preview_records,  # Preview only (first 5000 rows)
+            summary=summary,
+            computation_time=computation_time,
+        )
+    else:
+        # Small results (≤20MB): Return full data
+        return UnpivotComputeResponse(
+            atom_id=atom_id,
+            status="success",
+            updated_at=datetime.now(timezone.utc),
+            row_count=len(records),
+            dataframe=records,  # Full data
+            summary=summary,
+            computation_time=computation_time,
+        )
 
 
 async def get_unpivot_result(atom_id: str) -> UnpivotResultResponse:
@@ -623,9 +987,10 @@ async def save_unpivot_result(atom_id: str, payload: UnpivotSaveRequest) -> Unpi
     
     if result:
         records = result.get("dataframe", [])
+        is_preview = result.get("is_preview", False)
         
         # If result is stored in MinIO (especially if it's a preview), load full data from MinIO
-        if result.get("stored_in_minio") or result.get("is_preview"):
+        if result.get("stored_in_minio") or is_preview:
             metadata = _load_metadata(atom_id) or {}
             minio_path = metadata.get("cached_result_path") or result.get("full_data_path")
             
@@ -637,15 +1002,22 @@ async def save_unpivot_result(atom_id: str, payload: UnpivotSaveRequest) -> Unpi
                     logger.info("Loaded full data from MinIO cache for saving: %s", minio_path)
                 except Exception as e:
                     logger.warning("Failed to load from MinIO cache, will recompute: %s", e)
+                    # If MinIO load fails and it's a preview, we MUST recompute - don't use preview records
+                    df = None  # Force recomputation
+            else:
+                # No MinIO path found - if it's a preview, we MUST recompute
+                logger.warning("Result marked as stored_in_minio/is_preview but no cached_result_path found. Will recompute.")
+                df = None  # Force recomputation
         
-        # If we have records and no dataframe yet, convert records to dataframe
-        if df is None and records:
+        # Only use records if it's NOT a preview and we don't have a dataframe yet
+        # NEVER use preview records for saving
+        if df is None and records and not is_preview:
             df = pd.DataFrame(records)
             logger.info("Using cached result for saving (converted from records)")
     
-    # If no cached result available, recompute from source
+    # If no cached result available or if it was a preview, recompute from source
     if df is None or df.empty:
-        logger.info("No cached result available, recomputing from source for atom: %s", atom_id)
+        logger.info("No cached result available or preview detected, recomputing from source for atom: %s", atom_id)
         
         # Load metadata to get configuration
         metadata = _load_metadata(atom_id)
