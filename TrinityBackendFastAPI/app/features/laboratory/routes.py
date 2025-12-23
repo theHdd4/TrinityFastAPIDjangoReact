@@ -426,9 +426,24 @@ async def compute_variables(payload: VariableComputeRequest) -> VariableComputeR
                     },
                 }
                 
-                save_result = await save_variable_to_project(variable_doc)
-                if save_result.get("status") == "success":
-                    created_variables.append(variable_name)
+                if payload.preview:
+                    # In preview mode, just collect the computed value without saving
+                    created_variables.append({
+                        "name": variable_name,
+                        "value": str(value),
+                        "operationDetails": {
+                            "operationMethod": op.method,
+                            "column": op.numericalColumn,
+                            "secondColumn": op.secondColumn,
+                            "secondValue": op.secondValue,
+                            "customName": op.customName,
+                        },
+                    })
+                else:
+                    # Normal mode: save to MongoDB
+                    save_result = await save_variable_to_project(variable_doc)
+                    if save_result.get("status") == "success":
+                        created_variables.append(variable_name)
         
         elif payload.computeMode == "within-group":
             # Validate identifiers
@@ -623,14 +638,41 @@ async def compute_variables(payload: VariableComputeRequest) -> VariableComputeR
                         },
                     }
                     
-                    save_result = await save_variable_to_project(variable_doc)
-                    if save_result.get("status") == "success":
-                        created_variables.append(variable_name)
+                    if payload.preview:
+                        # In preview mode, just collect the computed value without saving
+                        created_variables.append({
+                            "name": variable_name,
+                            "value": str(value) if not isinstance(value, str) else value,
+                            "operationDetails": {
+                                "operationMethod": op.method,
+                                "column": op.numericalColumn,
+                                "groupBy": payload.identifiers,
+                                "secondColumn": op.secondColumn,
+                                "secondValue": op.secondValue,
+                                "customName": op.customName,
+                                "identifiers": {id_col.lower(): str(row[id_col]) for id_col in payload.identifiers},
+                            },
+                        })
+                    else:
+                        # Normal mode: save to MongoDB
+                        save_result = await save_variable_to_project(variable_doc)
+                        if save_result.get("status") == "success":
+                            created_variables.append(variable_name)
         
-        return VariableComputeResponse(
-            success=True,
-            newColumns=created_variables,
-        )
+        # Return response based on preview mode
+        if payload.preview:
+            # In preview mode, return computed values with details
+            return VariableComputeResponse(
+                success=True,
+                newColumns=[],  # Empty in preview mode
+                computedValues=created_variables,  # Return computed values with details
+            )
+        else:
+            # Normal mode: return list of created variable names
+            return VariableComputeResponse(
+                success=True,
+                newColumns=created_variables,
+            )
     
     except HTTPException as he:
         logger.error(f"❌ HTTP Exception in compute_variables: {he.status_code} - {he.detail}")
