@@ -56,9 +56,9 @@ export const openGuidedMode = async ({
       return;
     }
 
-    // Find the landing card atom instead of creating a new data-upload atom
-    // The landing card should host the guided flow
-    console.log('[openGuidedMode] Looking for landing card atom...');
+    // Find or create a data-upload atom to host the guided flow
+    // The function will search for existing atoms first, then create one if needed
+    console.log('[openGuidedMode] Looking for or creating data-upload atom...');
     console.log('[openGuidedMode] Cards available:', Array.isArray(cards) ? cards.length : 'not an array');
     let atomId: string = '';
     
@@ -97,11 +97,15 @@ export const openGuidedMode = async ({
       }
     }
     
-    // If no landing card found, try the function approach as fallback
+    // If no atom found, create a new data-upload atom
+    // This handles the case where the upload atom was deleted from the canvas
     if (!atomId && typeof findOrCreateDataUploadAtom === 'function') {
       try {
         atomId = findOrCreateDataUploadAtom();
-        console.log('[openGuidedMode] Got atomId from function (fallback):', atomId);
+        console.log('[openGuidedMode] Created/found atomId from function:', atomId);
+        if (atomId) {
+          console.log('[openGuidedMode] ✅ Successfully created new data-upload atom for guided mode');
+        }
       } catch (error) {
         console.error('[openGuidedMode] Error calling findOrCreateDataUploadAtom:', error);
       }

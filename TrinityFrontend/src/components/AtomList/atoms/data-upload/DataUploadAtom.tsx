@@ -81,6 +81,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     upload_session_id?: string;
     sheetNameMap?: Record<string, string>;
   } | null>(null);
+  const panelContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Sync primed files from settings only when they actually change
   useEffect(() => {
@@ -154,6 +155,27 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   useEffect(() => {
     const handleDataframeSaved = (event?: Event) => {
       console.log('[DataUploadAtom] dataframe-saved event received, refreshing...', event);
+      
+      // Extract file information from event detail if available
+      const customEvent = event as CustomEvent;
+      if (customEvent?.detail?.filePath) {
+        const filePath = customEvent.detail.filePath;
+        const fileName = customEvent.detail.fileName || filePath.split('/').pop() || filePath;
+        
+        // Update atom settings to include the newly uploaded file
+        const currentFiles = settings.uploadedFiles || [];
+        if (!currentFiles.includes(fileName)) {
+          updateSettings(atomId, {
+            uploadedFiles: [...currentFiles, fileName],
+            filePathMap: {
+              ...(settings.filePathMap || {}),
+              [fileName]: filePath,
+            },
+          });
+          setPrimedFiles(prev => [...prev, fileName]);
+        }
+      }
+      
       // Trigger reload token to force refresh
       setReloadToken(prev => prev + 1);
       // Add a small delay to ensure backend has saved the file
@@ -162,8 +184,30 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
       }, 500);
     };
     
-    const handleDataframeDeleted = () => {
-      console.log('[DataUploadAtom] dataframe-deleted event received, refreshing...');
+    const handleDataframeDeleted = (event?: Event) => {
+      console.log('[DataUploadAtom] dataframe-deleted event received, refreshing...', event);
+      
+      // Extract file information from event detail if available
+      const customEvent = event as CustomEvent;
+      if (customEvent?.detail?.filePath) {
+        const filePath = customEvent.detail.filePath;
+        const fileName = customEvent.detail.fileName || filePath.split('/').pop() || filePath;
+        
+        // Remove deleted file from atom settings
+        const currentFiles = settings.uploadedFiles || [];
+        if (currentFiles.includes(fileName)) {
+          const updatedFiles = currentFiles.filter(f => f !== fileName);
+          const updatedPathMap = { ...(settings.filePathMap || {}) };
+          delete updatedPathMap[fileName];
+          
+          updateSettings(atomId, {
+            uploadedFiles: updatedFiles,
+            filePathMap: updatedPathMap,
+          });
+          setPrimedFiles(prev => prev.filter(f => f !== fileName));
+        }
+      }
+      
       // Trigger reload token to force refresh
       setReloadToken(prev => prev + 1);
       // Refresh immediately when file is deleted, then again after a delay
@@ -179,7 +223,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
       window.removeEventListener('dataframe-saved', handleDataframeSaved);
       window.removeEventListener('dataframe-deleted', handleDataframeDeleted);
     };
-  }, [fetchSavedDataframes]);
+  }, [fetchSavedDataframes, settings.uploadedFiles, settings.filePathMap, atomId, updateSettings]);
   
   // Refresh when reloadToken changes
   useEffect(() => {
@@ -234,10 +278,11 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     e.stopPropagation();
     setIsDragOver(false);
     
-    // Handle dropped files - support multiple files
+    // Handle dropped files - use existing upload logic which dispatches dataframe-saved events
+    // This keeps everything in sync with SavedDataFramesPanel
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
-      const fileArray = Array.from(files);
+      const fileArray = Array.from(files) as File[];
       if (fileArray.length === 1) {
         // Single file - use existing logic
         const firstFile = fileArray[0];
@@ -254,7 +299,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
         void uploadSelectedFile(firstFile);
       } else {
         // Multiple files - upload all in parallel
-        void handleMultipleFiles(fileArray as File[]);
+        void handleMultipleFiles(fileArray);
       }
     }
   };
@@ -879,10 +924,14 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   };
 
   const handleUploadAreaClick = () => {
-    triggerFilePicker();
+    // Trigger the file input from SavedDataFramesPanel instead of using local upload
+    if (panelContainerRef.current) {
+      const fileInput = panelContainerRef.current.querySelector('input[type="file"]') as HTMLInputElement;
+      if (fileInput) {
+        fileInput.click();
+      }
+    }
   };
-
-
 
   // Handle selecting an existing dataframe in guided mode (used by properties panel, not left layout)
   const handleSelectExistingDataframe = (dataframe: SavedDataframe) => {
@@ -910,7 +959,6 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   };
 
   interface UploadPanelRightProps {
-    onFileInputChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
     onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
     onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
     onDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -918,7 +966,6 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   }
 
   const UploadPanelRight: React.FC<UploadPanelRightProps> = ({
-    onFileInputChange,
     onDrop,
     onDragOver,
     onDragLeave,
@@ -929,48 +976,30 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
         <h3 className="text-sm font-semibold text-gray-800">Upload New Files</h3>
       </div>
       <div className="flex-1 p-3 flex flex-col">
-        {/* Hidden file input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          accept=".csv,.xlsx,.xls"
-          multiple
-          onChange={onFileInputChange}
-        />
-
-        {/* Upload Drop Zone or Loading State */}
-        {uploadingFile ? (
-          <div className="flex-1 border-2 border-dashed border-blue-300 rounded-lg flex flex-col items-center justify-center text-center bg-blue-50/50">
-            <Loader2 className="w-10 h-10 animate-spin text-blue-500 mb-3" />
-            <p className="text-sm font-medium text-blue-700 mb-1">Uploading...</p>
-            <p className="text-xs text-blue-500">{pendingFile?.name || 'Processing file'}</p>
-          </div>
-        ) : (
+        {/* Upload Drop Zone */}
+        <div
+          className={`flex-1 border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer ${
+            isDragOver
+              ? 'border-blue-400 bg-blue-50'
+              : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/30'
+          }`}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onClick={onUploadAreaClick}
+        >
           <div
-            className={`flex-1 border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer ${
-              isDragOver
-                ? 'border-blue-400 bg-blue-50'
-                : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/30'
-            }`}
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onClick={onUploadAreaClick}
+            className={`rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md transform transition-transform duration-300 ${
+              isDragOver ? 'scale-110' : 'hover:scale-105'
+            } w-12 h-12 mb-3`}
           >
-            <div
-              className={`rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md transform transition-transform duration-300 ${
-                isDragOver ? 'scale-110' : 'hover:scale-105'
-              } w-12 h-12 mb-3`}
-            >
-              <Upload className="text-white w-6 h-6" />
-            </div>
-            <p className="text-sm font-medium text-gray-700 mb-1">
-              {isDragOver ? 'Drop files here' : 'Drag and drop files'}
-            </p>
-            <p className="text-xs text-gray-500">or click to browse</p>
+            <Upload className="text-white w-6 h-6" />
           </div>
-        )}
+          <p className="text-sm font-medium text-gray-700 mb-1">
+            {isDragOver ? 'Drop files here' : 'Drag and drop files'}
+          </p>
+          <p className="text-xs text-gray-500">or click to browse</p>
+        </div>
 
         {/* Upload Error */}
         {uploadError && (
@@ -990,20 +1019,20 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex flex-col">
       {/* Top row: Priming list (left) + Upload panel (right).
-          This behaves exactly like before – intrinsic height based on content,
-          not tied to the bottom panels. */}
+          The upload panel triggers the SavedDataFramesPanel file input for synced uploads. */}
       <div className="w-full flex gap-3 p-3 flex-shrink-0">
-        <div className="flex-[3] min-w-0 flex flex-col overflow-hidden">
-          <PartialPrimedCard
-            atomId={atomId}
-            cardId={atomId}
-            files={[]}
-            primingStatuses={[]}
-          />
+        <div className="flex-[3] min-w-0 flex flex-col overflow-hidden" ref={panelContainerRef}>
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <PartialPrimedCard
+              atomId={atomId}
+              cardId={atomId}
+              files={[]}
+              primingStatuses={[]}
+            />
+          </div>
         </div>
         <div className="flex-1 min-w-0 flex-shrink-0">
           <UploadPanelRight
-            onFileInputChange={handleFileInput}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}

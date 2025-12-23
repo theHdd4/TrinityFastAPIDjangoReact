@@ -64,6 +64,7 @@ const LaboratoryMode = () => {
   const [isHeaderMinimized, setIsHeaderMinimized] = useState(false);
   const [isTrinityAIVisible, setIsTrinityAIVisible] = useState(true); // Track if AI panel should be visible at all
   const [isHorizontalAICollapsed, setIsHorizontalAICollapsed] = useState(false); // Track collapse state for horizontal view only
+  const [areSidePanelsHidden, setAreSidePanelsHidden] = useState(false); // Track if side panels should be hidden (bulb icon toggle)
   // Layout preference: 'vertical' (default) or 'horizontal'
   const [trinityAILayout, setTrinityAILayout] = useState<'vertical' | 'horizontal'>(() => {
     const saved = localStorage.getItem('trinity_ai_layout_preference');
@@ -202,15 +203,8 @@ const LaboratoryMode = () => {
     window.history.replaceState({}, '', url.toString());
   }, [subMode]);
 
-  // Close left panel and exhibition when guided mode is enabled
-  useEffect(() => {
-    if (globalGuidedModeEnabled) {
-      // Close the atom library panel
-      setAuxiliaryMenuLeftOpen(false);
-      // Close exhibition panel
-      setIsExhibitionOpen(false);
-    }
-  }, [globalGuidedModeEnabled, setAuxiliaryMenuLeftOpen]);
+  // Note: Side panels are no longer automatically closed when guided mode is enabled
+  // Users can toggle panel visibility using the bulb icon on cards
 
   // Listen for event to open guided panel
   useEffect(() => {
@@ -1093,7 +1087,7 @@ const LaboratoryMode = () => {
         className="absolute top-[53px] flex items-center justify-center z-50 pointer-events-none"
         style={{
           // Left sidebar is always visible (with opacity when guided mode is ON)
-          left: (auxiliaryMenuLeftOpen || isExhibitionOpen) && !globalGuidedModeEnabled ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
+          left: (auxiliaryMenuLeftOpen || isExhibitionOpen) ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
           right: (auxActive && auxActive !== 'exhibition') ? '368px' : '48px', // w-12 (48px) icons + w-80 (320px) panel when open (exhibition is on left)
         }}
       >
@@ -1275,11 +1269,13 @@ const LaboratoryMode = () => {
                 cardEditors={cardEditors}
                 onCardFocus={notifyCardFocus}
                 onCardBlur={notifyCardBlur}
+                onToggleSidePanels={() => setAreSidePanelsHidden(prev => !prev)}
+                areSidePanelsHidden={areSidePanelsHidden}
               />
           </div>
 
           {/* Auxiliary menu - Simplified when guided mode is ON */}
-          <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+          <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full ${areSidePanelsHidden ? 'opacity-0 pointer-events-none' : ''}`}>
             <AuxiliaryMenu
               selectedAtomId={selectedAtomId}
               selectedCardId={selectedCardId}
@@ -1299,7 +1295,7 @@ const LaboratoryMode = () => {
                 }
               }}
               trinityAILayout={trinityAILayout}
-              isTrinityAIVisible={globalGuidedModeEnabled ? false : isTrinityAIVisible}
+              isTrinityAIVisible={isTrinityAIVisible}
               onTrinityAIClose={() => {
                 setIsTrinityAIVisible(false);
                 setAuxActive(null);
@@ -1336,7 +1332,7 @@ const LaboratoryMode = () => {
           {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
           {/* In horizontal view, panel stays visible and aligned with canvas area */}
           {/* Hidden when guided mode is ON */}
-          {isTrinityAIVisible && trinityAILayout === 'horizontal' && !globalGuidedModeEnabled && (
+          {isTrinityAIVisible && trinityAILayout === 'horizontal' && !areSidePanelsHidden && (
             <div 
               className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
             >

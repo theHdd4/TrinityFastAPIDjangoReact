@@ -29,6 +29,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
   const [primingStats, setPrimingStats] = useState<{ total: number; primed: number; unprimed: number }>({ total: 0, primed: 0, unprimed: 0 });
   const isCheckingRef = useRef(false);
   const panelContainerRef = useRef<HTMLDivElement>(null);
+  const [panelRefreshKey, setPanelRefreshKey] = useState(0);
   
   // Note: We still access store state to update it when needed (e.g., when "Direct review" is chosen),
   // but we don't render DirectReviewPanel or GuidedUploadFlowInline here anymore.
@@ -149,21 +150,39 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
     fetchPrimingStats();
     
     const handleDataframeSaved = () => {
+      // Force refresh of SavedDataFramesPanel by updating key
+      setPanelRefreshKey(prev => prev + 1);
       // Fetch immediately, then again after a short delay to ensure backend has updated
       fetchPrimingStats();
-      setTimeout(() => fetchPrimingStats(), 500);
+      setTimeout(() => {
+        fetchPrimingStats();
+        setPanelRefreshKey(prev => prev + 1); // Force another refresh after delay
+      }, 500);
     };
     const handlePrimingStatusChange = () => {
+      // Force refresh of SavedDataFramesPanel by updating key
+      setPanelRefreshKey(prev => prev + 1);
       // Fetch immediately, then again after a short delay to ensure backend has updated
       fetchPrimingStats();
-      setTimeout(() => fetchPrimingStats(), 500);
+      setTimeout(() => {
+        fetchPrimingStats();
+        setPanelRefreshKey(prev => prev + 1); // Force another refresh after delay
+      }, 500);
     };
     const handleDataframeDeleted = () => {
+      // Force refresh of SavedDataFramesPanel by updating key
+      setPanelRefreshKey(prev => prev + 1);
       // Fetch immediately when file is deleted to update status text
       fetchPrimingStats();
       // Also fetch after a short delay to ensure backend has updated
-      setTimeout(() => fetchPrimingStats(), 300);
-      setTimeout(() => fetchPrimingStats(), 700);
+      setTimeout(() => {
+        fetchPrimingStats();
+        setPanelRefreshKey(prev => prev + 1); // Force another refresh after delay
+      }, 300);
+      setTimeout(() => {
+        fetchPrimingStats();
+        setPanelRefreshKey(prev => prev + 1); // Force another refresh after delay
+      }, 700);
     };
     
     window.addEventListener('dataframe-saved', handleDataframeSaved);
@@ -360,7 +379,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           border-bottom: none !important;
         }
         
-        /* Make file list container use grid layout - 2 files per row, full width */
+        /* Make file list container use grid layout - 2 files per row, full width, limit to 4 rows with scroll */
         [data-saved-dataframes-panel] .flex-1.overflow-y-auto.p-3 {
           display: grid !important;
           grid-template-columns: repeat(2, minmax(250px, 1fr)) !important;
@@ -372,6 +391,9 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           align-items: start !important;
           padding: 0.25rem 0.5rem !important;
           padding-top: 0.25rem !important;
+          max-height: calc((4 * 3.5rem) + (3 * 0.5rem)) !important; /* 4 rows: 4 cards at 3.5rem each + 3 gaps at 0.5rem each = 15.5rem */
+          overflow-y: auto !important;
+          overflow-x: hidden !important;
         }
         
         /* Target ALL direct children - make them grid items, remove all margins */
@@ -402,7 +424,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           margin-left: 0 !important;
         }
         
-        /* Target file entry cards - ensure they fit grid cells perfectly, blue box styling */
+        /* Target file entry cards - ensure they fit grid cells perfectly, blue box styling, fixed height */
         [data-saved-dataframes-panel] .flex.items-center.justify-between.border {
           width: 100% !important;
           min-width: 0 !important;
@@ -417,6 +439,8 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
           justify-content: space-between !important;
           flex-wrap: nowrap !important;
           padding: 0.5rem !important;
+          min-height: 3.5rem !important;
+          max-height: 3.5rem !important;
         }
         
         [data-saved-dataframes-panel] .flex.items-center.justify-between.border.p-1\\.5 {
@@ -482,7 +506,7 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
       `}</style>
       {/* Saved DataFrames Panel - Always visible */}
       <div className="overflow-y-auto w-full flex flex-col flex-1 min-h-0" data-saved-dataframes-panel ref={panelContainerRef}>
-        <div className="w-full">
+        <div className="w-full" key={panelRefreshKey}>
           <SavedDataFramesPanel 
             isOpen={true} 
             onToggle={() => {}} 

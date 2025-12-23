@@ -31,9 +31,10 @@ import {
 import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore, createDefaultDataUploadSettings, DroppedAtom } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { openGuidedMode } from './equalizer_icon';
+import { atoms as allAtoms } from '@/components/AtomList/data';
 
 interface Props {
   isOpen: boolean;
@@ -288,9 +289,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   // Hook for marking files as primed
   const { markFileAsPrimed } = useGuidedFlowPersistence();
 
-  // Helper function to find the landing card atom or data-upload atom (not create a new one)
+  // Helper function to find or create a data-upload atom
   // Use useCallback to ensure stable function reference
-  // Priority: data-upload atom (new integrated approach) > landing-screen atom (legacy)
+  // Priority: data-upload atom (new integrated approach) > landing-screen atom (legacy) > create new data-upload atom
   const findOrCreateDataUploadAtom = useCallback(() => {
     try {
       console.log('[findOrCreateDataUploadAtom] Looking for data-upload or landing card atom, cards type:', Array.isArray(cards) ? `array(${cards.length})` : typeof cards);
@@ -321,13 +322,51 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         }
       }
 
-      console.error('[findOrCreateDataUploadAtom] Neither data-upload nor landing-screen atom found');
-      return '';
+      // No existing atom found - create a new data-upload atom
+      console.log('[findOrCreateDataUploadAtom] No existing data-upload atom found, creating a new one...');
+      
+      // Get atom information from allAtoms
+      const atomInfo = allAtoms.find(a => a.id === 'data-upload');
+      if (!atomInfo) {
+        console.error('[findOrCreateDataUploadAtom] data-upload atom not found in allAtoms');
+        return '';
+      }
+
+      // Generate unique IDs
+      const generateId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const newAtomId = generateId('data-upload');
+      const newCardId = generateId('card');
+
+      // Create new atom with proper structure
+      const newAtom: DroppedAtom = {
+        id: newAtomId,
+        atomId: 'data-upload',
+        title: atomInfo.title || 'Data Upload',
+        category: atomInfo.category || 'Data Sources',
+        color: atomInfo.color || 'bg-blue-500',
+        source: 'manual',
+        settings: createDefaultDataUploadSettings(),
+      };
+
+      // Create new card with the atom
+      const newCard = {
+        id: newCardId,
+        atoms: [newAtom],
+        isExhibited: false,
+        variables: [],
+      };
+
+      // Add the new card to the cards array
+      const currentCards = Array.isArray(cards) ? cards : [];
+      setCards([...currentCards, newCard]);
+
+      console.log('[findOrCreateDataUploadAtom] Created new data-upload atom:', newAtomId, 'in card:', newCardId);
+      return newAtomId;
     } catch (error) {
       console.error('[findOrCreateDataUploadAtom] Error:', error);
       return '';
     }
-  }, [cards]);
+  }, [cards, setCards]);
   
   const [viewColumns, setViewColumns] = useState<ProcessingColumnConfig[]>([]);
   const [viewLoading, setViewLoading] = useState(false);

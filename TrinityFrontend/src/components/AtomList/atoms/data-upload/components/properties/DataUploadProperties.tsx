@@ -327,21 +327,6 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
         </Card>
       )}
 
-      {/* Uploaded Files Summary */}
-      {settings.uploadedFiles && settings.uploadedFiles.length > 0 && (
-        <Card className="p-4">
-          <h4 className="font-medium text-gray-700 mb-2">Primed Files</h4>
-          <div className="space-y-2">
-            {settings.uploadedFiles.map((file, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 px-3 py-2 rounded">
-                <Sparkles className="w-4 h-4 text-green-500" />
-                <span>{file}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
       {/* Empty State - Only show when no files and not in guided mode */}
       {(!settings.uploadedFiles || settings.uploadedFiles.length === 0) && !globalGuidedModeEnabled && (
         <div className="text-center py-4 text-gray-500">
