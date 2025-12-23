@@ -788,7 +788,10 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     try {
       const excelFolderName = fileName.replace(/\.[^.]+$/, '').replace(/\s+/g, '_').replace(/\./g, '_');
       
-      for (const sheetName of sheetsToSave) {
+      for (let index = 0; index < sheetsToSave.length; index++) {
+        const sheetName = sheetsToSave[index];
+        const sheetIndex = index + 1; // 1-based index
+        
         try {
           // Get normalized sheet name from mapping or normalize it
           const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || 
@@ -799,7 +802,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           convertForm.append('upload_session_id', uploadSessionId);
           convertForm.append('sheet_name', normalizedSheetName);
           convertForm.append('original_filename', fileName);
-          convertForm.append('use_folder_structure', 'true');
+          convertForm.append('use_folder_structure', 'false');
+          convertForm.append('sheet_index', String(sheetIndex));
           appendEnvFields(convertForm);
           
           const convertRes = await fetch(`${VALIDATE_API}/convert-session-sheet-to-arrow`, {
@@ -818,6 +822,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           
           const convertData = await convertRes.json();
           const sheetPath = convertData.file_path || '';
+          const displayFileName = convertData.file_name || `${fileName}_sheet${sheetIndex}`;
           
           if (!sheetPath) {
             console.warn(`No file path returned for sheet ${sheetName}`);
@@ -826,7 +831,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           
           // Trigger refresh of SavedDataFramesPanel
           window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-            detail: { filePath: sheetPath, fileName: `${fileName} (${sheetName})` } 
+            detail: { filePath: sheetPath, fileName: displayFileName } 
           }));
         } catch (err: any) {
           console.error(`Error saving sheet ${sheetName}:`, err);

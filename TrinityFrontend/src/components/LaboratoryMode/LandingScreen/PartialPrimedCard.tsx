@@ -235,10 +235,24 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
 
       const data = await res.json();
       const files = Array.isArray(data?.files) ? data.files : [];
-      if (files.length === 0) return true; // No files means all are "primed" (none to check)
+      const excelFolders = Array.isArray(data?.excel_folders) ? data.excel_folders : [];
+
+      // Collect all files including sheets from Excel folders (same logic as fetchPrimingStats)
+      const allFiles: Array<{ object_name: string; [key: string]: any }> = [...files];
+      excelFolders.forEach((folder: any) => {
+        if (Array.isArray(folder.sheets)) {
+          folder.sheets.forEach((sheet: any) => {
+            if (sheet.object_name) {
+              allFiles.push({ object_name: sheet.object_name, ...sheet });
+            }
+          });
+        }
+      });
+
+      if (allFiles.length === 0) return true; // No files means all are "primed" (none to check)
 
       // Check priming status for all files
-      const statusChecks = await Promise.all(files.map(async (f: typeof files[0]) => {
+      const statusChecks = await Promise.all(allFiles.map(async (f: typeof allFiles[0]) => {
         try {
           const queryParams = new URLSearchParams({
             client_name: projectContext.client_name || '',

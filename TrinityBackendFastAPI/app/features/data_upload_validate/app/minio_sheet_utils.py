@@ -506,7 +506,7 @@ def list_upload_session_sheets(upload_session_id: str, prefix: str) -> List[str]
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 
-def convert_session_sheet_to_arrow(upload_session_id: str, sheet_name: str, original_filename: str, prefix: str, use_folder_structure: bool = True) -> Dict[str, Any]:
+def convert_session_sheet_to_arrow(upload_session_id: str, sheet_name: str, original_filename: str, prefix: str, use_folder_structure: bool = True, sheet_index: Optional[int] = None) -> Dict[str, Any]:
     """
     Fetches a specific sheet (Parquet) from the upload folder,
     converts it to an Arrow file, and uploads the Arrow file to the main MinIO prefix.
@@ -517,6 +517,7 @@ def convert_session_sheet_to_arrow(upload_session_id: str, sheet_name: str, orig
         original_filename: The original name of the Excel file (e.g., "my_workbook.xlsx").
         prefix: The main MinIO prefix for the current project.
         use_folder_structure: If True, saves in folder structure {excel_filename}/sheets/{sheet_name}.arrow
+        sheet_index: Optional 1-based index of the sheet. If provided and use_folder_structure is False, uses "sheet{index}" in filename.
         
     Returns:
         A dictionary containing the file_path of the newly created Arrow file.
@@ -528,11 +529,12 @@ def convert_session_sheet_to_arrow(upload_session_id: str, sheet_name: str, orig
     session_parquet_path = f"{folder_prefix}sheets/{sheet_name}.parquet"
     
     logger.info(
-        "data_upload.convert_sheet_to_arrow.start session_id=%s sheet=%s original_filename=%s use_folder_structure=%s",
+        "data_upload.convert_sheet_to_arrow.start session_id=%s sheet=%s original_filename=%s use_folder_structure=%s sheet_index=%s",
         upload_session_id,
         sheet_name,
         original_filename,
         use_folder_structure,
+        sheet_index,
     )
     
     try:
@@ -553,8 +555,13 @@ def convert_session_sheet_to_arrow(upload_session_id: str, sheet_name: str, orig
             arrow_file_key = f"{excel_folder_name}/sheets/{sheet_name}"
             arrow_object_name = f"{prefix}{arrow_file_key}.arrow"
         else:
-            # Legacy flat structure: {excel_filename}_{sheet_name}.arrow
-            arrow_file_key = f"{base_file_key}_{sheet_name}"
+            # Flat structure: use sheet index if provided, otherwise use sheet_name
+            if sheet_index is not None:
+                # Use format: {excel_filename}_sheet{index}.arrow
+                arrow_file_key = f"{base_file_key}_sheet{sheet_index}"
+            else:
+                # Fallback to sheet name: {excel_filename}_{sheet_name}.arrow
+                arrow_file_key = f"{base_file_key}_{sheet_name}"
             arrow_object_name = f"{prefix}{arrow_file_key}.arrow"
         
         arrow_buffer = io.BytesIO()
@@ -585,9 +592,19 @@ def convert_session_sheet_to_arrow(upload_session_id: str, sheet_name: str, orig
                 arrow_object_name,
             )
             # excel_folder_name is only defined when use_folder_structure is True
+            # Determine display file name
+            if use_folder_structure:
+                display_file_name = f"{original_filename} ({sheet_name})"
+            elif sheet_index is not None:
+                # Use format: filename_sheet{index}
+                base_name = Path(original_filename).stem
+                display_file_name = f"{base_name}_sheet{sheet_index}"
+            else:
+                display_file_name = original_filename
+            
             result = {
                 "file_path": arrow_object_name,
-                "file_name": f"{original_filename} ({sheet_name})" if use_folder_structure else original_filename,
+                "file_name": display_file_name,
                 "file_key": arrow_file_key,
             }
             if use_folder_structure:

@@ -463,7 +463,13 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
         totalSheets?: number;
       }> = [];
       
-      for (const sheetName of sheetsToSave) {
+      // Always use flat structure with sheet indices (file_name_sheet1, file_name_sheet2, etc.)
+      const useFolderStructure = false;
+      
+      for (let index = 0; index < sheetsToSave.length; index++) {
+        const sheetName = sheetsToSave[index];
+        const sheetIndex = index + 1; // 1-based index
+        
         try {
           // Validate sheet name
           if (!sheetName || sheetName.trim() === '') {
@@ -475,14 +481,15 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
           const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || 
             sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
           
-          console.log(`[U0FileUpload] Converting sheet: ${sheetName} -> ${normalizedSheetName} (use_folder_structure: ${useFolderStructure})`);
+          console.log(`[U0FileUpload] Converting sheet: ${sheetName} -> ${normalizedSheetName} (use_folder_structure: false, sheet_index: ${sheetIndex})`);
           
           // Use the convert endpoint to save sheet directly
           const convertForm = new FormData();
           convertForm.append('upload_session_id', uploadSessionId);
           convertForm.append('sheet_name', normalizedSheetName); // Use normalized name from backend
           convertForm.append('original_filename', fileName);
-          convertForm.append('use_folder_structure', useFolderStructure ? 'true' : 'false');
+          convertForm.append('use_folder_structure', 'false');
+          convertForm.append('sheet_index', String(sheetIndex));
           appendEnvFields(convertForm);
           
           const convertRes = await fetch(`${VALIDATE_API}/convert-session-sheet-to-arrow`, {
@@ -512,12 +519,8 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
           }
           
           // Use backend file_name and file_key directly
-          const sheetDisplayName = convertData.file_name || (useFolderStructure 
-            ? `${fileName} (${sheetName})`
-            : fileName);
-          const fileKey = convertData.file_key || (useFolderStructure 
-            ? `${excelFolderName}_${normalizedSheetName}`
-            : excelFolderName);
+          const sheetDisplayName = convertData.file_name || `${fileName}_sheet${sheetIndex}`;
+          const fileKey = convertData.file_key || `${excelFolderName}_sheet${sheetIndex}`;
           
           console.log(`[U0FileUpload] Successfully saved sheet: ${sheetDisplayName} at ${sheetPath}`);
           

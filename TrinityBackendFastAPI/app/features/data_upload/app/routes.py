@@ -961,6 +961,7 @@ async def convert_session_sheet_to_arrow_endpoint(
     sheet_name: str = Form(...),
     original_filename: str = Form(...),
     use_folder_structure: str = Form("true"),
+    sheet_index: str = Form(""),
     client_name: str = Form(""),
     app_name: str = Form(""),
     project_name: str = Form(""),
@@ -973,12 +974,13 @@ async def convert_session_sheet_to_arrow_endpoint(
         sheet_name: The normalized sheet name
         original_filename: Original Excel filename
         use_folder_structure: "true" or "false" - whether to use folder structure
+        sheet_index: Optional 1-based index of the sheet (e.g., "1", "2", "3"). Used for flat file naming.
         client_name, app_name, project_name: Environment context
         
     Returns:
         {
             "file_path": "path/to/file.arrow",
-            "file_name": "filename (sheet_name)",
+            "file_name": "filename_sheet1" or "filename (sheet_name)",
             "file_key": "file_key"
         }
     """
@@ -1003,20 +1005,30 @@ async def convert_session_sheet_to_arrow_endpoint(
     prefix = await get_object_prefix()
     use_folder = use_folder_structure.lower() == "true"
     
+    # Parse sheet_index if provided
+    parsed_sheet_index = None
+    if sheet_index and sheet_index.strip():
+        try:
+            parsed_sheet_index = int(sheet_index.strip())
+        except ValueError:
+            logger.warning(f"Invalid sheet_index '{sheet_index}', ignoring")
+    
     try:
         logger.info(
-            "convert_session_sheet_to_arrow_endpoint called: session_id=%s sheet_name=%s original_filename=%s use_folder=%s",
+            "convert_session_sheet_to_arrow_endpoint called: session_id=%s sheet_name=%s original_filename=%s use_folder=%s sheet_index=%s",
             upload_session_id,
             sheet_name,
             original_filename,
-            use_folder
+            use_folder,
+            parsed_sheet_index
         )
         result = convert_session_sheet_to_arrow(
             upload_session_id=upload_session_id,
             sheet_name=sheet_name,
             original_filename=original_filename,
             prefix=prefix,
-            use_folder_structure=use_folder
+            use_folder_structure=use_folder,
+            sheet_index=parsed_sheet_index
         )
         logger.info(
             "convert_session_sheet_to_arrow_endpoint success: file_path=%s file_name=%s",

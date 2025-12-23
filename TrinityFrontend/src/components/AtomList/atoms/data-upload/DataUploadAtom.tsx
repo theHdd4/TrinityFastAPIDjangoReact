@@ -405,33 +405,38 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
 
             // For multiple files, save all sheets automatically
             if (globalGuidedModeEnabled) {
-              const uploadedFiles = sheetNames.map((sheetName) => {
+              const excelFolderName = fileName.replace(/\.[^.]+$/, '').replace(/\s+/g, '_').replace(/\./g, '_');
+              const uploadedFiles = sheetNames.map((sheetName, index) => {
+                const sheetIndex = index + 1; // 1-based index
                 const normalizedSheetName = sheetNameMap[sheetName] || sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
-                const excelFolderName = fileName.replace(/\.[^.]+$/, '').replace(/\s+/g, '_').replace(/\./g, '_');
                 return {
-                  name: `${fileName} (${sheetName})`,
+                  name: `${excelFolderName}_sheet${sheetIndex}`,
                   path: data.original_file_path || '',
                   size: file.size || 0,
-                  fileKey: `${excelFolderName}_${normalizedSheetName}`,
+                  fileKey: `${excelFolderName}_sheet${sheetIndex}`,
                   sheetNames: sheetNames,
                   selectedSheet: sheetName,
                   totalSheets: sheetNames.length,
                   processed: false,
                   uploadSessionId: uploadSessionId,
                   sheetNameMap: sheetNameMap,
+                  sheetIndex: sheetIndex,
                 };
               });
               return { success: true, uploadedFiles, fileName };
             } else {
               // Non-guided mode: Save all sheets
-              const savedSheetFiles: string[] = [];
-              for (const sheetName of sheetNames) {
+              const savedSheetFiles: Array<{ filePath: string; fileName: string }> = [];
+              for (let index = 0; index < sheetNames.length; index++) {
+                const sheetName = sheetNames[index];
+                const sheetIndex = index + 1; // 1-based index
                 const normalizedSheetName = sheetNameMap[sheetName] || sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
                 const convertForm = new FormData();
                 convertForm.append('upload_session_id', uploadSessionId);
                 convertForm.append('sheet_name', normalizedSheetName);
                 convertForm.append('original_filename', fileName);
-                convertForm.append('use_folder_structure', 'true');
+                convertForm.append('use_folder_structure', 'false');
+                convertForm.append('sheet_index', String(sheetIndex));
                 appendEnvFields(convertForm);
                 
                 const convertRes = await fetch(`${VALIDATE_API}/convert-session-sheet-to-arrow`, {
@@ -443,8 +448,9 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
                 if (convertRes.ok) {
                   const convertData = await convertRes.json().catch(() => null);
                   const filePath = convertData?.file_path || convertData?.object_name;
+                  const displayFileName = convertData?.file_name || `${fileName}_sheet${sheetIndex}`;
                   if (filePath) {
-                    savedSheetFiles.push(filePath);
+                    savedSheetFiles.push({ filePath, fileName: displayFileName });
                   }
                 } else {
                   console.warn(`Failed to convert sheet ${sheetName} from ${fileName}`);
@@ -452,11 +458,11 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
               }
               
               // Dispatch dataframe-saved events for all saved sheets
-              savedSheetFiles.forEach((filePath, index) => {
+              savedSheetFiles.forEach((fileInfo, index) => {
                 setTimeout(() => {
-                  console.log(`[DataUploadAtom] Dispatching dataframe-saved event for Excel sheet: ${filePath}`);
+                  console.log(`[DataUploadAtom] Dispatching dataframe-saved event for Excel sheet: ${fileInfo.filePath}`);
                   window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-                    detail: { filePath, fileName: `${fileName} (${sheetNames[index] || ''})` } 
+                    detail: { filePath: fileInfo.filePath, fileName: fileInfo.fileName } 
                   }));
                 }, index * 100);
               });
@@ -801,7 +807,10 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     try {
       const excelFolderName = fileName.replace(/\.[^.]+$/, '').replace(/\s+/g, '_').replace(/\./g, '_');
       
-      for (const sheetName of sheetsToSave) {
+      for (let index = 0; index < sheetsToSave.length; index++) {
+        const sheetName = sheetsToSave[index];
+        const sheetIndex = index + 1; // 1-based index
+        
         try {
           // Get normalized sheet name from mapping or normalize it
           const normalizedSheetName = tempUploadMeta?.sheetNameMap?.[sheetName] || 
@@ -812,7 +821,8 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           convertForm.append('upload_session_id', uploadSessionId);
           convertForm.append('sheet_name', normalizedSheetName);
           convertForm.append('original_filename', fileName);
-          convertForm.append('use_folder_structure', 'true');
+          convertForm.append('use_folder_structure', 'false');
+          convertForm.append('sheet_index', String(sheetIndex));
           appendEnvFields(convertForm);
           
           const convertRes = await fetch(`${VALIDATE_API}/convert-session-sheet-to-arrow`, {
@@ -831,6 +841,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           
           const convertData = await convertRes.json();
           const sheetPath = convertData.file_path || '';
+          const displayFileName = convertData.file_name || `${fileName}_sheet${sheetIndex}`;
           
           if (!sheetPath) {
             console.warn(`No file path returned for sheet ${sheetName}`);
@@ -839,7 +850,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           
           // Trigger refresh of SavedDataFramesPanel
           window.dispatchEvent(new CustomEvent('dataframe-saved', { 
-            detail: { filePath: sheetPath, fileName: `${fileName} (${sheetName})` } 
+            detail: { filePath: sheetPath, fileName: displayFileName } 
           }));
         } catch (err: any) {
           console.error(`Error saving sheet ${sheetName}:`, err);
@@ -902,15 +913,20 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
-    
+
     const fileArray = Array.from(files) as File[];
-    const firstFile = fileArray[0];
-    const remainingFiles = fileArray.slice(1);
-    
-    // Store remaining files in queue
-    if (remainingFiles.length > 0) {
-      setPendingFilesQueue(remainingFiles);
+
+    // If user selected multiple files from the picker, reuse the same
+    // multi-upload pipeline that drag & drop uses.
+    if (fileArray.length > 1) {
+      setPendingFilesQueue([]);
+      void handleMultipleFiles(fileArray);
+      event.target.value = '';
+      return;
     }
+
+    // Single-file path: keep existing behavior (Excel multi-sheet modal, etc.)
+    const firstFile = fileArray[0];
     
     setPendingFile(firstFile);
     setUploadError('');
