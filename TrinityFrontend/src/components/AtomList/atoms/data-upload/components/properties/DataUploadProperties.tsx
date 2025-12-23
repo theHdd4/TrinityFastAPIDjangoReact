@@ -72,13 +72,29 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
     }
   }, []);
 
-  // Initial fetch
+  // Initial fetch when guided mode is active
   useEffect(() => {
     if (hasFetchedRef.current || !globalGuidedModeEnabled) return;
     hasFetchedRef.current = true;
     const timeoutId = setTimeout(() => fetchSavedDataframes(), 100);
     return () => clearTimeout(timeoutId);
   }, [fetchSavedDataframes, globalGuidedModeEnabled]);
+
+  // Keep list in sync with uploads/deletes from other parts of the UI
+  useEffect(() => {
+    const handleDataframeChanged = () => {
+      // Always use the latest handler
+      fetchSavedDataframes();
+    };
+
+    window.addEventListener('dataframe-saved', handleDataframeChanged);
+    window.addEventListener('dataframe-deleted', handleDataframeChanged);
+
+    return () => {
+      window.removeEventListener('dataframe-saved', handleDataframeChanged);
+      window.removeEventListener('dataframe-deleted', handleDataframeChanged);
+    };
+  }, [fetchSavedDataframes]);
 
   // Refresh when the component becomes visible/active (focus)
   useEffect(() => {

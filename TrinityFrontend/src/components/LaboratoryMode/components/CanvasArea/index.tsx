@@ -4429,6 +4429,48 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     );
   };
 
+  // Allow guided upload steps (and other atoms) to request card fullscreen
+  // by dispatching a window 'laboratory-card-expand' event with the atomId.
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleCardExpandEvent = (event: Event) => {
+      const customEvent = event as CustomEvent<{ atomId?: string }>;
+      const atomId = customEvent.detail?.atomId;
+      if (!atomId) return;
+
+      let targetCard: LayoutCard | undefined;
+
+      if (Array.isArray(layoutCards)) {
+        targetCard = layoutCards.find(card =>
+          Array.isArray(card.atoms) && card.atoms.some(atom => atom.id === atomId),
+        );
+      }
+
+      // If not found in top-level layout cards, also look in workflow molecule cards
+      if (!targetCard && Array.isArray(workflowMolecules) && Array.isArray(layoutCards)) {
+        for (const molecule of workflowMolecules) {
+          const moleculeCards = layoutCards.filter(c => c.moleculeId === molecule.moleculeId);
+          targetCard = moleculeCards.find(card =>
+            Array.isArray(card.atoms) && card.atoms.some(atom => atom.id === atomId),
+          );
+          if (targetCard) break;
+        }
+      }
+
+      if (!targetCard) return;
+      setExpandedCard(targetCard.id);
+    };
+
+    window.addEventListener('laboratory-card-expand', handleCardExpandEvent as EventListener);
+
+    return () => {
+      window.removeEventListener('laboratory-card-expand', handleCardExpandEvent as EventListener);
+    };
+  }, [layoutCards, workflowMolecules]);
+
   const toggleMoleculeCollapse = (moleculeId: string) => {
     setCollapsedMolecules(prev => ({ ...prev, [moleculeId]: !prev[moleculeId] }));
   };

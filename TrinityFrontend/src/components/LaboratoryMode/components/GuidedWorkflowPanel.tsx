@@ -196,7 +196,7 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
             size="sm"
           >
             <LogOut className="w-4 h-4 mr-2" />
-            Exit Workflow Mode
+            Exit
           </Button>
         </div>
       )}
@@ -211,7 +211,7 @@ export const GuidedWorkflowPanel: React.FC<GuidedWorkflowPanelProps> = ({
             size="sm"
           >
             <LogOut className="w-4 h-4 mr-2" />
-            Exit Workflow Mode
+            Exit
           </Button>
         </div>
       )}
