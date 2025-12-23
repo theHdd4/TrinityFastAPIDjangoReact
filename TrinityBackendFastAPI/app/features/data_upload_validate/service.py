@@ -30,6 +30,7 @@ from app.features.data_upload_validate.app.database import (
 from app.features.data_upload_validate.app.validators.custom_validator import (
     perform_enhanced_validation,
 )
+from app.features.data_upload_validate.file_ingestion import RobustFileReader
 
 logger = logging.getLogger("app.features.data_upload_validate.service")
 
@@ -50,6 +51,8 @@ CSV_READ_KWARGS: Dict[str, Any] = {
     "low_memory": True,
     "infer_schema_length": 10_000,
     "encoding": "utf8-lossy",
+    "truncate_ragged_lines": False,  # CRITICAL: Don't truncate columns - preserve all columns
+    "has_header": True,
 }
 
 
@@ -156,6 +159,10 @@ def _normalize_column_names(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.DataFrame, List[str], Dict[str, Any]]:
+    """
+    Smart CSV parser that preserves all columns even when description rows have fewer columns.
+    Uses CSVReader to find max columns first, then reads with Polars.
+    """
     warnings: List[str] = []
     metadata: Dict[str, Any] = {
         "mixed_dtype_columns": [],
@@ -163,45 +170,87 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
         "parsing_method": "standard",
     }
 
+    # CRITICAL: Use CSVReader to find max columns first to prevent truncation
     try:
-        df = pl.read_csv(io.BytesIO(content), **csv_kwargs)
-        df = _normalize_column_names(df)
-        return df, warnings, metadata
-    except Exception as first_error:  # pragma: no cover - defensive parsing
-        error_msg = str(first_error).lower()
-        if "could not parse" in error_msg and "as dtype" in error_msg:
-            kwargs_ignore = csv_kwargs.copy()
-            kwargs_ignore["ignore_errors"] = True
-            try:
-                df = pl.read_csv(io.BytesIO(content), **kwargs_ignore)
-                df = _normalize_column_names(df)
-                metadata["parsing_method"] = "ignore_errors"
-                try:
-                    import re
-
-                    match = re.search(r"at column '([^']+)'", str(first_error))
-                    if match:
-                        problematic_col = match.group(1)
-                        metadata["mixed_dtype_columns"] = [problematic_col]
-                        warnings.append(f"Detected mixed data types in column: {problematic_col}")
-                        warnings.append(
-                            "File may contain mixed numeric and text values - converted problematic data to preserve integrity"
-                        )
-                except Exception:  # pragma: no cover - diagnostic helper
-                    warnings.append("Detected mixed data types - some problematic data was handled")
-                return df, warnings, metadata
-            except Exception:
-                pass
-        kwargs_strings = {k: v for k, v in csv_kwargs.items() if k not in ["infer_schema_length"]}
+        from app.features.data_upload_validate.file_ingestion.readers.csv_reader import CSVReader
+        
+        # Detect encoding and delimiter first
+        from app.features.data_upload_validate.file_ingestion.detectors.encoding_detector import EncodingDetector
+        encoding = EncodingDetector.detect(content)
+        delimiter = CSVReader._detect_delimiter(content, encoding)
+        
+        # Find max columns across all rows
+        max_cols = CSVReader._find_max_columns(content, encoding, delimiter, sample_rows=0)
+        logger.debug(f"_smart_csv_parse: Detected max columns: {max_cols}")
+        
+        # Prepare Polars read kwargs - DO NOT use truncate_ragged_lines
+        kwargs_polars = csv_kwargs.copy()
+        kwargs_polars["truncate_ragged_lines"] = False  # CRITICAL: Don't truncate!
+        kwargs_polars["ignore_errors"] = True  # Handle parsing errors gracefully
+        
+        # Ensure has_header is set (default True, but be explicit)
+        if "has_header" not in kwargs_polars:
+            kwargs_polars["has_header"] = True
+        
+        # If we found max columns, create schema to ensure all columns are read
+        if max_cols > 0:
+            # Create schema with all columns as string to avoid type conflicts
+            schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
+            kwargs_polars["schema"] = schema
+            logger.debug(f"_smart_csv_parse: Using schema with {max_cols} columns")
+        
         try:
-            df = pl.read_csv(io.BytesIO(content), dtypes=pl.Utf8, **kwargs_strings)
+            df = pl.read_csv(io.BytesIO(content), **kwargs_polars)
             df = _normalize_column_names(df)
-            metadata["parsing_method"] = "all_strings"
-            warnings.append("All columns read as strings to handle data type conflicts")
-            warnings.append("Please use Dataframe Operations atom to fix column data types if needed")
+            
+            # Verify we got all columns
+            if max_cols > 0 and len(df.columns) < max_cols:
+                logger.warning(f"_smart_csv_parse: Polars read {len(df.columns)} columns but expected {max_cols}. Expanding.")
+                # Add missing columns
+                for i in range(len(df.columns), max_cols):
+                    df = df.with_columns(pl.lit(None).alias(f"col_{i}"))
+            
+            metadata["parsing_method"] = "column_preserving"
             return df, warnings, metadata
-        except Exception:
-            raise first_error
+        except Exception as polars_error:
+            logger.warning(f"_smart_csv_parse: Polars read failed: {polars_error}, trying pandas fallback")
+            # Fallback to pandas via CSVReader
+            try:
+                df_pandas, csv_metadata = CSVReader.read(
+                    content=content,
+                    filename="temp.csv",
+                    delimiter=delimiter,
+                    auto_detect_header=kwargs_polars.get("has_header", True),
+                    return_raw=False,
+                )
+                df = pl.from_pandas(df_pandas)
+                df = _normalize_column_names(df)
+                metadata.update(csv_metadata)
+                metadata["parsing_method"] = "pandas_fallback"
+                return df, warnings, metadata
+            except Exception as pandas_error:
+                logger.error(f"_smart_csv_parse: Both Polars and Pandas failed: {pandas_error}")
+                raise polars_error from pandas_error
+                
+    except Exception as first_error:
+        logger.exception("_smart_csv_parse: Failed to use column-preserving method, using legacy fallback")
+        # Last resort: Use legacy method but try to preserve columns
+        kwargs_legacy = csv_kwargs.copy()
+        kwargs_legacy["truncate_ragged_lines"] = False  # Still try not to truncate
+        kwargs_legacy["ignore_errors"] = True
+        
+        if "has_header" not in kwargs_legacy:
+            kwargs_legacy["has_header"] = True
+        
+        try:
+            df = pl.read_csv(io.BytesIO(content), **kwargs_legacy)
+            df = _normalize_column_names(df)
+            metadata["parsing_method"] = "legacy_fallback"
+            warnings.append("Used legacy CSV parser - column count may be inaccurate")
+            return df, warnings, metadata
+        except Exception as fallback_error:
+            logger.exception("All parsing methods failed for CSV file")
+            raise first_error from fallback_error
 
 
 def process_temp_upload(
@@ -220,37 +269,113 @@ def process_temp_upload(
     sheet_details: Dict[str, Any] | None = None
     workbook_upload: Dict[str, Any] | None = None
 
-    if filename.lower().endswith(".csv"):
-        df_pl, parsing_warnings, parsing_metadata = _smart_csv_parse(content, CSV_READ_KWARGS)
-    elif filename.lower().endswith((".xls", ".xlsx")):
-        try:
-            excel_bytes = io.BytesIO(content)
-            excel_file = pd.ExcelFile(excel_bytes)
-            sheet_names = excel_file.sheet_names or ["Sheet1"]
-            selected_sheet = sheet_name or sheet_names[0]
-            if selected_sheet not in sheet_names:
-                logger.warning(
-                    "Requested sheet '%s' not found in workbook %s. Falling back to '%s'",
-                    selected_sheet,
-                    filename,
-                    sheet_names[0],
-                )
-                selected_sheet = sheet_names[0]
-            df_pandas = excel_file.parse(selected_sheet)
-            df_pl = pl.from_pandas(df_pandas)
-            df_pl = _normalize_column_names(df_pl)
+    try:
+        # Use robust file reader for better handling of various file formats
+        df_result, file_metadata = RobustFileReader.read_file_to_polars(
+            content=content,
+            filename=filename,
+            sheet_name=sheet_name,
+            auto_detect_header=True,
+        )
+        
+        # Handle both single DataFrame and dict of DataFrames (multiple sheets)
+        if isinstance(df_result, dict):
+            # Multiple sheets - use the selected sheet or first one
+            if sheet_name and sheet_name in df_result:
+                df_pl = df_result[sheet_name]
+            else:
+                df_pl = list(df_result.values())[0]
+            
+            # Extract sheet details from metadata
             sheet_details = {
-                "sheet_names": sheet_names,
-                "selected_sheet": selected_sheet,
-                "has_multiple_sheets": len(sheet_names) > 1,
+                "sheet_names": file_metadata.get("sheet_names", []),
+                "selected_sheet": file_metadata.get("selected_sheet"),
+                "has_multiple_sheets": file_metadata.get("has_multiple_sheets", False),
             }
-            workbook_upload = upload_to_minio(content, filename, tmp_prefix + "workbooks/")
-        except Exception as exc:  # pragma: no cover - relies on pandas engine
-            logger.exception("Excel parsing failed for file %s", filename)
-            raise ValueError(f"Error parsing file {filename}: {exc}") from exc
-    else:
-        raise ValueError("Only CSV and XLSX files supported")
+            
+            # Upload workbook for Excel files
+            if file_metadata.get("file_type") == "excel":
+                workbook_upload = upload_to_minio(content, filename, tmp_prefix + "workbooks/")
+        else:
+            # Single DataFrame (CSV or single-sheet Excel)
+            df_pl = df_result
+            
+            # For Excel files, extract sheet details
+            if file_metadata.get("file_type") == "excel":
+                sheet_names = file_metadata.get("sheet_names", [])
+                selected_sheet = file_metadata.get("selected_sheet")
+                sheet_details = {
+                    "sheet_names": sheet_names,
+                    "selected_sheet": selected_sheet,
+                    "has_multiple_sheets": file_metadata.get("has_multiple_sheets", False),
+                }
+                workbook_upload = upload_to_minio(content, filename, tmp_prefix + "workbooks/")
+        
+        # Update parsing metadata
+        parsing_metadata.update(file_metadata)
+        
+        # Add warnings based on metadata
+        if file_metadata.get("parsing_method") == "all_strings":
+            parsing_warnings.append("All columns read as strings to handle data type conflicts")
+            parsing_warnings.append("Please use Dataframe Operations atom to fix column data types if needed")
+        elif file_metadata.get("parsing_method") == "truncate_ragged_lines":
+            parsing_warnings.append("File contains rows with inconsistent column counts - extra columns truncated")
+        elif file_metadata.get("parsing_method") == "fallback_encoding":
+            parsing_warnings.append(f"Used fallback encoding: {file_metadata.get('encoding', 'unknown')}")
+        
+        # Check if header was auto-detected (not in first row)
+        if file_metadata.get("header_row", 0) > 0:
+            parsing_warnings.append(f"Header row detected at row {file_metadata.get('header_row') + 1} (not first row)")
+        
+    except Exception as exc:
+        logger.exception("Robust file reading failed, falling back to legacy parser for file %s", filename)
+        # Fallback to legacy parser for backward compatibility
+        if filename.lower().endswith(".csv"):
+            df_pl, parsing_warnings, parsing_metadata = _smart_csv_parse(content, CSV_READ_KWARGS)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            try:
+                # CRITICAL: Use ExcelReader to preserve all columns
+                from app.features.data_upload_validate.file_ingestion.readers.excel_reader import ExcelReader
+                dfs_dict, excel_metadata = ExcelReader.read(
+                    content=content,
+                    sheet_name=sheet_name,
+                    auto_detect_header=True,
+                    return_raw=False,
+                )
+                # Handle both single DataFrame and dict (multiple sheets)
+                if isinstance(dfs_dict, dict):
+                    selected_sheet = sheet_name or list(dfs_dict.keys())[0]
+                    if selected_sheet not in dfs_dict:
+                        selected_sheet = list(dfs_dict.keys())[0]
+                    df_pandas = dfs_dict[selected_sheet]
+                    sheet_names = excel_metadata.get("sheet_names", [selected_sheet])
+                else:
+                    df_pandas = dfs_dict
+                    sheet_names = excel_metadata.get("sheet_names", ["Sheet1"])
+                    selected_sheet = sheet_names[0]
+                
+                df_pl = pl.from_pandas(df_pandas)
+                df_pl = _normalize_column_names(df_pl)
+                sheet_details = {
+                    "sheet_names": sheet_names,
+                    "selected_sheet": selected_sheet,
+                    "has_multiple_sheets": len(sheet_names) > 1,
+                }
+                workbook_upload = upload_to_minio(content, filename, tmp_prefix + "workbooks/")
+            except Exception as excel_exc:
+                logger.exception("Excel parsing failed for file %s", filename)
+                raise ValueError(f"Error parsing file {filename}: {excel_exc}") from excel_exc
+        else:
+            raise ValueError(f"Unsupported file type: {filename}") from exc
 
+    # CRITICAL: Save original CSV/Excel file BEFORE processing
+    # This ensures /file-preview can read the original file with actual headers
+    original_file_upload = None
+    if filename.lower().endswith((".csv", ".xls", ".xlsx")):
+        # Save original file so /file-preview can read it with actual headers
+        original_file_upload = upload_to_minio(content, filename, tmp_prefix + "originals/")
+        logger.info(f"Saved original file: {original_file_upload.get('object_name', '')}")
+    
     arrow_buf = io.BytesIO()
     df_pl.write_ipc(arrow_buf)
     arrow_name = Path(filename).stem + ".arrow"
@@ -268,12 +393,17 @@ def process_temp_upload(
         logger.error("data_upload.temp_upload.upload_failed file=%s error=%s", filename, error_msg)
         raise ValueError(error_msg)
 
+    # Return ORIGINAL file path for /file-preview, not processed Arrow file
+    # This ensures we can read the file with actual headers
+    file_path_to_return = original_file_upload.get("object_name") if original_file_upload else result["object_name"]
+    
     response: Dict[str, Any] = {
-        "file_path": result["object_name"],
+        "file_path": file_path_to_return,  # Return original file path, not Arrow file
         "file_name": filename,
         "has_data_quality_issues": False,
         "message": "File uploaded successfully",
         "workbook_path": workbook_upload.get("object_name") if workbook_upload else None,
+        "arrow_path": result["object_name"],  # Also return Arrow path for processing
     }
 
     if parsing_warnings:
@@ -332,16 +462,46 @@ def run_validation(
             key = payload["key"]
             filename = payload.get("filename", key)
             content = base64.b64decode(payload["content_b64"])
-            if filename.lower().endswith(".csv"):
-                df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
-            elif filename.lower().endswith((".xls", ".xlsx")):
-                df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
-            elif filename.lower().endswith(".arrow"):
+            
+            if filename.lower().endswith(".arrow"):
                 df_pl = pl.read_ipc(io.BytesIO(content))
+                df_pl = _normalize_column_names(df_pl)
+                df = df_pl.to_pandas()
             else:
-                raise ValueError("Only CSV, XLSX and Arrow files supported")
-            df_pl = _normalize_column_names(df_pl)
-            df = df_pl.to_pandas()
+                # Use robust file reader for CSV and Excel files
+                try:
+                    df_result, _ = RobustFileReader.read_file_to_pandas(
+                        content=content,
+                        filename=filename,
+                        auto_detect_header=True,
+                    )
+                    # Handle both single DataFrame and dict (multiple sheets)
+                    if isinstance(df_result, dict):
+                        df = list(df_result.values())[0]  # Use first sheet
+                    else:
+                        df = df_result
+                except Exception as e:
+                    logger.warning(f"Robust reader failed for {filename}, using RobustFileReader fallback: {e}")
+                    # Fallback: Try RobustFileReader with different settings
+                    try:
+                        df_result, _ = RobustFileReader.read_file_to_pandas(
+                            content=content,
+                            filename=filename,
+                            auto_detect_header=False,
+                            return_raw=False,
+                        )
+                        # Handle both single DataFrame and dict (multiple sheets)
+                        if isinstance(df_result, dict):
+                            df = list(df_result.values())[0]  # Use first sheet
+                        else:
+                            df = df_result
+                        df_pl = pl.from_pandas(df)
+                        df_pl = _normalize_column_names(df_pl)
+                        df = df_pl.to_pandas()
+                    except Exception as fallback_error:
+                        logger.error(f"RobustFileReader fallback also failed: {fallback_error}")
+                        raise ValueError(f"Failed to read file {filename}: {str(fallback_error)}")
+            
             df.columns = [preprocess_column_name(col) for col in df.columns]
             files_data.append((key, df))
             file_contents.append((len(content), filename, key))
@@ -350,16 +510,46 @@ def run_validation(
         for path, key in zip(file_paths, keys):
             data = read_minio_object(path)
             filename = Path(path).name
-            if filename.lower().endswith(".csv"):
-                df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-            elif filename.lower().endswith((".xls", ".xlsx")):
-                df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
-            elif filename.lower().endswith(".arrow"):
+            
+            if filename.lower().endswith(".arrow"):
                 df_pl = pl.read_ipc(io.BytesIO(data))
+                df_pl = _normalize_column_names(df_pl)
+                df = df_pl.to_pandas()
             else:
-                raise ValueError("Only CSV, XLSX and Arrow files supported")
-            df_pl = _normalize_column_names(df_pl)
-            df = df_pl.to_pandas()
+                # Use robust file reader for CSV and Excel files
+                try:
+                    df_result, _ = RobustFileReader.read_file_to_pandas(
+                        content=data,
+                        filename=filename,
+                        auto_detect_header=True,
+                    )
+                    # Handle both single DataFrame and dict (multiple sheets)
+                    if isinstance(df_result, dict):
+                        df = list(df_result.values())[0]  # Use first sheet
+                    else:
+                        df = df_result
+                except Exception as e:
+                    logger.warning(f"Robust reader failed for {filename}, using RobustFileReader fallback: {e}")
+                    # Fallback: Try RobustFileReader with different settings
+                    try:
+                        df_result, _ = RobustFileReader.read_file_to_pandas(
+                            content=data,
+                            filename=filename,
+                            auto_detect_header=False,
+                            return_raw=False,
+                        )
+                        # Handle both single DataFrame and dict (multiple sheets)
+                        if isinstance(df_result, dict):
+                            df = list(df_result.values())[0]  # Use first sheet
+                        else:
+                            df = df_result
+                        df_pl = pl.from_pandas(df)
+                        df_pl = _normalize_column_names(df_pl)
+                        df = df_pl.to_pandas()
+                    except Exception as fallback_error:
+                        logger.error(f"RobustFileReader fallback also failed: {fallback_error}")
+                        raise ValueError(f"Failed to read file {filename}: {str(fallback_error)}")
+            
             df.columns = [preprocess_column_name(col) for col in df.columns]
             files_data.append((key, df))
             file_contents.append((len(data), filename, key))

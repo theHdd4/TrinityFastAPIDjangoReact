@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Info, Check, AlertCircle, Upload, Settings, ClipboardCheck, Eye, ChevronDown, Plus, Pencil } from 'lucide-react';
+import { Info, Check, AlertCircle, Upload, Settings, ClipboardCheck, Eye, ChevronDown, Plus, Pencil, RefreshCw } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 import ColumnClassifierCanvas from '../column-classifier/components/ColumnClassifierCanvas';
 import ColumnClassifierDimensionMapping from '../column-classifier/components/ColumnClassifierDimensionMapping';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 interface UploadedFileRef {
   name: string;
@@ -37,7 +38,7 @@ interface Props {
   atomId: string;
 }
 
-const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
+const DataUploadValidateAtomContent: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore((state) => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
   
@@ -2252,7 +2253,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       // Complete the save
       if (successfullySavedFiles.length > 0) {
         addNavigationItem(user?.id, {
-          atom: 'data-upload-validate',
+          atom: 'data-validate',
           files: uploadedFiles.map(f => f.name),
           settings
         });
@@ -2585,6 +2586,41 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       )}
     </div>
   );
+};
+
+// Wrapper component with ErrorBoundary for crash protection
+const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
+  try {
+    return (
+      <ErrorBoundary>
+        <DataUploadValidateAtomContent atomId={atomId} />
+      </ErrorBoundary>
+    );
+  } catch (err) {
+    console.error('DataUploadValidateAtom: Component error:', err);
+    return (
+      <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex items-center justify-center">
+        <div className="text-center p-6">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center">
+            <AlertCircle className="w-8 h-8 text-amber-600" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">
+            Unable to Load Data Validate
+          </h3>
+          <p className="text-gray-600 mb-4 text-sm max-w-sm">
+            The component encountered an error. This might be due to network issues or service unavailability.
+          </p>
+          <Button
+            onClick={() => window.location.reload()}
+            className="bg-blue-500 hover:bg-blue-600 text-white"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Reload Page
+          </Button>
+        </div>
+      </div>
+    );
+  }
 };
 
 export default DataUploadValidateAtom;

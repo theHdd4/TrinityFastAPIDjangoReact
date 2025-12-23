@@ -25,7 +25,8 @@ import {
 } from 'lucide-react';
 
 // Atom definitions are stored in individual folders under AtomList/atoms
-import dataUploadValidate from '@/components/AtomList/atoms/data-upload-validate';
+import dataUpload from '@/components/AtomList/atoms/data-upload';
+import dataValidate from '@/components/AtomList/atoms/data-validate';
 import csvImport from '@/components/AtomList/atoms/csv-import';
 import jsonImport from '@/components/AtomList/atoms/json-import';
 import databaseConnect from '@/components/AtomList/atoms/database-connect';
@@ -88,7 +89,8 @@ export const atomCategories: AtomCategory[] = [
     icon: Database,
     color: 'bg-blue-500',
     atoms: [
-      dataUploadValidate,
+      dataUpload,
+      dataValidate,
       csvImport,
       jsonImport,
       databaseConnect

@@ -44,7 +44,8 @@ import {
   
   export const atomIconMap: Record<string, any> = {
     // Data Sources
-    'data-upload-validate': Upload,
+    'data-upload': Upload,
+    'data-validate': CheckSquare,
     'csv-import': FileText,
     'json-import': Database,
     'database-connect': Link,

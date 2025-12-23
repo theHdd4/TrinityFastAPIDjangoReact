@@ -1,9 +1,10 @@
 import React, { useId, useState } from 'react';
-import { FileText, Upload, Trash2 } from 'lucide-react';
+import { FileText, Upload, Trash2, Sparkles } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import FileDataPreview from './FileDataPreview';
+import { GuidedUploadFlow } from '../guided-upload';
 
 interface FileRow {
   name: string;
@@ -93,6 +94,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   const inputId = useId();
   const [selectedSavedDataframe, setSelectedSavedDataframe] = useState<string>('');
   const [isSelectOpen, setIsSelectOpen] = useState(false);
+  const [isGuidedFlowOpen, setIsGuidedFlowOpen] = useState(false);
 
   const handleSavedDataframeChange = (value: string) => {
     if (value && onSelectSavedDataframe) {
@@ -112,8 +114,9 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   };
 
   return (
-    <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white">
-    <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
+    <>
+      <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white">
+      <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
       <div className={useMasterFile && onSelectSavedDataframe ? "" : ""}>
         {/* Saved Dataframes Selector - Only show when validation steps are enabled */}
         {useMasterFile && onSelectSavedDataframe && (() => {
@@ -221,8 +224,31 @@ const UploadSection: React.FC<UploadSectionProps> = ({
           Validate Files
         </Button>
       )}
+      
+      {/* Guided Upload Flow Button */}
+      {!useMasterFile && (
+        <Button
+          className="w-full mt-4 bg-[#458EE2] hover:bg-[#3a7bc7] text-white flex items-center justify-center gap-2"
+          onClick={() => setIsGuidedFlowOpen(true)}
+        >
+          <Sparkles className="w-4 h-4" />
+          Start Guided Upload Flow
+        </Button>
+      )}
     </div>
     </Card>
+    
+    {/* Guided Upload Flow Modal */}
+    <GuidedUploadFlow
+      open={isGuidedFlowOpen}
+      onOpenChange={setIsGuidedFlowOpen}
+      onComplete={(result) => {
+        // TODO: Handle completion - integrate with existing upload flow
+        console.log('Guided upload completed:', result);
+        setIsGuidedFlowOpen(false);
+      }}
+    />
+    </>
   );
 };
 

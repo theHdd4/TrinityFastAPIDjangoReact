@@ -36,7 +36,8 @@ const StreamStepMonitor: React.FC<StreamStepMonitorProps> = ({
       'chart-maker': '📈',
       'correlation': '📉',
       'explore': '🔍',
-      'data-upload-validate': '📁'
+      'data-upload': '📤',
+      'data-validate': '✅'
     };
     return icons[atomId] || '⚡';
   };

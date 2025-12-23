@@ -50,7 +50,7 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
 
   // Check if specific atoms are already used
   const hasDataUploadAtom = useMemo(() => {
-    return allAtoms.some(atom => atom.atomId === 'data-upload-validate');
+    return allAtoms.some(atom => atom.atomId === 'data-validate');
   }, [allAtoms]);
 
   const hasColumnClassifierAtom = useMemo(() => {
@@ -276,7 +276,7 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     const cardAbove = cardIndex > 0 ? cards[cardIndex - 1] : null;
     const cardAboveHasColumnClassifier = cardAbove?.atoms.some(atom => atom.atomId === 'column-classifier') || false;
     const cardAboveHasFeatureOverview = cardAbove?.atoms.some(atom => atom.atomId === 'feature-overview') || false;
-    const cardAboveHasDataUpload = cardAbove?.atoms.some(atom => atom.atomId === 'data-upload-validate') || false;
+    const cardAboveHasDataUpload = cardAbove?.atoms.some(atom => atom.atomId === 'data-upload' || atom.atomId === 'data-validate') || false;
     const cardAboveHasExplore = cardAbove?.atoms.some(atom => atom.atomId === 'explore') || false;
     const cardAboveHasDataframeOperations = cardAbove?.atoms.some(atom => atom.atomId === 'dataframe-operations') || false;
     const cardAboveHasGroupBy = cardAbove?.atoms.some(atom => atom.atomId === 'groupby-wtg-avg') || false;
@@ -545,8 +545,8 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     // If no atoms in any card but dataframes exist, suggest data upload, column classifier, and dataframe operations
     if (allAtoms.length === 0 && savedDataframes.length > 0) {
       suggestions.push({
-        id: 'data-upload-validate',
-        name: 'Data upload and validate',
+        id: 'data-validate',
+        name: 'Data validate',
         color: 'bg-blue-500'
       });
       
@@ -566,8 +566,8 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     // If no upload atom and no dataframes, suggest data upload
     if (!hasDataUploadAtom && savedDataframes.length === 0) {
       suggestions.push({
-        id: 'data-upload-validate',
-        name: 'Data upload and validate',
+        id: 'data-validate',
+        name: 'Data validate',
         color: 'bg-blue-500'
       });
     }

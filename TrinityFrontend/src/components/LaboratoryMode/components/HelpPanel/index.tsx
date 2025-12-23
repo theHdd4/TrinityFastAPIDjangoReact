@@ -2,7 +2,8 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { ChevronRight } from 'lucide-react';
 import { useLaboratoryStore } from '../../store/laboratoryStore';
-import DataUploadValidateHelp from '@/components/AtomList/atoms/data-upload-validate/components/help/DataUploadValidateHelp';
+import DataValidateHelp from '@/components/AtomList/atoms/data-validate/components/help/DataUploadValidateHelp';
+import DataUploadHelp from '@/components/AtomList/atoms/data-upload/components/help/DataUploadHelp';
 import ColumnClassifierHelp from '@/components/AtomList/atoms/column-classifier/components/help/ColumnClassifierHelp';
 
 interface HelpPanelProps {
@@ -46,8 +47,10 @@ const HelpPanel: React.FC<HelpPanelProps> = ({
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
           {!selectedAtomId && !selectedCardId ? (
             <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
-          ) : selectedAtomId && atom?.atomId === 'data-upload-validate' ? (
-            <DataUploadValidateHelp atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'data-validate' ? (
+            <DataValidateHelp atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'data-upload' ? (
+            <DataUploadHelp atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'column-classifier' ? (
             <ColumnClassifierHelp atomId={selectedAtomId} />
           ) : (

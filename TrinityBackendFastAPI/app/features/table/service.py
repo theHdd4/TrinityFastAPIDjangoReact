@@ -14,7 +14,6 @@ from minio.error import S3Error
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
-from app.core.mongo import build_host_mongo_uri
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +34,25 @@ minio_client = Minio(
 )
 
 # MongoDB configuration
-MONGO_URI = os.getenv("MONGO_URI", build_host_mongo_uri())
+# Use MONGO_URI from environment (set in docker-compose.yml: mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin)
+MONGO_URI = os.getenv(
+    "MONGO_URI",
+    "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
+)
 MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
+
+# Extract MongoDB credentials for explicit authentication (required for Motor async client)
+_MONGO_USERNAME = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER") or "root"
+_MONGO_PASSWORD = os.getenv("MONGO_PASSWORD") or "rootpass"
+_MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
+
+def _get_mongo_host_port():
+    """Extract host and port from MONGO_URI."""
+    from urllib.parse import urlparse
+    parsed = urlparse(MONGO_URI)
+    host = parsed.hostname or "mongo"
+    port = parsed.port or 27017
+    return host, port
 
 # Draft save queue for debounced saves
 _draft_save_queue: Dict[str, asyncio.Task] = {}
@@ -734,6 +750,18 @@ def evaluate_conditional_formatting(
 # MongoDB Session Storage Functions
 # ============================================================================
 
+def _get_async_mongo_client():
+    """Get an AsyncIOMotorClient with proper authentication."""
+    host, port = _get_mongo_host_port()
+    return AsyncIOMotorClient(
+        f"mongodb://{host}:{port}",
+        username=_MONGO_USERNAME,
+        password=_MONGO_PASSWORD,
+        authSource=_MONGO_AUTH_DB,
+        serverSelectionTimeoutMS=5000,
+    )
+
+
 async def save_session_metadata(
     table_id: str,
     atom_id: str,
@@ -761,7 +789,7 @@ async def save_session_metadata(
         True if successful, False otherwise
     """
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_sessions"]
         
@@ -797,7 +825,7 @@ async def save_session_metadata(
         logger.info(f"💾 [SESSION] Saved metadata for session {table_id}")
         if table_metadata:
             logger.info(f"📋 [SESSION] Saved table metadata (formatting, design, layout)")
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         return True
     except Exception as e:
         logger.error(f"❌ [SESSION] Failed to save metadata for {table_id}: {e}")
@@ -816,12 +844,12 @@ async def get_session_metadata(table_id: str) -> Optional[Dict[str, Any]]:
         Includes table_metadata field if present
     """
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_sessions"]
         
         doc = await coll.find_one({"_id": table_id})
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         
         if doc:
             # Convert ObjectId to string and datetime to ISO format
@@ -848,7 +876,7 @@ async def get_session_metadata(table_id: str) -> Optional[Dict[str, Any]]:
 async def update_session_access_time(table_id: str) -> bool:
     """Update last_accessed timestamp for a session."""
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_sessions"]
         
@@ -857,7 +885,7 @@ async def update_session_access_time(table_id: str) -> bool:
             {"$set": {"last_accessed": datetime.utcnow()}}
         )
         
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         return True
     except Exception as e:
         logger.error(f"❌ [SESSION] Failed to update access time for {table_id}: {e}")
@@ -883,21 +911,26 @@ async def save_change_log(
         True if successful, False otherwise
     """
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_changes"]
         
-        await coll.insert_one({
+        change_doc = {
             "table_id": table_id,
             "atom_id": atom_id,
             "change_type": change_type,
             "change_data": change_data,
             "timestamp": datetime.utcnow(),
             "applied": False
-        })
+        }
+        result = await coll.insert_one(change_doc)
         
-        await client.close()
-        logger.debug(f"📝 [CHANGE] Logged {change_type} for session {table_id}")
+        client.close()  # close() is not a coroutine in Motor
+        logger.info(
+            f"✅ [CHANGE] Logged {change_type} for session {table_id}, "
+            f"atom_id={atom_id}, inserted_id={result.inserted_id}, "
+            f"change_data={change_data}"
+        )
         return True
     except Exception as e:
         logger.error(f"❌ [CHANGE] Failed to log change for {table_id}: {e}")
@@ -916,7 +949,7 @@ async def get_change_log(table_id: str, applied: Optional[bool] = None) -> List[
         List of change documents
     """
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_changes"]
         
@@ -927,7 +960,7 @@ async def get_change_log(table_id: str, applied: Optional[bool] = None) -> List[
         cursor = coll.find(query).sort("timestamp", 1)
         changes = await cursor.to_list(length=1000)  # Limit to 1000 changes
         
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         
         # Convert ObjectId and datetime
         result = []
@@ -942,6 +975,12 @@ async def get_change_log(table_id: str, applied: Optional[bool] = None) -> List[
                 "applied": change.get("applied", False),
             })
         
+        logger.info(
+            f"🔍 [CHANGE] Retrieved {len(result)} changes for table_id='{table_id}', "
+            f"applied={applied}, query={query}, "
+            f"change_types={[c.get('change_type') for c in result]}"
+        )
+        
         return result
     except Exception as e:
         logger.error(f"❌ [CHANGE] Failed to get change log for {table_id}: {e}")
@@ -951,7 +990,7 @@ async def get_change_log(table_id: str, applied: Optional[bool] = None) -> List[
 async def mark_changes_applied(table_id: str) -> bool:
     """Mark all changes for a session as applied (after save)."""
     try:
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_changes"]
         
@@ -960,7 +999,7 @@ async def mark_changes_applied(table_id: str) -> bool:
             {"$set": {"applied": True}}
         )
         
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         logger.info(f"✅ [CHANGE] Marked changes as applied for session {table_id}")
         return True
     except Exception as e:
@@ -1092,7 +1131,7 @@ async def clear_draft(table_id: str) -> bool:
                 logger.warning(f"⚠️ [DRAFT] Failed to delete draft file: {e}")
         
         # Update MongoDB metadata
-        client = AsyncIOMotorClient(MONGO_URI)
+        client = _get_async_mongo_client()
         db = client[MONGO_DB]
         coll = db["table_sessions"]
         
@@ -1112,7 +1151,7 @@ async def clear_draft(table_id: str) -> bool:
         # Mark changes as applied
         await mark_changes_applied(table_id)
         
-        await client.close()
+        client.close()  # close() is not a coroutine in Motor
         logger.info(f"✅ [DRAFT] Cleared draft for session {table_id}")
         return True
     except Exception as e:

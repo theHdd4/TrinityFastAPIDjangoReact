@@ -3,7 +3,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 // import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
-import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown, BarChart3, LayoutDashboard } from 'lucide-react';
+import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown, BarChart3, LayoutDashboard, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -39,6 +39,12 @@ import {
 import { useCollaborativeSync } from '@/hooks/useCollaborativeSync';
 import { TrinityAIPanel } from '@/components/TrinityAI';
 
+import { useLaboratoryScenario } from './hooks/useLaboratoryScenario';
+import { useGuidedFlowPersistence } from './hooks/useGuidedFlowPersistence';
+import { GuidedUploadFlow } from '@/components/AtomList/atoms/data-validate/components/guided-upload';
+
+
+
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 const useIsomorphicInsertionEffect =
   typeof window !== 'undefined' && typeof useInsertionEffect === 'function'
@@ -51,7 +57,9 @@ const LaboratoryMode = () => {
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(false);
-  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>('frames');
+  const [auxActive, setAuxActive] = useState<
+    'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | 'guided' | 'metrics' | null
+  >('frames');
   const [isExhibitionOpen, setIsExhibitionOpen] = useState<boolean>(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isPipelineOpen, setIsPipelineOpen] = useState(false);
@@ -90,8 +98,23 @@ const LaboratoryMode = () => {
   }, []);
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
   const [autosaveEnabled, setAutosaveEnabled] = useState(true); // Default to true, will be loaded from MongoDB
+  const [scenarioDismissed, setScenarioDismissed] = useState(false);
   const { toast } = useToast();
-  const { cards, setCards: setLabCards, auxiliaryMenuLeftOpen, subMode, setSubMode } = useLaboratoryStore();
+  
+  // Scenario detection and flow persistence for guided workflow
+  const scenarioData = useLaboratoryScenario();
+  const { saveState, loadState, markFileAsPrimed, clearState } = useGuidedFlowPersistence();
+  const { 
+    cards, 
+    setCards: setLabCards, 
+    auxiliaryMenuLeftOpen, 
+    setAuxiliaryMenuLeftOpen,
+    subMode, 
+    setSubMode, 
+    activeGuidedFlows,
+    globalGuidedModeEnabled,
+    setGlobalGuidedMode
+  } = useLaboratoryStore();
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
@@ -112,13 +135,13 @@ const LaboratoryMode = () => {
       console.error('[CollaborativeSync] Error:', error);
     },
     onConnected: () => {
-      console.log('[CollaborativeSync] Connected to real-time sync');
+      // console.log('[CollaborativeSync] Connected to real-time sync');
     },
     onDisconnected: () => {
-      console.log('[CollaborativeSync] Disconnected from real-time sync');
+      // console.log('[CollaborativeSync] Disconnected from real-time sync');
     },
     onUsersChanged: (users) => {
-      console.log('[CollaborativeSync] Active users:', users);
+      // console.log('[CollaborativeSync] Active users:', users);
     },
   });
 
@@ -180,6 +203,29 @@ const LaboratoryMode = () => {
     url.searchParams.set('mode', subMode);
     window.history.replaceState({}, '', url.toString());
   }, [subMode]);
+
+  // Close left panel and exhibition when guided mode is enabled
+  useEffect(() => {
+    if (globalGuidedModeEnabled) {
+      // Close the atom library panel
+      setAuxiliaryMenuLeftOpen(false);
+      // Close exhibition panel
+      setIsExhibitionOpen(false);
+    }
+  }, [globalGuidedModeEnabled, setAuxiliaryMenuLeftOpen]);
+
+  // Listen for event to open guided panel
+  useEffect(() => {
+    const handleOpenGuidedPanel = () => {
+      console.log('[LaboratoryMode] Opening guided panel via event');
+      setAuxActive('guided');
+    };
+
+    window.addEventListener('open-guided-panel', handleOpenGuidedPanel);
+    return () => {
+      window.removeEventListener('open-guided-panel', handleOpenGuidedPanel);
+    };
+  }, []);
 
   useEffect(() => {
     if (isShareOpen) {
@@ -373,7 +419,7 @@ const LaboratoryMode = () => {
 
     // Debounce autosave to avoid too frequent saves
     const autosaveTimer = setTimeout(async () => {
-      console.log('🔄 [AUTOSAVE] Triggering autosave...');
+      // console.log('🔄 [AUTOSAVE] Triggering autosave...');
 
       try {
         const exhibitedCards = (cards || []).filter(card => card.isExhibited);
@@ -386,7 +432,7 @@ const LaboratoryMode = () => {
           try {
             workflowMolecules = JSON.parse(storedWorkflowMolecules);
           } catch (e) {
-            console.warn('[AUTOSAVE] Failed to parse workflow molecules for sorting', e);
+            // console.warn('[AUTOSAVE] Failed to parse workflow molecules for sorting', e);
           }
         }
 
@@ -405,9 +451,9 @@ const LaboratoryMode = () => {
             };
           }).filter(card => (card.atoms || []).length > 0); // Remove cards with no allowed atoms
           
-          if (cardsToSave.length !== cards.length) {
-            console.warn(`[AUTOSAVE] Filtered out ${cards.length - cardsToSave.length} card(s) with non-dashboard atoms before saving to MongoDB`);
-          }
+          // if (cardsToSave.length !== cards.length) {
+          //   console.warn(`[AUTOSAVE] Filtered out ${cards.length - cardsToSave.length} card(s) with non-dashboard atoms before saving to MongoDB`);
+          // }
         }
         // Analytics mode: Save all cards (no filtering needed)
 
@@ -442,15 +488,15 @@ const LaboratoryMode = () => {
           const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
           const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
           
-          console.log('🔍 [DIAGNOSIS] ========== AUTOSAVE START ==========');
-          console.log('🔍 [DIAGNOSIS] Autosave details:', {
-            subMode,
-            mode,
-            cardsCount: sanitized.cards?.length || 0,
-            workflowMoleculesCount: workflowMoleculesForSave.length,
-            cardAtomIds: sanitized.cards?.map((c: any) => c.atoms?.map((a: any) => a.atomId)).flat() || [],
-            timestamp: new Date().toISOString()
-          });
+          // console.log('🔍 [DIAGNOSIS] ========== AUTOSAVE START ==========');
+          // console.log('🔍 [DIAGNOSIS] Autosave details:', {
+          //   subMode,
+          //   mode,
+          //   cardsCount: sanitized.cards?.length || 0,
+          //   workflowMoleculesCount: workflowMoleculesForSave.length,
+          //   cardAtomIds: sanitized.cards?.map((c: any) => c.atoms?.map((a: any) => a.atomId)).flat() || [],
+          //   timestamp: new Date().toISOString()
+          // });
           
           const payload = {
             client_name: projectContext.client_name,
@@ -463,15 +509,15 @@ const LaboratoryMode = () => {
             mode: mode,
           };
 
-          console.log('🔍 [DIAGNOSIS] Payload being sent to MongoDB:', {
-            mode: payload.mode,
-            cardsCount: payload.cards.length,
-            cardDetails: payload.cards.map((c: any) => ({
-              id: c.id,
-              atoms: c.atoms?.map((a: any) => ({ atomId: a.atomId, title: a.title })) || []
-            }))
-          });
-          console.log('🔄 [AUTOSAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
+          // console.log('🔍 [DIAGNOSIS] Payload being sent to MongoDB:', {
+          //   mode: payload.mode,
+          //   cardsCount: payload.cards.length,
+          //   cardDetails: payload.cards.map((c: any) => ({
+          //     id: c.id,
+          //     atoms: c.atoms?.map((a: any) => ({ atomId: a.atomId, title: a.title })) || []
+          //   }))
+          // });
+          // console.log('🔄 [AUTOSAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
           try {
             const response = await fetch(requestUrl, {
@@ -482,21 +528,21 @@ const LaboratoryMode = () => {
             });
             if (!response.ok) {
               const errorText = await response.text();
-              console.error('🔍 [DIAGNOSIS] ❌ [AUTOSAVE] Failed to persist configuration', {
+              console.error('❌ [AUTOSAVE] Failed to persist configuration', {
                 status: response.status,
                 error: errorText,
                 mode,
                 subMode
               });
             } else {
-              const responseData = await response.json().catch(() => ({}));
-              console.log('🔍 [DIAGNOSIS] ✅ [AUTOSAVE] Configuration saved successfully', {
-                mode,
-                subMode,
-                cardsCount: payload.cards.length,
-                response: responseData
-              });
-              console.log('🔍 [DIAGNOSIS] ========== AUTOSAVE COMPLETE ==========');
+              // const responseData = await response.json().catch(() => ({}));
+              // console.log('🔍 [DIAGNOSIS] ✅ [AUTOSAVE] Configuration saved successfully', {
+              //   mode,
+              //   subMode,
+              //   cardsCount: payload.cards.length,
+              //   response: responseData
+              // });
+              // console.log('🔍 [DIAGNOSIS] ========== AUTOSAVE COMPLETE ==========');
             }
           } catch (apiError) {
             console.error('[AUTOSAVE] Error while saving configuration', apiError);
@@ -526,18 +572,18 @@ const LaboratoryMode = () => {
         persistLaboratoryConfig(sanitized, subMode);
 
         // CRITICAL: Sync changes to Workflow collection during autosave
-        console.log('🔄 [AUTOSAVE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
+        // console.log('🔄 [AUTOSAVE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
         if (canvasAreaRef.current) {
           try {
-            console.log('🔄 [AUTOSAVE] Calling syncWorkflowCollection...');
+            // console.log('🔄 [AUTOSAVE] Calling syncWorkflowCollection...');
             await canvasAreaRef.current.syncWorkflowCollection();
-            console.log('✅ [AUTOSAVE] Laboratory changes synced to Workflow collection');
+            // console.log('✅ [AUTOSAVE] Laboratory changes synced to Workflow collection');
           } catch (syncError) {
             console.error('❌ [AUTOSAVE] Failed to sync Laboratory changes to Workflow collection:', syncError);
-            console.error('❌ [AUTOSAVE] Sync error details:', syncError instanceof Error ? syncError.stack : syncError);
+            // console.error('❌ [AUTOSAVE] Sync error details:', syncError instanceof Error ? syncError.stack : syncError);
           }
         } else {
-          console.warn('⚠️ [AUTOSAVE] canvasAreaRef.current is null, cannot sync workflow collection');
+          // console.warn('⚠️ [AUTOSAVE] canvasAreaRef.current is null, cannot sync workflow collection');
         }
       } catch (error) {
         console.error('[AUTOSAVE] Autosave error:', error);
@@ -1048,7 +1094,8 @@ const LaboratoryMode = () => {
         data-lab-header="true"
         className="absolute top-[53px] flex items-center justify-center z-50 pointer-events-none"
         style={{
-          left: (auxiliaryMenuLeftOpen || isExhibitionOpen) ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
+          // Left sidebar is always visible (with opacity when guided mode is ON)
+          left: (auxiliaryMenuLeftOpen || isExhibitionOpen) && !globalGuidedModeEnabled ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
           right: (auxActive && auxActive !== 'exhibition') ? '368px' : '48px', // w-12 (48px) icons + w-80 (320px) panel when open (exhibition is on left)
         }}
       >
@@ -1189,8 +1236,8 @@ const LaboratoryMode = () => {
       </div>
 
         <div className="flex-1 flex overflow-hidden relative">
-          {/* Atoms Sidebar */}
-          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
+          {/* Atoms Sidebar - Always visible, with opacity effect when guided mode is ON */}
+          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10 ${globalGuidedModeEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
             <AuxiliaryMenuLeft 
               onAtomDragStart={handleAtomDragStart}
               active={auxActive}
@@ -1199,7 +1246,7 @@ const LaboratoryMode = () => {
               }}
               isExhibitionOpen={isExhibitionOpen}
               setIsExhibitionOpen={setIsExhibitionOpen}
-              canEdit={canEdit}
+              canEdit={canEdit && !globalGuidedModeEnabled}
               showFloatingNavigationList={showFloatingNavigationList}
               setShowFloatingNavigationList={setShowFloatingNavigationList}
             />
@@ -1208,7 +1255,7 @@ const LaboratoryMode = () => {
           {/* Main Canvas Area */}
           <div
             data-lab-canvas="true"
-            className={`flex-1 pt-[2.1rem] px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
+            className={`flex-1 min-w-0 overflow-hidden pt-[2.1rem] px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
             onClick={
               canEdit
                 ? () => {
@@ -1233,7 +1280,7 @@ const LaboratoryMode = () => {
               />
           </div>
 
-          {/* Auxiliary menu */}
+          {/* Auxiliary menu - Simplified when guided mode is ON */}
           <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
             <AuxiliaryMenu
               selectedAtomId={selectedAtomId}
@@ -1254,7 +1301,7 @@ const LaboratoryMode = () => {
                 }
               }}
               trinityAILayout={trinityAILayout}
-              isTrinityAIVisible={isTrinityAIVisible}
+              isTrinityAIVisible={globalGuidedModeEnabled ? false : isTrinityAIVisible}
               onTrinityAIClose={() => {
                 setIsTrinityAIVisible(false);
                 setAuxActive(null);
@@ -1268,18 +1315,30 @@ const LaboratoryMode = () => {
               onShare={handleShareClick}
               showFloatingNavigationList={showFloatingNavigationList}
               setShowFloatingNavigationList={setShowFloatingNavigationList}
+              onCreateDataUploadAtom={async () => {
+                // Create a data upload atom on the canvas
+                if (canvasAreaRef.current) {
+                  await canvasAreaRef.current.addNewCardWithAtom('data-upload');
+                }
+              }}
+              isGuidedModeEnabled={globalGuidedModeEnabled}
             />
-            <FloatingNavigationList
-              isVisible={showFloatingNavigationList}
-              onClose={() => setShowFloatingNavigationList(false)}
-              anchorSelector="[data-lab-header-text]"
-            />
+            {!globalGuidedModeEnabled && (
+              <FloatingNavigationList
+                isVisible={showFloatingNavigationList}
+                onClose={() => setShowFloatingNavigationList(false)}
+                anchorSelector="[data-lab-header-text]"
+              />
+            )}
           </div>
+
+
 
           {/* Trinity AI Panel - Only for horizontal layout */}
           {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
           {/* In horizontal view, panel stays visible and aligned with canvas area */}
-          {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
+          {/* Hidden when guided mode is ON */}
+          {isTrinityAIVisible && trinityAILayout === 'horizontal' && !globalGuidedModeEnabled && (
             <div 
               className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
             >
@@ -1314,12 +1373,18 @@ const LaboratoryMode = () => {
         onOpenChange={setIsShareOpen}
         projectName={projectContext?.project_name ?? 'Dashboard Project'}
       />
-        
-        <PipelineModal
-          open={isPipelineOpen}
-          onOpenChange={setIsPipelineOpen}
-          mode="laboratory"
-        />
+
+      {/* Pipeline Modal */}
+      <PipelineModal
+        open={isPipelineOpen}
+        onOpenChange={setIsPipelineOpen}
+        mode="laboratory"
+      />
+
+      {/* Direct Guided Upload Flow - fallback when scenario detection is still loading */}
+      {/* Removed - using inline flow instead */}
+
+
     </div>
   );
 };

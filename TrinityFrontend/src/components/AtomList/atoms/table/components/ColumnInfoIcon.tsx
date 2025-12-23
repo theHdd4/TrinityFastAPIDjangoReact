@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Info, X } from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Info } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Dialog,
@@ -12,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 
 interface ColumnMetadata {
   is_created: boolean;
+  is_transformed?: boolean;
   operation_type?: string;
   input_columns?: string[];
   parameters?: Record<string, any>;
@@ -21,53 +23,157 @@ interface ColumnMetadata {
 
 interface ColumnInfoIconProps {
   metadata: ColumnMetadata;
+  tooltipContainer?: HTMLElement | null;
 }
 
-export const ColumnInfoIcon: React.FC<ColumnInfoIconProps> = ({ metadata }) => {
+export const ColumnInfoIcon: React.FC<ColumnInfoIconProps> = ({ metadata, tooltipContainer }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Debug: Log what metadata is received
-  console.log('🔍 [ColumnInfoIcon] Received metadata:', {
-    metadata,
-    is_created: metadata?.is_created,
-    has_formula: !!metadata?.formula,
-    formula: metadata?.formula
-  });
+  // Clear timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+      }
+    };
+  }, []);
 
-  if (!metadata || !metadata.is_created || !metadata.formula) {
-    console.log('❌ [ColumnInfoIcon] Not rendering - missing required data:', {
-      hasMetadata: !!metadata,
-      is_created: metadata?.is_created,
-      hasFormula: !!metadata?.formula
-    });
+  // Handle mouse enter with immediate show
+  const handleMouseEnter = useCallback(() => {
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+    setShowTooltip(true);
+  }, []);
+
+  // Handle mouse leave with delay to allow moving to tooltip
+  const handleMouseLeave = useCallback(() => {
+    hideTimeoutRef.current = setTimeout(() => {
+      setShowTooltip(false);
+    }, 150); // Small delay to allow mouse to move to tooltip
+  }, []);
+
+  // Show icon if column is created OR transformed (in-place operations)
+  const shouldShowIcon = metadata && (metadata.is_created || metadata.is_transformed) && metadata.formula;
+  
+  if (!shouldShowIcon) {
     return null;
   }
-  
-  console.log('✅ [ColumnInfoIcon] Rendering ENHANCED icon for column with formula:', metadata.formula);
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsDialogOpen(true);
   };
 
+  // Custom tooltip positioning for container-aware rendering
+  const renderCustomTooltip = () => {
+    if (!showTooltip || !buttonRef.current || !tooltipContainer) return null;
+
+    const buttonRect = buttonRef.current.getBoundingClientRect();
+    const containerRect = tooltipContainer.getBoundingClientRect();
+    
+    // Calculate position relative to container
+    // Position tooltip above the button, centered horizontally
+    const tooltipHeight = 60; // Approximate tooltip height
+    const tooltipWidth = 280; // max-w-xs = 20rem = 320px, but we'll use 280px for calculation
+    const offset = 8; // Space between button and tooltip
+    let top = buttonRect.top - containerRect.top - tooltipHeight - offset;
+    let left = buttonRect.left - containerRect.left + buttonRect.width / 2;
+    
+    // Ensure tooltip doesn't go above container
+    if (top < 0) {
+      top = buttonRect.bottom - containerRect.top + offset; // Position below instead
+    }
+    
+    // Boundary detection: ensure tooltip stays within container bounds
+    const containerWidth = containerRect.width;
+    const halfTooltipWidth = tooltipWidth / 2;
+    const margin = 8; // Margin from container edges
+    let transform = 'translateX(-50%)';
+    
+    // Calculate where tooltip would be if centered
+    const tooltipLeftEdge = left - halfTooltipWidth;
+    const tooltipRightEdge = left + halfTooltipWidth;
+    
+    // Check if tooltip would overflow on the left
+    if (tooltipLeftEdge < margin) {
+      // Align tooltip's left edge to container's left edge (with margin)
+      left = margin;
+      transform = 'none'; // Don't center, align to left
+    }
+    // Check if tooltip would overflow on the right
+    else if (tooltipRightEdge > containerWidth - margin) {
+      // Align tooltip's right edge to container's right edge (with margin)
+      left = containerWidth - margin;
+      transform = 'translateX(-100%)'; // Align to right
+    }
+
+    return (
+      <div
+        ref={tooltipRef}
+        className="absolute z-50 max-w-xs rounded-md border bg-white px-3 py-1.5 text-sm text-gray-900 shadow-lg"
+        style={{
+          top: `${top}px`,
+          left: `${left}px`,
+          transform: transform,
+          whiteSpace: 'normal',
+        }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        <p className="text-sm font-medium">Click to see how this column was created</p>
+        <p className="text-xs mt-1 text-gray-600 break-words">{metadata.formula}</p>
+      </div>
+    );
+  };
+
+  // Use custom tooltip if container is provided, otherwise use Radix Tooltip
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
+      {tooltipContainer ? (
+        <div 
+          className="relative inline-block" 
+          onMouseEnter={handleMouseEnter} 
+          onMouseLeave={handleMouseLeave}
+        >
           <button
+            ref={buttonRef}
             onClick={handleClick}
-            className="inline-flex items-center justify-center w-5 h-5 rounded-full hover:bg-blue-100 text-blue-600 hover:text-blue-700 transition-colors border border-blue-200 bg-blue-50 relative z-10 flex-shrink-0"
+            className="inline-flex items-center justify-center w-5 h-5 rounded-full hover:bg-blue-100 text-blue-600 hover:text-blue-700 transition-colors border border-blue-200 bg-blue-50 flex-shrink-0"
             aria-label="Column creation info"
             style={{ minWidth: '20px', minHeight: '20px' }}
           >
             <Info className="w-4 h-4" />
           </button>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs">
-          <p className="text-sm font-medium">Click to see how this column was created</p>
-          <p className="text-xs mt-1 text-gray-600">{metadata.formula}</p>
-        </TooltipContent>
-      </Tooltip>
+          {showTooltip && createPortal(renderCustomTooltip(), tooltipContainer)}
+        </div>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={handleClick}
+              className="inline-flex items-center justify-center w-5 h-5 rounded-full hover:bg-blue-100 text-blue-600 hover:text-blue-700 transition-colors border border-blue-200 bg-blue-50 flex-shrink-0"
+              aria-label="Column creation info"
+              style={{ minWidth: '20px', minHeight: '20px' }}
+            >
+              <Info className="w-4 h-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent 
+            className="max-w-xs"
+            side="top"
+            sideOffset={4}
+          >
+            <p className="text-sm font-medium">Click to see how this column was created</p>
+            <p className="text-xs mt-1 text-gray-600">{metadata.formula}</p>
+          </TooltipContent>
+        </Tooltip>
+      )}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-md">

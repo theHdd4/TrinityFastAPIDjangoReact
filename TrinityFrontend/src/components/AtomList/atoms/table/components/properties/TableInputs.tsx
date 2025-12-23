@@ -93,6 +93,15 @@ const TableInputs: React.FC<Props> = ({ atomId }) => {
     } finally {
       setLoading(false);
     }
+
+    // Record the current dataframe selection for this atom in the laboratory store
+    try {
+      const { setAtomCurrentDataframe } = useLaboratoryStore.getState();
+      const normalized = fileId.endsWith('.arrow') ? fileId : `${fileId}.arrow`;
+      setAtomCurrentDataframe(atomId, normalized);
+    } catch {
+      // best-effort; do not block table atom on metrics sync
+    }
   };
 
   const handleCreateBlankTable = async () => {

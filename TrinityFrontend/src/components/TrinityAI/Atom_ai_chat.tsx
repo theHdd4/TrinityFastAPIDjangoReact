@@ -35,7 +35,7 @@ const ENDPOINTS: Record<string, string> = {
   'explore': `${TRINITY_AI_API}/explore`,
   'correlation': `${TRINITY_AI_API}/correlation`,
   'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
-  'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
+  'data-validate': `${TRINITY_AI_API}/df-validate`,
 };
 
 const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {
@@ -308,7 +308,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                                  (atomType === 'explore' && data.exploration_config) ||
                                  (atomType === 'correlation' && data.correlation_config) ||
                                  (atomType === 'dataframe-operations' && data.dataframe_config) ||
-                                 (atomType === 'data-upload-validate' && data.validate_json);
+                                 (atomType === 'data-validate' && data.validate_json);
         
         console.log('🚨🚨🚨 ===== ATOM_AI_CHAT HANDLER CHECK =====');
         console.log('🚨 atomType:', atomType);

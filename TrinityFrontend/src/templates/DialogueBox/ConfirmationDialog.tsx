@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, X } from 'lucide-react';
+import { CheckCircle2, X, HelpCircle, SlidersHorizontal } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -21,6 +21,7 @@ interface ConfirmationDialogProps {
   cancelLabel?: string;
   iconBgClass?: string;
   confirmButtonClass?: string;
+  helpText?: string;
 }
 
 const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
@@ -35,6 +36,7 @@ const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   cancelLabel = 'Cancel',
   iconBgClass = 'bg-blue-500',
   confirmButtonClass = 'bg-green-500 hover:bg-green-600',
+  helpText,
 }) => {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -50,6 +52,17 @@ const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
             <DialogDescription className="text-gray-600 mt-2 leading-relaxed">
               {description}
             </DialogDescription>
+            {/* Help text section */}
+            {helpText && (
+              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-blue-600 bg-blue-50 rounded-lg p-3 border border-blue-200">
+                <HelpCircle className="w-4 h-4 flex-shrink-0 text-blue-600" />
+                <span className="flex items-center gap-1.5">
+                  Click the
+                  <SlidersHorizontal className="w-4 h-4 text-blue-600" />
+                  icon to prime your data
+                </span>
+              </div>
+            )}
           </DialogHeader>
           <div className="flex gap-3 pt-2">
             <Button

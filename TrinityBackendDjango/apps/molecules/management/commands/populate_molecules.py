@@ -31,10 +31,10 @@ class Command(BaseCommand):
                 'subtitle': 'Data preparation and processing',
                 'tag': 'Data Processing',
                 'atoms': [
-                    'data-upload-validate',
+                    'data-upload',
+                    'data-validate',
                     'feature-overview',
-                    'dataframe-operations',
-                    'clustering'
+                    'dataframe-operations'
                 ]
             },
             {
