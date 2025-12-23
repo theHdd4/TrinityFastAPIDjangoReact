@@ -50,8 +50,9 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      const response = await fetch(`${UPLOAD_API}/list_saved_dataframes?${params.toString()}`, {
+
+      // Use the same endpoint as Saved DataFrames panel so results stay in sync
+      const response = await fetch(`${VALIDATE_API}/list_saved_dataframes?${params.toString()}`, {
         signal: controller.signal,
         credentials: 'include',
       });

@@ -7,7 +7,7 @@ import { U3ReviewColumnNames } from './stages/U3ReviewColumnNames';
 import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
 import { U5MissingValues } from './stages/U5MissingValues';
 import { U6FinalPreview } from './stages/U6FinalPreview';
-import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Maximize2 } from 'lucide-react';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -509,9 +509,6 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   // Track if current stage is collapsed
   const [isCurrentStageCollapsed, setIsCurrentStageCollapsed] = useState(false);
   
-  // Track which stage is maximized (null if none)
-  const [maximizedStage, setMaximizedStage] = useState<UploadStage | null>(null);
-
   // Handle when user makes changes on an expanded completed stage
   const handleCompletedStageChange = useCallback((stage: UploadStage) => {
     // Only handle if this is a completed stage that's expanded but not current
@@ -657,16 +654,18 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setMaximizedStage(maximizedStage === stage ? null : stage);
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(
+                      new CustomEvent('laboratory-card-expand', {
+                        detail: { atomId },
+                      }),
+                    );
+                  }
                 }}
                 className="p-1.5 hover:bg-gray-200 rounded transition-colors"
-                title={maximizedStage === stage ? "Exit Fullscreen" : "Maximize Stage"}
+                title="Maximize Card"
               >
-                {maximizedStage === stage ? (
-                  <Minimize2 className="w-4 h-4 text-gray-600" />
-                ) : (
-                  <Maximize2 className="w-4 h-4 text-gray-600" />
-                )}
+                <Maximize2 className="w-4 h-4 text-gray-600" />
               </button>
               {isExpanded ? (
                 <ChevronUp className="w-4 h-4 text-gray-500" />
@@ -709,16 +708,18 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setMaximizedStage(maximizedStage === stage ? null : stage);
+                    if (typeof window !== 'undefined') {
+                      window.dispatchEvent(
+                        new CustomEvent('laboratory-card-expand', {
+                          detail: { atomId },
+                        }),
+                      );
+                    }
                   }}
                   className="p-1.5 hover:bg-gray-200 rounded transition-colors"
-                  title={maximizedStage === stage ? "Exit Fullscreen" : "Maximize Stage"}
+                  title="Maximize Card"
                 >
-                  {maximizedStage === stage ? (
-                    <Minimize2 className="w-4 h-4 text-gray-600" />
-                  ) : (
-                    <Maximize2 className="w-4 h-4 text-gray-600" />
-                  )}
+                  <Maximize2 className="w-4 h-4 text-gray-600" />
                 </button>
               )}
               {isCurrent && (
@@ -1018,129 +1019,6 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
         {/* Render only visible stages (U2-U6) */}
         {VISIBLE_STAGES.map(stage => renderStageItem(stage))}
       </div>
-
-      {/* Maximized Stage Fullscreen Overlay */}
-      {maximizedStage && typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-40 pointer-events-none"
-            role="dialog"
-            aria-modal="true"
-          >
-            {/* Backdrop */}
-            <div
-              className="absolute inset-0 bg-black/40 pointer-events-auto"
-              aria-hidden="true"
-              onClick={() => setMaximizedStage(null)}
-            />
-
-            {/* Fullscreen Content Container */}
-            <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
-              {/* Fullscreen Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white shadow-sm">
-                <div className="flex items-center space-x-2">
-                  <span className="text-lg font-semibold text-gray-900">
-                    {STAGE_TITLES[maximizedStage]}
-                  </span>
-                  {maximizedStage === state.currentStage && (
-                    <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
-                      Current
-                    </span>
-                  )}
-                  {isStageCompleted(maximizedStage, state.currentStage) && (
-                    <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">
-                      Completed
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => setMaximizedStage(null)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="Close Fullscreen"
-                >
-                  <X className="w-5 h-5 text-gray-500" />
-                </button>
-              </div>
-
-              {/* Fullscreen Stage Content */}
-              <div className="flex-1 overflow-auto">
-                {renderMaximizedStageContent(maximizedStage)}
-              </div>
-
-              {/* Fullscreen Navigation Footer - mirrors inline footer so
-                  Continue / Cancel are always visible when maximized */}
-              {maximizedStage !== 'U6' && (
-                <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-white">
-                  <div className="flex gap-2">
-                    {/* Back button only when the maximized stage is the current one
-                        and it's not the first (U2) stage */}
-                    {maximizedStage === state.currentStage && getStageIndex(maximizedStage) > getStageIndex('U2') && (
-                      <Button
-                        variant="outline"
-                        onClick={handleBack}
-                        className="flex items-center gap-2"
-                      >
-                        <ArrowLeft className="w-4 h-4" />
-                        Back
-                      </Button>
-                    )}
-                    {maximizedStage === state.currentStage && maximizedStage !== 'U2' && (
-                      <Button
-                        variant="ghost"
-                        onClick={handleRestart}
-                        className="flex items-center gap-2 text-gray-600"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        Reset option
-                      </Button>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={handleClose}>
-                      Cancel
-                    </Button>
-                    {!isLastStage && (
-                      <Button
-                        onClick={() => {
-                          // Use U2's custom handler if available, otherwise default next
-                          if (maximizedStage === 'U2' && u2ContinueHandlerRef.current) {
-                            u2ContinueHandlerRef.current();
-                          } else {
-                            handleNext();
-                          }
-                        }}
-                        disabled={
-                          maximizedStage === 'U2' && u2ContinueDisabledRef.current
-                            ? u2ContinueDisabledRef.current()
-                            : false
-                        }
-                        className={
-                          maximizedStage === 'U2' &&
-                          u2ContinueDisabledRef.current &&
-                          u2ContinueDisabledRef.current()
-                            ? 'bg-gray-400 hover:bg-gray-400 text-white cursor-not-allowed'
-                            : 'bg-[#458EE2] hover:bg-[#3a7bc7] text-white'
-                        }
-                      >
-                        Continue
-                      </Button>
-                    )}
-                    {isLastStage && (
-                      <Button
-                        onClick={handleNext}
-                        className="bg-[#41C185] hover:bg-[#36a870] text-white"
-                      >
-                        Proceed to Next Steps
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>,
-          document.body
-        )
-      }
     </>
   );
 };

@@ -1345,44 +1345,55 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   const initialLoad = React.useRef(true);
   const { setCards } = useExhibitionStore();
   const { toast } = useToast();
-  
+
+  // Track active project so we can re-run initialisation when the project changes
+  const projectContext = getActiveProjectContext();
+  const activeProjectKey =
+    projectContext && (projectContext.client_name || projectContext.app_name || projectContext.project_name)
+      ? `${projectContext.client_name}::${projectContext.app_name}::${projectContext.project_name}`
+      : null;
+  const lastProjectKeyRef = React.useRef<string | null>(null);
+
   // Automatically create data-upload card when there are no cards (only in analytics mode)
   const hasInitializedDataUploadRef = React.useRef(false);
+
+  // Reset Data Upload initialisation whenever the active project changes
+  React.useEffect(() => {
+    if (lastProjectKeyRef.current !== activeProjectKey) {
+      lastProjectKeyRef.current = activeProjectKey;
+      hasInitializedDataUploadRef.current = false;
+    }
+  }, [activeProjectKey]);
 
   React.useEffect(() => {
     // Only create data-upload card in analytics mode, not in dashboard mode
     if (subMode !== 'analytics') {
       return;
     }
+
+    // Wait until the canvas has finished loading before attempting to inject cards
+    if (isCanvasLoading) {
+      return;
+    }
     
     if (hasInitializedDataUploadRef.current) {
       return;
     }
-    
-    if (!Array.isArray(layoutCards) || layoutCards.length === 0) {
-      // Check if data-upload card already exists
-      const hasDataUploadCard = Array.isArray(layoutCards) && 
-        layoutCards.some(card => 
-          card.atoms?.some(atom => atom.atomId === 'data-upload')
-        );
-      
-      if (!hasDataUploadCard) {
-        hasInitializedDataUploadRef.current = true;
-        // Create data-upload card directly
-        addNewCardWithAtom('data-upload', undefined, 0);
-      } else {
-        hasInitializedDataUploadRef.current = true;
-      }
-    } else {
-      // If there are cards, check if any is data-upload
-      const hasDataUploadCard = layoutCards.some(card => 
-        card.atoms?.some(atom => atom.atomId === 'data-upload')
-      );
-      if (hasDataUploadCard) {
-        hasInitializedDataUploadRef.current = true;
-      }
+
+    const cards = Array.isArray(layoutCards) ? layoutCards : [];
+
+    // Check if data-upload card already exists in the current layout
+    const hasDataUploadCard = cards.some(card =>
+      card.atoms?.some(atom => atom.atomId === 'data-upload'),
+    );
+
+    hasInitializedDataUploadRef.current = true;
+
+    if (!hasDataUploadCard) {
+      // Create data-upload card directly at the top of the canvas
+      void addNewCardWithAtom('data-upload', undefined, 0);
     }
-  }, [layoutCards, subMode]);
+  }, [layoutCards, subMode, isCanvasLoading, activeProjectKey]);
 
   const renderAppendedVariables = (card: LayoutCard) => {
     const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
@@ -6599,8 +6610,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               );
             })}
 
-            {/* Add New Card Button - Show at end if there are cards */}
-            {Array.isArray(layoutCards) && layoutCards.length > 0 && (
+            {/* Add New Card Button - Always show at end when layoutCards is an array */}
+            {Array.isArray(layoutCards) && layoutCards.length >= 0 && (
             <div className="flex justify-center">
               <button
                 onClick={() => addNewCard()}
