@@ -585,6 +585,7 @@ def _apply_regex_decoder(df: pd.DataFrame, variable_col: str, config: VariableDe
 
 async def update_unpivot_properties(atom_id: str, payload: UnpivotPropertiesUpdate) -> UnpivotMetadataResponse:
     """Update properties of an unpivot atom."""
+    logger.info("update_unpivot_properties START atom_id=%s auto_refresh=%s", atom_id, payload.auto_refresh)
     metadata = _load_metadata(atom_id)
     if not metadata:
         raise HTTPException(status_code=404, detail=f"Unpivot atom '{atom_id}' not found")
@@ -623,12 +624,44 @@ async def update_unpivot_properties(atom_id: str, payload: UnpivotPropertiesUpda
     
     _store_metadata(atom_id, metadata)
     
-    # If auto_refresh is enabled, trigger computation
+    # If auto_refresh is enabled, trigger computation via Celery
     if metadata.get("auto_refresh", True):
         try:
-            await compute_unpivot(atom_id, UnpivotComputeRequest(force_recompute=True))
+            # Import here to avoid circular dependency
+            from app.features.unpivot.task_service import submit_compute_task
+            
+            logger.info("Auto-refresh enabled, submitting compute task atom_id=%s", atom_id)
+            
+            # Submit task to Celery (fire and forget - don't await)
+            submission = submit_compute_task(
+                atom_id=atom_id,
+                force_recompute=True,
+                preview_limit=None,
+            )
+            
+            logger.info(
+                "Auto-refresh submitted compute task atom_id=%s task_id=%s status=%s has_result=%s",
+                atom_id,
+                submission.task_id,
+                submission.status,
+                submission.result is not None,
+            )
+            
+            # Log result if available (eager execution)
+            if submission.result is not None:
+                result = submission.result
+                if isinstance(result, dict):
+                    logger.info(
+                        "Auto-refresh task completed atom_id=%s status=%s row_count=%d",
+                        atom_id,
+                        result.get("status", "unknown"),
+                        result.get("row_count", 0),
+                    )
+                else:
+                    logger.info("Auto-refresh task result type=%s", type(result).__name__)
         except Exception as e:
-            logger.warning("Auto-refresh failed for atom %s: %s", atom_id, e)
+            logger.exception("Auto-refresh task submission failed for atom %s", atom_id)
+            logger.warning("Auto-refresh task submission failed for atom %s: %s", atom_id, e)
     
     return await get_unpivot_metadata(atom_id)
 
@@ -895,6 +928,168 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
             summary=summary,
             computation_time=computation_time,
         )
+
+
+def compute_unpivot_task(
+    atom_id: str,
+    force_recompute: bool = False,
+    preview_limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Synchronous task function for Celery to execute unpivot computation.
+    
+    This is a wrapper around the async compute_unpivot function that handles
+    async operations internally for Celery workers.
+    """
+    import asyncio
+    import concurrent.futures
+    
+    print(f"[UNPIVOT_TASK] compute_unpivot_task called: atom_id={atom_id}")  # Debug print
+    logger.info(
+        "compute_unpivot_task starting atom_id=%s force_recompute=%s preview_limit=%s",
+        atom_id,
+        force_recompute,
+        preview_limit,
+    )
+    
+    # Create a request-like object for the async function
+    class ComputeRequest:
+        def __init__(self, force_recompute: bool, preview_limit: Optional[int]):
+            self.force_recompute = force_recompute
+            self.preview_limit = preview_limit
+    
+    payload = ComputeRequest(force_recompute, preview_limit)
+    
+    # Helper to run async function
+    def run_async():
+        return asyncio.run(compute_unpivot(atom_id, payload))
+    
+    # Run the async function - handle both sync and async contexts
+    try:
+        # Check if we're in an existing event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # We're inside an async context - run in a thread pool
+            logger.info("compute_unpivot_task: Running in thread pool (async context detected)")
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_async)
+                response = future.result(timeout=300)  # 5 minute timeout
+        except RuntimeError:
+            # No running loop - we can use asyncio.run directly
+            logger.info("compute_unpivot_task: Running with asyncio.run (no async context)")
+            response = asyncio.run(compute_unpivot(atom_id, payload))
+        
+        logger.info(
+            "compute_unpivot_task completed atom_id=%s status=%s row_count=%d",
+            atom_id,
+            response.status,
+            response.row_count,
+        )
+        
+        # Convert Pydantic model to dict for Celery serialization
+        result = {
+            "atom_id": response.atom_id,
+            "status": response.status,
+            "updated_at": response.updated_at.isoformat() if isinstance(response.updated_at, datetime) else str(response.updated_at),
+            "row_count": response.row_count,
+            "dataframe": response.dataframe if response.dataframe else [],
+            "summary": response.summary if response.summary else {},
+            "computation_time": response.computation_time,
+        }
+        
+        logger.info(
+            "compute_unpivot_task returning result atom_id=%s dataframe_len=%d",
+            atom_id,
+            len(result.get("dataframe", [])),
+        )
+        
+        return result
+    except HTTPException as e:
+        # Convert HTTPException to dict for error handling
+        logger.error(
+            "compute_unpivot_task HTTPException atom_id=%s error=%s",
+            atom_id,
+            e.detail,
+        )
+        return {
+            "atom_id": atom_id,
+            "status": "failure",
+            "error": e.detail,
+            "status_code": e.status_code,
+        }
+    except Exception as e:
+        logger.exception("Unpivot computation task failed for atom %s", atom_id)
+        return {
+            "atom_id": atom_id,
+            "status": "failure",
+            "error": str(e),
+        }
+
+
+def save_unpivot_result_task(
+    atom_id: str,
+    format: str = "arrow",
+    filename: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Synchronous task function for Celery to execute unpivot save.
+    
+    This is a wrapper around the async save_unpivot_result function that handles
+    async operations internally for Celery workers.
+    """
+    import asyncio
+    import concurrent.futures
+    
+    print(f"[UNPIVOT_TASK] save_unpivot_result_task called: atom_id={atom_id}")  # Debug print
+    logger.info("save_unpivot_result_task starting atom_id=%s format=%s", atom_id, format)
+    
+    # Create a request-like object for the async function
+    class SaveRequest:
+        def __init__(self, format: str, filename: Optional[str]):
+            self.format = format
+            self.filename = filename
+    
+    payload = SaveRequest(format, filename)
+    
+    # Helper to run async function
+    def run_async():
+        return asyncio.run(save_unpivot_result(atom_id, payload))
+    
+    # Run the async function - handle both sync and async contexts
+    try:
+        # Check if we're in an existing event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # We're inside an async context - run in a thread pool
+            logger.info("save_unpivot_result_task: Running in thread pool (async context detected)")
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_async)
+                response = future.result(timeout=300)  # 5 minute timeout
+        except RuntimeError:
+            # No running loop - we can use asyncio.run directly
+            logger.info("save_unpivot_result_task: Running with asyncio.run (no async context)")
+            response = asyncio.run(save_unpivot_result(atom_id, payload))
+        
+        # Convert Pydantic model to dict for Celery serialization
+        return {
+            "atom_id": response.atom_id,
+            "minio_path": response.minio_path,
+            "updated_at": response.updated_at.isoformat() if isinstance(response.updated_at, datetime) else str(response.updated_at),
+            "row_count": response.row_count,
+        }
+    except HTTPException as e:
+        # Convert HTTPException to dict for error handling
+        return {
+            "atom_id": atom_id,
+            "status": "failure",
+            "error": e.detail,
+            "status_code": e.status_code,
+        }
+    except Exception as e:
+        logger.exception("Unpivot save task failed for atom %s", atom_id)
+        return {
+            "atom_id": atom_id,
+            "status": "failure",
+            "error": str(e),
+        }
 
 
 async def get_unpivot_result(atom_id: str) -> UnpivotResultResponse:

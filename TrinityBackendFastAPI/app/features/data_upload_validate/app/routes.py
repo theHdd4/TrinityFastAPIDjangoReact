@@ -340,6 +340,8 @@ async def get_object_prefix(
         app_id_env = app_id or os.getenv("APP_ID", "")
         project_id_env = project_id or os.getenv("PROJECT_ID", "")
 
+    # Priority: Use provided names directly if available (trust frontend)
+    # Only resolve from IDs/env if names are not provided
     # Resolve environment variables using ``get_env_vars`` which consults the
     # Redis cache keyed by ``<client>/<app>/<project>`` and falls back to
     # Postgres when missing.  This ensures we always load the latest names for
@@ -363,18 +365,29 @@ async def get_object_prefix(
         env, env_source = fresh, "unknown"
 
     # print(f"🔧 fetched env {env} (source={env_source})")  # Disabled
-    client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
-    app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
-    project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
+    
+    # Priority: Use explicitly provided names over resolved values
+    # This ensures frontend-provided names are trusted even if env resolution fails
+    client = client_name if client_name else env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
+    app = app_name if app_name else env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
+    project = project_name if project_name else env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
 
+    # If we got defaults and have PROJECT_ID, try to resolve from DB (only for missing names)
     if PROJECT_ID and (client == "default_client" or app == "default_app" or project == "default_project"):
         try:
             client_db, app_db, project_db = await fetch_client_app_project(
                 USER_ID if USER_ID else None, PROJECT_ID
             )
-            client = client_db or client
-            app = app_db or app
-            project = project_db or project
+            # Only use DB values if we don't have provided names
+            if not client_name and client_db:
+                client = client_db
+                env["CLIENT_NAME"] = client_db
+            if not app_name and app_db:
+                app = app_db
+                env["APP_NAME"] = app_db
+            if not project_name and project_db:
+                project = project_db
+                env["PROJECT_NAME"] = project_db
         except Exception as exc:  # pragma: no cover - database unreachable
             print(f"⚠️ Failed to load names from DB: {exc}")
 

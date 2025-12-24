@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.observability import timing_dependency_factory
+from .task_service import submit_compute_task, submit_save_task
 
 from .unpivot_models import (
     UnpivotAutosaveResponse,
@@ -126,21 +128,188 @@ async def compute_unpivot_endpoint(
     atom_id: str,
     payload: UnpivotComputeRequest,
 ) -> UnpivotComputeResponse:
-    """Compute unpivot transformation.
+    """Compute unpivot transformation via Celery.
     
     Executes the unpivot operation with the current configuration.
     Returns the unpivoted dataframe, row count, summary, and computation time.
     """
-    logger.info("unpivot.compute atom_id=%s force_recompute=%s", atom_id, payload.force_recompute)
-    response = await compute_unpivot(atom_id, payload)
-    logger.info(
-        "unpivot.compute.completed atom_id=%s status=%s rows=%d time=%.2fs",
-        atom_id,
-        response.status,
-        response.row_count,
-        response.computation_time,
-    )
-    return response
+    print(f"[UNPIVOT_ENDPOINT] compute_unpivot_endpoint called: atom_id={atom_id}")  # Debug print
+    logger.info("unpivot.compute START atom_id=%s force_recompute=%s preview_limit=%s", 
+                atom_id, payload.force_recompute, payload.preview_limit)
+    
+    try:
+        # Submit task to Celery
+        submission = submit_compute_task(
+            atom_id=atom_id,
+            force_recompute=payload.force_recompute,
+            preview_limit=payload.preview_limit,
+        )
+        
+        logger.info(
+            "unpivot.compute.submission atom_id=%s task_id=%s status=%s has_result=%s result_type=%s",
+            atom_id,
+            submission.task_id,
+            submission.status,
+            submission.result is not None,
+            type(submission.result).__name__ if submission.result is not None else "None",
+        )
+        
+        # Debug: log the actual result structure
+        if submission.result is not None:
+            try:
+                result_keys = list(submission.result.keys()) if isinstance(submission.result, dict) else "not_a_dict"
+                dataframe_len = len(submission.result.get("dataframe", [])) if isinstance(submission.result, dict) else 0
+                logger.info(
+                    "unpivot.compute.result_structure atom_id=%s result_keys=%s dataframe_len=%d",
+                    atom_id,
+                    result_keys,
+                    dataframe_len,
+                )
+            except Exception as e:
+                logger.exception("unpivot.compute.result_structure_error atom_id=%s error=%s", atom_id, str(e))
+        
+        # If task failed immediately (eager execution), raise error
+        if submission.status == "failure":
+            logger.error(
+                "unpivot.compute.failed atom_id=%s task_id=%s detail=%s",
+                atom_id,
+                submission.task_id,
+                submission.detail,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=submission.detail or "Unpivot computation failed",
+            )
+        
+        # Check result store for the task result (works for both eager and async)
+        from app.core.task_results import task_result_store
+        task_info = task_result_store.fetch(submission.task_id)
+        
+        logger.info(
+            "unpivot.compute.task_info atom_id=%s task_info_exists=%s task_info_status=%s",
+            atom_id,
+            task_info is not None,
+            task_info.get("status") if task_info else None,
+        )
+        
+        # If task completed (eager execution or already finished), return result
+        if submission.status == "success" and submission.result is not None:
+            result = submission.result
+            
+            # Ensure result is a dict
+            if not isinstance(result, dict):
+                logger.error(
+                    "unpivot.compute.invalid_result_type atom_id=%s result_type=%s",
+                    atom_id,
+                    type(result).__name__,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Invalid result type: {type(result).__name__}",
+                )
+            
+            # Check if result indicates failure
+            if result.get("status") == "failure":
+                logger.error(
+                    "unpivot.compute.task_failed atom_id=%s error=%s",
+                    atom_id,
+                    result.get("error", "Unknown error"),
+                )
+                raise HTTPException(
+                    status_code=result.get("status_code", 400),
+                    detail=result.get("error", "Unpivot computation failed"),
+                )
+            
+            logger.info(
+                "unpivot.compute.completed atom_id=%s status=%s row_count=%d dataframe_len=%d time=%.2fs",
+                atom_id,
+                result.get("status", "success"),
+                result.get("row_count", 0),
+                len(result.get("dataframe", [])),
+                result.get("computation_time", 0.0),
+            )
+            
+            try:
+                response = UnpivotComputeResponse(
+                    atom_id=result.get("atom_id", atom_id),
+                    status=result.get("status", "success"),
+                    updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result.get("updated_at"), str) else datetime.now(timezone.utc),
+                    row_count=result.get("row_count", 0),
+                    dataframe=result.get("dataframe", []),
+                    summary=result.get("summary", {}),
+                    computation_time=result.get("computation_time", 0.0),
+                )
+                logger.info("unpivot.compute.returning_response atom_id=%s row_count=%d", atom_id, response.row_count)
+                return response
+            except Exception as e:
+                logger.exception("unpivot.compute.response_creation_failed atom_id=%s", atom_id)
+                raise HTTPException(status_code=500, detail=f"Failed to create response: {str(e)}")
+        
+        # Also check task_result_store (for async tasks that completed quickly)
+        if task_info and task_info.get("status") == "success":
+            result = task_info.get("result", {})
+            if isinstance(result, dict):
+                # Check if result indicates failure
+                if result.get("status") == "failure":
+                    logger.error(
+                        "unpivot.compute.task_failed_from_store atom_id=%s error=%s",
+                        atom_id,
+                        result.get("error", "Unknown error"),
+                    )
+                    raise HTTPException(
+                        status_code=result.get("status_code", 400),
+                        detail=result.get("error", "Unpivot computation failed"),
+                    )
+                
+                logger.info(
+                    "unpivot.compute.completed_from_store atom_id=%s status=%s row_count=%d dataframe_len=%d",
+                    atom_id,
+                    result.get("status", "success"),
+                    result.get("row_count", 0),
+                    len(result.get("dataframe", [])),
+                )
+                return UnpivotComputeResponse(
+                    atom_id=result.get("atom_id", atom_id),
+                    status=result.get("status", "success"),
+                    updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result.get("updated_at"), str) else datetime.now(timezone.utc),
+                    row_count=result.get("row_count", 0),
+                    dataframe=result.get("dataframe", []),
+                    summary=result.get("summary", {}),
+                    computation_time=result.get("computation_time", 0.0),
+                )
+        
+        # Task is pending - return task submission info
+        logger.warning(
+            "unpivot.compute.queued atom_id=%s task_id=%s status=%s result_is_none=%s",
+            atom_id,
+            submission.task_id,
+            submission.status,
+            submission.result is None,
+        )
+        
+        # Return pending response
+        return UnpivotComputeResponse(
+            atom_id=atom_id,
+            status="pending",
+            updated_at=datetime.now(timezone.utc),
+            row_count=0,
+            dataframe=[],
+            summary={},
+            computation_time=0.0,
+        )
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.exception(
+            "unpivot.compute.UNHANDLED_ERROR atom_id=%s error=%s",
+            atom_id,
+            str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unpivot computation failed with unexpected error: {str(e)}",
+        )
 
 
 @router.get("/{atom_id}/result", response_model=UnpivotResultResponse)
@@ -211,16 +380,67 @@ async def save_unpivot_result_endpoint(
     atom_id: str,
     payload: UnpivotSaveRequest,
 ) -> UnpivotSaveResponse:
-    """Save unpivot output to MinIO.
+    """Save unpivot output to MinIO via Celery.
     
     Saves the computed result to MinIO in the specified format (parquet, arrow, csv).
     If payload.filename is provided, creates a new file (save_as).
     If payload is None or filename is not provided, overwrites existing saved file (save).
     """
     logger.info("unpivot.save atom_id=%s format=%s", atom_id, payload.format)
-    response = await save_unpivot_result(atom_id, payload)
-    logger.info("unpivot.save.completed atom_id=%s path=%s", atom_id, response.minio_path)
-    return response
+    
+    # Submit task to Celery
+    submission = submit_save_task(
+        atom_id=atom_id,
+        format=payload.format,
+        filename=payload.filename,
+    )
+    
+    # If task failed immediately (eager execution), raise error
+    if submission.status == "failure":
+        logger.error(
+            "unpivot.save.failed atom_id=%s task_id=%s detail=%s",
+            atom_id,
+            submission.task_id,
+            submission.detail,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=submission.detail or "Unpivot save failed",
+        )
+    
+    # If task completed immediately (eager execution), return result
+    if submission.status == "success" and submission.result:
+        result = submission.result
+        logger.info("unpivot.save.completed atom_id=%s path=%s", atom_id, result.get("minio_path"))
+        return UnpivotSaveResponse(
+            atom_id=result.get("atom_id", atom_id),
+            minio_path=result.get("minio_path", ""),
+            updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result.get("updated_at"), str) else datetime.now(timezone.utc),
+            row_count=result.get("row_count", 0),
+        )
+    
+    # Task is pending - return task submission info
+    logger.info("unpivot.save.queued atom_id=%s task_id=%s", atom_id, submission.task_id)
+    
+    # For pending tasks, we need to check the result store
+    from app.core.task_results import task_result_store
+    
+    # Try to get initial status
+    task_info = task_result_store.fetch(submission.task_id)
+    if task_info and task_info.get("status") == "success":
+        result = task_info.get("result", {})
+        return UnpivotSaveResponse(
+            atom_id=result.get("atom_id", atom_id),
+            minio_path=result.get("minio_path", ""),
+            updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result.get("updated_at"), str) else datetime.now(timezone.utc),
+            row_count=result.get("row_count", 0),
+        )
+    
+    # Return pending response (though save should typically complete quickly)
+    raise HTTPException(
+        status_code=202,
+        detail=f"Save task queued. Task ID: {submission.task_id}. Please poll for results.",
+    )
 
 
 @router.post("/{atom_id}/dataset-updated", response_model=UnpivotComputeResponse)
@@ -228,15 +448,88 @@ async def handle_dataset_updated_endpoint(
     atom_id: str,
     payload: UnpivotDatasetUpdatedRequest,
 ) -> UnpivotComputeResponse:
-    """Auto-refresh when dataset changes.
+    """Auto-refresh when dataset changes via Celery.
     
     Triggered when dataset file in the workflow is updated.
     Auto-computes with current config.
     """
     logger.info("unpivot.dataset-updated atom_id=%s", atom_id)
-    response = await handle_dataset_updated(atom_id, payload)
-    logger.info("unpivot.dataset-updated.completed atom_id=%s rows=%d", atom_id, response.row_count)
-    return response
+    
+    # Update metadata if dataset path changed (synchronously, it's fast)
+    # We need to do this before submitting the task so the task uses the new path
+    if payload.dataset_path:
+        # Import here to avoid circular dependency
+        from .unpivot_service import _load_metadata, _store_metadata
+        metadata = _load_metadata(atom_id)
+        if metadata:
+            metadata["dataset_path"] = payload.dataset_path
+            metadata["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _store_metadata(atom_id, metadata)
+    
+    # Submit compute task to Celery (force recompute)
+    submission = submit_compute_task(
+        atom_id=atom_id,
+        force_recompute=True,
+        preview_limit=None,
+    )
+    
+    # If task failed immediately (eager execution), raise error
+    if submission.status == "failure":
+        logger.error(
+            "unpivot.dataset-updated.failed atom_id=%s task_id=%s detail=%s",
+            atom_id,
+            submission.task_id,
+            submission.detail,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=submission.detail or "Unpivot computation failed",
+        )
+    
+    # If task completed immediately (eager execution), return result
+    if submission.status == "success" and submission.result:
+        result = submission.result
+        logger.info("unpivot.dataset-updated.completed atom_id=%s rows=%d", atom_id, result.get("row_count", 0))
+        return UnpivotComputeResponse(
+            atom_id=result.get("atom_id", atom_id),
+            status=result.get("status", "success"),
+            updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result.get("updated_at"), str) else datetime.now(timezone.utc),
+            row_count=result.get("row_count", 0),
+            dataframe=result.get("dataframe", []),
+            summary=result.get("summary", {}),
+            computation_time=result.get("computation_time", 0.0),
+        )
+    
+    # Task is pending - return task submission info
+    logger.info("unpivot.dataset-updated.queued atom_id=%s task_id=%s", atom_id, submission.task_id)
+    
+    # For pending tasks, check the result store
+    from app.core.task_results import task_result_store
+    
+    # Try to get initial status
+    task_info = task_result_store.fetch(submission.task_id)
+    if task_info and task_info.get("status") == "success":
+        result = task_info.get("result", {})
+        return UnpivotComputeResponse(
+            atom_id=result.get("atom_id", atom_id),
+            status=result.get("status", "success"),
+            updated_at=datetime.fromisoformat(result["updated_at"]) if isinstance(result.get("updated_at"), str) else datetime.now(timezone.utc),
+            row_count=result.get("row_count", 0),
+            dataframe=result.get("dataframe", []),
+            summary=result.get("summary", {}),
+            computation_time=result.get("computation_time", 0.0),
+        )
+    
+    # Return pending response
+    return UnpivotComputeResponse(
+        atom_id=atom_id,
+        status="pending",
+        updated_at=datetime.now(timezone.utc),
+        row_count=0,
+        dataframe=[],
+        summary={},
+        computation_time=0.0,
+    )
 
 
 @router.post("/{atom_id}/autosave", response_model=UnpivotAutosaveResponse)
