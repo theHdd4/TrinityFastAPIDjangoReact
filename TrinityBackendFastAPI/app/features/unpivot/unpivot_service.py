@@ -315,7 +315,7 @@ async def stream_full_unpivot_to_minio(
     row_count = 0
     total_original_rows = 0
     
-    # Initialize Arrow stream writer
+    # Initialize Arrow file writer (not stream - file format is required for RecordBatchFileReader)
     sink = pa.BufferOutputStream()
     writer = None
     schema = None
@@ -360,16 +360,16 @@ async def stream_full_unpivot_to_minio(
         # Convert to Arrow table
         table = pa.Table.from_pandas(melted_chunk)
         
-        # Initialize writer on first chunk
+        # Initialize writer on first chunk (use new_file, not new_stream, for compatibility with RecordBatchFileReader)
         if writer is None:
             schema = table.schema
-            writer = ipc.new_stream(sink, schema)
+            writer = ipc.new_file(sink, schema)
         
-        # Write chunk to stream
+        # Write chunk to file
         writer.write_table(table)
         row_count += len(melted_chunk)
     
-    # Close writer
+    # Close writer (context manager will handle this, but explicit close is safe)
     if writer:
         writer.close()
     
