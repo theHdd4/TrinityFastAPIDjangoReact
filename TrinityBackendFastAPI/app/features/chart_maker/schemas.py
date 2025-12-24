@@ -216,6 +216,8 @@ class ChartRequest(BaseModel):
     second_y_axis: Optional[str] = None
     # All charts configuration (for saving all charts together in MongoDB)
     all_charts: Optional[List[dict]] = None  # Array of all charts in the atom
+    # Skip pipeline recording (used when called from within KPI Dashboard)
+    skip_pipeline_recording: Optional[bool] = False
 
 class RechartsConfig(BaseModel):
     chart_type: str

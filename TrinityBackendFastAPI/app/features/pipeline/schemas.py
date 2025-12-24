@@ -127,6 +127,27 @@ class DataSummaryEntry(BaseModel):
     saved_at: Optional[datetime] = Field(None, description="When data summary was saved")
 
 
+class VariableOperationEntry(BaseModel):
+    """Single variable operation entry."""
+    id: str = Field(..., description="Unique operation identifier")
+    numericalColumn: str = Field(..., description="Column or variable to operate on")
+    method: str = Field(..., description="Operation method (sum, mean, median, max, min, count, nunique, rank_pct, add, subtract, multiply, divide)")
+    secondColumn: Optional[str] = Field(None, description="Second column for arithmetic operations")
+    secondValue: Optional[float] = Field(None, description="Second value for arithmetic operations")
+    customName: Optional[str] = Field(None, description="Custom variable name")
+
+
+class VariableOperationsConfig(BaseModel):
+    """Variable operations configuration for a file."""
+    input_file: str = Field(..., description="Input file path (data source)")
+    original_input_file: Optional[str] = Field(None, description="Original input file path (before replacement)")
+    compute_mode: str = Field("whole-dataframe", description="Compute mode: whole-dataframe or within-group")
+    identifiers: Optional[List[str]] = Field(None, description="Identifiers for within-group mode")
+    operations: List[VariableOperationEntry] = Field(default_factory=list, description="Variable operations")
+    created_variables: List[str] = Field(default_factory=list, description="List of created variable names")
+    saved_at: Optional[datetime] = Field(None, description="When operations were saved")
+
+
 class PipelineData(BaseModel):
     """Pipeline execution data."""
     root_files: List[FileMetadata] = Field(default_factory=list, description="Root input files")
@@ -135,6 +156,10 @@ class PipelineData(BaseModel):
     column_operations: List[ColumnOperationsConfig] = Field(
         default_factory=list, 
         description="Global column operations from metrics tab"
+    )
+    variable_operations: List[VariableOperationsConfig] = Field(
+        default_factory=list,
+        description="Variable operations from metrics tab"
     )
     data_summary: List[DataSummaryEntry] = Field(
         default_factory=list,

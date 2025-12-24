@@ -500,7 +500,8 @@ def perform_createcolumn_task(
             x_vars = columns[1:]
 
             def residual_func(subdf: pd.DataFrame) -> pd.DataFrame:
-                new_col = rename_val or f"Res_{y_var}"
+                # Use lowercase for case-insensitive matching
+                new_col = (rename_val or f"res_{y_var}").lower()
                 if subdf.shape[0] < 2:
                     subdf[new_col] = np.nan
                     return subdf
@@ -512,7 +513,7 @@ def perform_createcolumn_task(
                 return subdf
 
             df = group_apply(df, residual_func)
-            new_cols_total.append(rename_val or f"Res_{y_var}")
+            new_cols_total.append((rename_val or f"res_{y_var}").lower())
         elif op == "stl_outlier":
             date_col = next((c for c in df.columns if c.strip().lower() == "date"), None)
             if not date_col:
@@ -2257,6 +2258,26 @@ def perform_createcolumn_task(
 
     if not new_cols_total:
         raise ValueError("No new columns were created")
+
+    # ========================================================================
+    # FINAL CHECK: Remove duplicate columns (case-insensitive)
+    # Keep the latest (rightmost) column when duplicates exist
+    # ========================================================================
+    columns_lower = [col.lower() for col in df.columns]
+    seen = {}
+    cols_to_drop = []
+    
+    # Iterate through columns and track which ones to keep (latest occurrence)
+    for idx, (col, col_lower) in enumerate(zip(df.columns, columns_lower)):
+        if col_lower in seen:
+            # Mark the previous occurrence for removal (keep the latest)
+            cols_to_drop.append(seen[col_lower])
+        seen[col_lower] = col
+    
+    # Drop duplicate columns (keeping the latest)
+    if cols_to_drop:
+        logger.info(f"🔄 Removing {len(cols_to_drop)} duplicate columns (case-insensitive): {cols_to_drop}")
+        df = df.drop(columns=cols_to_drop)
 
     create_key = f"{full_object_path}_create.csv"
     clean_df = df.replace({np.nan: None, np.inf: None, -np.inf: None})

@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLaboratoryStore } from '../../../store/laboratoryStore';
-import { FEATURE_OVERVIEW_API, CREATECOLUMN_API, LABORATORY_API } from '@/lib/api';
+import { FEATURE_OVERVIEW_API, CREATECOLUMN_API, LABORATORY_API, PIPELINE_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
 
@@ -241,6 +241,50 @@ const VariableTab: React.FC<VariableTabProps> = ({
           title: "Success",
           description: `Successfully updated ${result.newColumns?.length || result.newVariables?.length || 0} variable(s).`,
         });
+        
+        // ========================================================================
+        // SAVE VARIABLE OPERATIONS TO PIPELINE EXECUTION (for overwrite)
+        // ========================================================================
+        // Only save to pipeline if this is a compute operation (not constant assignment)
+        if (!payloadWithConfirm.assignments && payloadWithConfirm.operations) {
+          try {
+            // Get environment variables
+            const envStr = localStorage.getItem('env');
+            let client_name = '';
+            let app_name = '';
+            let project_name = '';
+            
+            if (envStr) {
+              try {
+                const env = JSON.parse(envStr);
+                client_name = env.CLIENT_NAME || '';
+                app_name = env.APP_NAME || '';
+                project_name = env.PROJECT_NAME || '';
+              } catch {
+                // Ignore parse errors
+              }
+            }
+            
+            if (client_name && app_name && project_name) {
+              await fetch(`${PIPELINE_API}/save-variable-operations?client_name=${encodeURIComponent(client_name)}&app_name=${encodeURIComponent(app_name)}&project_name=${encodeURIComponent(project_name)}&mode=laboratory`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  input_file: payloadWithConfirm.dataSource,
+                  compute_mode: payloadWithConfirm.computeMode || 'whole-dataframe',
+                  operations: payloadWithConfirm.operations,
+                  created_variables: result.newColumns || [],
+                  identifiers: payloadWithConfirm.identifiers || null,
+                }),
+              });
+              console.log('✅ Variable operations saved to pipeline execution (overwrite)');
+            }
+          } catch (err) {
+            console.warn('⚠️ Failed to save variable operations to pipeline execution:', err);
+            // Don't fail the save operation if pipeline save fails
+          }
+        }
+        
         // Refresh saved variables
         await fetchSavedVariables();
         // Trigger refresh in other components (e.g., KPIDashboardCanvas)
@@ -475,6 +519,37 @@ const VariableTab: React.FC<VariableTabProps> = ({
           title: "Success",
           description: `Successfully created ${result.newColumns?.length || 0} variable(s).`,
         });
+        
+        // ========================================================================
+        // SAVE VARIABLE OPERATIONS TO PIPELINE EXECUTION
+        // ========================================================================
+        try {
+          const operations_for_pipeline = validOperations.map(op => ({
+            id: op.id,
+            numericalColumn: op.numericalColumn,
+            method: op.method,
+            secondColumn: op.secondInputType === 'column' ? (op.secondColumn || undefined) : undefined,
+            secondValue: op.secondInputType === 'number' && op.secondValue ? parseFloat(op.secondValue) : undefined,
+            customName: op.customName || undefined,
+          }));
+          
+          await fetch(`${PIPELINE_API}/save-variable-operations?client_name=${encodeURIComponent(client_name)}&app_name=${encodeURIComponent(app_name)}&project_name=${encodeURIComponent(project_name)}&mode=laboratory`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              input_file: metricsInputs.dataSource,
+              compute_mode: variableType === 'dataframe' ? (computeWithinGroup ? 'within-group' : 'whole-dataframe') : 'whole-dataframe',
+              operations: operations_for_pipeline,
+              created_variables: result.newColumns || [],
+              identifiers: variableType === 'dataframe' && computeWithinGroup ? selectedVariableIdentifiers : null,
+            }),
+          });
+          console.log('✅ Variable operations saved to pipeline execution');
+        } catch (err) {
+          console.warn('⚠️ Failed to save variable operations to pipeline execution:', err);
+          // Don't fail the save operation if pipeline save fails
+        }
+        
         // Refresh saved variables after successful save
         await fetchSavedVariables();
         // Trigger refresh in other components (e.g., KPIDashboardCanvas)

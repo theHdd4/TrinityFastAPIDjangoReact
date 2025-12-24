@@ -151,9 +151,10 @@ async def load_saved_dataframe(request: LoadSavedDataframeRequest):
                 except Exception as e:
                     logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
             
-            # Prioritize atom_list_configuration as source of truth
-            final_card_id = card_id_from_config or request.card_id or (request.validator_atom_id.split("-")[0] if "-" in request.validator_atom_id else request.validator_atom_id)
-            final_canvas_position = canvas_position_from_config if canvas_position_from_config is not None else (request.canvas_position if request.canvas_position is not None else 0)
+            # CRITICAL FIX: Prioritize card_id from request (pipeline execution passes the correct card_id)
+            # Only use atom_list_configuration as fallback when no card_id is provided
+            final_card_id = request.card_id or card_id_from_config or (request.validator_atom_id.split("-")[0] if "-" in request.validator_atom_id else request.validator_atom_id)
+            final_canvas_position = request.canvas_position if request.canvas_position is not None else (canvas_position_from_config if canvas_position_from_config is not None else 0)
             
             # Build configuration
             configuration = {
@@ -194,7 +195,7 @@ async def load_saved_dataframe(request: LoadSavedDataframeRequest):
                         "row_count": result.get("row_count", 0) if isinstance(result, dict) else 0
                     })
             
-            if client_name and app_name and project_name:
+            if client_name and app_name and project_name and not getattr(request, 'skip_pipeline_recording', False):
                 await record_atom_execution(
                     client_name=client_name,
                     app_name=app_name,
@@ -416,9 +417,10 @@ async def generate_chart(request: ChartRequest):
                 except Exception as e:
                     logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
             
-            # Prioritize atom_list_configuration as source of truth
-            final_card_id = card_id_from_config or request.card_id or (request.validator_atom_id.split("-")[0] if "-" in request.validator_atom_id else request.validator_atom_id)
-            final_canvas_position = canvas_position_from_config if canvas_position_from_config is not None else (request.canvas_position if request.canvas_position is not None else 0)
+            # CRITICAL FIX: Prioritize card_id from request (pipeline execution passes the correct card_id)
+            # Only use atom_list_configuration as fallback when no card_id is provided
+            final_card_id = request.card_id or card_id_from_config or (request.validator_atom_id.split("-")[0] if "-" in request.validator_atom_id else request.validator_atom_id)
+            final_canvas_position = request.canvas_position if request.canvas_position is not None else (canvas_position_from_config if canvas_position_from_config is not None else 0)
             
             # Build configuration (convert column names to lowercase for pipeline)
             # Use explicit dual_axis_mode and second_y_axis from request if provided
@@ -521,7 +523,7 @@ async def generate_chart(request: ChartRequest):
             # Build output files (chartmaker doesn't produce output files, but we track the chart config)
             output_files = []
             
-            if client_name and app_name and project_name:
+            if client_name and app_name and project_name and not getattr(request, 'skip_pipeline_recording', False):
                 await record_atom_execution(
                     client_name=client_name,
                     app_name=app_name,

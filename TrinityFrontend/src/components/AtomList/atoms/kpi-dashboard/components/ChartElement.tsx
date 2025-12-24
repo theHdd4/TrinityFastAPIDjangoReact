@@ -398,6 +398,7 @@ const ChartElement: React.FC<ChartElementProps> = ({
         traces: traces,
         title: chartSettings.customTitle || chartConfig.title || 'Chart',
         filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : chartConfig.filters || {},
+        skip_pipeline_recording: true, // Don't record as separate step - this is part of KPI Dashboard
       };
 
       const chartResponse = await chartMakerApi.generateChart(chartRequest);

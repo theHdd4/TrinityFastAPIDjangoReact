@@ -698,150 +698,165 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
   // Used for operations that use global identifiers and create one column per input column
   const getOutputColNameForColumn = (op: typeof selectedOperations[0], col: string) => {
     if (op.rename && typeof op.rename === 'string' && op.rename.trim()) {
-      // If rename is provided and only one column, use rename
+      // If rename is provided and only one column, use rename (lowercase for case-insensitive matching)
       // For multiple columns with rename, we'd need per-column rename (not currently supported)
       const columns = op.columns?.filter(Boolean) || [];
       if (columns.length === 1) {
-        return op.rename.trim();
+        return op.rename.trim().toLowerCase();
       }
     }
     
+    let result = '';
     switch (op.type) {
-      case 'dummy': return `${col}_dummy`;
-      case 'log': return `${col}_log`;
-      case 'sqrt': return `${col}_sqrt`;
-      case 'exp': return `${col}_exp`;
-      case 'power': return op.param ? `${col}_power${op.param}` : `${col}_power`;
-      case 'standardize_zscore': return `${col}_zscore_scaled`;
-      case 'standardize_minmax': return `${col}_minmax_scaled`;
-      case 'logistic': return `${col}_logistic`;
-      case 'detrend': return `${col}_detrended`;
-      case 'deseasonalize': return `${col}_deseasonalized`;
-      case 'detrend_deseasonalize': return `${col}_detrend_deseasonalized`;
-      case 'lag': return `${col}_lag`;
-      case 'lead': return `${col}_lead`;
-      case 'diff': return `${col}_diff`;
-      case 'rolling_mean': return `${col}_rolling_mean`;
-      case 'rolling_sum': return `${col}_rolling_sum`;
-      case 'rolling_min': return `${col}_rolling_min`;
-      case 'rolling_max': return `${col}_rolling_max`;
-      case 'cumulative_sum': return `${col}_cumulative_sum`;
-      case 'growth_rate': return `${col}_growth_rate`;
-      case 'abs': return `${col}_abs`;
-      case 'lower': return `${col}_lower`;
-      case 'upper': return `${col}_upper`;
-      case 'strip': return `${col}_strip`;
-      default: return `${col}_${op.type}`;
+      case 'dummy': result = `${col}_dummy`; break;
+      case 'log': result = `${col}_log`; break;
+      case 'sqrt': result = `${col}_sqrt`; break;
+      case 'exp': result = `${col}_exp`; break;
+      case 'power': result = op.param ? `${col}_power${op.param}` : `${col}_power`; break;
+      case 'standardize_zscore': result = `${col}_zscore_scaled`; break;
+      case 'standardize_minmax': result = `${col}_minmax_scaled`; break;
+      case 'logistic': result = `${col}_logistic`; break;
+      case 'detrend': result = `${col}_detrended`; break;
+      case 'deseasonalize': result = `${col}_deseasonalized`; break;
+      case 'detrend_deseasonalize': result = `${col}_detrend_deseasonalized`; break;
+      case 'lag': result = `${col}_lag`; break;
+      case 'lead': result = `${col}_lead`; break;
+      case 'diff': result = `${col}_diff`; break;
+      case 'rolling_mean': result = `${col}_rolling_mean`; break;
+      case 'rolling_sum': result = `${col}_rolling_sum`; break;
+      case 'rolling_min': result = `${col}_rolling_min`; break;
+      case 'rolling_max': result = `${col}_rolling_max`; break;
+      case 'cumulative_sum': result = `${col}_cumulative_sum`; break;
+      case 'growth_rate': result = `${col}_growth_rate`; break;
+      case 'abs': result = `${col}_abs`; break;
+      case 'lower': result = `${col}_lower`; break;
+      case 'upper': result = `${col}_upper`; break;
+      case 'strip': result = `${col}_strip`; break;
+      default: result = `${col}_${op.type}`; break;
     }
+    // Convert all output column names to lowercase for case-insensitive matching
+    return result.toLowerCase();
   };
 
   // Helper to get the output column name for an operation
   // IMPORTANT: These names must match the backend naming in service.py
   const getOutputColName = (op: typeof selectedOperations[0]) => {
-    if (op.rename && typeof op.rename === 'string' && op.rename.trim()) return op.rename.trim();
+    // Convert rename to lowercase for case-insensitive matching
+    if (op.rename && typeof op.rename === 'string' && op.rename.trim()) return op.rename.trim().toLowerCase();
     const columns = op.columns?.filter(Boolean) || [];
+    let result = '';
     switch (op.type) {
       // Backend: "_plus_".join(columns)
-      case 'add': return columns.join('_plus_');
+      case 'add': result = columns.join('_plus_'); break;
       // Backend: "_minus_".join(columns)
-      case 'subtract': return columns.join('_minus_');
-      case 'multiply': return columns.join('_x_');  // Backend uses _x_ not _times_
-      case 'divide': return columns.join('_div_');   // Backend uses _div_ not _dividedby_
-      case 'pct_change': return columns.length === 2 ? `${columns[1]}_pct_change_from_${columns[0]}` : 'pct_change';
-      // Backend: f"Res_{y_var}"
-      case 'residual': return `Res_${columns[0] || ''}`;
+      case 'subtract': result = columns.join('_minus_'); break;
+      case 'multiply': result = columns.join('_x_'); break;  // Backend uses _x_ not _times_
+      case 'divide': result = columns.join('_div_'); break;   // Backend uses _div_ not _dividedby_
+      case 'pct_change': result = columns.length === 2 ? `${columns[1]}_pct_change_from_${columns[0]}` : 'pct_change'; break;
+      // Backend: f"Res_{y_var}" - convert to lowercase
+      case 'residual': result = `res_${columns[0] || ''}`; break;
       // Backend: f"{col}_dummy"
-      case 'dummy': return columns.length > 0 ? `${columns[0]}_dummy` : 'dummy';
+      case 'dummy': result = columns.length > 0 ? `${columns[0]}_dummy` : 'dummy'; break;
       // Backend: f"{col}_log"
-      case 'log': return columns.length > 0 ? `${columns[0]}_log` : 'log';
+      case 'log': result = columns.length > 0 ? `${columns[0]}_log` : 'log'; break;
       // Backend: f"{col}_sqrt"
-      case 'sqrt': return columns.length > 0 ? `${columns[0]}_sqrt` : 'sqrt';
+      case 'sqrt': result = columns.length > 0 ? `${columns[0]}_sqrt` : 'sqrt'; break;
       // Backend: f"{col}_exp"
-      case 'exp': return columns.length > 0 ? `${columns[0]}_exp` : 'exp';
+      case 'exp': result = columns.length > 0 ? `${columns[0]}_exp` : 'exp'; break;
       // Backend: f"{col}_abs"
-      case 'abs': return columns.length > 0 ? `${columns[0]}_abs` : 'abs';
+      case 'abs': result = columns.length > 0 ? `${columns[0]}_abs` : 'abs'; break;
       // Backend: f"{col}_power{param}"
-      case 'power': return columns.length > 0 && op.param ? `${columns[0]}_power${op.param}` : 'power';
+      case 'power': result = columns.length > 0 && op.param ? `${columns[0]}_power${op.param}` : 'power'; break;
       // Backend: f"{col}_zscore_scaled"
-      case 'standardize_zscore': return columns.length > 0 ? `${columns[0]}_zscore_scaled` : 'zscore_scaled';
+      case 'standardize_zscore': result = columns.length > 0 ? `${columns[0]}_zscore_scaled` : 'zscore_scaled'; break;
       // Backend: f"{col}_minmax_scaled"
-      case 'standardize_minmax': return columns.length > 0 ? `${columns[0]}_minmax_scaled` : 'minmax_scaled';
+      case 'standardize_minmax': result = columns.length > 0 ? `${columns[0]}_minmax_scaled` : 'minmax_scaled'; break;
       // Backend: f"{col}_logistic"
-      case 'logistic': return columns.length > 0 ? `${columns[0]}_logistic` : 'logistic';
+      case 'logistic': result = columns.length > 0 ? `${columns[0]}_logistic` : 'logistic'; break;
       // Backend: f"{col}_detrended"
-      case 'detrend': return columns.length > 0 ? `${columns[0]}_detrended` : 'detrended';
+      case 'detrend': result = columns.length > 0 ? `${columns[0]}_detrended` : 'detrended'; break;
       // Backend: f"{col}_deseasonalized"
-      case 'deseasonalize': return columns.length > 0 ? `${columns[0]}_deseasonalized` : 'deseasonalized';
+      case 'deseasonalize': result = columns.length > 0 ? `${columns[0]}_deseasonalized` : 'deseasonalized'; break;
       // Backend: f"{col}_detrend_deseasonalized"
-      case 'detrend_deseasonalize': return columns.length > 0 ? `${columns[0]}_detrend_deseasonalized` : 'detrend_deseasonalized';
+      case 'detrend_deseasonalize': result = columns.length > 0 ? `${columns[0]}_detrend_deseasonalized` : 'detrend_deseasonalized'; break;
       // Backend: f"{col}_lag"
-      case 'lag': return columns.length > 0 ? `${columns[0]}_lag` : 'lag';
+      case 'lag': result = columns.length > 0 ? `${columns[0]}_lag` : 'lag'; break;
       // Backend: f"{col}_lead"
-      case 'lead': return columns.length > 0 ? `${columns[0]}_lead` : 'lead';
+      case 'lead': result = columns.length > 0 ? `${columns[0]}_lead` : 'lead'; break;
       // Backend: f"{col}_diff"
-      case 'diff': return columns.length > 0 ? `${columns[0]}_diff` : 'diff';
+      case 'diff': result = columns.length > 0 ? `${columns[0]}_diff` : 'diff'; break;
       // Backend: f"{col}_rolling_mean"
-      case 'rolling_mean': return columns.length > 0 ? `${columns[0]}_rolling_mean` : 'rolling_mean';
+      case 'rolling_mean': result = columns.length > 0 ? `${columns[0]}_rolling_mean` : 'rolling_mean'; break;
       // Backend: f"{col}_rolling_sum"
-      case 'rolling_sum': return columns.length > 0 ? `${columns[0]}_rolling_sum` : 'rolling_sum';
+      case 'rolling_sum': result = columns.length > 0 ? `${columns[0]}_rolling_sum` : 'rolling_sum'; break;
       // Backend: f"{col}_rolling_min"
-      case 'rolling_min': return columns.length > 0 ? `${columns[0]}_rolling_min` : 'rolling_min';
+      case 'rolling_min': result = columns.length > 0 ? `${columns[0]}_rolling_min` : 'rolling_min'; break;
       // Backend: f"{col}_rolling_max"
-      case 'rolling_max': return columns.length > 0 ? `${columns[0]}_rolling_max` : 'rolling_max';
+      case 'rolling_max': result = columns.length > 0 ? `${columns[0]}_rolling_max` : 'rolling_max'; break;
       // Backend: f"{col}_cumulative_sum"
-      case 'cumulative_sum': return columns.length > 0 ? `${columns[0]}_cumulative_sum` : 'cumulative_sum';
+      case 'cumulative_sum': result = columns.length > 0 ? `${columns[0]}_cumulative_sum` : 'cumulative_sum'; break;
       // Backend: f"{col}_growth_rate"
-      case 'growth_rate': return columns.length > 0 ? `${columns[0]}_growth_rate` : 'growth_rate';
+      case 'growth_rate': result = columns.length > 0 ? `${columns[0]}_growth_rate` : 'growth_rate'; break;
       // Backend: f"{date_col}_year", f"{date_col}_month", etc.
       case 'datetime': {
         if (columns.length > 0 && op.param) {
           const dateCol = columns[0];
           const param = op.param as string;
-          if (param === 'to_year') return `${dateCol}_year`;
-          if (param === 'to_month') return `${dateCol}_month`;
-          if (param === 'to_week') return `${dateCol}_week`;
-          if (param === 'to_day') return `${dateCol}_day`;
-          if (param === 'to_day_name') return `${dateCol}_day_name`;
-          if (param === 'to_month_name') return `${dateCol}_month_name`;
+          if (param === 'to_year') result = `${dateCol}_year`;
+          else if (param === 'to_month') result = `${dateCol}_month`;
+          else if (param === 'to_week') result = `${dateCol}_week`;
+          else if (param === 'to_day') result = `${dateCol}_day`;
+          else if (param === 'to_day_name') result = `${dateCol}_day_name`;
+          else if (param === 'to_month_name') result = `${dateCol}_month_name`;
+          else result = 'datetime_extract';
+        } else {
+          result = 'datetime_extract';
         }
-        return 'datetime_extract';
+        break;
       }
       // Backend: f"{date_col}_fiscal_year", f"{date_col}_fiscal_quarter", etc.
       case 'fiscal_mapping': {
         if (columns.length > 0 && op.param) {
           const dateCol = columns[0];
           const param = op.param as string;
-          if (param === 'fiscal_year') return `${dateCol}_fiscal_year`;
-          if (param === 'fiscal_quarter') return `${dateCol}_fiscal_quarter`;
-          if (param === 'fiscal_month') return `${dateCol}_fiscal_month`;
-          if (param === 'fiscal_year_full') return `${dateCol}_fiscal_year_full`;
+          if (param === 'fiscal_year') result = `${dateCol}_fiscal_year`;
+          else if (param === 'fiscal_quarter') result = `${dateCol}_fiscal_quarter`;
+          else if (param === 'fiscal_month') result = `${dateCol}_fiscal_month`;
+          else if (param === 'fiscal_year_full') result = `${dateCol}_fiscal_year_full`;
+          else result = 'fiscal_mapping';
+        } else {
+          result = 'fiscal_mapping';
         }
-        return 'fiscal_mapping';
+        break;
       }
       // Backend: f"{date_col}_is_weekend"
-      case 'is_weekend': return columns.length > 0 ? `${columns[0]}_is_weekend` : 'is_weekend';
+      case 'is_weekend': result = columns.length > 0 ? `${columns[0]}_is_weekend` : 'is_weekend'; break;
       // Backend: f"{date_col}_is_month_end"
-      case 'is_month_end': return columns.length > 0 ? `${columns[0]}_is_month_end` : 'is_month_end';
+      case 'is_month_end': result = columns.length > 0 ? `${columns[0]}_is_month_end` : 'is_month_end'; break;
       // Backend: f"{date_col}_is_qtr_end"
-      case 'is_qtr_end': return columns.length > 0 ? `${columns[0]}_is_qtr_end` : 'is_qtr_end';
+      case 'is_qtr_end': result = columns.length > 0 ? `${columns[0]}_is_qtr_end` : 'is_qtr_end'; break;
       // Backend: "built_date"
-      case 'date_builder': return 'built_date';
+      case 'date_builder': result = 'built_date'; break;
       // Backend: "is_outlier"
-      case 'stl_outlier': return 'is_outlier';
+      case 'stl_outlier': result = 'is_outlier'; break;
       // Backend: f"{metric_col}_group_{method}" for compute_metrics_within_group
       case 'compute_metrics_within_group': {
         if (op.param && typeof op.param === 'object') {
           const param = op.param as Record<string, any>;
           const metricCols = param.metric_cols;
           if (Array.isArray(metricCols) && metricCols.length > 0) {
-            return metricCols.map((item: any) => {
+            result = metricCols.map((item: any) => {
               const rename = item.rename?.trim();
-              if (rename) return rename;
+              if (rename) return rename.toLowerCase();
               return `${item.metric_col}_group_${item.method}`;
             }).join(', ');
+          } else {
+            result = 'compute_metrics_within_group';
           }
+        } else {
+          result = 'compute_metrics_within_group';
         }
-        return 'compute_metrics_within_group';
+        break;
       }
       // Backend: f"{metric_col}_share_of_total"
       case 'group_share_of_total': {
@@ -849,14 +864,18 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
           const param = op.param as Record<string, any>;
           const metricCols = param.metric_cols;
           if (Array.isArray(metricCols) && metricCols.length > 0) {
-            return metricCols.map((item: any) => {
+            result = metricCols.map((item: any) => {
               const rename = item.rename?.trim();
-              if (rename) return rename;
+              if (rename) return rename.toLowerCase();
               return `${item.metric_col}_share_of_total`;
             }).join(', ');
+          } else {
+            result = 'group_share_of_total';
           }
+        } else {
+          result = 'group_share_of_total';
         }
-        return 'group_share_of_total';
+        break;
       }
       // Backend: f"{metric_col}_contribution"
       case 'group_contribution': {
@@ -864,17 +883,23 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
           const param = op.param as Record<string, any>;
           const metricCols = param.metric_cols;
           if (Array.isArray(metricCols) && metricCols.length > 0) {
-            return metricCols.map((item: any) => {
+            result = metricCols.map((item: any) => {
               const rename = item.rename?.trim();
-              if (rename) return rename;
+              if (rename) return rename.toLowerCase();
               return `${item.metric_col}_contribution`;
             }).join(', ');
+          } else {
+            result = 'group_contribution';
           }
+        } else {
+          result = 'group_contribution';
         }
-        return 'group_contribution';
+        break;
       }
-      default: return `${op.type}_${columns.join('_')}`;
+      default: result = `${op.type}_${columns.join('_')}`; break;
     }
+    // Convert all output column names to lowercase for case-insensitive matching
+    return result.toLowerCase();
   };
 
   // Helper to expand operations for metadata storage
@@ -1473,13 +1498,14 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
               let renameValue = '';
               if (op.rename && typeof op.rename === 'object') {
                 const renameObj = op.rename as Record<string, any>;
-                // Get rename values in the same order as columns
+                // Get rename values in the same order as columns, convert to lowercase for case-insensitive matching
                 const renameValues = op.columns
-                  .map((col, idx) => col ? (renameObj[idx] || '') : '')
+                  .map((col, idx) => col ? ((renameObj[idx] || '').toLowerCase()) : '')
                   .filter(Boolean);
                 renameValue = renameValues.join(',');
               } else if (op.rename) {
-                renameValue = op.rename.toString();
+                // Convert to lowercase for case-insensitive matching
+                renameValue = op.rename.toString().toLowerCase();
               }
               
               if (renameValue) {
@@ -2649,7 +2675,8 @@ const MetricsColOps = React.forwardRef<MetricsColOpsRef, MetricsColOpsProps>(({ 
                                         value={(selectedOperation.rename && typeof selectedOperation.rename === 'object' ? (selectedOperation.rename as Record<string, any>)[idx] : '') || ''}
                                         onChange={e => {
                                           const currentRename = (selectedOperation.rename && typeof selectedOperation.rename === 'object' ? selectedOperation.rename as Record<string, any> : {}) || {};
-                                          const newRename = { ...currentRename, [idx]: e.target.value };
+                                          // Convert to lowercase for case-insensitive matching
+                                          const newRename = { ...currentRename, [idx]: e.target.value.toLowerCase() };
                                           updateMetricsOperation(selectedOperation.id, { rename: newRename });
                                         }}
                                         placeholder="New name"

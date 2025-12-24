@@ -12,6 +12,7 @@ class TableLoadRequest(BaseModel):
     atom_id: Optional[str] = None  # Atom ID for session tracking
     project_id: Optional[str] = None  # Project ID for session tracking
     reuse_table_id: Optional[str] = None  # Reuse existing table_id during pipeline runs (instead of creating new UUID)
+    skip_pipeline_recording: Optional[bool] = False  # Skip recording to pipeline (used when called from within KPI Dashboard)
 
 
 class TableSettings(BaseModel):

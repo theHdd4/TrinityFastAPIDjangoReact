@@ -106,18 +106,20 @@ async def init_groupby(
             except Exception as e:
                 logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
             
-            # Prioritize atom_list_configuration as source of truth
-            if card_id_from_config:
-                final_card_id = card_id_from_config
-            elif card_id:
+            # CRITICAL FIX: Prioritize card_id from request (pipeline execution passes the correct card_id)
+            # Only use atom_list_configuration as fallback when no card_id is provided
+            if card_id:
                 final_card_id = card_id
+            elif card_id_from_config:
+                final_card_id = card_id_from_config
             else:
                 final_card_id = validator_atom_id.split("-")[0] if "-" in validator_atom_id else validator_atom_id
             
-            if canvas_position_from_config is not None:
-                final_canvas_position = canvas_position_from_config
-            elif canvas_position is not None:
+            # CRITICAL FIX: Prioritize canvas_position from request too
+            if canvas_position is not None:
                 final_canvas_position = canvas_position
+            elif canvas_position_from_config is not None:
+                final_canvas_position = canvas_position_from_config
             else:
                 final_canvas_position = 0
             
@@ -304,26 +306,27 @@ async def run_groupby(
         except Exception as e:
             logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
     
-    # Prioritize atom_list_configuration as source of truth (same as how atom_list_configuration works)
-    # Use from config if available, otherwise from request, otherwise fallback
-    if card_id_from_config:
-        final_card_id = card_id_from_config
-        logger.info(f"✅ Using card_id from atom_list_configuration: {final_card_id} for atom {validator_atom_id}")
-    elif card_id:
+    # CRITICAL FIX: Prioritize card_id from request (pipeline execution passes the correct card_id)
+    # Only use atom_list_configuration as fallback when no card_id is provided
+    # This prevents duplicate execution_graph entries when pipeline re-runs atoms
+    if card_id:
         final_card_id = card_id
-        logger.info(f"Using card_id from request: {final_card_id} for atom {validator_atom_id}")
+        logger.info(f"✅ Using card_id from request: {final_card_id} for atom {validator_atom_id}")
+    elif card_id_from_config:
+        final_card_id = card_id_from_config
+        logger.info(f"Using card_id from atom_list_configuration: {final_card_id} for atom {validator_atom_id}")
     else:
         # Last resort fallback
         final_card_id = validator_atom_id.split("-")[0] if "-" in validator_atom_id else validator_atom_id
         logger.warning(f"⚠️ Using fallback card_id for {validator_atom_id}: {final_card_id}")
     
-    # Prioritize atom_list_configuration for canvas_position too
-    if canvas_position_from_config is not None:
-        final_canvas_position = canvas_position_from_config
-        logger.info(f"✅ Using canvas_position from atom_list_configuration: {final_canvas_position} for atom {validator_atom_id}")
-    elif canvas_position is not None:
+    # CRITICAL FIX: Prioritize canvas_position from request too
+    if canvas_position is not None:
         final_canvas_position = canvas_position
-        logger.info(f"Using canvas_position from request: {final_canvas_position} for atom {validator_atom_id}")
+        logger.info(f"✅ Using canvas_position from request: {final_canvas_position} for atom {validator_atom_id}")
+    elif canvas_position_from_config is not None:
+        final_canvas_position = canvas_position_from_config
+        logger.info(f"Using canvas_position from atom_list_configuration: {final_canvas_position} for atom {validator_atom_id}")
     else:
         final_canvas_position = 0
         logger.warning(f"⚠️ Using default canvas_position for {validator_atom_id}: 0")

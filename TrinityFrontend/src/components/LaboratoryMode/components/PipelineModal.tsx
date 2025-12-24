@@ -2451,6 +2451,77 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 
                 successCount++;
                 processedCount++;
+              } else if (atomType === 'kpi-dashboard') {
+                // Handle kpi-dashboard atom updates
+                console.log('🔄 [PIPELINE] KPIDashboard restoration started', {
+                  atomInstanceId,
+                  logEntry: logEntry.configuration,
+                });
+                
+                const additionalResults = taskResult.additional_results || taskResult.result?.additional_results || {};
+                const logEntryAdditionalResults = logEntry.additional_results || {};
+                
+                // Get updated layouts from execution results
+                const updatedLayouts = additionalResults.layouts || logEntryAdditionalResults.layouts;
+                const kpiData = additionalResults.kpi_data || logEntryAdditionalResults.kpi_data;
+                const filesReplaced = additionalResults.files_replaced || logEntryAdditionalResults.files_replaced || [];
+                const chartsRegenerated = additionalResults.charts_regenerated || logEntryAdditionalResults.charts_regenerated || [];
+                const tablesReloaded = additionalResults.tables_reloaded || logEntryAdditionalResults.tables_reloaded || [];
+                
+                console.log('📦 [PIPELINE] KPIDashboard execution results', {
+                  has_updatedLayouts: !!updatedLayouts,
+                  layouts_count: updatedLayouts?.length || 0,
+                  files_replaced: filesReplaced.length,
+                  charts_regenerated: chartsRegenerated.length,
+                  tables_reloaded: tablesReloaded.length,
+                });
+                
+                const updateData: any = {
+                  pipelineExecutionTimestamp: Date.now(), // Force re-render
+                };
+                
+                // Update layouts with regenerated charts and reloaded tables
+                if (updatedLayouts && Array.isArray(updatedLayouts) && updatedLayouts.length > 0) {
+                  updateData.layouts = updatedLayouts;
+                  console.log('✅ [PIPELINE] KPIDashboard layouts updated', {
+                    layouts_count: updatedLayouts.length,
+                    boxes_count: updatedLayouts.reduce((sum: number, layout: any) => sum + (layout.boxes?.length || 0), 0),
+                  });
+                }
+                
+                // Update title if available
+                if (kpiData?.title) {
+                  updateData.title = kpiData.title;
+                }
+                
+                // Update selectedFile and dataSource for settings tab (chart maker element)
+                if (kpiData?.selectedFile) {
+                  updateData.selectedFile = kpiData.selectedFile;
+                  console.log('✅ [PIPELINE] KPIDashboard selectedFile updated:', kpiData.selectedFile);
+                }
+                if (kpiData?.dataSource) {
+                  updateData.dataSource = kpiData.dataSource;
+                  console.log('✅ [PIPELINE] KPIDashboard dataSource updated:', kpiData.dataSource);
+                }
+                
+                // Update atom settings
+                await updateAtomForMode(executionMode, atomInstanceId, updateData);
+                
+                // Trigger variables refresh in KPIDashboardCanvas
+                // This ensures metric-cards reload their values from MongoDB
+                useLaboratoryStore.getState().updateMetricsInputs({
+                  variablesRefreshTrigger: Date.now()
+                });
+                
+                console.log('✅ [PIPELINE] KPIDashboard atom settings updated', {
+                  atomInstanceId,
+                  files_replaced: filesReplaced.length,
+                  charts_regenerated: chartsRegenerated.length,
+                  tables_reloaded: tablesReloaded.length,
+                });
+                
+                successCount++;
+                processedCount++;
               } else {
                 // Other atom types - just mark as processed
                 if (isSuccess) {
@@ -2987,6 +3058,141 @@ const PipelineModal: React.FC<PipelineModalProps> = ({ open, onOpenChange, mode 
                 </div>
               </details>
             )}
+
+            {/* Other Atoms (without root file inputs) - like KPI Dashboard with internal file refs */}
+            {(() => {
+              // Find atoms that don't have inputs matching root files
+              // These could be atoms with no inputs, or atoms with inputs that are internal/derived
+              const rootFileKeysSet = new Set(rootFileKeys);
+              const derivedFileKeysSet = new Set(Array.from(derivedFilesMap.keys()));
+              
+              const otherAtoms = executionGraph.filter((step: any) => {
+                // Check if any input matches a root file
+                const hasRootFileInput = step.inputs?.some((input: any) => 
+                  input.file_key && rootFileKeysSet.has(input.file_key)
+                );
+                // Check if any input matches a derived file
+                const hasDerivedFileInput = step.inputs?.some((input: any) => 
+                  input.file_key && derivedFileKeysSet.has(input.file_key)
+                );
+                // Show in "Other Atoms" if it doesn't have root or derived file inputs
+                return !hasRootFileInput && !hasDerivedFileInput;
+              });
+              
+              if (otherAtoms.length === 0) return null;
+              
+              return (
+                <details className="space-y-4">
+                  <summary className="flex items-center gap-2 cursor-pointer hover:text-foreground list-none">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    <h3 className="text-sm font-semibold">Other Atoms ({otherAtoms.length})</h3>
+                    <span className="text-xs text-muted-foreground">▼</span>
+                  </summary>
+                  <div className="space-y-4 max-h-[400px] overflow-y-auto mt-4">
+                    {otherAtoms.map((step: any, idx: number) => {
+                      const exec = step.execution || {};
+                      const status = exec.status || 'pending';
+                      const duration = exec.duration_ms || 0;
+                      const startedAt = exec.started_at ? new Date(exec.started_at).toLocaleString() : 'N/A';
+                      const apiCalls = step.api_calls || [];
+                      
+                      return (
+                        <div key={idx} className="border rounded-lg p-4 space-y-3">
+                          {/* Atom Header */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              {status === 'success' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                              {status === 'failed' && <XCircle className="h-4 w-4 text-red-500" />}
+                              {status === 'pending' && <Clock className="h-4 w-4 text-yellow-500" />}
+                              <span className="font-medium text-sm">{step.atom_title || step.atom_type}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {step.atom_type}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-1 text-muted-foreground text-xs">
+                              <Clock className="h-3 w-3" />
+                              <span>{duration}ms</span>
+                            </div>
+                          </div>
+                          
+                          {/* Execution Metadata */}
+                          <div className="text-xs text-muted-foreground">
+                            <div>Started: {startedAt}</div>
+                            {exec.error && (
+                              <div className="text-red-500">
+                                Error: {exec.error}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Input files (if any - these are internal/embedded file refs) */}
+                          {step.inputs && step.inputs.length > 0 && (
+                            <div className="space-y-1 pt-2 border-t">
+                              <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                                Referenced Files ({step.inputs.length})
+                              </Label>
+                              <div className="text-xs text-muted-foreground space-y-0.5">
+                                {step.inputs.map((input: any, inputIdx: number) => (
+                                  <div key={inputIdx} className="font-mono truncate" title={input.file_key}>
+                                    {input.file_key?.split('/').pop() || input.file_key || 'Unknown'}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* API Calls Section - Collapsible */}
+                          {apiCalls.length > 0 && (
+                            <details className="pt-2 border-t">
+                              <summary className="text-[10px] font-semibold text-muted-foreground cursor-pointer hover:text-foreground list-none">
+                                <div className="flex items-center gap-1">
+                                  <span>Endpoints ({apiCalls.length})</span>
+                                  <span className="text-[8px]">▼</span>
+                                </div>
+                              </summary>
+                              <div className="mt-1 space-y-0.5">
+                                {apiCalls.map((apiCall: any, apiIdx: number) => {
+                                  const apiMethod = apiCall.method || 'N/A';
+                                  const apiEndpoint = apiCall.endpoint || 'N/A';
+                                  const apiStatus = apiCall.response_status || 0;
+                                  const isSuccess = apiStatus >= 200 && apiStatus < 300;
+                                  
+                                  return (
+                                    <div key={apiIdx} className="bg-background/50 rounded px-1.5 py-0.5 text-[9px] border border-muted/30">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`font-mono font-medium ${
+                                          isSuccess ? 'text-green-600' 
+                                          : apiStatus >= 400 ? 'text-red-600' 
+                                          : 'text-yellow-600'
+                                        }`}>
+                                          {apiMethod}
+                                        </span>
+                                        <span className="text-muted-foreground truncate flex-1 font-mono">
+                                          {apiEndpoint}
+                                        </span>
+                                        {apiStatus > 0 && (
+                                          <span className={`text-[8px] px-1 py-0.5 rounded ${
+                                            isSuccess ? 'text-green-600 bg-green-50' 
+                                            : apiStatus >= 400 ? 'text-red-600 bg-red-50' 
+                                            : 'text-yellow-600 bg-yellow-50'
+                                          }`}>
+                                            {apiStatus}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              );
+            })()}
           </div>
         )}
 

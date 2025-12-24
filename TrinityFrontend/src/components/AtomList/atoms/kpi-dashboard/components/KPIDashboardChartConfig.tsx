@@ -486,6 +486,7 @@ const KPIDashboardChartConfig: React.FC<KPIDashboardChartConfigProps> = ({
         traces: traces,
         title: migratedChart.title,
         filters: Object.keys(mergedFilters).length > 0 ? mergedFilters : undefined,
+        skip_pipeline_recording: true, // Don't record as separate step - this is part of KPI Dashboard
       };
 
       const chartResponse = await chartMakerApi.generateChart(chartRequest);

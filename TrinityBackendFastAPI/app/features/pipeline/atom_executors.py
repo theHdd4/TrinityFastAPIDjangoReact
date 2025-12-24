@@ -2737,6 +2737,766 @@ _table_executor = TableExecutor()
 register_atom_executor(_table_executor)
 
 
+class KPIDashboardExecutor(BaseAtomExecutor):
+    """Executor for kpi-dashboard atom.
+    
+    Handles endpoints:
+    - /kpi-dashboard/save-config (save configuration)
+    - /kpi-dashboard/get-config (get configuration)
+    
+    KPI Dashboard stores its configuration in MongoDB's atom_list_configuration collection.
+    During pipeline execution, we reload the saved configuration, apply file replacements
+    to charts and tables within each box, and RE-EXECUTE them to get updated data.
+    """
+    
+    def get_atom_type(self) -> str:
+        return "kpi-dashboard"
+    
+    async def execute(
+        self,
+        atom_instance_id: str,
+        card_id: str,
+        configuration: Dict[str, Any],
+        input_files: List[str],
+        api_calls: List[Dict[str, Any]],
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Execute kpi-dashboard atom based on API calls from MongoDB."""
+        from app.features.kpi_dashboard.mongodb_saver import get_kpi_dashboard_config, save_kpi_dashboard_config
+        from app.features.chart_maker.endpoint import generate_chart
+        from app.features.chart_maker.schemas import ChartRequest, ChartTrace
+        from app.features.chart_maker.service import chart_service
+        
+        # Get client/app/project from kwargs
+        client_name = kwargs.get("client_name", "")
+        app_name = kwargs.get("app_name", "")
+        project_name = kwargs.get("project_name", "")
+        file_replacements = kwargs.get("file_replacements", {})
+        
+        logger.info(
+            f"🔄 KPIDashboard executor: Executing for atom {atom_instance_id} "
+            f"(client: {client_name}, app: {app_name}, project: {project_name})"
+        )
+        logger.info(f"📋 KPIDashboard executor: File replacements: {file_replacements}")
+        
+        task_response = None
+        additional_results = {}
+        
+        # Check which endpoints were called and build box-specific file mappings
+        has_save_config = False
+        has_get_config = False
+        save_config_endpoint = None
+        get_config_endpoint = None
+        
+        # Build a map of box_id -> file info from per-box API calls
+        # This helps apply file replacements correctly during pipeline rerun
+        box_file_map = {}
+        
+        for api_call in api_calls:
+            endpoint = api_call.get("endpoint", "")
+            params = api_call.get("params", {})
+            
+            # Check for save-config endpoint
+            if "save-config" in endpoint.lower() or "/kpi-dashboard/save-config" in endpoint:
+                has_save_config = True
+                save_config_endpoint = api_call
+            # Check for get-config endpoint
+            if "get-config" in endpoint.lower() or "/kpi-dashboard/get-config" in endpoint:
+                has_get_config = True
+                get_config_endpoint = api_call
+            # Check for per-box API calls (chart, table, metric-card)
+            if "/kpi-dashboard/box/" in endpoint:
+                box_id = params.get("box_id")
+                if box_id:
+                    element_type = params.get("element_type")
+                    if element_type == "chart":
+                        box_file_map[box_id] = {
+                            "type": "chart",
+                            "file_id": params.get("file_id"),
+                            "chart_config": params.get("chart_config", {})
+                        }
+                    elif element_type == "table":
+                        box_file_map[box_id] = {
+                            "type": "table",
+                            "source_file": params.get("source_file"),
+                            "table_id": params.get("table_id"),
+                            "visible_columns": params.get("visible_columns"),
+                            "page_size": params.get("page_size")
+                        }
+                    elif element_type == "metric-card":
+                        box_file_map[box_id] = {
+                            "type": "metric-card",
+                            "variable_name_key": params.get("variable_name_key"),
+                            "metric_value": params.get("metric_value"),
+                            "formula": params.get("formula"),
+                            "description": params.get("description")
+                        }
+        
+        logger.info(f"📋 KPIDashboard executor: Found {len(box_file_map)} per-box API calls")
+        
+        # Step 1: Load existing configuration from MongoDB
+        existing_config = None
+        try:
+            existing_config = await get_kpi_dashboard_config(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                atom_id=atom_instance_id
+            )
+            
+            if existing_config:
+                logger.info(
+                    f"✅ KPIDashboard executor: Loaded existing configuration for atom {atom_instance_id}"
+                )
+                additional_results["loaded_config"] = True
+            else:
+                logger.info(
+                    f"ℹ️ KPIDashboard executor: No existing configuration found for atom {atom_instance_id}"
+                )
+                additional_results["loaded_config"] = False
+                # Return early if no config
+                return {
+                    "status": "success",
+                    "result_file": None,
+                    "message": "No KPI Dashboard configuration found",
+                    "task_response": {"status": "success", "has_config": False},
+                    "additional_results": additional_results
+                }
+                
+        except Exception as e:
+            logger.warning(f"⚠️ KPIDashboard executor: Failed to load configuration: {e}")
+            additional_results["loaded_config"] = False
+            additional_results["load_error"] = str(e)
+            return {
+                "status": "failed",
+                "result_file": None,
+                "message": f"Failed to load KPI Dashboard configuration: {e}",
+                "task_response": None,
+                "additional_results": additional_results
+            }
+        
+        # Step 2: Apply file replacements and RE-EXECUTE charts and tables
+        layouts = existing_config.get("layouts", [])
+        updated_layouts = []
+        files_replaced = []
+        charts_regenerated = []
+        tables_reloaded = []
+        
+        logger.info(
+            f"📋 KPIDashboard: Loaded {len(layouts)} layout(s) from existing_config"
+        )
+        
+        # Count elements by type
+        chart_count = 0
+        table_count = 0
+        metric_count = 0
+        for layout in layouts:
+            for box in layout.get("boxes", []):
+                element_type = box.get("elementType")
+                if element_type == "chart":
+                    chart_count += 1
+                elif element_type == "table":
+                    table_count += 1
+                elif element_type == "metric-card":
+                    metric_count += 1
+        
+        logger.info(
+            f"📋 KPIDashboard: Found {chart_count} chart(s), {table_count} table(s), {metric_count} metric-card(s)"
+        )
+        
+        # Get the primary input file for this KPI Dashboard (used when chart doesn't have fileId)
+        primary_input_file = input_files[0] if input_files else None
+        logger.info(f"📋 KPIDashboard: Primary input file (from input_files): {primary_input_file}")
+        logger.info(f"📋 KPIDashboard: File replacements: {file_replacements}")
+        
+        for layout in layouts:
+            updated_layout = layout.copy()
+            updated_boxes = []
+            
+            for box in layout.get("boxes", []):
+                updated_box = box.copy()
+                box_id = box.get("id")
+                
+                # Check if we have per-box API call info for this box
+                box_api_info = box_file_map.get(box_id, {})
+                
+                # Handle chart elements - replace file_id and RE-GENERATE chart
+                if box.get("elementType") == "chart" and box.get("chartConfig"):
+                    chart_config = box.get("chartConfig", {})
+                    
+                    # Get file_id from: 1) per-box API call, 2) chartConfig, 3) fallback sources
+                    original_file_id = None
+                    if box_api_info.get("type") == "chart" and box_api_info.get("file_id"):
+                        original_file_id = box_api_info.get("file_id")
+                        logger.info(f"📊 KPIDashboard: Using file_id from per-box API call: {original_file_id}")
+                    else:
+                        original_file_id = chart_config.get("fileId") or chart_config.get("file_id")
+                    
+                    logger.info(
+                        f"📊 KPIDashboard: Processing chart box {box_id}, "
+                        f"original_file_id: {original_file_id}"
+                    )
+                    
+                    # If chart doesn't have a fileId, try to get it from:
+                    # 1. The table's sourceFile in the same KPI Dashboard
+                    # 2. The primary input file of the KPI Dashboard
+                    if not original_file_id:
+                        logger.info(f"📋 KPIDashboard: Chart has no fileId, searching for alternative source...")
+                        
+                        # Try to find a table's sourceFile in the layouts
+                        for search_layout in layouts:
+                            for search_box in search_layout.get("boxes", []):
+                                if search_box.get("elementType") == "table" and search_box.get("tableSettings"):
+                                    table_source = search_box.get("tableSettings", {}).get("sourceFile")
+                                    logger.info(f"📋 KPIDashboard: Found table with sourceFile: {table_source}")
+                                    if table_source:
+                                        original_file_id = table_source
+                                        logger.info(f"📋 KPIDashboard: Using table sourceFile as chart file: {original_file_id}")
+                                        break
+                            if original_file_id:
+                                break
+                        
+                        # If still no file, use primary input file
+                        if not original_file_id and primary_input_file:
+                            original_file_id = primary_input_file
+                            logger.info(f"📋 KPIDashboard: Using primary input file as chart file: {original_file_id}")
+                    
+                    logger.info(
+                        f"📊 KPIDashboard: Final original_file_id for chart: {original_file_id}, "
+                        f"file_replacements keys: {list(file_replacements.keys())}"
+                    )
+                    
+                    # Determine the file to use (replacement or original)
+                    target_file = original_file_id
+                    if original_file_id and original_file_id in file_replacements:
+                        target_file = file_replacements[original_file_id]
+                        files_replaced.append({
+                            "type": "chart",
+                            "box_id": box_id,
+                            "original": original_file_id,
+                            "replacement": target_file
+                        })
+                        logger.info(
+                            f"🔄 KPIDashboard: Replacing chart file {original_file_id} -> {target_file}"
+                        )
+                    elif original_file_id:
+                        # No replacement found, but we have a file - still regenerate with the file
+                        # This handles the case where the file is already the replacement file
+                        logger.info(f"📋 KPIDashboard: No replacement mapping for {original_file_id}, using as-is")
+                    else:
+                        logger.warning(f"⚠️ KPIDashboard: No file found for chart in box {box.get('id')}")
+                    
+                    logger.info(f"📊 KPIDashboard: target_file for chart regeneration: {target_file}")
+                    
+                    # RE-GENERATE the chart with the target file
+                    if target_file:
+                        try:
+                            # Load dataframe for column mapping
+                            column_lookup = {}
+                            actual_columns = []
+                            try:
+                                df = chart_service.get_file(target_file)
+                                actual_columns = list(df.columns)
+                                column_lookup = {col.lower(): col for col in actual_columns}
+                                logger.info(f"📋 KPIDashboard: Loaded dataframe with {len(actual_columns)} columns")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Could not load dataframe for column mapping: {e}")
+                            
+                            # Build traces from chart config
+                            # KPI Dashboard stores chart config with xAxis, yAxis, type at top level
+                            # NOT in a traces array like the chart-maker atom
+                            traces = []
+                            
+                            # Get x and y axis from chart config (KPI Dashboard format)
+                            x_axis = chart_config.get("xAxis", "")
+                            y_axis = chart_config.get("yAxis", "")
+                            second_y_axis = chart_config.get("secondYAxis", "")
+                            chart_type_config = chart_config.get("type", "line")
+                            aggregation = chart_config.get("aggregation", "sum")
+                            legend_field = chart_config.get("legendField")
+                            is_advanced_mode = chart_config.get("isAdvancedMode", False)
+                            
+                            logger.info(
+                                f"📊 KPIDashboard: Chart config - xAxis: {x_axis}, yAxis: {y_axis}, "
+                                f"secondYAxis: {second_y_axis}, type: {chart_type_config}, "
+                                f"isAdvancedMode: {is_advanced_mode}"
+                            )
+                            
+                            # Check if chart has advanced mode traces
+                            if is_advanced_mode and chart_config.get("traces"):
+                                # Use advanced mode traces
+                                for trace_config in chart_config.get("traces", []):
+                                    trace_y_axis = trace_config.get("yAxis", "")
+                                    trace_name = trace_config.get("name", trace_y_axis)
+                                    trace_aggregation = trace_config.get("aggregation", "sum")
+                                    trace_filters = trace_config.get("filters", {})
+                                    
+                                    # Map to actual column names (case-insensitive)
+                                    x_column = column_lookup.get(x_axis.lower(), x_axis) if x_axis else ""
+                                    y_column = column_lookup.get(trace_y_axis.lower(), trace_y_axis) if trace_y_axis else ""
+                                    
+                                    if x_column and y_column:
+                                        trace = ChartTrace(
+                                            x_column=x_column,
+                                            y_column=y_column,
+                                            name=trace_name,
+                                            chart_type=chart_type_config if chart_type_config != "stacked_bar" else "bar",
+                                            aggregation=trace_aggregation,
+                                            filters=trace_filters if trace_filters else None,
+                                        )
+                                        traces.append(trace)
+                            else:
+                                # Simple mode - build traces from xAxis, yAxis, secondYAxis
+                                # Map to actual column names (case-insensitive)
+                                x_column = column_lookup.get(x_axis.lower(), x_axis) if x_axis else ""
+                                y_column = column_lookup.get(y_axis.lower(), y_axis) if y_axis else ""
+                                
+                                if x_column and y_column:
+                                    # Primary trace
+                                    trace = ChartTrace(
+                                        x_column=x_column,
+                                        y_column=y_column,
+                                        name=y_axis,
+                                        chart_type=chart_type_config if chart_type_config != "stacked_bar" else "bar",
+                                        aggregation=aggregation,
+                                        legend_field=legend_field if legend_field and legend_field != "aggregate" else None,
+                                    )
+                                    traces.append(trace)
+                                    
+                                    # Secondary trace (if secondYAxis is set and not in single axis mode)
+                                    dual_axis_mode = chart_config.get("dualAxisMode", "dual")
+                                    if second_y_axis and dual_axis_mode != "single":
+                                        second_y_column = column_lookup.get(second_y_axis.lower(), second_y_axis) if second_y_axis else ""
+                                        if second_y_column:
+                                            trace2 = ChartTrace(
+                                                x_column=x_column,
+                                                y_column=second_y_column,
+                                                name=second_y_axis,
+                                                chart_type=chart_type_config if chart_type_config != "stacked_bar" else "bar",
+                                                aggregation=aggregation,
+                                                legend_field=legend_field if legend_field and legend_field != "aggregate" else None,
+                                            )
+                                            traces.append(trace2)
+                            
+                            logger.info(f"📊 KPIDashboard: Built {len(traces)} trace(s) for chart")
+                            
+                            # 🔧 CRITICAL: Reset/remove filters during pipeline rerun
+                            # When running pipeline with replacement files, filters from the original file
+                            # may not be valid for the new file (different column values, etc.)
+                            # So we clear all filters to ensure clean chart regeneration
+                            filters = None
+                            if chart_config.get("filters"):
+                                logger.info(
+                                    f"🔄 KPIDashboard: Resetting filters for chart in box {box_id} during pipeline rerun. "
+                                    f"Original filters: {list(chart_config.get('filters', {}).keys())}"
+                                )
+                            
+                            # Build chart request
+                            chart_type = chart_type_config
+                            if chart_type == "stacked_bar":
+                                chart_type = "bar"
+                            
+                            # Only proceed if we have valid traces
+                            if not traces:
+                                logger.warning(
+                                    f"⚠️ KPIDashboard: No valid traces built for chart in box {box_id}. "
+                                    f"xAxis: {x_axis}, yAxis: {y_axis}"
+                                )
+                                charts_regenerated.append({
+                                    "box_id": box_id,
+                                    "file": target_file,
+                                    "status": "skipped",
+                                    "reason": "No valid traces (missing xAxis or yAxis)"
+                                })
+                            else:
+                                request = ChartRequest(
+                                    file_id=target_file,
+                                    chart_type=chart_type,
+                                    traces=traces,
+                                    title=chart_config.get("title"),
+                                    filters=filters,  # Always None - filters are reset during pipeline rerun
+                                    validator_atom_id=atom_instance_id,
+                                    card_id=card_id,
+                                    canvas_position=kwargs.get("canvas_position", 0),
+                                    skip_pipeline_recording=True,  # Don't record as separate step - this is part of KPI Dashboard
+                                )
+                                
+                                # Generate chart
+                                logger.info(
+                                    f"📊 KPIDashboard: Calling generate_chart with file_id={target_file}, "
+                                    f"chart_type={chart_type}, traces_count={len(traces)}"
+                                )
+                                result = await generate_chart(request)
+                                
+                                logger.info(
+                                    f"📊 KPIDashboard: generate_chart returned type={type(result)}, "
+                                    f"has_model_dump={hasattr(result, 'model_dump')}, "
+                                    f"has_dict={hasattr(result, 'dict')}, "
+                                    f"is_dict={isinstance(result, dict)}"
+                                )
+                                
+                                # Convert result to dict
+                                if hasattr(result, 'model_dump'):
+                                    result_dict = result.model_dump()
+                                elif hasattr(result, 'dict'):
+                                    result_dict = result.dict()
+                                elif isinstance(result, dict):
+                                    result_dict = result
+                                else:
+                                    result_dict = {}
+                                
+                                logger.info(
+                                    f"📊 KPIDashboard: result_dict keys={list(result_dict.keys())}, "
+                                    f"has_chart_config={bool(result_dict.get('chart_config'))}, "
+                                    f"task_status={result_dict.get('task_status')}"
+                                )
+                                
+                                # Update chart config with new data
+                                updated_chart_config = chart_config.copy()
+                                updated_chart_config["fileId"] = target_file
+                                updated_chart_config["file_id"] = target_file
+                                
+                                # 🔧 CRITICAL: Reset/clear filters during pipeline rerun
+                                # Filters from the original file may not be valid for the replacement file
+                                updated_chart_config["filters"] = {}
+                                
+                                # Merge new chart data into config
+                                # CRITICAL: The frontend reads from chartConfig.chartConfig (nested structure)
+                                # The API returns chart_config which contains data, traces, chart_type, etc.
+                                if result_dict.get("chart_config"):
+                                    new_chart_config = result_dict.get("chart_config", {})
+                                    # Convert to dict if it's a Pydantic model
+                                    if hasattr(new_chart_config, 'model_dump'):
+                                        new_chart_config = new_chart_config.model_dump()
+                                    elif hasattr(new_chart_config, 'dict'):
+                                        new_chart_config = new_chart_config.dict()
+                                    
+                                    # Update the nested chartConfig with the ENTIRE chart_config from API
+                                    updated_chart_config["chartConfig"] = new_chart_config
+                                    # Also update filteredData (used by frontend for rendering)
+                                    updated_chart_config["filteredData"] = new_chart_config.get("data", [])
+                                    # Mark chart as rendered
+                                    updated_chart_config["chartRendered"] = True
+                                    
+                                    logger.info(
+                                        f"📊 KPIDashboard: Chart data updated - "
+                                        f"data_points: {len(new_chart_config.get('data', []))}, "
+                                        f"traces: {len(new_chart_config.get('traces', []))}, "
+                                        f"filteredData_count: {len(updated_chart_config.get('filteredData', []))}, "
+                                        f"filters_reset: True"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"⚠️ KPIDashboard: generate_chart did not return chart_config! "
+                                        f"result_dict keys: {list(result_dict.keys())}"
+                                    )
+                                
+                                updated_box["chartConfig"] = updated_chart_config
+                                charts_regenerated.append({
+                                    "box_id": box_id,
+                                    "file": target_file,
+                                    "status": "success",
+                                    "filters_reset": True
+                                })
+                                logger.info(f"✅ KPIDashboard: Regenerated chart for box {box_id} (filters reset)")
+                            
+                        except Exception as e:
+                            logger.error(f"❌ KPIDashboard: Failed to regenerate chart: {e}", exc_info=True)
+                            charts_regenerated.append({
+                                "box_id": box_id,
+                                "file": target_file,
+                                "status": "failed",
+                                "error": str(e)
+                            })
+                            # Keep original chart config but update file reference and reset filters
+                            updated_chart_config = chart_config.copy()
+                            updated_chart_config["fileId"] = target_file
+                            updated_chart_config["file_id"] = target_file
+                            updated_chart_config["filters"] = {}  # Reset filters even on error
+                            updated_box["chartConfig"] = updated_chart_config
+                
+                # Handle table elements - replace sourceFile and reload table data
+                if box.get("elementType") == "table" and box.get("tableSettings"):
+                    table_settings = box.get("tableSettings", {})
+                    
+                    # Get source_file from: 1) per-box API call, 2) tableSettings
+                    original_source_file = None
+                    if box_api_info.get("type") == "table" and box_api_info.get("source_file"):
+                        original_source_file = box_api_info.get("source_file")
+                        logger.info(f"📋 KPIDashboard: Using source_file from per-box API call: {original_source_file}")
+                    else:
+                        original_source_file = table_settings.get("sourceFile")
+                    
+                    existing_table_id = table_settings.get("tableId") or table_settings.get("tableData", {}).get("table_id")
+                    
+                    logger.info(
+                        f"📋 KPIDashboard: Processing table box {box_id}, "
+                        f"original_source_file: {original_source_file}, existing_table_id: {existing_table_id}"
+                    )
+                    
+                    # Determine the file to use (replacement or original)
+                    target_file = original_source_file
+                    if original_source_file and original_source_file in file_replacements:
+                        target_file = file_replacements[original_source_file]
+                        files_replaced.append({
+                            "type": "table",
+                            "box_id": box_id,
+                            "original": original_source_file,
+                            "replacement": target_file
+                        })
+                        logger.info(
+                            f"🔄 KPIDashboard: Replacing table file {original_source_file} -> {target_file}"
+                        )
+                    
+                    # Reload table data from the target file
+                    if target_file:
+                        try:
+                            # Import table session management
+                            from app.features.table.routes import SESSIONS as TABLE_SESSIONS
+                            from app.features.table.service import load_table_from_minio, get_column_types
+                            import uuid as uuid_module
+                            
+                            # Load the dataframe from MinIO
+                            df, conditional_format_styles, table_metadata = load_table_from_minio(target_file)
+                            
+                            # Create a new table session directly (without calling the API endpoint)
+                            # This avoids recording a separate pipeline step for the table
+                            new_table_id = str(uuid_module.uuid4())
+                            TABLE_SESSIONS[new_table_id] = df
+                            logger.info(f"📋 KPIDashboard: Created new table session {new_table_id} for {target_file}")
+                            
+                            # Get visible columns from: 1) per-box API call, 2) tableSettings, 3) all columns
+                            visible_columns = None
+                            if box_api_info.get("type") == "table" and box_api_info.get("visible_columns"):
+                                visible_columns = box_api_info.get("visible_columns")
+                            else:
+                                visible_columns = table_settings.get("visibleColumns", list(df.columns))
+                            
+                            # Filter to only columns that exist in the new file
+                            existing_columns = [col for col in visible_columns if col in df.columns]
+                            if not existing_columns:
+                                existing_columns = list(df.columns)
+                            
+                            # Get page_size from: 1) per-box API call, 2) tableSettings
+                            page_size = box_api_info.get("page_size") if box_api_info.get("type") == "table" else None
+                            if page_size is None:
+                                page_size = table_settings.get("pageSize", 50)
+                            
+                            # Get table data (limited rows for performance)
+                            rows = df.head(page_size).to_dicts()
+                            
+                            # Get column types using the table service function
+                            column_types = get_column_types(df)
+                            
+                            # Update table settings - preserve the tableData structure
+                            updated_table_settings = table_settings.copy()
+                            updated_table_settings["sourceFile"] = target_file
+                            
+                            # Build new tableData with the new session ID
+                            updated_table_data = {
+                                "table_id": new_table_id,
+                                "rows": rows,
+                                "columns": list(df.columns),
+                                "row_count": len(df),
+                                "column_types": column_types,
+                                "object_name": target_file,
+                            }
+                            
+                            # Include conditional format styles if available
+                            if conditional_format_styles:
+                                updated_table_data["conditional_format_styles"] = conditional_format_styles
+                            
+                            updated_table_settings["tableData"] = updated_table_data
+                            # Set the new tableId at the settings level
+                            updated_table_settings["tableId"] = new_table_id
+                            updated_table_settings["visibleColumns"] = existing_columns
+                            updated_table_settings["columnOrder"] = existing_columns
+                            # Reset to page 1 when data changes
+                            updated_table_settings["currentPage"] = 1
+                            
+                            updated_box["tableSettings"] = updated_table_settings
+                            tables_reloaded.append({
+                                "box_id": box.get("id"),
+                                "file": target_file,
+                                "table_id": new_table_id,
+                                "rows": len(rows),
+                                "total_rows": len(df),
+                                "columns": len(existing_columns),
+                                "status": "success"
+                            })
+                            logger.info(
+                                f"✅ KPIDashboard: Reloaded table for box {box.get('id')} "
+                                f"(table_id: {new_table_id}, {len(rows)} rows displayed, {len(df)} total rows)"
+                            )
+                            
+                        except Exception as e:
+                            logger.error(f"❌ KPIDashboard: Failed to reload table: {e}", exc_info=True)
+                            tables_reloaded.append({
+                                "box_id": box.get("id"),
+                                "file": target_file,
+                                "status": "failed",
+                                "error": str(e)
+                            })
+                            # Keep original table settings but update file reference
+                            updated_table_settings = table_settings.copy()
+                            updated_table_settings["sourceFile"] = target_file
+                            updated_box["tableSettings"] = updated_table_settings
+                
+                # Handle metric-card elements - refresh variable values from MongoDB
+                if box.get("elementType") == "metric-card":
+                    variable_name_key = box.get("variableNameKey") or box.get("variableName")
+                    if variable_name_key:
+                        try:
+                            # Fetch updated variable value from MongoDB
+                            from app.features.laboratory.mongodb_saver import get_config_variable_collection
+                            
+                            collection = get_config_variable_collection()
+                            doc_id = f"{client_name}/{app_name}/{project_name}"
+                            document = await collection.find_one({"_id": doc_id})
+                            
+                            if document:
+                                variables = document.get("variables", {})
+                                # Try to find the variable by variableNameKey or variableName
+                                variable_data = variables.get(variable_name_key)
+                                
+                                if variable_data:
+                                    # Update the metric-card with the new value
+                                    updated_box["metricValue"] = variable_data.get("value", box.get("metricValue", "0"))
+                                    updated_box["value"] = variable_data.get("value", box.get("value", "0"))
+                                    updated_box["formula"] = variable_data.get("formula", box.get("formula"))
+                                    updated_box["description"] = variable_data.get("description", box.get("description"))
+                                    updated_box["updatedAt"] = variable_data.get("updated_at")
+                                    
+                                    logger.info(
+                                        f"✅ KPIDashboard: Updated metric-card '{variable_name_key}' "
+                                        f"with value: {variable_data.get('value')}"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"⚠️ KPIDashboard: Variable '{variable_name_key}' not found in MongoDB"
+                                    )
+                            else:
+                                logger.warning(
+                                    f"⚠️ KPIDashboard: No variables document found for {doc_id}"
+                                )
+                        except Exception as e:
+                            logger.error(f"❌ KPIDashboard: Failed to fetch variable '{variable_name_key}': {e}")
+                
+                updated_boxes.append(updated_box)
+            
+            updated_layout["boxes"] = updated_boxes
+            updated_layouts.append(updated_layout)
+        
+        # Store results
+        additional_results["files_replaced"] = files_replaced
+        additional_results["charts_regenerated"] = charts_regenerated
+        additional_results["tables_reloaded"] = tables_reloaded
+        additional_results["layouts"] = updated_layouts
+        
+        logger.info(
+            f"✅ KPIDashboard executor: Processed {len(files_replaced)} file replacement(s), "
+            f"{len(charts_regenerated)} chart(s), {len(tables_reloaded)} table(s)"
+        )
+        
+        # Determine the new selectedFile/dataSource based on file replacements
+        # Use the first replacement file as the new data source for the settings tab
+        new_selected_file = None
+        new_data_source = None
+        
+        if files_replaced:
+            # Get the first replacement file (typically the main data source)
+            first_replacement = files_replaced[0]
+            new_selected_file = first_replacement.get("replacement")
+            if new_selected_file:
+                # Extract filename from path for dataSource
+                new_data_source = new_selected_file.split("/")[-1] if "/" in new_selected_file else new_selected_file
+                logger.info(
+                    f"📋 KPIDashboard: Updating selectedFile to '{new_selected_file}', dataSource to '{new_data_source}'"
+                )
+        elif primary_input_file:
+            # No replacements, but we have a primary input file - use it
+            new_selected_file = primary_input_file
+            new_data_source = primary_input_file.split("/")[-1] if "/" in primary_input_file else primary_input_file
+        
+        # Step 3: Save the updated configuration back to MongoDB
+        try:
+            kpi_data = {
+                "layouts": updated_layouts,
+                "title": existing_config.get("title", "KPI Dashboard"),
+                "activeLayoutIndex": existing_config.get("activeLayoutIndex", 0),
+                "editInteractionsMode": existing_config.get("editInteractionsMode", False),
+                "elementInteractions": existing_config.get("elementInteractions", {}),
+            }
+            
+            # Include selectedFile and dataSource if we have them
+            if new_selected_file:
+                kpi_data["selectedFile"] = new_selected_file
+            if new_data_source:
+                kpi_data["dataSource"] = new_data_source
+            
+            save_result = await save_kpi_dashboard_config(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                atom_id=atom_instance_id,
+                kpi_dashboard_data=kpi_data,
+                user_id="pipeline",
+                project_id=None,
+                explicit_save=False  # Autosave mode during pipeline
+            )
+            
+            if save_result.get("status") == "success":
+                logger.info(
+                    f"✅ KPIDashboard executor: Updated configuration saved to MongoDB for atom {atom_instance_id}"
+                )
+                additional_results["save_result"] = save_result
+            else:
+                logger.warning(
+                    f"⚠️ KPIDashboard executor: Failed to save configuration: {save_result.get('error')}"
+                )
+                additional_results["save_error"] = save_result.get("error")
+                
+        except Exception as e:
+            logger.error(f"❌ KPIDashboard executor: Error saving configuration: {e}")
+            additional_results["save_error"] = str(e)
+        
+        # Store final kpi_data for frontend (includes selectedFile and dataSource for settings tab)
+        additional_results["kpi_data"] = {
+            "layouts": updated_layouts,
+            "title": existing_config.get("title", "KPI Dashboard"),
+        }
+        
+        # Include selectedFile and dataSource in kpi_data for frontend settings tab update
+        if new_selected_file:
+            additional_results["kpi_data"]["selectedFile"] = new_selected_file
+        if new_data_source:
+            additional_results["kpi_data"]["dataSource"] = new_data_source
+        
+        # Build task response
+        task_response = {
+            "status": "success",
+            "atom_id": atom_instance_id,
+            "has_config": True,
+            "layouts_count": len(updated_layouts),
+            "files_replaced_count": len(files_replaced),
+            "charts_regenerated_count": len(charts_regenerated),
+            "tables_reloaded_count": len(tables_reloaded),
+        }
+        
+        # Return success
+        return {
+            "status": "success",
+            "result_file": None,  # KPI Dashboard doesn't produce output files
+            "message": f"KPI Dashboard updated: {len(charts_regenerated)} chart(s), {len(tables_reloaded)} table(s)",
+            "task_response": task_response,
+            "additional_results": additional_results
+        }
+
+
+_kpi_dashboard_executor = KPIDashboardExecutor()
+register_atom_executor(_kpi_dashboard_executor)
+
+
 async def execute_atom_step(
     atom_type: str,
     atom_instance_id: str,

@@ -552,7 +552,7 @@ async def load_table(
                 except Exception as e:
                     logger.warning(f"Failed to get atom configuration: {e}")
             
-            if final_client_name and final_app_name and final_project_name and atom_id:
+            if final_client_name and final_app_name and final_project_name and atom_id and not request.skip_pipeline_recording:
                 await record_atom_execution(
                     client_name=final_client_name,
                     app_name=final_app_name,

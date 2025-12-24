@@ -87,6 +87,30 @@ def _get_preserved_column_operations(doc_id: str, existing_column_operations: Li
     return existing_column_operations if existing_column_operations else []
 
 
+def _get_preserved_variable_operations(doc_id: str, existing_variable_operations: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Get preserved variable_operations from rerun, or return existing if available.
+    
+    Args:
+        doc_id: Document ID
+        existing_variable_operations: Existing variable_operations from document (if available)
+    
+    Returns:
+        Preserved variable_operations if available from rerun, otherwise existing variable_operations
+    """
+    try:
+        from app.features.pipeline.endpoint import run_pipeline
+        if hasattr(run_pipeline, '_preserved_variable_operations'):
+            preserved = run_pipeline._preserved_variable_operations.get(doc_id, [])
+            if preserved:
+                logger.info(f"💾 Using preserved variable_operations with {len(preserved)} entries for {doc_id}")
+                return preserved
+    except Exception as e:
+        logger.warning(f"⚠️ Could not access preserved variable_operations: {e}")
+    
+    # Return existing variable_operations if available, otherwise empty list
+    return existing_variable_operations if existing_variable_operations else []
+
+
 async def save_column_operations(
     client_name: str,
     app_name: str,
@@ -370,6 +394,233 @@ async def save_column_operations(
         
     except Exception as e:
         logger.error(f"❌ Error saving column operations: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def save_variable_operations(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    input_file: str,
+    compute_mode: str,
+    operations: List[Dict[str, Any]],
+    created_variables: List[str],
+    identifiers: Optional[List[str]] = None,
+    mode: str = "laboratory"
+) -> Dict[str, Any]:
+    """Save variable operations to pipeline execution.
+    
+    Operations are merged based on variable name (customName or auto-generated name).
+    If a variable with the same name already exists, its operation is replaced.
+    
+    Args:
+        client_name: Client identifier
+        app_name: App identifier
+        project_name: Project identifier
+        input_file: Input file path (data source)
+        compute_mode: Compute mode (whole-dataframe or within-group)
+        operations: List of operation dictionaries
+        created_variables: List of created variable names
+        identifiers: List of identifiers for within-group mode
+        mode: Mode (laboratory, workflow, exhibition)
+    
+    Returns:
+        Result dictionary with status
+    """
+    try:
+        coll = await get_pipeline_collection()
+        
+        client_id = client_name
+        app_id = app_name
+        project_id = project_name
+        
+        # Build composite _id
+        doc_id = f"{client_id}/{app_id}/{project_id}"
+        
+        # Get or create pipeline execution document
+        existing_doc = await coll.find_one({"_id": doc_id})
+        
+        execution_timestamp = datetime.utcnow()
+        
+        # Helper function to get variable name from operation
+        def get_variable_name(op: Dict[str, Any]) -> str:
+            """Get the variable name from an operation (customName or auto-generated)."""
+            if op.get("customName") and op["customName"].strip():
+                return op["customName"].strip().lower()
+            # Auto-generate name based on operation
+            method = op.get("method", "")
+            numerical_col = op.get("numericalColumn", "")
+            second_col = op.get("secondColumn")
+            second_val = op.get("secondValue")
+            
+            if method in ['add', 'subtract', 'multiply', 'divide']:
+                if second_col:
+                    return f"{numerical_col}_{method}_{second_col}".lower()
+                elif second_val is not None:
+                    return f"{numerical_col}_{method}_{second_val}".lower()
+            return f"{numerical_col}_{method}".lower()
+        
+        if existing_doc:
+            # Update existing document
+            pipeline = existing_doc.get("pipeline", {})
+            variable_operations = pipeline.get("variable_operations", [])
+            
+            # Find existing variable operations config for this file with matching compute_mode and identifiers
+            existing_index = None
+            new_identifiers_tuple = tuple(sorted(identifiers or []))
+            
+            for idx, var_op in enumerate(variable_operations):
+                stored_input_file = var_op.get("input_file")
+                stored_compute_mode = var_op.get("compute_mode", "whole-dataframe")
+                stored_identifiers = var_op.get("identifiers") or []
+                stored_identifiers_tuple = tuple(sorted(stored_identifiers))
+                
+                # Match if input_file, compute_mode, and identifiers all match
+                if (stored_input_file == input_file and 
+                    stored_compute_mode == compute_mode and 
+                    stored_identifiers_tuple == new_identifiers_tuple):
+                    existing_index = idx
+                    break
+            
+            if existing_index is not None:
+                # Merge operations: replace operations with same variable name, append others
+                existing_ops = variable_operations[existing_index].get("operations", [])
+                existing_created_vars = set(variable_operations[existing_index].get("created_variables", []))
+                
+                # Build a map of variable_name -> operation index in existing ops
+                var_name_to_op_idx = {}
+                for idx, op in enumerate(existing_ops):
+                    var_name = get_variable_name(op)
+                    if var_name:
+                        var_name_to_op_idx[var_name] = idx
+                
+                # Process new operations
+                operations_to_append = []
+                replaced_count = 0
+                
+                for new_op in operations:
+                    var_name = get_variable_name(new_op)
+                    if var_name and var_name in var_name_to_op_idx:
+                        # Replace existing operation with same variable name
+                        existing_op_idx = var_name_to_op_idx[var_name]
+                        existing_ops[existing_op_idx] = new_op
+                        replaced_count += 1
+                        logger.info(
+                            f"🔄 Replaced variable operation for '{var_name}' in file {input_file}"
+                        )
+                    else:
+                        # Append new operation
+                        operations_to_append.append(new_op)
+                
+                # Append new operations that don't conflict
+                existing_ops.extend(operations_to_append)
+                
+                # Update created_variables list (union of existing and new)
+                updated_created_vars = list(existing_created_vars.union(set(created_variables)))
+                
+                # Update the existing config
+                variable_operations[existing_index]["operations"] = existing_ops
+                variable_operations[existing_index]["created_variables"] = updated_created_vars
+                variable_operations[existing_index]["saved_at"] = execution_timestamp
+                # Preserve original_input_file if it exists
+                if "original_input_file" not in variable_operations[existing_index]:
+                    variable_operations[existing_index]["original_input_file"] = input_file
+                
+                logger.info(
+                    f"🔄 Merged variable operations for file {input_file} (compute_mode: {compute_mode}, "
+                    f"identifiers: {identifiers}) in {doc_id}: {len(operations_to_append)} new, {replaced_count} replaced"
+                )
+            else:
+                # No existing config for this file+compute_mode+identifiers combination, add new one
+                var_ops_config = {
+                    "input_file": input_file,
+                    "original_input_file": input_file,
+                    "compute_mode": compute_mode,
+                    "identifiers": identifiers,
+                    "operations": operations,
+                    "created_variables": created_variables,
+                    "saved_at": execution_timestamp
+                }
+                variable_operations.append(var_ops_config)
+                logger.info(
+                    f"➕ Added new variable operations for file {input_file} (compute_mode: {compute_mode}, "
+                    f"identifiers: {identifiers}) in {doc_id}"
+                )
+            
+            # Update document
+            # CRITICAL: Preserve data_summary
+            existing_data_summary = pipeline.get("data_summary", [])
+            final_data_summary = _get_preserved_data_summary(doc_id, existing_data_summary)
+            
+            await coll.update_one(
+                {"_id": doc_id},
+                {
+                    "$set": {
+                        "execution_timestamp": execution_timestamp,
+                        "pipeline.variable_operations": variable_operations,
+                        "pipeline.data_summary": final_data_summary  # Preserve data_summary
+                    }
+                }
+            )
+        else:
+            # Create new document with variable operations
+            # CRITICAL: Preserve data_summary if available from rerun
+            preserved_data_summary = _get_preserved_data_summary(doc_id)
+            
+            var_ops_config = {
+                "input_file": input_file,
+                "original_input_file": input_file,
+                "compute_mode": compute_mode,
+                "identifiers": identifiers,
+                "operations": operations,
+                "created_variables": created_variables,
+                "saved_at": execution_timestamp
+            }
+            
+            doc = {
+                "_id": doc_id,
+                "execution_id": f"exec_{int(time.time() * 1000)}",
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "execution_timestamp": execution_timestamp,
+                "user_id": "unknown",
+                "pipeline": {
+                    "root_files": [],
+                    "execution_graph": [],
+                    "lineage": {
+                        "nodes": [],
+                        "edges": []
+                    },
+                    "column_operations": [],
+                    "variable_operations": [var_ops_config],
+                    "data_summary": preserved_data_summary  # Preserve data_summary from rerun
+                },
+                "summary": {
+                    "total_atoms": 0,
+                    "total_files": 0,
+                    "root_files_count": 0,
+                    "derived_files_count": 0,
+                    "total_duration_ms": 0,
+                    "status": "success"
+                }
+            }
+            
+            await coll.insert_one(doc)
+            logger.info(
+                f"✅ Created new pipeline execution document with variable operations for {doc_id}"
+            )
+        
+        return {
+            "status": "success",
+            "message": "Variable operations saved successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving variable operations: {e}")
         return {
             "status": "error",
             "error": str(e)
@@ -1004,90 +1255,7 @@ async def record_atom_execution(
                     logger.info(
                         f"📋 [CHART-MAKER] Merged API calls: {len(preserved_api_calls)} preserved + {len(api_calls)} new"
                     )
-                # elif atom_type == "table":
-                #     # For table atoms, we need special handling:
-                #     # - Keep only the FIRST /table/load call (initial load)
-                #     # - Preserve all /table/update, /table/edit-cell, column ops, etc. (operations)
-                #     # - If a new /table/load comes in, replace the old one (it's just a refresh)
-                #     has_preserved_load = False
-                #     load_call_to_preserve = None
-                    
-                #     for existing_call in existing_api_calls:
-                #         endpoint = existing_call.get("endpoint", "")
-                        
-                #         if "/table/load" in endpoint.lower() or endpoint.endswith("/load"):
-                #             # Only preserve the first /table/load call
-                #             if not has_preserved_load:
-                #                 load_call_to_preserve = existing_call
-                #                 has_preserved_load = True
-                #                 logger.info(
-                #                     f"📌 [TABLE] Preserving first /table/load call"
-                #                 )
-                #             else:
-                #                 # Skip subsequent /table/load calls (they're just refreshes)
-                #                 logger.info(
-                #                     f"🔄 [TABLE] Skipping duplicate /table/load call (refresh)"
-                #                 )
-                #         elif endpoint not in execution_endpoints:
-                #             # Preserve all other non-execution calls (update, edit-cell, column ops, etc.)
-                #             preserved_api_calls.append(existing_call)
-                #             logger.info(
-                #                 f"📌 [TABLE] Preserving API call: {endpoint}"
-                #             )
-                    
-                #     # Add the preserved load call at the beginning if it exists
-                #     if load_call_to_preserve:
-                #         preserved_api_calls.insert(0, load_call_to_preserve)
-                    
-                #     # Check if new API calls include a /table/load
-                #     new_load_calls = [call for call in api_calls if "/table/load" in call.get("endpoint", "").lower() or call.get("endpoint", "").endswith("/load")]
-                #     new_operation_calls = [call for call in api_calls if call not in new_load_calls]
-                    
-                #     # 🔧 CRITICAL: Check if the new load is loading a file that's an output from this same atom (save as scenario)
-                #     new_load_file = None
-                #     is_loading_own_output = False
-                #     if new_load_calls:
-                #         new_load_params = new_load_calls[0].get("params", {})
-                #         new_load_file = new_load_params.get("object_name", "")
-                        
-                #         # Check if this file is in the outputs of the existing step (save as scenario)
-                #         existing_outputs = existing_step.get("outputs", [])
-                #         for output in existing_outputs:
-                #             if output.get("file_key") == new_load_file:
-                #                 is_loading_own_output = True
-                #                 logger.info(
-                #                     f"🔄 [TABLE] New /table/load is loading own output file '{new_load_file}' (save as scenario) - preserving all old operations"
-                #                 )
-                #                 break
-                    
-                #     if new_load_calls:
-                #         if is_loading_own_output:
-                #             # Save as scenario: preserve ALL old operations (load, updates, etc.)
-                #             # Add new load at the beginning, but keep all old operations
-                #             merged_api_calls = new_load_calls + preserved_api_calls + new_operation_calls
-                #             logger.info(
-                #                 f"📋 [TABLE] Save as scenario: {len(new_load_calls)} new load(s) + {len(preserved_api_calls)} preserved operations + {len(new_operation_calls)} new operations"
-                #             )
-                #         else:
-                #             # Regular file refresh: replace old load, preserve operations
-                #             if load_call_to_preserve:
-                #                 logger.info(
-                #                     f"🔄 [TABLE] Replacing old /table/load with new one (file refresh)"
-                #                 )
-                #                 # Remove the old load call from preserved_api_calls
-                #                 preserved_api_calls = [call for call in preserved_api_calls if call != load_call_to_preserve]
-                #             # Add the new load call at the beginning
-                #             # Then preserved operations, then new operations
-                #             merged_api_calls = new_load_calls + preserved_api_calls + new_operation_calls
-                #             logger.info(
-                #                 f"📋 [TABLE] Merged API calls: {len(new_load_calls)} load(s) + {len(preserved_api_calls)} preserved + {len(new_operation_calls)} new operations"
-                #             )
-                #     else:
-                #         # No new load call, just append new operation calls (updates, etc.) at the end
-                #         merged_api_calls = preserved_api_calls + new_operation_calls
-                #         logger.info(
-                #             f"📋 [TABLE] Merged API calls: {len(preserved_api_calls)} preserved + {len(new_operation_calls)} new operations"
-                        # )
+              
                 elif atom_type == "groupby-wtg-avg":
                     # For groupby atoms: 
                     # - If pipeline rerun (is_pipeline_rerun=True): REPLACE all API calls (same endpoints, updated files)
@@ -1182,6 +1350,96 @@ async def record_atom_execution(
                         logger.info(
                             f"📋 [TABLE] Normal operation: Appended {len(api_calls)} new API call(s) to existing {len(existing_api_calls)} call(s). "
                             f"Total: {len(merged_api_calls)} API calls preserved."
+                        )
+                elif atom_type == "kpi-dashboard":
+                    # For KPI Dashboard atoms:
+                    # - If pipeline rerun (is_pipeline_rerun=True): REPLACE all API calls (same endpoints, updated files)
+                    # - If normal operation: REPLACE API calls intelligently:
+                    #   - Replace /kpi-dashboard/save-config call (there should only be one)
+                    #   - Replace per-box API calls based on box_id
+                    # This prevents accumulation of 50-60 API calls
+                    if is_pipeline_rerun:
+                        # Pipeline rerun: Replace all API calls (same endpoints, files updated from replacements)
+                        merged_api_calls = api_calls
+                        logger.info(
+                            f"🔄 [KPI-DASHBOARD] Pipeline rerun: Replaced {len(existing_api_calls)} existing API calls with {len(api_calls)} new calls "
+                            f"(same endpoints, updated files from replacements)"
+                        )
+                    else:
+                        # Normal operation: Replace API calls intelligently
+                        # 1. Replace /kpi-dashboard/save-config call (only keep the latest one)
+                        # 2. Replace per-box API calls based on box_id
+                        
+                        # Build maps for replacement
+                        save_config_idx = None  # Index of existing save-config call
+                        box_id_to_existing_idx = {}  # box_id -> index for per-box calls
+                        
+                        for idx, existing_call in enumerate(existing_api_calls):
+                            endpoint = existing_call.get("endpoint", "")
+                            existing_params = existing_call.get("params", {})
+                            
+                            # Track save-config call
+                            if "/kpi-dashboard/save-config" in endpoint or endpoint == "/kpi-dashboard/save-config":
+                                save_config_idx = idx
+                            
+                            # Track per-box calls
+                            existing_box_id = existing_params.get("box_id")
+                            if existing_box_id:
+                                box_id_to_existing_idx[existing_box_id] = idx
+                        
+                        # Start with existing API calls (will be modified in place)
+                        merged_api_calls = list(existing_api_calls)
+                        replaced_count = 0
+                        appended_count = 0
+                        
+                        for new_call in api_calls:
+                            endpoint = new_call.get("endpoint", "")
+                            new_params = new_call.get("params", {})
+                            new_box_id = new_params.get("box_id")
+                            
+                            # Handle save-config call - replace existing one
+                            if "/kpi-dashboard/save-config" in endpoint or endpoint == "/kpi-dashboard/save-config":
+                                if save_config_idx is not None:
+                                    # Replace existing save-config call
+                                    merged_api_calls[save_config_idx] = new_call
+                                    replaced_count += 1
+                                    logger.info(
+                                        f"🔄 [KPI-DASHBOARD] Replaced save-config API call"
+                                    )
+                                else:
+                                    # No existing save-config, append it
+                                    merged_api_calls.append(new_call)
+                                    save_config_idx = len(merged_api_calls) - 1
+                                    appended_count += 1
+                                    logger.info(
+                                        f"➕ [KPI-DASHBOARD] Appended save-config API call (first one)"
+                                    )
+                            # Handle per-box calls - replace based on box_id
+                            elif new_box_id:
+                                if new_box_id in box_id_to_existing_idx:
+                                    # Replace existing API call for this box
+                                    existing_idx = box_id_to_existing_idx[new_box_id]
+                                    merged_api_calls[existing_idx] = new_call
+                                    replaced_count += 1
+                                    logger.info(
+                                        f"🔄 [KPI-DASHBOARD] Replaced API call for box_id: {new_box_id}"
+                                    )
+                                else:
+                                    # New box, append the API call
+                                    merged_api_calls.append(new_call)
+                                    box_id_to_existing_idx[new_box_id] = len(merged_api_calls) - 1
+                                    appended_count += 1
+                                    logger.info(
+                                        f"➕ [KPI-DASHBOARD] Appended API call for new box_id: {new_box_id}"
+                                    )
+                            else:
+                                # Unknown call type without box_id, append it
+                                merged_api_calls.append(new_call)
+                                appended_count += 1
+                        
+                        logger.info(
+                            f"📋 [KPI-DASHBOARD] Normal operation: {replaced_count} replaced, {appended_count} appended. "
+                            f"Total: {len(merged_api_calls)} API calls."
                         )
                 else:
                     # For other atom types, use the original logic
@@ -2531,6 +2789,228 @@ async def record_column_operations_execution(
         }
 
 
+async def record_variable_operations_execution(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    input_file: str,
+    compute_mode: str,
+    operations: List[Dict[str, Any]],
+    created_variables: List[str],
+    execution_status: str = "success",
+    execution_error: Optional[str] = None,
+    identifiers: Optional[List[str]] = None,
+    original_input_file: Optional[str] = None,
+    mode: str = "laboratory"
+) -> Dict[str, Any]:
+    """Record variable operations execution to the pipeline execution data.
+    
+    This ensures variable operations are preserved in the pipeline document after execution.
+    
+    Args:
+        client_name: Client identifier
+        app_name: App identifier
+        project_name: Project identifier
+        input_file: Input file path (may be replacement file)
+        compute_mode: Compute mode (whole-dataframe or within-group)
+        operations: List of operation dictionaries
+        created_variables: List of created variable names
+        execution_status: Execution status (success, failed)
+        execution_error: Error message if failed
+        identifiers: List of identifiers for within-group mode
+        original_input_file: Original file from config (for matching)
+        mode: Mode (laboratory, workflow, exhibition)
+    
+    Returns:
+        Result dictionary with status
+    """
+    try:
+        coll = await get_pipeline_collection()
+        
+        client_id = client_name
+        app_id = app_name
+        project_id = project_name
+        
+        # Build composite _id
+        doc_id = f"{client_id}/{app_id}/{project_id}"
+        
+        # Get existing document
+        existing_doc = await coll.find_one({"_id": doc_id})
+        
+        execution_timestamp = datetime.utcnow()
+        
+        # Build execution info
+        execution_info = {
+            "executed_at": execution_timestamp,
+            "status": execution_status,
+            "error": execution_error
+        }
+        
+        # Build the variable operations config
+        new_var_op_config = {
+            "input_file": input_file,
+            "original_input_file": original_input_file if original_input_file else input_file,
+            "compute_mode": compute_mode,
+            "identifiers": identifiers,
+            "operations": operations,
+            "created_variables": created_variables,
+            "saved_at": execution_timestamp,
+            "execution": execution_info
+        }
+        
+        if existing_doc:
+            # Document exists, update it
+            pipeline = existing_doc.get("pipeline", {})
+            variable_operations = pipeline.get("variable_operations", [])
+            
+            # Find the variable operations config for this input_file
+            var_op_index = None
+            match_input_file = original_input_file if original_input_file else input_file
+            new_identifiers_tuple = tuple(sorted(identifiers or []))
+            
+            for idx, var_op in enumerate(variable_operations):
+                stored_input_file = var_op.get("input_file")
+                stored_original_input_file = var_op.get("original_input_file")
+                config_original_file = stored_original_input_file if stored_original_input_file else stored_input_file
+                stored_compute_mode = var_op.get("compute_mode", "whole-dataframe")
+                stored_identifiers = var_op.get("identifiers") or []
+                stored_identifiers_tuple = tuple(sorted(stored_identifiers))
+                
+                # Match by original file, compute_mode, and identifiers
+                matches_file = (
+                    config_original_file == match_input_file or
+                    stored_input_file == match_input_file or
+                    stored_input_file == input_file or
+                    (original_input_file and config_original_file == original_input_file)
+                )
+                
+                if matches_file and stored_compute_mode == compute_mode and stored_identifiers_tuple == new_identifiers_tuple:
+                    var_op_index = idx
+                    break
+            
+            if var_op_index is not None:
+                # Update existing config
+                variable_operations[var_op_index] = new_var_op_config
+                logger.info(
+                    f"🔄 Updated variable operations config at index {var_op_index} for {input_file}"
+                )
+            else:
+                # Add new config
+                variable_operations.append(new_var_op_config)
+                logger.info(
+                    f"➕ Added new variable operations config for {input_file}"
+                )
+            
+            # Update document
+            # CRITICAL: Preserve data_summary
+            existing_data_summary = pipeline.get("data_summary", [])
+            final_data_summary = _get_preserved_data_summary(doc_id, existing_data_summary)
+            
+            await coll.update_one(
+                {"_id": doc_id},
+                {
+                    "$set": {
+                        "execution_timestamp": execution_timestamp,
+                        "pipeline.variable_operations": variable_operations,
+                        "pipeline.data_summary": final_data_summary
+                    }
+                }
+            )
+            
+            logger.info(
+                f"✅ Recorded variable operations execution: {input_file} "
+                f"for {client_id}/{app_id}/{project_id}"
+            )
+        else:
+            # Document doesn't exist, create it
+            import uuid
+            execution_id = str(uuid.uuid4())
+            
+            # CRITICAL: Preserve data_summary and variable_operations if available from rerun
+            preserved_data_summary = _get_preserved_data_summary(doc_id)
+            preserved_variable_operations = _get_preserved_variable_operations(doc_id)
+            
+            # If we have preserved variable operations, use them and update the matching one
+            if preserved_variable_operations:
+                var_op_index = None
+                match_input_file = original_input_file if original_input_file else input_file
+                new_identifiers_tuple = tuple(sorted(identifiers or []))
+                
+                for idx, var_op in enumerate(preserved_variable_operations):
+                    stored_input_file = var_op.get("input_file")
+                    stored_original_input_file = var_op.get("original_input_file")
+                    config_original_file = stored_original_input_file if stored_original_input_file else stored_input_file
+                    stored_compute_mode = var_op.get("compute_mode", "whole-dataframe")
+                    stored_identifiers = var_op.get("identifiers") or []
+                    stored_identifiers_tuple = tuple(sorted(stored_identifiers))
+                    
+                    matches_file = (
+                        config_original_file == match_input_file or
+                        stored_input_file == match_input_file or
+                        stored_input_file == input_file or
+                        (original_input_file and config_original_file == original_input_file)
+                    )
+                    
+                    if matches_file and stored_compute_mode == compute_mode and stored_identifiers_tuple == new_identifiers_tuple:
+                        var_op_index = idx
+                        break
+                
+                if var_op_index is not None:
+                    preserved_variable_operations[var_op_index] = new_var_op_config
+                else:
+                    preserved_variable_operations.append(new_var_op_config)
+                
+                final_variable_operations = preserved_variable_operations
+            else:
+                final_variable_operations = [new_var_op_config]
+            
+            doc = {
+                "_id": doc_id,
+                "execution_id": execution_id,
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "execution_timestamp": execution_timestamp,
+                "user_id": "unknown",
+                "pipeline": {
+                    "root_files": [],
+                    "execution_graph": [],
+                    "lineage": {
+                        "nodes": [],
+                        "edges": []
+                    },
+                    "column_operations": [],
+                    "variable_operations": final_variable_operations,
+                    "data_summary": preserved_data_summary
+                },
+                "summary": {
+                    "total_atoms": 0,
+                    "total_files": 0,
+                    "root_files_count": 0,
+                    "derived_files_count": 0,
+                    "total_duration_ms": 0,
+                    "status": execution_status
+                }
+            }
+            
+            await coll.insert_one(doc)
+            logger.info(
+                f"✅ Created new pipeline document with variable operations execution for {doc_id}"
+            )
+        
+        return {
+            "status": "success",
+            "message": "Variable operations execution recorded successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error recording variable operations execution: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
 async def get_pipeline_execution(
     client_name: str,
     app_name: str,
@@ -2587,19 +3067,20 @@ async def get_pipeline_execution(
         pipeline = pipeline_doc.get("pipeline", {})
         execution_graph = pipeline.get("execution_graph", [])
         column_operations = pipeline.get("column_operations", [])
+        variable_operations = pipeline.get("variable_operations", [])
         data_summary = pipeline.get("data_summary", [])
         
-        # If document exists but has no execution graph, no column operations, AND no data summary, it's essentially empty
-        # Return it if it has at least one of: atoms, column operations, or data summaries
-        if len(execution_graph) == 0 and len(column_operations) == 0 and len(data_summary) == 0:
+        # If document exists but has no execution graph, no column operations, no variable operations, AND no data summary, it's essentially empty
+        # Return it if it has at least one of: atoms, column operations, variable operations, or data summaries
+        if len(execution_graph) == 0 and len(column_operations) == 0 and len(variable_operations) == 0 and len(data_summary) == 0:
             logger.warning(
-                f"⚠️ Pipeline document exists but is empty (no atoms, no column operations, no data summaries) for {doc_id}"
+                f"⚠️ Pipeline document exists but is empty (no atoms, no column operations, no variable operations, no data summaries) for {doc_id}"
             )
             return None
         
         logger.info(
             f"📦 Retrieved pipeline execution data for {client_id}/{app_id}/{project_id} "
-            f"(atoms: {len(execution_graph)}, column_ops: {len(column_operations)}, data_summaries: {len(data_summary)})"
+            f"(atoms: {len(execution_graph)}, column_ops: {len(column_operations)}, variable_ops: {len(variable_operations)}, data_summaries: {len(data_summary)})"
         )
         
         return pipeline_doc

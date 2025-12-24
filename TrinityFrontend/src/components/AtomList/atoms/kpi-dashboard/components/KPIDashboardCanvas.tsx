@@ -342,8 +342,16 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
         return;
       }
       
+      // Get card_id and canvas_position for pipeline tracking
+      const cards = useLaboratoryStore.getState().cards;
+      const card = cards.find(c => Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId));
+      const cardId = card?.id || '';
+      const canvasPosition = card?.atoms?.find(a => a.id === atomId)?.canvasPosition ?? 0;
+      
       console.log('💾 Saving KPI Dashboard to MongoDB...', {
         atomId: atomId,
+        cardId: cardId,
+        canvasPosition: canvasPosition,
         layouts: layoutsToSave.length,
         boxes: layoutsToSave.reduce((sum, layout) => sum + layout.boxes.length, 0)
       });
@@ -363,12 +371,15 @@ const KPIDashboardCanvas: React.FC<KPIDashboardCanvasProps> = ({
       };
       
       // ✅ STEP 2: Save to atom_list_configuration collection (with atom_id for per-instance storage)
+      // Include card_id and canvas_position for pipeline tracking
       const response = await fetch(
         `${KPI_DASHBOARD_API}/save-config?` +
         `client_name=${encodeURIComponent(projectContext.client_name)}&` +
         `app_name=${encodeURIComponent(projectContext.app_name)}&` +
         `project_name=${encodeURIComponent(projectContext.project_name)}&` +
-        `atom_id=${encodeURIComponent(atomId)}`,
+        `atom_id=${encodeURIComponent(atomId)}&` +
+        `card_id=${encodeURIComponent(cardId)}&` +
+        `canvas_position=${canvasPosition}`,
         {
           method: 'POST',
           headers: {
@@ -5900,6 +5911,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               traces: traces,
               title: migratedChart.title,
               filters: Object.keys(newTempFilters).length > 0 ? newTempFilters : undefined,
+              skip_pipeline_recording: true, // Don't record as separate step - this is part of KPI Dashboard
             };
 
             const chartResponse = await chartMakerApi.generateChart(chartRequest);

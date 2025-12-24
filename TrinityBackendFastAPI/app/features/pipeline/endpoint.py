@@ -13,7 +13,7 @@ from .schemas import (
     RunPipelineResponse,
     PipelineExecutionDocument,
 )
-from .service import save_pipeline_execution, get_pipeline_execution, record_atom_execution, get_pipeline_collection, save_column_operations, record_column_operations_execution, remove_pipeline_steps_by_card_id, get_priming_steps, save_priming_steps
+from .service import save_pipeline_execution, get_pipeline_execution, record_atom_execution, get_pipeline_collection, save_column_operations, save_variable_operations, record_column_operations_execution, record_variable_operations_execution, remove_pipeline_steps_by_card_id, get_priming_steps, save_priming_steps
 from .atom_executors import execute_atom_step, get_atom_executor
 from app.features.project_state.routes import get_atom_list_configuration
 from app.features.data_upload_validate.app.routes import _background_auto_classify_files, get_object_prefix, read_minio_object
@@ -190,6 +190,43 @@ async def save_column_operations_endpoint(
         
     except Exception as e:
         logger.error(f"❌ Error saving column operations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/save-variable-operations")
+async def save_variable_operations_endpoint(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    mode: str = Query("laboratory", description="Mode"),
+    input_file: str = Body(..., description="Input file path (data source)"),
+    compute_mode: str = Body("whole-dataframe", description="Compute mode: whole-dataframe or within-group"),
+    operations: List[Dict[str, Any]] = Body(..., description="List of variable operations"),
+    created_variables: List[str] = Body(..., description="List of created variable names"),
+    identifiers: Optional[List[str]] = Body(None, description="Identifiers for within-group mode")
+):
+    """Save variable operations from metrics tab to pipeline execution.
+    
+    This endpoint saves variable operations that are not tied to any atom/card.
+    These operations will be executed when the pipeline runs with replacement files.
+    """
+    try:
+        result = await save_variable_operations(
+            client_name,
+            app_name,
+            project_name,
+            input_file,
+            compute_mode,
+            operations,
+            created_variables,
+            identifiers,
+            mode
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving variable operations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -505,6 +542,67 @@ async def run_pipeline(
             if not hasattr(run_pipeline, '_preserved_column_operations'):
                 run_pipeline._preserved_column_operations = {}
             run_pipeline._preserved_column_operations[doc_id] = preserved_column_operations
+        
+        # CRITICAL: Preserve variable_operations section before deletion
+        # Variable operations should persist across pipeline reruns (like column_operations)
+        preserved_variable_operations = pipeline_data.get('pipeline', {}).get('variable_operations', [])
+        if preserved_variable_operations:
+            logger.info(
+                f"💾 Preserving variable_operations section with {len(preserved_variable_operations)} entries before clearing pipeline"
+            )
+            # Store in module-level dict for access during variable operations execution
+            if not hasattr(run_pipeline, '_preserved_variable_operations'):
+                run_pipeline._preserved_variable_operations = {}
+            run_pipeline._preserved_variable_operations[doc_id] = preserved_variable_operations
+            
+            # ========================================================================
+            # DELETE WITHIN-GROUP VARIABLES FROM CONFIG_VARIABLE COLLECTION
+            # ========================================================================
+            # When variable_operations is not empty, delete all variables with
+            # compute_mode = 'within-group' from config_variable collection
+            # This ensures fresh computation during pipeline run
+            try:
+                from app.features.laboratory.mongodb_saver import get_config_variable_collection
+                
+                config_var_collection = get_config_variable_collection()
+                config_var_doc_id = f"{request.client_name}/{request.app_name}/{request.project_name}"
+                
+                # Get existing document
+                existing_config_var_doc = await config_var_collection.find_one({"_id": config_var_doc_id})
+                
+                if existing_config_var_doc:
+                    existing_variables = existing_config_var_doc.get("variables", {})
+                    
+                    # Find and remove variables with compute_mode = 'within-group'
+                    variables_to_delete = []
+                    for var_name, var_data in existing_variables.items():
+                        metadata = var_data.get("metadata", {})
+                        if metadata.get("compute_mode") == "within-group":
+                            variables_to_delete.append(var_name)
+                    
+                    if variables_to_delete:
+                        # Remove within-group variables from the variables dict
+                        for var_name in variables_to_delete:
+                            del existing_variables[var_name]
+                        
+                        # Update the document
+                        await config_var_collection.update_one(
+                            {"_id": config_var_doc_id},
+                            {"$set": {"variables": existing_variables}}
+                        )
+                        
+                        logger.info(
+                            f"🗑️ Deleted {len(variables_to_delete)} within-group variable(s) from config_variable: "
+                            f"{variables_to_delete[:5]}{'...' if len(variables_to_delete) > 5 else ''}"
+                        )
+                    else:
+                        logger.info(f"ℹ️ No within-group variables found to delete in config_variable")
+                else:
+                    logger.info(f"ℹ️ No config_variable document found for {config_var_doc_id}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to delete within-group variables from config_variable: {e}")
+                # Don't fail the pipeline if this cleanup fails
         
         try:
             coll = await get_pipeline_collection()
@@ -923,6 +1021,10 @@ async def run_pipeline(
         import time
         import csv
         
+        # Track executed column operations to prevent duplicates
+        # Key: (original_input_file, created_column_names_tuple, overwrite_original)
+        executed_col_ops = set()
+        
         # Define MINIO connection variables once for all column operations (immediate and deferred)
         # Use different names to avoid shadowing the module-level imports
         COL_OPS_MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
@@ -1185,6 +1287,22 @@ async def run_pipeline(
             
             return form_items
         
+        def get_col_op_key(col_op: Dict[str, Any]) -> str:
+            """Generate a unique key for a column operation to track execution.
+            
+            Key is based on: original_input_file + created_column_names (lowercase) + overwrite_original
+            This ensures we don't execute the same operation twice even if it appears in multiple lists.
+            """
+            original_input = col_op.get("original_input_file") or col_op.get("input_file") or ""
+            overwrite = col_op.get("overwrite_original", True)
+            # Get all created column names (lowercase for case-insensitive comparison)
+            created_cols = sorted([
+                (op.get("created_column_name") or "").lower().strip()
+                for op in col_op.get("operations", [])
+                if op.get("created_column_name")
+            ])
+            return f"{original_input}|{','.join(created_cols)}|{overwrite}"
+        
         for col_op in immediate_col_ops:
             execution_start_time = datetime.utcnow()
             try:
@@ -1197,6 +1315,14 @@ async def run_pipeline(
                 
                 if not operations:
                     logger.warning(f"⚠️ Skipping column operations for {original_input_file}: no operations found")
+                    continue
+                
+                # Check if this operation was already executed (prevent duplicates)
+                col_op_key = get_col_op_key(col_op)
+                if col_op_key in executed_col_ops:
+                    logger.info(
+                        f"⏭️ Skipping already executed column operation: {col_op_key}"
+                    )
                     continue
                 
                 # Apply file replacements
@@ -1435,6 +1561,9 @@ async def run_pipeline(
                     })
                     success_count += 1
                     
+                    # Mark this operation as executed to prevent duplicates
+                    executed_col_ops.add(col_op_key)
+                    
                     # Record execution to MongoDB
                     # When a file is replaced, use the replacement file as input_file
                     # When overwriting, output_file should be None
@@ -1480,6 +1609,14 @@ async def run_pipeline(
                             for chained_col_op in chained_ops:
                                 chained_execution_start_time = datetime.utcnow()
                                 try:
+                                    # Check if this operation was already executed (prevent duplicates)
+                                    chained_col_op_key = get_col_op_key(chained_col_op)
+                                    if chained_col_op_key in executed_col_ops:
+                                        logger.info(
+                                            f"⏭️ Skipping already executed chained column operation: {chained_col_op_key}"
+                                        )
+                                        continue
+                                    
                                     chained_original_input_file = chained_col_op.get("original_input_file") or chained_col_op.get("input_file")
                                     chained_operations = chained_col_op.get("operations", [])
                                     chained_overwrite = chained_col_op.get("overwrite_original", False)
@@ -1648,6 +1785,9 @@ async def run_pipeline(
                                         logger.info(f"✅ Chained column operation completed: {chained_actual_input_file} -> {chained_final_output_file}")
                                         success_count += 1
                                         
+                                        # Mark this operation as executed to prevent duplicates
+                                        executed_col_ops.add(chained_col_op_key)
+                                        
                                         # Record to MongoDB
                                         await record_column_operations_execution(
                                             client_name=request.client_name,
@@ -1737,6 +1877,211 @@ async def run_pipeline(
                     original_input_file=original_input_file_for_error,  # Pass original for matching
                     mode=request.mode
                 )
+        
+        # ========================================================================
+        # EXECUTE VARIABLE OPERATIONS AFTER COLUMN OPERATIONS
+        # ========================================================================
+        # Variable operations create variables in MongoDB based on dataframe computations
+        # When running pipeline with replacement files, apply same variable operations
+        # to the replacement file with the same variable names (overwriting existing)
+        # 
+        # Similar to column operations, we separate into:
+        # 1. Immediate operations (on root files) - execute now
+        # 2. Deferred operations (on derived files) - execute after atoms create the files
+        
+        variable_operations = preserved_variable_operations if preserved_variable_operations else []
+        
+        # Separate variable operations into immediate and deferred
+        immediate_var_ops = []
+        deferred_var_ops = {}  # Map of file_key -> list of operations
+        
+        for var_op in variable_operations:
+            original_input_file = var_op.get("original_input_file") or var_op.get("input_file")
+            
+            # Check if this is a root file or derived file
+            is_root_file = original_input_file in root_file_keys
+            is_in_derived_set = original_input_file in derived_files
+            
+            if is_in_derived_set or not is_root_file:
+                # Must wait for file to be created - defer this operation
+                if original_input_file not in deferred_var_ops:
+                    deferred_var_ops[original_input_file] = []
+                deferred_var_ops[original_input_file].append(var_op)
+                logger.info(
+                    f"📋 Deferred variable operation: {original_input_file} (is_root={is_root_file}, is_derived={is_in_derived_set})"
+                )
+            else:
+                # File exists (root file) - can execute immediately
+                immediate_var_ops.append(var_op)
+                logger.info(
+                    f"📋 Immediate variable operation: {original_input_file} (is_root={is_root_file})"
+                )
+        
+        # Helper function to execute a single variable operation
+        async def execute_variable_operation(var_op: Dict[str, Any], file_replacements_map: Dict[str, str]) -> Dict[str, Any]:
+            """Execute a single variable operation and return result info."""
+            from app.features.laboratory.routes import compute_variables
+            from app.features.laboratory.models import VariableComputeRequest, VariableOperation
+            
+            original_input_file = var_op.get("original_input_file") or var_op.get("input_file")
+            compute_mode = var_op.get("compute_mode", "whole-dataframe")
+            operations = var_op.get("operations", [])
+            identifiers = var_op.get("identifiers")
+            
+            if not operations:
+                return {
+                    "status": "skipped",
+                    "message": "No operations found",
+                    "original_input_file": original_input_file
+                }
+            
+            # Apply file replacements - use replacement file if available
+            actual_input_file = file_replacements_map.get(original_input_file, original_input_file)
+            
+            logger.info(
+                f"🔄 Executing variable operations for file: {original_input_file} -> {actual_input_file} "
+                f"(compute_mode: {compute_mode}, {len(operations)} operations)"
+            )
+            
+            # Build the request model
+            operation_inputs = [
+                VariableOperation(
+                    id=op.get("id", str(idx)),
+                    numericalColumn=op.get("numericalColumn"),
+                    method=op.get("method"),
+                    secondColumn=op.get("secondColumn"),
+                    secondValue=op.get("secondValue"),
+                    customName=op.get("customName"),
+                )
+                for idx, op in enumerate(operations)
+            ]
+            
+            compute_request = VariableComputeRequest(
+                dataSource=actual_input_file,
+                computeMode=compute_mode,
+                identifiers=identifiers if compute_mode == "within-group" else None,
+                operations=operation_inputs,
+                client_name=request.client_name,
+                app_name=request.app_name,
+                project_name=request.project_name,
+                confirmOverwrite=True,  # Always overwrite existing variables during pipeline run
+            )
+            
+            # Call the compute_variables function directly
+            result = await compute_variables(compute_request)
+            
+            if result.success:
+                created_vars = result.new_columns or []
+                logger.info(
+                    f"✅ Variable operations completed for {actual_input_file}: "
+                    f"created/updated {len(created_vars)} variable(s)"
+                )
+                
+                # Record variable operations execution to MongoDB
+                await record_variable_operations_execution(
+                    client_name=request.client_name,
+                    app_name=request.app_name,
+                    project_name=request.project_name,
+                    input_file=actual_input_file,
+                    compute_mode=compute_mode,
+                    operations=operations,
+                    created_variables=created_vars,
+                    execution_status="success",
+                    execution_error=None,
+                    identifiers=identifiers,
+                    original_input_file=original_input_file,
+                    mode=request.mode
+                )
+                
+                return {
+                    "status": "success",
+                    "message": f"Created/updated {len(created_vars)} variable(s)",
+                    "created_variables": created_vars,
+                    "original_input_file": original_input_file,
+                    "actual_input_file": actual_input_file
+                }
+            else:
+                error_msg = result.error or "Variable operations failed"
+                logger.error(f"❌ Variable operations failed for {actual_input_file}: {error_msg}")
+                
+                # Record failed variable operations execution to MongoDB
+                await record_variable_operations_execution(
+                    client_name=request.client_name,
+                    app_name=request.app_name,
+                    project_name=request.project_name,
+                    input_file=actual_input_file,
+                    compute_mode=compute_mode,
+                    operations=operations,
+                    created_variables=[],
+                    execution_status="failed",
+                    execution_error=error_msg,
+                    identifiers=identifiers,
+                    original_input_file=original_input_file,
+                    mode=request.mode
+                )
+                
+                return {
+                    "status": "failed",
+                    "message": error_msg,
+                    "original_input_file": original_input_file,
+                    "actual_input_file": actual_input_file
+                }
+        
+        # Execute immediate variable operations (on root files)
+        if immediate_var_ops:
+            logger.info(
+                f"📊 Executing {len(immediate_var_ops)} immediate variable operation config(s)"
+            )
+            
+            for var_op in immediate_var_ops:
+                try:
+                    result_info = await execute_variable_operation(var_op, file_replacements)
+                    
+                    if result_info["status"] == "success":
+                        execution_log.append({
+                            "type": "variable_operations",
+                            "input_file": result_info.get("actual_input_file"),
+                            "original_input_file": result_info.get("original_input_file"),
+                            "status": "success",
+                            "message": result_info.get("message"),
+                            "created_variables": result_info.get("created_variables", [])
+                        })
+                        success_count += 1
+                    elif result_info["status"] == "failed":
+                        execution_log.append({
+                            "type": "variable_operations",
+                            "input_file": result_info.get("actual_input_file"),
+                            "original_input_file": result_info.get("original_input_file"),
+                            "status": "failed",
+                            "message": result_info.get("message")
+                        })
+                        failed_count += 1
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error executing variable operations for {var_op.get('input_file')}: {e}")
+                    execution_log.append({
+                        "type": "variable_operations",
+                        "input_file": var_op.get("input_file"),
+                        "status": "failed",
+                        "message": str(e)
+                    })
+                    failed_count += 1
+                    
+                    # Record failed variable operations execution to MongoDB
+                    await record_variable_operations_execution(
+                        client_name=request.client_name,
+                        app_name=request.app_name,
+                        project_name=request.project_name,
+                        input_file=var_op.get("input_file", ""),
+                        compute_mode=var_op.get("compute_mode", "whole-dataframe"),
+                        operations=var_op.get("operations", []),
+                        created_variables=[],
+                        execution_status="failed",
+                        execution_error=str(e),
+                        identifiers=var_op.get("identifiers"),
+                        original_input_file=var_op.get("original_input_file") or var_op.get("input_file"),
+                        mode=request.mode
+                    )
         
         # Build map of atom configurations by card and atom
         atom_configs_map = {}
@@ -1876,6 +2221,10 @@ async def run_pipeline(
                     input_files=updated_input_files,
                     api_calls=api_calls,
                     canvas_position=step.get("canvas_position", 0),
+                    client_name=request.client_name,
+                    app_name=request.app_name,
+                    project_name=request.project_name,
+                    file_replacements=file_replacements,
                 )
                 
                 # Process execution result
@@ -2253,6 +2602,14 @@ async def run_pipeline(
                         for deferred_col_op in matching_deferred_ops:
                                 deferred_execution_start_time = datetime.utcnow()
                                 try:
+                                    # Check if this operation was already executed (prevent duplicates)
+                                    deferred_col_op_key = get_col_op_key(deferred_col_op)
+                                    if deferred_col_op_key in executed_col_ops:
+                                        logger.info(
+                                            f"⏭️ Skipping already executed deferred column operation: {deferred_col_op_key}"
+                                        )
+                                        continue
+                                    
                                     # Execute column operations (same logic as immediate operations)
                                     deferred_operations = deferred_col_op.get("operations", [])
                                     deferred_overwrite = deferred_col_op.get("overwrite_original", False)
@@ -2504,6 +2861,9 @@ async def run_pipeline(
                                         })
                                         success_count += 1
                                         
+                                        # Mark this operation as executed to prevent duplicates
+                                        executed_col_ops.add(deferred_col_op_key)
+                                        
                                         # Record execution to MongoDB
                                         await record_column_operations_execution(
                                             client_name=request.client_name,
@@ -2576,6 +2936,95 @@ async def run_pipeline(
                                         execution_status="failed",
                                         execution_error=str(e),
                                         identifiers=deferred_col_op.get("identifiers"),  # Pass identifiers to match config
+                                        mode=request.mode
+                                    )
+                        
+                        # ========================================================================
+                        # STEP 3: CHECK AND APPLY DEFERRED VARIABLE OPERATIONS TO OUTPUT FILE
+                        # ========================================================================
+                        # Similar to deferred column operations, execute variable operations
+                        # that were waiting for this derived file to be created
+                        
+                        # Find matching deferred variable operations for this output file
+                        matching_deferred_var_ops = []
+                        
+                        for deferred_var_file_key, deferred_var_ops_list in deferred_var_ops.items():
+                            for deferred_var_op in deferred_var_ops_list:
+                                var_op_input_file = deferred_var_op.get("input_file")
+                                var_op_original_input_file = deferred_var_op.get("original_input_file")
+                                
+                                # Normalize paths for comparison
+                                normalized_var_op_input = normalize_path(var_op_input_file) if var_op_input_file else ""
+                                normalized_var_op_original = normalize_path(var_op_original_input_file) if var_op_original_input_file else ""
+                                normalized_deferred_var_key = normalize_path(deferred_var_file_key) if deferred_var_file_key else ""
+                                
+                                # Match if output_file matches any of the variable operation's file references
+                                if (output_file == var_op_input_file or 
+                                    output_file == var_op_original_input_file or
+                                    output_file == deferred_var_file_key or
+                                    normalized_output_file == normalized_var_op_input or
+                                    normalized_output_file == normalized_var_op_original or
+                                    normalized_output_file == normalized_deferred_var_key):
+                                    if deferred_var_op not in matching_deferred_var_ops:
+                                        matching_deferred_var_ops.append(deferred_var_op)
+                        
+                        if matching_deferred_var_ops:
+                            logger.info(
+                                f"📊 Found {len(matching_deferred_var_ops)} deferred variable operation(s) for '{output_file}'"
+                            )
+                            
+                            for deferred_var_op in matching_deferred_var_ops:
+                                try:
+                                    # Execute the deferred variable operation
+                                    # The file_replacements map should already have the correct mapping
+                                    result_info = await execute_variable_operation(deferred_var_op, file_replacements)
+                                    
+                                    if result_info["status"] == "success":
+                                        execution_log.append({
+                                            "type": "variable_operations",
+                                            "input_file": result_info.get("actual_input_file"),
+                                            "original_input_file": result_info.get("original_input_file"),
+                                            "status": "success",
+                                            "message": result_info.get("message"),
+                                            "created_variables": result_info.get("created_variables", [])
+                                        })
+                                        success_count += 1
+                                        logger.info(
+                                            f"✅ Deferred variable operations completed for {output_file}"
+                                        )
+                                    elif result_info["status"] == "failed":
+                                        execution_log.append({
+                                            "type": "variable_operations",
+                                            "input_file": result_info.get("actual_input_file"),
+                                            "original_input_file": result_info.get("original_input_file"),
+                                            "status": "failed",
+                                            "message": result_info.get("message")
+                                        })
+                                        failed_count += 1
+                                        
+                                except Exception as e:
+                                    logger.error(f"❌ Error executing deferred variable operations for {output_file}: {e}")
+                                    execution_log.append({
+                                        "type": "variable_operations",
+                                        "input_file": output_file,
+                                        "status": "failed",
+                                        "message": str(e)
+                                    })
+                                    failed_count += 1
+                                    
+                                    # Record failed variable operations execution to MongoDB
+                                    await record_variable_operations_execution(
+                                        client_name=request.client_name,
+                                        app_name=request.app_name,
+                                        project_name=request.project_name,
+                                        input_file=output_file,
+                                        compute_mode=deferred_var_op.get("compute_mode", "whole-dataframe"),
+                                        operations=deferred_var_op.get("operations", []),
+                                        created_variables=[],
+                                        execution_status="failed",
+                                        execution_error=str(e),
+                                        identifiers=deferred_var_op.get("identifiers"),
+                                        original_input_file=deferred_var_op.get("original_input_file") or output_file,
                                         mode=request.mode
                                     )
                     
@@ -2701,6 +3150,14 @@ async def run_pipeline(
                         if additional_results.get("columns"):
                             log_entry["columns"] = additional_results.get("columns")
                         
+                        # Include kpi-dashboard-specific results for frontend
+                        if additional_results.get("kpi_data"):
+                            log_entry["kpi_data"] = additional_results.get("kpi_data")
+                        if additional_results.get("layouts"):
+                            log_entry["layouts"] = additional_results.get("layouts")
+                        if additional_results.get("loaded_config") is not None:
+                            log_entry["loaded_config"] = additional_results.get("loaded_config")
+                        
                         # Store all additional_results for frontend to access
                         log_entry["additional_results"] = additional_results
                     
@@ -2708,8 +3165,8 @@ async def run_pipeline(
                     
                     # 🔧 CRITICAL: Record full execution back to MongoDB to preserve all API calls (init/run/save)
                     # This ensures that when pipeline runs, all API calls are preserved with file replacements applied
-                    # For groupby/merge/concat/pivot/table atoms, this preserves the full sequence of operations
-                    if atom_type in ["groupby-wtg-avg", "merge", "concat", "pivot-table", "table"] or atom_type.startswith("groupby"):
+                    # For groupby/merge/concat/pivot/table/kpi-dashboard atoms, this preserves the full sequence of operations
+                    if atom_type in ["groupby-wtg-avg", "merge", "concat", "pivot-table", "table", "kpi-dashboard"] or atom_type.startswith("groupby"):
                         try:
                             from datetime import datetime
                             from .service import record_atom_execution

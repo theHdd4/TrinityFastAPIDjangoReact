@@ -167,14 +167,20 @@ export interface TableSaveResponse {
  * Load a table from MinIO
  * @param objectName Path to Arrow file in MinIO
  * @param atomId Atom instance ID for pipeline tracking
+/**
+ * Load a table from MinIO
+ * @param objectName Path to the Arrow file in MinIO
+ * @param atomId Atom instance ID for pipeline tracking
  * @param cardId Card ID for pipeline tracking
  * @param canvasPosition Canvas position for pipeline tracking
+ * @param skipPipelineRecording Skip recording to pipeline (used when called from within KPI Dashboard)
  */
 export const loadTable = async (
   objectName: string,
   atomId?: string,
   cardId?: string,
-  canvasPosition?: number
+  canvasPosition?: number,
+  skipPipelineRecording?: boolean
 ): Promise<TableResponse> => {
   // Build query parameters for pipeline tracking (like feature-overview and groupby)
   const queryParams = new URLSearchParams();
@@ -190,7 +196,8 @@ export const loadTable = async (
     body: JSON.stringify({ 
       object_name: objectName,
       atom_id: atomId,
-      project_id: undefined // Will be extracted from environment
+      project_id: undefined, // Will be extracted from environment
+      skip_pipeline_recording: skipPipelineRecording || false
     })
   });
   

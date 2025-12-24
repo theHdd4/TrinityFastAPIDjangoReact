@@ -806,18 +806,20 @@ async def feature_overview_uniquecountendpoint(
         except Exception as e:
             logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
     
-    # Prioritize atom_list_configuration as source of truth
-    if card_id_from_config:
-        final_card_id = card_id_from_config
-    elif card_id:
+    # CRITICAL FIX: Prioritize card_id from request (pipeline execution passes the correct card_id)
+    # Only use atom_list_configuration as fallback when no card_id is provided
+    if card_id:
         final_card_id = card_id
+    elif card_id_from_config:
+        final_card_id = card_id_from_config
     else:
         final_card_id = validator_atom_id.split("-")[0] if "-" in validator_atom_id else validator_atom_id
     
-    if canvas_position_from_config is not None:
-        final_canvas_position = canvas_position_from_config
-    elif canvas_position is not None:
+    # CRITICAL FIX: Prioritize canvas_position from request too
+    if canvas_position is not None:
         final_canvas_position = canvas_position
+    elif canvas_position_from_config is not None:
+        final_canvas_position = canvas_position_from_config
     else:
         final_canvas_position = 0
     
@@ -1022,18 +1024,20 @@ async def feature_overview_summaryendpoint(
         except Exception as e:
             logger.warning(f"Failed to get card_id from atom_list_configuration: {e}")
     
-    # Prioritize atom_list_configuration as source of truth
-    if card_id_from_config:
-        final_card_id = card_id_from_config
-    elif card_id:
+    # CRITICAL FIX: Prioritize card_id from request (pipeline execution passes the correct card_id)
+    # Only use atom_list_configuration as fallback when no card_id is provided
+    if card_id:
         final_card_id = card_id
+    elif card_id_from_config:
+        final_card_id = card_id_from_config
     else:
         final_card_id = validator_atom_id.split("-")[0] if "-" in validator_atom_id else validator_atom_id
     
-    if canvas_position_from_config is not None:
-        final_canvas_position = canvas_position_from_config
-    elif canvas_position is not None:
+    # CRITICAL FIX: Prioritize canvas_position from request too
+    if canvas_position is not None:
         final_canvas_position = canvas_position
+    elif canvas_position_from_config is not None:
+        final_canvas_position = canvas_position_from_config
     else:
         final_canvas_position = 0
     

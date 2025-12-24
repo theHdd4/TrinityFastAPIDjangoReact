@@ -177,7 +177,9 @@ const KPIDashboardTableConfig: React.FC<KPIDashboardTableConfigProps> = ({
     setLoading(true);
 
     try {
-      const tableData = await loadTable(fileId);
+      // Pass skipPipelineRecording=true since this table is inside KPI Dashboard
+      // The KPI Dashboard atom will record its own execution
+      const tableData = await loadTable(fileId, undefined, undefined, undefined, true);
       
       updateTableSettings({
         mode: 'load',

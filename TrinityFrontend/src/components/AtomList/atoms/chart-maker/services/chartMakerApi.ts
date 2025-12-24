@@ -67,6 +67,8 @@ export interface ChartRequest {
     second_y_axis?: string;
     dual_axis_mode?: "dual" | "single";
   }>;
+  // Skip pipeline recording (used when called from within KPI Dashboard)
+  skip_pipeline_recording?: boolean;
 }
 
 export interface RechartsConfig {
