@@ -56,6 +56,74 @@ UNPIVOT_CACHE_TTL = 3600
 UNPIVOT_NAMESPACE = "unpivot"
 
 
+def load_dataframe_in_chunks_from_source(resolved_path: str):
+    """
+    Generator that yields chunks of a dataframe loaded directly from source.
+    
+    Uses Arrow Flight reader iteration if available, otherwise falls back to
+    Arrow IPC RecordBatchFileReader from MinIO.
+    """
+    import pyarrow.flight as flight
+    from app.DataStorageRetrieval.arrow_client import _get_client, get_arrow_for_flight_path, get_minio_prefix, _find_latest_object
+    from minio import Minio
+    import os
+    
+    # Try Arrow Flight first (supports streaming)
+    try:
+        client = _get_client()
+        descriptor = flight.FlightDescriptor.for_path(resolved_path)
+        info = client.get_flight_info(descriptor)
+        reader = client.do_get(info.endpoints[0].ticket)
+        
+        # Iterate over Flight stream chunks
+        for chunk in reader:
+            batch = chunk.data
+            df_chunk = batch.to_pandas()
+            yield df_chunk
+        return
+    except Exception as flight_error:
+        logger.debug("Arrow Flight streaming failed, falling back to MinIO: %s", flight_error)
+    
+    # Fallback: Load from MinIO using Arrow IPC batch reader
+    try:
+        arrow_obj = get_arrow_for_flight_path(resolved_path)
+        if not arrow_obj:
+            # Try to resolve path
+            basename = os.path.basename(resolved_path)
+            default_prefix = get_minio_prefix()
+            
+            endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+            access_key = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
+            secret_key = os.getenv("MINIO_SECRET_KEY", "pass_dev")
+            bucket = os.getenv("MINIO_BUCKET", "trinity")
+            
+            m_client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=False)
+            arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, default_prefix) or os.path.join(default_prefix, basename)
+        else:
+            endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+            access_key = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
+            secret_key = os.getenv("MINIO_SECRET_KEY", "pass_dev")
+            bucket = os.getenv("MINIO_BUCKET", "trinity")
+            m_client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=False)
+        
+        resp = m_client.get_object(bucket, arrow_obj)
+        data = resp.read()
+        resp.close()
+        resp.release_conn()
+        
+        # Read Arrow file in batches
+        reader = ipc.RecordBatchFileReader(pa.BufferReader(data))
+        
+        # Read batches incrementally
+        for i in range(reader.num_record_batches):
+            batch = reader.get_batch(i)
+            df_chunk = batch.to_pandas()
+            yield df_chunk
+    except Exception as minio_error:
+        logger.error("Failed to load chunks from MinIO: %s", minio_error)
+        raise HTTPException(status_code=500, detail=f"Unable to load dataset in chunks: {minio_error}")
+
+
 def _ns_key(atom_id: str, suffix: str) -> str:
     return f"{UNPIVOT_NAMESPACE}:{atom_id}:{suffix}"
 
@@ -225,6 +293,113 @@ def _load_config(atom_id: str) -> Optional[Dict[str, Any]]:
     """Load atom configuration from Redis."""
     raw = redis_client.get((atom_id, "config"))
     return _decode_redis_json(raw)
+
+
+async def stream_full_unpivot_to_minio(
+    atom_id: str,
+    resolved_path: str,
+    id_vars: list[str],
+    value_vars: list[str],
+    variable_col: str,
+    value_col: str,
+) -> tuple[str, int]:
+    """
+    Stream full unpivot result to MinIO using chunked processing from source.
+    
+    Loads data in chunks directly from source, unpivots each chunk, and streams
+    results incrementally to Arrow format, then uploads to MinIO.
+    
+    Returns:
+        tuple: (minio_path, row_count)
+    """
+    row_count = 0
+    total_original_rows = 0
+    
+    # Initialize Arrow stream writer
+    sink = pa.BufferOutputStream()
+    writer = None
+    schema = None
+    
+    # Load and process chunks from source
+    for source_chunk in load_dataframe_in_chunks_from_source(resolved_path):
+        total_original_rows += len(source_chunk)
+        
+        # Handle no id_vars case
+        chunk_id_vars = id_vars.copy() if id_vars else []
+        chunk_value_vars = value_vars.copy() if value_vars else []
+        
+        if not chunk_id_vars:
+            source_chunk = source_chunk.copy()
+            if "row_number" not in source_chunk.columns:
+                source_chunk.insert(0, "row_number", range(len(source_chunk)))
+                chunk_id_vars = ["row_number"]
+            else:
+                source_chunk = source_chunk.reset_index()
+                chunk_id_vars = ["index"]
+        
+        if not chunk_value_vars:
+            chunk_value_vars = [col for col in source_chunk.columns if col not in chunk_id_vars]
+            if not chunk_value_vars:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No columns available to unpivot. All columns are in id_vars."
+                )
+        
+        # Unpivot chunk
+        melted_chunk = pd.melt(
+            source_chunk,
+            id_vars=chunk_id_vars,
+            value_vars=chunk_value_vars,
+            var_name=variable_col,
+            value_name=value_col,
+        )
+        
+        if melted_chunk.empty:
+            continue
+        
+        # Convert to Arrow table
+        table = pa.Table.from_pandas(melted_chunk)
+        
+        # Initialize writer on first chunk
+        if writer is None:
+            schema = table.schema
+            writer = ipc.new_stream(sink, schema)
+        
+        # Write chunk to stream
+        writer.write_table(table)
+        row_count += len(melted_chunk)
+    
+    # Close writer
+    if writer:
+        writer.close()
+    
+    # Get bytes and upload to MinIO
+    file_bytes = sink.getvalue().to_pybytes()
+    
+    # Get object prefix
+    prefix = await get_object_prefix()
+    if isinstance(prefix, tuple):
+        prefix = prefix[0]
+    if not prefix.endswith("/"):
+        prefix = f"{prefix}/"
+    
+    object_prefix = f"{prefix}unpivot/"
+    file_name = f"{atom_id}_full_result.arrow"
+    
+    # Upload to MinIO
+    ensure_minio_bucket()
+    upload_result = upload_to_minio(file_bytes, file_name, object_prefix)
+    
+    if upload_result.get("status") != "success":
+        raise HTTPException(
+            status_code=500,
+            detail=upload_result.get("error_message", "Failed to upload unpivot result to MinIO"),
+        )
+    
+    minio_path = upload_result["object_name"]
+    logger.info("Streamed full unpivot result to MinIO: %s (%d rows from %d original rows)", minio_path, row_count, total_original_rows)
+    
+    return minio_path, row_count
 
 
 async def _save_large_result_to_minio(atom_id: str, result: Dict[str, Any]) -> Optional[str]:
@@ -700,234 +875,135 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
                 computation_time=cached.get("computation_time", 0.0),
             )
     
-    # Load dataset
+    # Resolve dataset path
     try:
         resolved_path = await resolve_object_path(metadata["dataset_path"])
-        df = download_dataframe(resolved_path)
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Failed to load dataframe for atom %s", atom_id)
-        raise HTTPException(status_code=500, detail=f"Unable to load dataset: {exc}")
+        logger.exception("Failed to resolve dataset path for atom %s", atom_id)
+        raise HTTPException(status_code=500, detail=f"Unable to resolve dataset path: {exc}")
     
-    if df.empty:
-        raise HTTPException(status_code=400, detail="Dataset is empty")
-    
-    # Apply pre-filters
-    pre_filters = metadata.get("pre_filters", [])
-    filtered_df = apply_filters(df, pre_filters)
-    
-    if filtered_df.empty:
-        raise HTTPException(status_code=400, detail="No rows remain after applying pre-filters")
-    
-    # Resolve column names
-    id_vars = resolve_columns(filtered_df, metadata.get("id_vars", []))
-    value_vars = resolve_columns(filtered_df, metadata.get("value_vars", []))
-    
-    # Validate configuration
-    is_valid, errors, warnings = validate_unpivot_config(filtered_df, id_vars, value_vars)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=f"Invalid configuration: {', '.join(errors)}")
-    
-    # Perform unpivot
-    try:
-        if not id_vars:
-            # If no id_vars, create a row number column to use as identifier
-            # This ensures we can unpivot all columns while maintaining row identity
-            filtered_df = filtered_df.copy()
-            if "row_number" not in filtered_df.columns:
-                filtered_df.insert(0, "row_number", range(len(filtered_df)))
-                id_vars = ["row_number"]
-            else:
-                # If row_number already exists, use index
-                filtered_df = filtered_df.reset_index()
-                id_vars = ["index"]
-        
-        if not value_vars:
-            # If no value_vars specified, use all columns not in id_vars
-            value_vars = [col for col in filtered_df.columns if col not in id_vars]
-            if not value_vars:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No columns available to unpivot. All columns are in id_vars."
-                )
-        
-        # Perform melt (unpivot)
-        variable_col = metadata.get("variable_column_name", "variable")
-        value_col = metadata.get("value_column_name", "value")
-
-        unpivoted_df = pd.melt(
-            filtered_df,
-            id_vars=id_vars,
-            value_vars=value_vars,
-            var_name=variable_col,
-            value_name=value_col,
-        )
-        
-    except Exception as exc:
-        logger.exception("Unpivot computation failed for atom %s", atom_id)
-        raise HTTPException(status_code=400, detail=f"Unpivot computation failed: {exc}")
-    
-    # Apply variable decoder if enabled (after unpivot, before post-filters)
-    decoder_stats = {}
-    decoder_config_dict = metadata.get("variable_decoder")
-    if decoder_config_dict and isinstance(decoder_config_dict, dict) and decoder_config_dict.get("enabled"):
-        try:
-            decoder_config = VariableDecoderConfig(**decoder_config_dict)
-            
-            # Validate decoder config
-            is_valid, errors = _validate_decoder_config(unpivoted_df, variable_col, decoder_config)
-            if not is_valid:
-                logger.warning("Variable decoder validation failed: %s", ", ".join(errors))
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Variable decoder validation failed: {', '.join(errors)}"
-                )
-            
-            # Apply decoder based on type
-            if decoder_config.type == "delimiter":
-                unpivoted_df, decoder_stats = _apply_delimiter_decoder(unpivoted_df, variable_col, decoder_config)
-            elif decoder_config.type == "regex":
-                unpivoted_df, decoder_stats = _apply_regex_decoder(unpivoted_df, variable_col, decoder_config)
-            
-            logger.info("Variable decoder applied successfully: %s", decoder_stats)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.exception("Variable decoder failed for atom %s: %s", atom_id, exc)
-            raise HTTPException(
-                status_code=400,
-                detail=f"Variable decoder failed: {exc}"
-            )
-    
-    # Apply post-filters
-    post_filters = metadata.get("post_filters", [])
-    unpivoted_df = apply_filters(unpivoted_df, post_filters)
-    
-    # Apply preview limit if specified (for preview mode)
-    full_unpivoted_rows = len(unpivoted_df)
-    if payload.preview_limit and payload.preview_limit > 0:
-        unpivoted_df = unpivoted_df.head(payload.preview_limit)
-        logger.info("Preview mode: limiting to %d rows (full dataset has %d rows)", payload.preview_limit, full_unpivoted_rows)
-    
-    # Convert to records (needed for API response and storage decision)
-    records = [convert_numpy(record) for record in unpivoted_df.to_dict(orient="records")]
-    
-    # Generate summary
-    summary = {
-        "original_rows": len(filtered_df),
-        "original_columns": len(filtered_df.columns),
-        "unpivoted_rows": full_unpivoted_rows,  # Total rows (before preview limit)
-        "unpivoted_columns": len(unpivoted_df.columns),
-        "id_vars_count": len(id_vars),
-        "value_vars_count": len(value_vars),
-    }
-    
-    # Add decoder stats if decoder was applied
-    if decoder_stats:
-        decoder_config_dict = metadata.get("variable_decoder")
-        if decoder_config_dict and isinstance(decoder_config_dict, dict):
-            summary["decoder_enabled"] = True
-            summary["decoder_type"] = decoder_config_dict.get("type", "unknown")
-            summary["decoder_matched_rows"] = decoder_stats.get("matched_rows", 0)
-            summary["decoder_failed_rows"] = decoder_stats.get("failed_rows", 0)
-            summary["decoder_match_rate"] = decoder_stats.get("match_rate", 0.0)
-        else:
-            summary["decoder_enabled"] = False
-    else:
-        summary["decoder_enabled"] = False
-    
-    # Mark as preview in summary if preview_limit was used
-    if payload.preview_limit and payload.preview_limit > 0:
-        summary["is_preview"] = True
-        summary["preview_limit"] = payload.preview_limit
-        summary["preview_rows"] = len(records)  # Actual rows returned
-    
-    computation_time = time.time() - start_time
-    
-    # Store result (but don't cache preview results - compute fresh each time)
-    result = {
-        "atom_id": atom_id,
-        "status": "success",
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "row_count": len(records),
-        "dataframe": records,
-        "summary": summary,
-        "computation_time": computation_time,
-    }
-    
-    # Only store full results in cache, not preview results
+    # Safety guard: Force preview-only for very large datasets
+    # Estimate based on dataset info if available, otherwise force preview
     if not (payload.preview_limit and payload.preview_limit > 0):
-        await _store_result(atom_id, result)
-    else:
-        logger.info("Preview mode: skipping cache storage for atom %s", atom_id)
+        # Try to get row count estimate from Flight info
+        try:
+            from app.DataStorageRetrieval.arrow_client import _get_client
+            import pyarrow.flight as flight
+            client = _get_client()
+            descriptor = flight.FlightDescriptor.for_path(resolved_path)
+            info = client.get_flight_info(descriptor)
+            estimated_rows = info.total_records
+            if estimated_rows > 5_000_000:
+                logger.warning("Large dataset detected (%d rows), forcing preview mode", estimated_rows)
+                payload.preview_limit = 1000
+        except Exception:
+            # If we can't get estimate, default to preview for safety
+            logger.warning("Cannot estimate dataset size, defaulting to preview mode")
+            payload.preview_limit = 1000
     
-    # Update metadata with last computed time
-    metadata["last_computed_at"] = datetime.now(timezone.utc).isoformat()
-    _store_metadata(atom_id, metadata)
-    
-    logger.info("Computed unpivot for atom %s: %d rows in %.2f seconds", atom_id, len(records), computation_time)
-    
-    # Determine if result is large and should return preview only
-    # Calculate approximate size of the result
-    result_bytes = _ensure_redis_json(result)
-    result_size = len(result_bytes)
-    
-    # Thresholds for returning preview vs full data
-    SMALL_RESULT_THRESHOLD = 20 * 1024 * 1024  # 20MB
-    VERY_LARGE_THRESHOLD = 100 * 1024 * 1024  # 100MB
-    
-    # For large results, return only preview data to prevent frontend crashes
-    # Full data is already stored in MinIO via _store_result()
-    if result_size > VERY_LARGE_THRESHOLD:
-        # Very large results (>100MB): Return preview (first 1000 rows)
-        preview_records = records[:1000] if len(records) > 1000 else records
-        logger.info(
-            "Result size %d bytes exceeds %d bytes threshold. Returning preview (%d rows) instead of full data (%d rows)",
-            result_size,
-            VERY_LARGE_THRESHOLD,
-            len(preview_records),
-            len(records),
-        )
+    # PREVIEW MODE: Load and process only first chunk(s) until we have enough rows
+    if payload.preview_limit and payload.preview_limit > 0:
+        PREVIEW_LIMIT = payload.preview_limit
+        
+        preview_records = []
+        total_unpivoted_rows = 0
+        total_original_rows = 0
+        chunk_id_vars = None
+        chunk_value_vars = None
+        
+        # Load and process chunks from source
+        for source_chunk in load_dataframe_in_chunks_from_source(resolved_path):
+            total_original_rows += len(source_chunk)
+            
+            # Resolve column names for this chunk
+            chunk_id_vars = resolve_columns(source_chunk, metadata.get("id_vars", []))
+            chunk_value_vars = resolve_columns(source_chunk, metadata.get("value_vars", []))
+            
+            # Handle no id_vars case
+            if not chunk_id_vars:
+                source_chunk = source_chunk.copy()
+                if "row_number" not in source_chunk.columns:
+                    source_chunk.insert(0, "row_number", range(len(source_chunk)))
+                    chunk_id_vars = ["row_number"]
+                else:
+                    source_chunk = source_chunk.reset_index()
+                    chunk_id_vars = ["index"]
+            
+            # Handle no value_vars case
+            if not chunk_value_vars:
+                chunk_value_vars = [col for col in source_chunk.columns if col not in chunk_id_vars]
+                if not chunk_value_vars:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No columns available to unpivot. All columns are in id_vars."
+                    )
+            
+            # Validate configuration (only on first chunk)
+            if total_original_rows == len(source_chunk):
+                is_valid, errors, warnings = validate_unpivot_config(source_chunk, chunk_id_vars, chunk_value_vars)
+                if not is_valid:
+                    raise HTTPException(status_code=400, detail=f"Invalid configuration: {', '.join(errors)}")
+            
+            # Unpivot chunk
+            variable_col = metadata.get("variable_column_name", "variable")
+            value_col = metadata.get("value_column_name", "value")
+            
+            melted_chunk = pd.melt(
+                source_chunk,
+                id_vars=chunk_id_vars,
+                value_vars=chunk_value_vars,
+                var_name=variable_col,
+                value_name=value_col,
+            )
+            
+            total_unpivoted_rows += len(melted_chunk)
+            
+            # Collect needed rows
+            needed = PREVIEW_LIMIT - len(preview_records)
+            if needed > 0:
+                chunk_records = melted_chunk.head(needed).to_dict(orient="records")
+                preview_records.extend([convert_numpy(record) for record in chunk_records])
+            
+            # Stop if we have enough rows
+            if len(preview_records) >= PREVIEW_LIMIT:
+                break
+        
+        # Build response
+        summary = {
+            "original_rows": total_original_rows,  # Rows processed from source
+            "original_columns": len(source_chunk.columns) if 'source_chunk' in locals() else 0,
+            "unpivoted_rows": total_unpivoted_rows,  # Estimated total
+            "unpivoted_columns": len(preview_records[0].keys()) if preview_records else 0,
+            "id_vars_count": len(chunk_id_vars) if chunk_id_vars else 0,
+            "value_vars_count": len(chunk_value_vars) if chunk_value_vars else 0,
+            "is_preview": True,
+            "preview_limit": PREVIEW_LIMIT,
+            "preview_rows": len(preview_records),
+        }
+        
+        computation_time = time.time() - start_time
+        
+        # NEVER cache preview results
+        logger.info("Preview mode: returning %d rows (estimated total: %d), skipping cache", len(preview_records), total_unpivoted_rows)
+        
         return UnpivotComputeResponse(
             atom_id=atom_id,
             status="success",
             updated_at=datetime.now(timezone.utc),
-            row_count=len(records),  # Total count
-            dataframe=preview_records,  # Preview only (first 1000 rows)
+            row_count=total_unpivoted_rows,  # Estimated total
+            dataframe=preview_records,  # Only preview rows
             summary=summary,
             computation_time=computation_time,
         )
-    elif result_size > SMALL_RESULT_THRESHOLD:
-        # Large results (20-100MB): Return preview (first 5000 rows)
-        preview_records = records[:5000] if len(records) > 5000 else records
-        logger.info(
-            "Result size %d bytes exceeds %d bytes threshold. Returning preview (%d rows) instead of full data (%d rows)",
-            result_size,
-            SMALL_RESULT_THRESHOLD,
-            len(preview_records),
-            len(records),
-        )
-        return UnpivotComputeResponse(
-            atom_id=atom_id,
-            status="success",
-            updated_at=datetime.now(timezone.utc),
-            row_count=len(records),  # Total count
-            dataframe=preview_records,  # Preview only (first 5000 rows)
-            summary=summary,
-            computation_time=computation_time,
-        )
-    else:
-        # Small results (≤20MB): Return full data
-        return UnpivotComputeResponse(
-            atom_id=atom_id,
-            status="success",
-            updated_at=datetime.now(timezone.utc),
-            row_count=len(records),
-            dataframe=records,  # Full data
-            summary=summary,
-            computation_time=computation_time,
-        )
+    
+    # FULL MODE: This should not be reached if safety guard works correctly
+    # But keeping as fallback - will be handled by save path
+    raise HTTPException(
+        status_code=400,
+        detail="Full mode computation not supported. Use save endpoint for full dataset processing."
+    )
 
 
 def compute_unpivot_task(
@@ -1169,205 +1245,56 @@ async def get_dataset_schema(payload: DatasetSchemaRequest) -> DatasetSchemaResp
 
 
 async def save_unpivot_result(atom_id: str, payload: UnpivotSaveRequest) -> UnpivotSaveResponse:
-    """Save unpivot result directly to MinIO, bypassing cache updates.
+    """Save unpivot result directly to MinIO using chunked streaming.
     
-    Tries to load from cache/MinIO first. If not available, recomputes from source.
-    Does not update cache when saving.
+    Always recomputes from source using chunked processing and streams to MinIO.
+    Does not use cache or load full dataframes into memory.
     """
     logger.info("Saving unpivot result directly to MinIO for atom: %s", atom_id)
     
-    # Try to load from cache/MinIO first (more efficient)
-    result = await _load_result(atom_id)
-    df = None
+    # Load metadata to get configuration
+    metadata = _load_metadata(atom_id)
+    if not metadata:
+        raise HTTPException(status_code=404, detail=f"Unpivot atom '{atom_id}' not found")
     
-    if result:
-        records = result.get("dataframe", [])
-        is_preview = result.get("is_preview", False)
-        
-        # If result is stored in MinIO (especially if it's a preview), load full data from MinIO
-        if result.get("stored_in_minio") or is_preview:
-            metadata = _load_metadata(atom_id) or {}
-            minio_path = metadata.get("cached_result_path") or result.get("full_data_path")
-            
-            if minio_path:
-                try:
-                    # Load full data from MinIO
-                    resolved_path = await resolve_object_path(minio_path)
-                    df = download_dataframe(resolved_path)
-                    logger.info("Loaded full data from MinIO cache for saving: %s", minio_path)
-                except Exception as e:
-                    logger.warning("Failed to load from MinIO cache, will recompute: %s", e)
-                    # If MinIO load fails and it's a preview, we MUST recompute - don't use preview records
-                    df = None  # Force recomputation
-            else:
-                # No MinIO path found - if it's a preview, we MUST recompute
-                logger.warning("Result marked as stored_in_minio/is_preview but no cached_result_path found. Will recompute.")
-                df = None  # Force recomputation
-        
-        # Only use records if it's NOT a preview and we don't have a dataframe yet
-        # NEVER use preview records for saving
-        if df is None and records and not is_preview:
-            df = pd.DataFrame(records)
-            logger.info("Using cached result for saving (converted from records)")
+    # Resolve dataset path
+    try:
+        resolved_path = await resolve_object_path(metadata["dataset_path"])
+    except Exception as exc:
+        logger.exception("Failed to resolve dataset path for saving atom %s", atom_id)
+        raise HTTPException(status_code=500, detail=f"Unable to resolve dataset path: {exc}")
     
-    # If no cached result available or if it was a preview, recompute from source
-    if df is None or df.empty:
-        logger.info("No cached result available or preview detected, recomputing from source for atom: %s", atom_id)
-        
-        # Load metadata to get configuration
-        metadata = _load_metadata(atom_id)
-        if not metadata:
-            raise HTTPException(status_code=404, detail=f"Unpivot atom '{atom_id}' not found")
-        
-        # Load dataset directly from source
-        try:
-            resolved_path = await resolve_object_path(metadata["dataset_path"])
-            source_df = download_dataframe(resolved_path)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.exception("Failed to load dataframe for saving atom %s", atom_id)
-            raise HTTPException(status_code=500, detail=f"Unable to load dataset: {exc}")
-        
-        if source_df.empty:
-            raise HTTPException(status_code=400, detail="Dataset is empty")
-        
-        # Apply pre-filters
-        pre_filters = metadata.get("pre_filters", [])
-        filtered_df = apply_filters(source_df, pre_filters)
-        
-        if filtered_df.empty:
-            raise HTTPException(status_code=400, detail="No rows remain after applying pre-filters")
-        
-        # Resolve column names
-        id_vars = resolve_columns(filtered_df, metadata.get("id_vars", []))
-        value_vars = resolve_columns(filtered_df, metadata.get("value_vars", []))
-        
-        # Validate configuration
-        is_valid, errors, warnings = validate_unpivot_config(filtered_df, id_vars, value_vars)
-        if not is_valid:
-            raise HTTPException(status_code=400, detail=f"Invalid configuration: {', '.join(errors)}")
-        
-        # Perform unpivot directly
-        try:
-            if not id_vars:
-                # If no id_vars, create a row number column to use as identifier
-                filtered_df = filtered_df.copy()
-                if "row_number" not in filtered_df.columns:
-                    filtered_df.insert(0, "row_number", range(len(filtered_df)))
-                    id_vars = ["row_number"]
-                else:
-                    filtered_df = filtered_df.reset_index()
-                    id_vars = ["index"]
-            
-            if not value_vars:
-                # If no value_vars specified, use all columns not in id_vars
-                value_vars = [col for col in filtered_df.columns if col not in id_vars]
-                if not value_vars:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="No columns available to unpivot. All columns are in id_vars."
-                    )
-            
-            # Perform melt (unpivot)
-            variable_col = metadata.get("variable_column_name", "variable")
-            value_col = metadata.get("value_column_name", "value")
-            
-            unpivoted_df = pd.melt(
-                filtered_df,
-                id_vars=id_vars,
-                value_vars=value_vars,
-                var_name=variable_col,
-                value_name=value_col,
-            )
-            
-        except Exception as exc:
-            logger.exception("Unpivot computation failed for saving atom %s", atom_id)
-            raise HTTPException(status_code=400, detail=f"Unpivot computation failed: {exc}")
-        
-        # Apply post-filters
-        post_filters = metadata.get("post_filters", [])
-        unpivoted_df = apply_filters(unpivoted_df, post_filters)
-        
-        if unpivoted_df.empty:
-            raise HTTPException(status_code=400, detail="No rows remain after applying post-filters")
-        
-        df = unpivoted_df
+    # Resolve column names (we need to get these from first chunk or metadata)
+    # For now, use metadata values - they should be consistent across chunks
+    id_vars = metadata.get("id_vars", [])
+    value_vars = metadata.get("value_vars", [])
+    variable_col = metadata.get("variable_column_name", "variable")
+    value_col = metadata.get("value_column_name", "value")
     
-    if df is None or df.empty:
-        raise HTTPException(status_code=400, detail="Cannot save empty unpivot results")
+    # Perform full chunked unpivot and stream to MinIO
+    minio_path, row_count = await stream_full_unpivot_to_minio(
+        atom_id=atom_id,
+        resolved_path=resolved_path,
+        id_vars=id_vars,
+        value_vars=value_vars,
+        variable_col=variable_col,
+        value_col=value_col,
+    )
     
     timestamp = datetime.now(timezone.utc)
     
-    # Load metadata for filename and path info
-    metadata = _load_metadata(atom_id) or {}
-    
-    prefix = await get_object_prefix()
-    if isinstance(prefix, tuple):
-        prefix = prefix[0]
-    if not prefix.endswith("/"):
-        prefix = f"{prefix}/"
-    
-    object_prefix = f"{prefix}unpivot/"
-    
-    # Determine filename: use provided filename for save_as, or standard filename for save (always overwrites)
-    
-    if payload.filename:
-        # Save As: create new file with provided filename
-        file_name = payload.filename.strip()
-        if not file_name.endswith(('.arrow', '.parquet', '.csv')):
-            # Add extension based on format
-            if payload.format.lower() == "csv":
-                file_name = f"{file_name}.csv"
-            else:
-                file_name = f"{file_name}.arrow"
-    else:
-        # Save: always use the same filename (creates or overwrites)
-        atom_name = metadata.get("atom_name", "unpivot")
-        safe_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in atom_name)
-        file_name = f"{safe_name}_{atom_id[:8]}.arrow"
-    
-    if payload.format.lower() == "parquet":
-        # Convert to parquet bytes
-        table = pa.Table.from_pandas(df)
-        sink = pa.BufferOutputStream()
-        with ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
-        file_bytes = sink.getvalue().to_pybytes()
-    elif payload.format.lower() == "csv":
-        # Convert to CSV bytes
-        file_bytes = df.to_csv(index=False).encode("utf-8")
-    else:
-        # Default to arrow
-        table = pa.Table.from_pandas(df)
-        sink = pa.BufferOutputStream()
-        with ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
-        file_bytes = sink.getvalue().to_pybytes()
-    
-    ensure_minio_bucket()
-    upload_result = upload_to_minio(file_bytes, file_name, object_prefix)
-    
-    if upload_result.get("status") != "success":
-        raise HTTPException(
-            status_code=500,
-            detail=upload_result.get("error_message", "Failed to store unpivot result"),
-        )
-    
-    minio_path = upload_result["object_name"]
-    
-    # Update metadata with saved path (but don't update cache)
+    # Update metadata with saved path
     metadata["last_saved_path"] = minio_path
     metadata["last_saved_at"] = timestamp.isoformat()
     _store_metadata(atom_id, metadata)
     
-    logger.info("Saved unpivot result directly to MinIO for atom %s: %s (bypassed cache)", atom_id, minio_path)
+    logger.info("Saved unpivot result to MinIO for atom %s: %s (%d rows)", atom_id, minio_path, row_count)
     
     return UnpivotSaveResponse(
         atom_id=atom_id,
         minio_path=minio_path,
         updated_at=timestamp,
-        row_count=len(df),
+        row_count=row_count,
     )
 
 

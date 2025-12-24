@@ -8,6 +8,7 @@ import {
   DEFAULT_UNPIVOT_SETTINGS,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import UnpivotInputFiles from './UnpivotInputFiles';
+import { UNPIVOT_API } from '@/lib/api';
 
 interface UnpivotPropertiesProps {
   atomId: string;
@@ -34,42 +35,210 @@ const UnpivotProperties: React.FC<UnpivotPropertiesProps> = ({ atomId, onApply, 
     unpivotResults: Array.isArray(rawSettings?.unpivotResults) ? rawSettings!.unpivotResults : [],
   };
   
-  // Internal apply handler that triggers manual refresh
-  const handleApply = useCallback(() => {
+  // Helper to ensure backend atom exists
+  const ensureBackendAtom = useCallback(async (): Promise<string> => {
+    let currentAtomId = data.atomId;
+    
+    if (!currentAtomId) {
+      const envStr = localStorage.getItem('env');
+      let projectId = '';
+      let workflowId = '';
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          projectId = env.PROJECT_ID || '';
+          workflowId = env.WORKFLOW_ID || '';
+        } catch (e) {
+          console.warn('Failed to parse env', e);
+        }
+      }
+
+      const createResponse = await fetch(`${UNPIVOT_API}/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          workflow_id: workflowId,
+          atom_name: `Unpivot ${atomId}`,
+          dataset_path: data.datasetPath || '',
+        }),
+      });
+
+      if (!createResponse.ok) {
+        throw new Error(`Failed to create atom (${createResponse.status})`);
+      }
+
+      const createResult = await createResponse.json();
+      currentAtomId = createResult.atom_id;
+      updateSettings(atomId, { atomId: currentAtomId });
+      return currentAtomId;
+    }
+    
+    return currentAtomId;
+  }, [atomId, data.atomId, data.datasetPath, updateSettings]);
+
+  // Internal apply handler - calls provided handler or triggers computation directly
+  const handleApply = useCallback(async () => {
     if (onApply) {
       // Use external handler if provided (from UnpivotAtom)
       onApply();
-    } else {
-      // If no external handler (when used in SettingsPanel), trigger via setting update
-      // UnpivotAtom will watch for this change
-      const latestAtom = useLaboratoryStore.getState().getAtom(atomId);
-      const latestSettings: UnpivotSettingsType =
-        (latestAtom?.settings as UnpivotSettingsType) || { ...DEFAULT_UNPIVOT_SETTINGS };
+      return;
+    }
+    
+    // If no handler provided, trigger computation directly
+    console.log('handleApply: triggering computation directly');
+    if (!data.datasetPath || (data.idVars.length === 0 && data.valueVars.length === 0)) {
+      return;
+    }
+
+    updateSettings(atomId, {
+      unpivotStatus: 'pending',
+      unpivotError: null,
+    });
+
+    try {
+      const updatePayload: any = {
+        id_vars: data.idVars,
+        value_vars: data.valueVars,
+        variable_column_name: data.variableColumnName || undefined,
+        value_column_name: data.valueColumnName || undefined,
+        pre_filters: data.preFilters,
+        post_filters: data.postFilters,
+        auto_refresh: data.autoRefresh,
+      };
+      
+      if (data.variableDecoder) {
+        updatePayload.variable_decoder = data.variableDecoder;
+      }
+
+      const currentAtomId = await ensureBackendAtom();
+
+      const updateResponse = await fetch(
+        `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/properties`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatePayload),
+        }
+      );
+
+      if (!updateResponse.ok) {
+        throw new Error(`Properties update failed (${updateResponse.status})`);
+      }
+
+      const computeResponse = await fetch(
+        `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/compute`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force_recompute: true, preview_limit: 1000 }),
+        }
+      );
+
+      if (!computeResponse.ok) {
+        throw new Error(`Compute failed (${computeResponse.status})`);
+      }
+
+      const result = await computeResponse.json();
       updateSettings(atomId, {
-        ...latestSettings,
-        // Trigger refresh by updating a timestamp-like field that UnpivotAtom watches
-        lastApplyTrigger: Date.now(),
+        unpivotResults: result?.dataframe ?? [],
+        unpivotStatus: result?.status ?? 'success',
+        unpivotError: null,
+        unpivotUpdatedAt: result?.updated_at,
+        unpivotRowCount: result?.row_count,
+        unpivotSummary: result?.summary ?? {},
+        computationTime: result?.computation_time,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Computation failed';
+      updateSettings(atomId, {
+        unpivotStatus: 'failed',
+        unpivotError: message,
       });
     }
-  }, [atomId, onApply, updateSettings]);
+  }, [onApply, atomId, data, ensureBackendAtom, updateSettings]);
   
-  // Internal preview handler that triggers preview computation
-  const handlePreview = useCallback(() => {
+  // Internal preview handler - calls provided handler or triggers preview computation directly
+  const handlePreview = useCallback(async () => {
     if (onPreview) {
       // Use external handler if provided (from UnpivotAtom)
       onPreview();
-    } else {
-      // If no external handler (when used in SettingsPanel), trigger via setting update
-      const latestAtom = useLaboratoryStore.getState().getAtom(atomId);
-      const latestSettings: UnpivotSettingsType =
-        (latestAtom?.settings as UnpivotSettingsType) || { ...DEFAULT_UNPIVOT_SETTINGS };
+      console.log('handlePreview: using external handler');
+      return;
+    }
+    
+    // If no handler provided, trigger preview computation directly
+    console.log('handlePreview: triggering preview computation directly');
+    if (!data.datasetPath || (data.idVars.length === 0 && data.valueVars.length === 0)) {
+      return;
+    }
+
+    updateSettings(atomId, {
+      unpivotStatus: 'pending',
+      unpivotError: null,
+    });
+
+    try {
+      const updatePayload: any = {
+        id_vars: data.idVars,
+        value_vars: data.valueVars,
+        variable_column_name: data.variableColumnName || undefined,
+        value_column_name: data.valueColumnName || undefined,
+        pre_filters: data.preFilters,
+        post_filters: data.postFilters,
+        auto_refresh: data.autoRefresh,
+      };
+      
+      if (data.variableDecoder) {
+        updatePayload.variable_decoder = data.variableDecoder;
+      }
+
+      const currentAtomId = await ensureBackendAtom();
+
+      const updateResponse = await fetch(
+        `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/properties`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatePayload),
+        }
+      );
+
+      if (!updateResponse.ok) {
+        throw new Error(`Properties update failed (${updateResponse.status})`);
+      }
+
+      const computeResponse = await fetch(
+        `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/compute`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force_recompute: true, preview_limit: 100 }),
+        }
+      );
+
+      if (!computeResponse.ok) {
+        throw new Error(`Preview compute failed (${computeResponse.status})`);
+      }
+
+      const result = await computeResponse.json();
       updateSettings(atomId, {
-        ...latestSettings,
-        // Trigger preview by updating a timestamp-like field that UnpivotAtom watches
-        lastPreviewTrigger: Date.now(),
+        unpivotResults: result?.dataframe ?? [],
+        unpivotStatus: result?.status ?? 'success',
+        unpivotError: null,
+        unpivotUpdatedAt: result?.updated_at,
+        unpivotRowCount: result?.row_count,
+        unpivotSummary: result?.summary ?? {},
+        computationTime: result?.computation_time,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Preview computation failed';
+      updateSettings(atomId, {
+        unpivotStatus: 'failed',
+        unpivotError: message,
       });
     }
-  }, [atomId, onPreview, updateSettings]);
+  }, [onPreview, atomId, data, ensureBackendAtom, updateSettings]);
   
   // Check if computing from atom status
   const isComputing = externalIsComputing || data.unpivotStatus === 'pending';

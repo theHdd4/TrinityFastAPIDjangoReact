@@ -29,6 +29,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
   const [computeError, setComputeError] = React.useState<string | null>(null);
   const [manualRefreshToken, setManualRefreshToken] = React.useState(0);
   const [previewToken, setPreviewToken] = React.useState(0);
+  const [activeOperation, setActiveOperation] = React.useState<'apply' | 'preview' | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saveMessage, setSaveMessage] = React.useState<string | null>(null);
@@ -232,19 +233,24 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
 
   // Manual apply handler - triggers full computation
   const handleApply = React.useCallback(() => {
+    // Prevent if another operation is active
+    if (isComputing) return;
+    setActiveOperation('apply');
     setManualRefreshToken((prev) => prev + 1);
-  }, []);
+  }, [isComputing]);
 
   // Preview handler - triggers preview computation (100 rows)
   const handlePreview = React.useCallback(() => {
+    // Prevent if another operation is active
+    if (isComputing) return;
+    setActiveOperation('preview');
     setPreviewToken((prev) => prev + 1);
-  }, []);
+  }, [isComputing]);
 
-  // Compute ONLY when Apply button is clicked (manualRefreshToken or lastApplyTrigger changes)
+  // Compute ONLY when Apply button is clicked (manualRefreshToken changes)
   React.useEffect(() => {
-    // Only compute if manualRefreshToken is > 0 (Apply button was clicked) OR lastApplyTrigger changed
-    const lastApplyTrigger = (settings as any).lastApplyTrigger || 0;
-    if (manualRefreshToken === 0 && lastApplyTrigger === 0) {
+    // Only compute if manualRefreshToken is > 0 (Apply button was clicked) AND we're in apply mode
+    if (manualRefreshToken === 0 || activeOperation !== 'apply') {
       return;
     }
 
@@ -333,13 +339,14 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         }
 
         // Compute (auto-refresh will trigger this, but we can also call it explicitly)
+        // Apply button should always use preview mode (≤1000 rows)
         let computeAtomId = currentAtomId;
         const computeResponse = await fetch(
           `${UNPIVOT_API}/${encodeURIComponent(computeAtomId)}/compute`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ force_recompute: true }),
+            body: JSON.stringify({ force_recompute: true, preview_limit: 1000 }),
             signal: controller.signal,
           }
         );
@@ -354,7 +361,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ force_recompute: true }),
+                body: JSON.stringify({ force_recompute: true, preview_limit: 1000 }),
                 signal: controller.signal,
               }
             );
@@ -401,6 +408,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         });
         setIsComputing(false);
         setComputeError(null);
+        setActiveOperation(null);
         
         // Emit heavy-operation-end event to resume SavedDataFramesPanel polling
         window.dispatchEvent(new CustomEvent('heavy-operation-end', {
@@ -408,6 +416,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         }));
       } catch (error) {
         if ((error as any)?.name === 'AbortError') {
+          setActiveOperation(null);
           // Emit end event even on abort
           window.dispatchEvent(new CustomEvent('heavy-operation-end', {
             detail: { operation: 'unpivot', atomId, type: 'compute' }
@@ -420,6 +429,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
             : 'Unpivot computation failed. Please try again.';
         setIsComputing(false);
         setComputeError(message);
+        setActiveOperation(null);
         updateSettings(atomId, {
           unpivotStatus: 'failed',
           unpivotError: message,
@@ -437,16 +447,15 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     return () => {
       controller.abort();
     };
-    // Only trigger when Apply button is clicked (manualRefreshToken or lastApplyTrigger changes)
+    // Only trigger when Apply button is clicked (manualRefreshToken changes) AND activeOperation is 'apply'
     // We read settings values inside the effect, but don't trigger on their changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [atomId, manualRefreshToken, (settings as any).lastApplyTrigger, updateSettings]);
+  }, [atomId, manualRefreshToken, activeOperation]);
 
   // Preview computation effect - computes only 100 rows for preview
   React.useEffect(() => {
-    // Only compute if previewToken is > 0 (Preview button was clicked) OR lastPreviewTrigger changed
-    const lastPreviewTrigger = (settings as any).lastPreviewTrigger || 0;
-    if (previewToken === 0 && lastPreviewTrigger === 0) {
+    // Only compute if previewToken is > 0 (Preview button was clicked) AND we're in preview mode
+    if (previewToken === 0 || activeOperation !== 'preview') {
       return;
     }
 
@@ -574,6 +583,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
             });
             setIsComputing(false);
             setComputeError(null);
+            setActiveOperation(null);
             
             // Emit heavy-operation-end event to resume SavedDataFramesPanel polling
             window.dispatchEvent(new CustomEvent('heavy-operation-end', {
@@ -599,6 +609,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         });
         setIsComputing(false);
         setComputeError(null);
+        setActiveOperation(null);
         
         // Emit heavy-operation-end event to resume SavedDataFramesPanel polling
         window.dispatchEvent(new CustomEvent('heavy-operation-end', {
@@ -606,6 +617,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         }));
       } catch (error) {
         if ((error as any)?.name === 'AbortError') {
+          setActiveOperation(null);
           // Emit end event even on abort
           window.dispatchEvent(new CustomEvent('heavy-operation-end', {
             detail: { operation: 'unpivot', atomId, type: 'preview' }
@@ -618,6 +630,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
             : 'Preview computation failed. Please try again.';
         setIsComputing(false);
         setComputeError(message);
+        setActiveOperation(null);
         updateSettings(atomId, {
           unpivotStatus: 'failed',
           unpivotError: message,
@@ -635,9 +648,9 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     return () => {
       controller.abort();
     };
-    // Only trigger when Preview button is clicked (previewToken or lastPreviewTrigger changes)
+    // Only trigger when Preview button is clicked (previewToken changes) AND activeOperation is 'preview'
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [atomId, previewToken, (settings as any).lastPreviewTrigger, updateSettings]);
+  }, [atomId, previewToken, activeOperation]);
 
   const handleRefresh = React.useCallback(() => {
     setManualRefreshToken((prev) => prev + 1);
