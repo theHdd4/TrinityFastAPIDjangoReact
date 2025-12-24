@@ -2173,13 +2173,43 @@ async def save_dataframes(
                 delimiter = CSVReader._detect_delimiter(content, encoding)
                 max_cols = CSVReader._find_max_columns(content, encoding, delimiter, sample_rows=0)
                 
-                # Create schema with all columns
+                # CRITICAL FIX: Extract original headers from first row to preserve column names
+                original_headers = None
+                has_header = CSV_READ_KWARGS.get("has_header", True)
+                if max_cols > 0 and has_header:
+                    try:
+                        import csv as csv_module
+                        text_content = content.decode(encoding, errors='ignore')
+                        csv_reader = csv_module.reader(io.StringIO(text_content), delimiter=delimiter)
+                        first_row = next(csv_reader, None)
+                        if first_row:
+                            original_headers = [str(h).strip() if h else "" for h in first_row]
+                            # Pad headers if needed to match max_cols
+                            while len(original_headers) < max_cols:
+                                original_headers.append(f"col_{len(original_headers)}")
+                            # Truncate if somehow we have more headers than max_cols
+                            original_headers = original_headers[:max_cols]
+                            logger.debug(f"save_dataframes: Extracted {len(original_headers)} headers from first row")
+                    except Exception as e:
+                        logger.warning(f"save_dataframes: Failed to extract headers: {e}, using generic names")
+                        original_headers = None
+                
+                # Create schema with all columns - use original headers if available
                 if max_cols > 0:
-                    schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
-                    batched_kwargs = CSV_READ_KWARGS.copy()
-                    batched_kwargs["schema"] = schema
-                    batched_kwargs["truncate_ragged_lines"] = False
-                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
+                    if original_headers:
+                        schema = {header: pl.Utf8 for header in original_headers}
+                        batched_kwargs = CSV_READ_KWARGS.copy()
+                        batched_kwargs["schema"] = schema
+                        batched_kwargs["has_header"] = False  # Headers already extracted
+                        batched_kwargs["skip_rows"] = 1  # CRITICAL: Skip the header row we already extracted
+                        batched_kwargs["truncate_ragged_lines"] = False
+                        batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
+                    else:
+                        schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
+                        batched_kwargs = CSV_READ_KWARGS.copy()
+                        batched_kwargs["schema"] = schema
+                        batched_kwargs["truncate_ragged_lines"] = False
+                        batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                 else:
                     batched_kwargs = CSV_READ_KWARGS.copy()
                     batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
