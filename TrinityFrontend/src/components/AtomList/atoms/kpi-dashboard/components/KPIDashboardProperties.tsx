@@ -20,9 +20,6 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({
   onSettingsChange,
   onDataUpload
 }) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardProperties.tsx:17',message:'KPIDashboardProperties render',data:{onDataUploadType:typeof onDataUpload,onDataUploadIsFunc:typeof onDataUpload==='function',onSettingsChangeType:typeof onSettingsChange,onSettingsChangeIsFunc:typeof onSettingsChange==='function'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   return (
     <div className="w-80 h-full bg-background border-l border-border flex flex-col">
       <div className="p-3 border-b border-border">

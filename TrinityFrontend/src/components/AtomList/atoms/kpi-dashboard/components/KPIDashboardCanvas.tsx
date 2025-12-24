@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Trash2, GripVertical, ChevronDown, Type, BarChart3, Lightbulb, HelpCircle, Quote, Blocks, LayoutGrid, Table2, ImageIcon, Zap, MessageSquare, Search, X, Target, AlertCircle, CheckCircle, ArrowLeft, ArrowRight, Star, Award, Flame, ArrowUp, ArrowDown, MoreVertical, Filter, Eye, EyeOff, Minus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -1344,16 +1345,34 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   // State for variable selection dialog (used for metric cards)
   const [showVariableDialog, setShowVariableDialog] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [variableDialogPosition, setVariableDialogPosition] = useState<{ side: 'right' | 'left'; width: number; top: number }>({ side: 'right', width: 500, top: 0 });
+  const [variableDialogPosition, setVariableDialogPosition] = useState<{ side: 'right' | 'left' | 'overlay'; width: number; top: number }>({ side: 'right', width: 500, top: 0 });
   const metricCardRef = useRef<HTMLDivElement>(null);
   
   const textRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const isSavingInsightsContentRef = useRef(false);
   const qaQuestionRef = useRef<HTMLDivElement>(null);
   const qaAnswerRef = useRef<HTMLDivElement>(null);
   const isAnswerTypingRef = useRef<boolean>(false);
   const interactiveBlock1ContentRef = useRef<HTMLDivElement>(null);
   const interactiveBlock2ContentRef = useRef<HTMLDivElement>(null);
+  // Refs for element containers to calculate toolbar position
+  const elementContainerRef = useRef<HTMLDivElement>(null);
+  const insightsPanelContainerRef = useRef<HTMLDivElement>(null);
+  const qaContainerRef = useRef<HTMLDivElement>(null);
+  const interactiveBlockContainerRef = useRef<HTMLDivElement>(null);
+  const captionPanelContainerRef = useRef<HTMLDivElement>(null);
+  // State to track toolbar position (above or below) and fixed position coordinates
+  const [toolbarPosition, setToolbarPosition] = useState<'above' | 'below'>('above');
+  const [toolbarFixedPosition, setToolbarFixedPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [insightsToolbarPosition, setInsightsToolbarPosition] = useState<'above' | 'below'>('above');
+  const [insightsToolbarFixedPosition, setInsightsToolbarFixedPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [qaToolbarPosition, setQAToolbarPosition] = useState<'above' | 'below'>('above');
+  const [qaToolbarFixedPosition, setQAToolbarFixedPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [interactiveBlockToolbarPosition, setInteractiveBlockToolbarPosition] = useState<'above' | 'below'>('above');
+  const [interactiveBlockToolbarFixedPosition, setInteractiveBlockToolbarFixedPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [captionToolbarPosition, setCaptionToolbarPosition] = useState<'above' | 'below'>('above');
+  const [captionToolbarFixedPosition, setCaptionToolbarFixedPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   // Image resize state and refs
   const [isResizing, setIsResizing] = useState(false);
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
@@ -1385,6 +1404,274 @@ const ElementBox: React.FC<ElementBoxProps> = ({
   
   const selectedElement = elementTypes.find(e => e.value === box.elementType);
   
+  // Utility function to calculate if toolbar should be above or below and get fixed position
+  const calculateToolbarPosition = (containerRef: React.RefObject<HTMLElement>): { position: 'above' | 'below'; fixedPos?: { top: number; left: number; width: number } } => {
+    if (!containerRef.current) return { position: 'above' };
+    
+    const rect = containerRef.current.getBoundingClientRect();
+    const toolbarHeight = 76; // Height of toolbar including padding
+    const padding = 10; // Gap between toolbar and element
+    // Check if toolbar positioned above would extend beyond viewport top (accounting for any headers/padding)
+    // Use a conservative threshold - if element is within 120px of top, position below
+    const safeTopThreshold = toolbarHeight + padding + 60; // 76 + 10 + 60 = 146px from top
+    
+    // rect.top is already relative to viewport (accounts for scrolling)
+    // If element is too close to top of viewport, position toolbar below
+    if (rect.top < safeTopThreshold) {
+      return { position: 'below' };
+    }
+    
+    // When above, calculate fixed position to escape overflow constraints
+    return {
+      position: 'above',
+      fixedPos: {
+        top: rect.top - toolbarHeight - padding,
+        left: rect.left,
+        width: rect.width
+      }
+    };
+  };
+  
+  // Calculate toolbar position for text box
+  useEffect(() => {
+    if (showTextBoxToolbar && elementContainerRef.current) {
+      // Calculate immediately, then again after render
+      const calculate = () => {
+        if (elementContainerRef.current) {
+          const result = calculateToolbarPosition(elementContainerRef);
+          setToolbarPosition(result.position);
+          setToolbarFixedPosition(result.fixedPos || null);
+        }
+      };
+      
+      // Calculate with multiple attempts to ensure DOM is ready
+      calculate();
+      requestAnimationFrame(() => {
+        calculate();
+        requestAnimationFrame(() => {
+          calculate();
+        });
+      });
+      
+      // Recalculate on scroll and resize
+      const handleScroll = () => {
+        calculate();
+      };
+      
+      // Listen to both window scroll and any scroll containers
+      window.addEventListener('scroll', handleScroll, true);
+      window.addEventListener('resize', handleScroll);
+      
+      // Also listen to scroll on parent scroll containers
+      const scrollContainer = elementContainerRef.current.closest('[style*="overflow"]') || 
+                             elementContainerRef.current.closest('.overflow-y-auto');
+      if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', handleScroll, true);
+        return () => {
+          window.removeEventListener('scroll', handleScroll, true);
+          window.removeEventListener('resize', handleScroll);
+          scrollContainer.removeEventListener('scroll', handleScroll, true);
+        };
+      }
+      
+      return () => {
+        window.removeEventListener('scroll', handleScroll, true);
+        window.removeEventListener('resize', handleScroll);
+      };
+    } else if (!showTextBoxToolbar) {
+      setToolbarPosition('above'); // Reset to default when hidden
+      setToolbarFixedPosition(null);
+    }
+  }, [showTextBoxToolbar]);
+  
+  // Calculate toolbar position for insights panel
+  useEffect(() => {
+    if (showInsightsToolbar && insightsPanelContainerRef.current) {
+      const calculate = () => {
+        if (insightsPanelContainerRef.current) {
+          const result = calculateToolbarPosition(insightsPanelContainerRef);
+          setInsightsToolbarPosition(result.position);
+          setInsightsToolbarFixedPosition(result.fixedPos || null);
+        }
+      };
+      
+      calculate();
+      requestAnimationFrame(() => {
+        calculate();
+        requestAnimationFrame(() => {
+          calculate();
+        });
+      });
+      
+      const handleScroll = () => {
+        calculate();
+      };
+      
+      window.addEventListener('scroll', handleScroll, true);
+      window.addEventListener('resize', handleScroll);
+      
+      const scrollContainer = insightsPanelContainerRef.current.closest('[style*="overflow"]') || 
+                             insightsPanelContainerRef.current.closest('.overflow-y-auto');
+      if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', handleScroll, true);
+        return () => {
+          window.removeEventListener('scroll', handleScroll, true);
+          window.removeEventListener('resize', handleScroll);
+          scrollContainer.removeEventListener('scroll', handleScroll, true);
+        };
+      }
+      
+      return () => {
+        window.removeEventListener('scroll', handleScroll, true);
+        window.removeEventListener('resize', handleScroll);
+      };
+    } else if (!showInsightsToolbar) {
+      setInsightsToolbarPosition('above');
+      setInsightsToolbarFixedPosition(null);
+    }
+  }, [showInsightsToolbar]);
+  
+  // Calculate toolbar position for Q&A
+  useEffect(() => {
+    if (activeQAField && qaContainerRef.current) {
+      const calculate = () => {
+        if (qaContainerRef.current) {
+          const result = calculateToolbarPosition(qaContainerRef);
+          setQAToolbarPosition(result.position);
+          setQAToolbarFixedPosition(result.fixedPos || null);
+        }
+      };
+      
+      calculate();
+      requestAnimationFrame(() => {
+        calculate();
+        requestAnimationFrame(() => {
+          calculate();
+        });
+      });
+      
+      const handleScroll = () => {
+        calculate();
+      };
+      
+      window.addEventListener('scroll', handleScroll, true);
+      window.addEventListener('resize', handleScroll);
+      
+      const scrollContainer = qaContainerRef.current.closest('[style*="overflow"]') || 
+                             qaContainerRef.current.closest('.overflow-y-auto');
+      if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', handleScroll, true);
+        return () => {
+          window.removeEventListener('scroll', handleScroll, true);
+          window.removeEventListener('resize', handleScroll);
+          scrollContainer.removeEventListener('scroll', handleScroll, true);
+        };
+      }
+      
+      return () => {
+        window.removeEventListener('scroll', handleScroll, true);
+        window.removeEventListener('resize', handleScroll);
+      };
+    } else if (!activeQAField) {
+      setQAToolbarPosition('above');
+      setQAToolbarFixedPosition(null);
+    }
+  }, [activeQAField]);
+  
+  // Calculate toolbar position for interactive blocks
+  useEffect(() => {
+    if ((showInteractiveBlock1Toolbar || showInteractiveBlock2Toolbar) && interactiveBlockContainerRef.current) {
+      const calculate = () => {
+        if (interactiveBlockContainerRef.current) {
+          const result = calculateToolbarPosition(interactiveBlockContainerRef);
+          setInteractiveBlockToolbarPosition(result.position);
+          setInteractiveBlockToolbarFixedPosition(result.fixedPos || null);
+        }
+      };
+      
+      calculate();
+      requestAnimationFrame(() => {
+        calculate();
+        requestAnimationFrame(() => {
+          calculate();
+        });
+      });
+      
+      const handleScroll = () => {
+        calculate();
+      };
+      
+      window.addEventListener('scroll', handleScroll, true);
+      window.addEventListener('resize', handleScroll);
+      
+      const scrollContainer = interactiveBlockContainerRef.current.closest('[style*="overflow"]') || 
+                             interactiveBlockContainerRef.current.closest('.overflow-y-auto');
+      if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', handleScroll, true);
+        return () => {
+          window.removeEventListener('scroll', handleScroll, true);
+          window.removeEventListener('resize', handleScroll);
+          scrollContainer.removeEventListener('scroll', handleScroll, true);
+        };
+      }
+      
+      return () => {
+        window.removeEventListener('scroll', handleScroll, true);
+        window.removeEventListener('resize', handleScroll);
+      };
+    } else if (!showInteractiveBlock1Toolbar && !showInteractiveBlock2Toolbar) {
+      setInteractiveBlockToolbarPosition('above');
+      setInteractiveBlockToolbarFixedPosition(null);
+    }
+  }, [showInteractiveBlock1Toolbar, showInteractiveBlock2Toolbar]);
+  
+  // Calculate toolbar position for caption panel
+  useEffect(() => {
+    if (showInsightsToolbar && captionPanelContainerRef.current) {
+      const calculate = () => {
+        if (captionPanelContainerRef.current) {
+          const result = calculateToolbarPosition(captionPanelContainerRef);
+          setCaptionToolbarPosition(result.position);
+          setCaptionToolbarFixedPosition(result.fixedPos || null);
+        }
+      };
+      
+      calculate();
+      requestAnimationFrame(() => {
+        calculate();
+        requestAnimationFrame(() => {
+          calculate();
+        });
+      });
+      
+      const handleScroll = () => {
+        calculate();
+      };
+      
+      window.addEventListener('scroll', handleScroll, true);
+      window.addEventListener('resize', handleScroll);
+      
+      const scrollContainer = captionPanelContainerRef.current.closest('[style*="overflow"]') || 
+                             captionPanelContainerRef.current.closest('.overflow-y-auto');
+      if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', handleScroll, true);
+        return () => {
+          window.removeEventListener('scroll', handleScroll, true);
+          window.removeEventListener('resize', handleScroll);
+          scrollContainer.removeEventListener('scroll', handleScroll, true);
+        };
+      }
+      
+      return () => {
+        window.removeEventListener('scroll', handleScroll, true);
+        window.removeEventListener('resize', handleScroll);
+      };
+    } else if (!showInsightsToolbar) {
+      setCaptionToolbarPosition('above');
+      setCaptionToolbarFixedPosition(null);
+    }
+  }, [showInsightsToolbar]);
+  
   // Calculate dropdown position and size when dialog opens (only for metric-card)
   useEffect(() => {
     // Only run this effect for metric-card elements
@@ -1395,6 +1682,23 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         const cardElement = metricCardRef.current;
         if (!cardElement) return;
 
+        // If there's only one element in the row, overlay the dialog inside the element
+        if (boxesInRow === 1) {
+          const cardRect = cardElement.getBoundingClientRect();
+          const preferredWidth = Math.min(500, cardRect.width - 32); // Leave 16px margin on each side
+          const minWidth = 350;
+          const width = Math.max(minWidth, preferredWidth);
+          
+          // Center the dialog vertically within the card
+          // The dialog height will be constrained by maxHeight, so we center based on available space
+          const dialogMaxHeight = Math.min(600, cardRect.height - 32);
+          const top = Math.max(16, (cardRect.height - dialogMaxHeight) / 2);
+          
+          setVariableDialogPosition({ side: 'overlay', width, top });
+          return;
+        }
+
+        // For multiple elements, use the existing logic (position beside the element)
         // Find the canvas container - look for the main canvas wrapper
         // Start from the card and traverse up to find the canvas container
         let current: HTMLElement | null = cardElement.parentElement;
@@ -1483,7 +1787,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Reset position when dialog closes
       setVariableDialogPosition({ side: 'right', width: 500, top: 0 });
     }
-  }, [showVariableDialog, box.elementType]);
+  }, [showVariableDialog, box.elementType, boxesInRow]);
   
   // Track cursor position and update current style and formatting state
   const updateCursorStyleFromSelection = () => {
@@ -1589,9 +1893,27 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
   // When an element is selected, exit edit mode
   const handleElementChange = (value: ElementType) => {
-    onSelectElement(value);
+    // Immediately cleanup Text Box state before changing element type
+    setIsEditing(false);
+    setShowTextBoxToolbar(false);
+    if (textRef.current) {
+      textRef.current.blur();
+    }
     setIsEditMode(false);
+    onSelectElement(value);
   };
+
+  // Cleanup Text Box state when element type changes away from text-box
+  useEffect(() => {
+    if (box.elementType !== 'text-box') {
+      setIsEditing(false);
+      setShowTextBoxToolbar(false);
+      // Reset cursor focus to prevent any lingering editor state
+      if (textRef.current) {
+        textRef.current.blur();
+      }
+    }
+  }, [box.elementType]);
 
   // Handle text content update
   useEffect(() => {
@@ -1646,7 +1968,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
   // Initialize content HTML for insights panel, Q&A, caption, and interactive blocks
   useEffect(() => {
-    if (box.elementType === 'insight-panel' && contentRef.current && box.insightsContent !== undefined && !isEditing) {
+    if (box.elementType === 'insight-panel' && contentRef.current && box.insightsContent !== undefined && !isEditing && !isSavingInsightsContentRef.current) {
       if (contentRef.current.innerHTML !== box.insightsContent) {
         contentRef.current.innerHTML = box.insightsContent;
       }
@@ -2327,6 +2649,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       
       return (
         <div 
+          ref={elementContainerRef}
           className={`relative group/box ${selectionClass}`}
           onClick={handleBoxClick} 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' }}
@@ -2343,11 +2666,94 @@ const ElementBox: React.FC<ElementBoxProps> = ({
             boxesInRow={boxesInRow}
           />
           {/* Toolbar - visible only when text box is focused */}
-          {showTextBoxToolbar && (
-            <div className="absolute left-0 right-0 flex items-center gap-2 bg-white rounded-lg shadow-2xl p-2 border border-gray-200" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
-            <div className="flex-1 overflow-x-auto min-w-0">
-              <div className="inline-flex">
-              <TextBoxToolbar
+          {showTextBoxToolbar && box.elementType === 'text-box' && (
+            <>
+              {toolbarPosition === 'above' && toolbarFixedPosition ? (
+                createPortal(
+                  <div 
+                    className="fixed flex items-center gap-2 bg-white rounded-lg shadow-2xl p-2 border border-gray-200" 
+                    style={{ 
+                      top: `${toolbarFixedPosition.top}px`, 
+                      left: `${toolbarFixedPosition.left}px`,
+                      width: `${toolbarFixedPosition.width}px`,
+                      zIndex: 10000 
+                    }} 
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div className="flex-1 overflow-x-auto min-w-0">
+                      <div className="inline-flex">
+                        <TextBoxToolbar
+                          textStyle={currentCursorStyle}
+                          onTextStyleChange={handleStyleChangeForSelection}
+                          fontFamily={box.fontFamily || 'DM Sans'}
+                          onFontFamilyChange={(font) => {
+                            applyFormatToSelection('fontName', font);
+                            updateCursorStyleFromSelection();
+                          }}
+                          fontSize={box.fontSize || currentDefaultSize}
+                          onIncreaseFontSize={() => {}}
+                          onDecreaseFontSize={() => {}}
+                          onApplyTextStyle={handleApplyTextStyle}
+                          bold={textBoxBold}
+                          italic={textBoxItalic}
+                          underline={textBoxUnderline}
+                          strikethrough={textBoxStrikethrough}
+                          onToggleBold={() => {
+                            applyFormatToSelection('bold');
+                            setTimeout(updateCursorStyleFromSelection, 10);
+                          }}
+                          onToggleItalic={() => {
+                            applyFormatToSelection('italic');
+                            setTimeout(updateCursorStyleFromSelection, 10);
+                          }}
+                          onToggleUnderline={() => {
+                            applyFormatToSelection('underline');
+                            setTimeout(updateCursorStyleFromSelection, 10);
+                          }}
+                          onToggleStrikethrough={() => {
+                            applyFormatToSelection('strikeThrough');
+                            setTimeout(updateCursorStyleFromSelection, 10);
+                          }}
+                          align={textBoxAlign}
+                          onAlign={(align) => {
+                            if (textRef.current) {
+                              textRef.current.style.textAlign = align;
+                              onTextBoxUpdate({ align });
+                            }
+                            applyFormatToSelection('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'));
+                            setTimeout(() => {
+                              setTextBoxAlign(align);
+                              updateCursorStyleFromSelection();
+                            }, 10);
+                          }}
+                          color={textBoxColor}
+                          onColorChange={(color) => {
+                            applyFormatToSelection('foreColor', color);
+                            setTimeout(() => {
+                              setTextBoxColor(color);
+                              updateCursorStyleFromSelection();
+                            }, 10);
+                          }}
+                          backgroundColor={textBoxBackgroundColor}
+                          onBackgroundColorChange={(backgroundColor) => {
+                            applyFormatToSelection('backColor', backgroundColor);
+                            setTimeout(() => {
+                              setTextBoxBackgroundColor(backgroundColor);
+                              updateCursorStyleFromSelection();
+                            }, 10);
+                          }}
+                          onDelete={handleDoubleClick}
+                        />
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )
+              ) : (
+                <div className="absolute left-0 right-0 flex items-center gap-2 bg-white rounded-lg shadow-2xl p-2 border border-gray-200" style={{ top: 'calc(100% + 10px)', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
+                  <div className="flex-1 overflow-x-auto min-w-0">
+                    <div className="inline-flex">
+                      <TextBoxToolbar
                 textStyle={currentCursorStyle}
                 onTextStyleChange={handleStyleChangeForSelection}
                 fontFamily={box.fontFamily || 'DM Sans'}
@@ -2409,11 +2815,13 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     updateCursorStyleFromSelection();
                   }, 10);
                 }}
-                onDelete={handleDoubleClick}
-              />
-              </div>
-            </div>
-            </div>
+                        onDelete={handleDoubleClick}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           )}
           
           {/* Text box ONLY - no border, completely separate from toolbar */}
@@ -2453,6 +2861,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               onBlur={(e) => {
                 const relatedTarget = e.relatedTarget as HTMLElement;
                 if (!relatedTarget || !relatedTarget.closest('[data-text-toolbar-root]')) {
+                  // Save text content before blurring
+                  handleTextInput();
                   setIsEditing(false);
                   setShowTextBoxToolbar(false);
                 }
@@ -2523,16 +2933,21 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
       const handleContentInput = () => {
         if (contentRef.current) {
-          onTextBoxUpdate({ insightsContent: contentRef.current.innerHTML });
+          isSavingInsightsContentRef.current = true;
+          onTextBoxUpdate(layoutId, boxId, { insightsContent: contentRef.current.innerHTML });
+          // Reset the flag after a short delay to allow state update to propagate
+          setTimeout(() => {
+            isSavingInsightsContentRef.current = false;
+          }, 100);
         }
       };
 
       const handleSaveInsights = () => {
-        onTextBoxUpdate({ isInsightsSaved: true });
+        onTextBoxUpdate(layoutId, boxId, { isInsightsSaved: true });
       };
 
       const handleEditInsights = () => {
-        onTextBoxUpdate({ isInsightsSaved: false });
+        onTextBoxUpdate(layoutId, boxId, { isInsightsSaved: false });
       };
 
       // EXACT same format apply as text-box
@@ -2616,7 +3031,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
         setInsightsBold(isBold);
         
         // Update the default style for new text
-        onTextBoxUpdate({ 
+        onTextBoxUpdate(layoutId, boxId, { 
           textStyle: style,
           fontSize: defaultSize,
           color: defaultColor,
@@ -2685,12 +3100,188 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       if (isInsightsSaved) {
         return (
           <div 
-            className={`relative group/box ${selectionClass}`}
-          onClick={handleBoxClick} 
+            ref={insightsPanelContainerRef}
+            className={`relative group/box flex flex-col gap-3 ${selectionClass}`}
+            onClick={handleBoxClick} 
             style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
             onDoubleClick={handleEditInsights}
             title="Double-click to edit"
           >
+            {/* Toolbar - visible only when content is focused */}
+            {showInsightsToolbar && (
+              <>
+                {insightsToolbarPosition === 'above' && insightsToolbarFixedPosition ? (
+                  createPortal(
+                    <div 
+                      className="fixed flex flex-col gap-2" 
+                      style={{ 
+                        top: `${insightsToolbarFixedPosition.top}px`, 
+                        left: `${insightsToolbarFixedPosition.left}px`,
+                        width: `${insightsToolbarFixedPosition.width}px`,
+                        zIndex: 10000 
+                      }} 
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
+                        <div className="flex-1 overflow-x-auto">
+                          <TextBoxToolbar
+                            textStyle={insightsTextStyle}
+                            onTextStyleChange={handleInsightsStyleChangeForSelection}
+                            fontFamily={contentFontFamily}
+                            onFontFamilyChange={(font) => {
+                              applyFormatToContent('fontName', font);
+                              onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
+                            }}
+                            fontSize={insightsFontSize}
+                            onIncreaseFontSize={() => {
+                              const selection = window.getSelection();
+                              if (selection && selection.toString()) {
+                                const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                                applyFormatToContent('fontSize', `${currentSize + 1}px`);
+                              } else {
+                                const newSize = insightsFontSize + 1;
+                                setInsightsFontSize(newSize);
+                                if (contentRef.current) {
+                                  contentRef.current.focus();
+                                  document.execCommand('fontSize', false, '7');
+                                  const fontElements = contentRef.current.querySelectorAll('font[size="7"]');
+                                  fontElements.forEach((el) => {
+                                    const span = document.createElement('span');
+                                    span.style.fontSize = `${newSize}px`;
+                                    span.innerHTML = el.innerHTML;
+                                    el.replaceWith(span);
+                                  });
+                                  handleContentInput();
+                                }
+                              }
+                            }}
+                            onDecreaseFontSize={() => {
+                              const selection = window.getSelection();
+                              if (selection && selection.toString()) {
+                                const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                                applyFormatToContent('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                              } else {
+                                const newSize = Math.max(insightsFontSize - 1, 8);
+                                setInsightsFontSize(newSize);
+                                if (contentRef.current) {
+                                  contentRef.current.focus();
+                                  document.execCommand('fontSize', false, '7');
+                                  const fontElements = contentRef.current.querySelectorAll('font[size="7"]');
+                                  fontElements.forEach((el) => {
+                                    const span = document.createElement('span');
+                                    span.style.fontSize = `${newSize}px`;
+                                    span.innerHTML = el.innerHTML;
+                                    el.replaceWith(span);
+                                  });
+                                  handleContentInput();
+                                }
+                              }
+                            }}
+                            onApplyTextStyle={() => {}}
+                            bold={insightsBold}
+                            italic={insightsItalic}
+                            underline={insightsUnderline}
+                            strikethrough={insightsStrikethrough}
+                            onToggleBold={() => applyFormatToContent('bold')}
+                            onToggleItalic={() => applyFormatToContent('italic')}
+                            onToggleUnderline={() => applyFormatToContent('underline')}
+                            onToggleStrikethrough={() => applyFormatToContent('strikeThrough')}
+                            align="left"
+                            onAlign={(align) => applyFormatToContent('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'))}
+                            onBulletedList={() => applyFormatToContent('insertUnorderedList')}
+                            onNumberedList={() => applyFormatToContent('insertOrderedList')}
+                            color="#111827"
+                            onColorChange={(color) => applyFormatToContent('foreColor', color)}
+                            backgroundColor={backgroundColor}
+                            onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { backgroundColor: bg })}
+                          />
+                        </div>
+                      </div>
+                    </div>,
+                    document.body
+                  )
+                ) : (
+                  <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: 'calc(100% + 10px)', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
+                    <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
+                      <div className="flex-1 overflow-x-auto">
+                        <TextBoxToolbar
+                          textStyle={insightsTextStyle}
+                          onTextStyleChange={handleInsightsStyleChangeForSelection}
+                          fontFamily={contentFontFamily}
+                          onFontFamilyChange={(font) => {
+                            applyFormatToContent('fontName', font);
+                            onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
+                          }}
+                          fontSize={insightsFontSize}
+                          onIncreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                              applyFormatToContent('fontSize', `${currentSize + 1}px`);
+                            } else {
+                              const newSize = insightsFontSize + 1;
+                              setInsightsFontSize(newSize);
+                              if (contentRef.current) {
+                                contentRef.current.focus();
+                                document.execCommand('fontSize', false, '7');
+                                const fontElements = contentRef.current.querySelectorAll('font[size="7"]');
+                                fontElements.forEach((el) => {
+                                  const span = document.createElement('span');
+                                  span.style.fontSize = `${newSize}px`;
+                                  span.innerHTML = el.innerHTML;
+                                  el.replaceWith(span);
+                                });
+                                handleContentInput();
+                              }
+                            }
+                          }}
+                          onDecreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                              applyFormatToContent('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                            } else {
+                              const newSize = Math.max(insightsFontSize - 1, 8);
+                              setInsightsFontSize(newSize);
+                              if (contentRef.current) {
+                                contentRef.current.focus();
+                                document.execCommand('fontSize', false, '7');
+                                const fontElements = contentRef.current.querySelectorAll('font[size="7"]');
+                                fontElements.forEach((el) => {
+                                  const span = document.createElement('span');
+                                  span.style.fontSize = `${newSize}px`;
+                                  span.innerHTML = el.innerHTML;
+                                  el.replaceWith(span);
+                                });
+                                handleContentInput();
+                              }
+                            }
+                          }}
+                          onApplyTextStyle={() => {}}
+                          bold={insightsBold}
+                          italic={insightsItalic}
+                          underline={insightsUnderline}
+                          strikethrough={insightsStrikethrough}
+                          onToggleBold={() => applyFormatToContent('bold')}
+                          onToggleItalic={() => applyFormatToContent('italic')}
+                          onToggleUnderline={() => applyFormatToContent('underline')}
+                          onToggleStrikethrough={() => applyFormatToContent('strikeThrough')}
+                          align="left"
+                          onAlign={(align) => applyFormatToContent('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'))}
+                          onBulletedList={() => applyFormatToContent('insertUnorderedList')}
+                          onNumberedList={() => applyFormatToContent('insertOrderedList')}
+                          color="#111827"
+                          onColorChange={(color) => applyFormatToContent('foreColor', color)}
+                          backgroundColor={backgroundColor}
+                          onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { backgroundColor: bg })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
             <div 
               className="relative w-full h-full rounded-xl overflow-hidden p-6 shadow-md border border-blue-200"
               style={{
@@ -2702,7 +3293,13 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                 <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center shadow-md">
                   <Zap className="w-6 h-6 text-white" />
                 </div>
-                <div 
+                <input
+                  type="text"
+                  value={insightsHeading}
+                  onChange={(e) => onTextBoxUpdate(layoutId, boxId, { insightsHeading: e.target.value })}
+                  onClick={(e) => e.stopPropagation()}
+                  onFocus={(e) => e.stopPropagation()}
+                  className="flex-1 outline-none cursor-text bg-transparent border-none"
                   style={{
                     fontSize: '22px',
                     fontWeight: 'bold',
@@ -2710,20 +3307,149 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     fontFamily: 'DM Sans, sans-serif',
                     letterSpacing: '0.05em',
                   }}
-                  dangerouslySetInnerHTML={{ __html: insightsHeading || 'KEY INSIGHTS' }}
+                  placeholder="KEY INSIGHTS"
                 />
               </div>
 
-              {/* Content with bullets */}
-              <div 
-                style={{
-                  fontSize: '16px',
-                  color: '#111827',
-                  fontFamily: 'DM Sans, sans-serif',
-                  lineHeight: '1.6',
-                }}
-                dangerouslySetInnerHTML={{ __html: insightsContent || '<p>Put your insights here</p>' }}
-              />
+              {/* Editable Content with Blue Tick Bullets */}
+              <div className="relative">
+                <div 
+                  ref={contentRef}
+                  contentEditable
+                  className="outline-none cursor-text relative z-10"
+                  style={{
+                    fontFamily: `${contentFontFamily}, sans-serif`,
+                    backgroundColor: 'transparent',
+                    minHeight: '50px',
+                    fontSize: '16px',
+                    lineHeight: '1.8',
+                  }}
+                  onInput={handleContentInput}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    updateInsightsFormatState();
+                  }}
+                  onFocus={(e) => {
+                    e.stopPropagation();
+                    setIsEditing(true);
+                    setShowInsightsToolbar(true);
+                    updateInsightsFormatState();
+                  }}
+                  onBlur={(e) => {
+                    const relatedTarget = e.relatedTarget as HTMLElement;
+                    if (!relatedTarget || !relatedTarget.closest('[data-text-toolbar-root]')) {
+                      // Save insights content before blurring
+                      handleContentInput();
+                      // Delay setIsEditing to ensure content is saved first
+                      setTimeout(() => {
+                        setIsEditing(false);
+                        setShowInsightsToolbar(false);
+                      }, 150);
+                    }
+                  }}
+                  onKeyUp={updateInsightsFormatState}
+                  onMouseUp={updateInsightsFormatState}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      
+                      const selection = window.getSelection();
+                      if (!selection || selection.rangeCount === 0) return;
+                      
+                      const range = selection.getRangeAt(0);
+                      
+                      // Create new tick bullet line
+                      const newLineDiv = document.createElement('div');
+                      newLineDiv.style.display = 'flex';
+                      newLineDiv.style.alignItems = 'flex-start';
+                      newLineDiv.style.marginBottom = '8px';
+                      
+                      // Create SVG tick icon
+                      const svgNS = "http://www.w3.org/2000/svg";
+                      const svg = document.createElementNS(svgNS, 'svg');
+                      svg.setAttribute('width', '20');
+                      svg.setAttribute('height', '20');
+                      svg.setAttribute('viewBox', '0 0 20 20');
+                      svg.setAttribute('fill', 'none');
+                      svg.style.marginRight = '8px';
+                      svg.style.marginTop = '2px';
+                      svg.style.flexShrink = '0';
+                      svg.style.pointerEvents = 'none';
+                      
+                      const circle = document.createElementNS(svgNS, 'circle');
+                      circle.setAttribute('cx', '10');
+                      circle.setAttribute('cy', '10');
+                      circle.setAttribute('r', '9');
+                      circle.setAttribute('stroke', '#1A73E8');
+                      circle.setAttribute('stroke-width', '2');
+                      circle.setAttribute('fill', 'none');
+                      
+                      const path = document.createElementNS(svgNS, 'path');
+                      path.setAttribute('d', 'M6 10L8.5 12.5L14 7');
+                      path.setAttribute('stroke', '#1A73E8');
+                      path.setAttribute('stroke-width', '2');
+                      path.setAttribute('stroke-linecap', 'round');
+                      path.setAttribute('stroke-linejoin', 'round');
+                      path.setAttribute('fill', 'none');
+                      
+                      svg.appendChild(circle);
+                      svg.appendChild(path);
+                      
+                      // Create text span
+                      const textSpan = document.createElement('span');
+                      textSpan.innerHTML = '&nbsp;';
+                      textSpan.style.flex = '1';
+                      
+                      newLineDiv.appendChild(svg);
+                      newLineDiv.appendChild(textSpan);
+                      
+                      // Insert the new line after current line
+                      const currentNode = range.startContainer;
+                      let currentLine = currentNode.nodeType === 3 ? currentNode.parentElement : currentNode as HTMLElement;
+                      
+                      // Find the parent div (tick bullet line)
+                      while (currentLine && currentLine !== contentRef.current && currentLine.parentElement !== contentRef.current) {
+                        currentLine = currentLine.parentElement;
+                      }
+                      
+                      if (currentLine && currentLine.parentElement === contentRef.current) {
+                        // Insert after current line
+                        currentLine.parentNode?.insertBefore(newLineDiv, currentLine.nextSibling);
+                      } else {
+                        // Fallback: append to end
+                        contentRef.current?.appendChild(newLineDiv);
+                      }
+                      
+                      // Position cursor in the text span
+                      const newRange = document.createRange();
+                      newRange.setStart(textSpan.firstChild || textSpan, 0);
+                      newRange.collapse(true);
+                      selection.removeAllRanges();
+                      selection.addRange(newRange);
+                      
+                      handleContentInput();
+                    } else if (e.key === 'Backspace') {
+                      // Prevent deleting the first tick bullet
+                      const allDivs = contentRef.current?.querySelectorAll('div[style*="display: flex"]');
+                      if (allDivs && allDivs.length === 1) {
+                        const selection = window.getSelection();
+                        if (selection && selection.rangeCount > 0) {
+                          const range = selection.getRangeAt(0);
+                          const currentNode = range.startContainer;
+                          
+                          // Check if we're at the start of the first tick's text
+                          if (range.startOffset === 0 || (currentNode.textContent === '\u00A0' && range.startOffset <= 1)) {
+                            e.preventDefault();
+                            return;
+                          }
+                        }
+                      }
+                    }
+                  }}
+                  suppressContentEditableWarning
+                />
+              </div>
             </div>
           </div>
         );
@@ -2732,6 +3458,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Edit mode - show editable heading and content
       return (
         <div 
+          ref={insightsPanelContainerRef}
           className="relative group/box flex flex-col gap-3" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
@@ -2749,7 +3476,99 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
           {/* Toolbar - visible only when content is focused */}
           {showInsightsToolbar && (
-            <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
+            <>
+              {insightsToolbarPosition === 'above' && insightsToolbarFixedPosition ? (
+                createPortal(
+                  <div 
+                    className="fixed flex flex-col gap-2" 
+                    style={{ 
+                      top: `${insightsToolbarFixedPosition.top}px`, 
+                      left: `${insightsToolbarFixedPosition.left}px`,
+                      width: `${insightsToolbarFixedPosition.width}px`,
+                      zIndex: 10000 
+                    }} 
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
+                      <div className="flex-1 overflow-x-auto">
+                        <TextBoxToolbar
+                          textStyle={insightsTextStyle}
+                          onTextStyleChange={handleInsightsStyleChangeForSelection}
+                          fontFamily={contentFontFamily}
+                          onFontFamilyChange={(font) => {
+                            applyFormatToContent('fontName', font);
+                            onTextBoxUpdate({ fontFamily: font });
+                          }}
+                          fontSize={insightsFontSize}
+                          onIncreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                              applyFormatToContent('fontSize', `${currentSize + 1}px`);
+                            } else {
+                              const newSize = insightsFontSize + 1;
+                              setInsightsFontSize(newSize);
+                              if (contentRef.current) {
+                                contentRef.current.focus();
+                                document.execCommand('fontSize', false, '7');
+                                const fontElements = contentRef.current.querySelectorAll('font[size="7"]');
+                                fontElements.forEach((el) => {
+                                  const span = document.createElement('span');
+                                  span.style.fontSize = `${newSize}px`;
+                                  span.innerHTML = el.innerHTML;
+                                  el.replaceWith(span);
+                                });
+                                handleContentInput();
+                              }
+                            }
+                          }}
+                          onDecreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                              applyFormatToContent('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                            } else {
+                              const newSize = Math.max(insightsFontSize - 1, 8);
+                              setInsightsFontSize(newSize);
+                              if (contentRef.current) {
+                                contentRef.current.focus();
+                                document.execCommand('fontSize', false, '7');
+                                const fontElements = contentRef.current.querySelectorAll('font[size="7"]');
+                                fontElements.forEach((el) => {
+                                  const span = document.createElement('span');
+                                  span.style.fontSize = `${newSize}px`;
+                                  span.innerHTML = el.innerHTML;
+                                  el.replaceWith(span);
+                                });
+                                handleContentInput();
+                              }
+                            }
+                          }}
+                          onApplyTextStyle={() => {}}
+                          bold={insightsBold}
+                          italic={insightsItalic}
+                          underline={insightsUnderline}
+                          strikethrough={insightsStrikethrough}
+                          onToggleBold={() => applyFormatToContent('bold')}
+                          onToggleItalic={() => applyFormatToContent('italic')}
+                          onToggleUnderline={() => applyFormatToContent('underline')}
+                          onToggleStrikethrough={() => applyFormatToContent('strikeThrough')}
+                          align="left"
+                          onAlign={(align) => applyFormatToContent('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'))}
+                          onBulletedList={() => applyFormatToContent('insertUnorderedList')}
+                          onNumberedList={() => applyFormatToContent('insertOrderedList')}
+                          color="#111827"
+                          onColorChange={(color) => applyFormatToContent('foreColor', color)}
+                          backgroundColor={backgroundColor}
+                          onBackgroundColorChange={(bg) => onTextBoxUpdate({ backgroundColor: bg })}
+                        />
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )
+              ) : (
+                <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: 'calc(100% + 10px)', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
               {/* Formatting toolbar with background color included */}
               <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
                 <div className="flex-1 overflow-x-auto">
@@ -2823,10 +3642,12 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     onColorChange={(color) => applyFormatToContent('foreColor', color)}
                     backgroundColor={backgroundColor}
                     onBackgroundColorChange={(bg) => onTextBoxUpdate({ backgroundColor: bg })}
-                  />
-                </div>
-              </div>
-            </div>
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
           )}
 
           {/* Insights Panel Card */}
@@ -2845,7 +3666,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                 <input
                   type="text"
                   value={insightsHeading}
-                  onChange={(e) => onTextBoxUpdate({ insightsHeading: e.target.value })}
+                  onChange={(e) => onTextBoxUpdate(layoutId, boxId, { insightsHeading: e.target.value })}
                   className="flex-1 outline-none cursor-text bg-transparent border-none"
                   style={{
                     fontSize: '22px',
@@ -2880,8 +3701,13 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                   onBlur={(e) => {
                     const relatedTarget = e.relatedTarget as HTMLElement;
                     if (!relatedTarget || !relatedTarget.closest('[data-text-toolbar-root]')) {
-                      setIsEditing(false);
-                      setShowInsightsToolbar(false);
+                      // Save insights content before blurring
+                      handleContentInput();
+                      // Delay setIsEditing to ensure content is saved first
+                      setTimeout(() => {
+                        setIsEditing(false);
+                        setShowInsightsToolbar(false);
+                      }, 150);
                     }
                   }}
                   onClick={updateInsightsFormatState}
@@ -3373,6 +4199,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Edit mode - show editable boxes
       return (
         <div 
+          ref={interactiveBlockContainerRef}
           className="relative group/box flex flex-col gap-3" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
@@ -3389,7 +4216,98 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           />
           {/* Toolbars for both boxes */}
           {showInteractiveBlock1Toolbar && (
-            <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
+            <>
+              {interactiveBlockToolbarPosition === 'above' && interactiveBlockToolbarFixedPosition ? (
+                createPortal(
+                  <div 
+                    className="fixed flex flex-col gap-2" 
+                    style={{ 
+                      top: `${interactiveBlockToolbarFixedPosition.top}px`, 
+                      left: `${interactiveBlockToolbarFixedPosition.left}px`,
+                      width: `${interactiveBlockToolbarFixedPosition.width}px`,
+                      zIndex: 10000 
+                    }} 
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
+                      <div className="flex-1 overflow-x-auto">
+                        <TextBoxToolbar
+                          textStyle={interactiveBlock1TextStyle}
+                          onTextStyleChange={handleBlock1StyleChange}
+                          fontFamily={block1FontFamily}
+                          onFontFamilyChange={(font) => {
+                            applyFormatToBlock1Content('fontName', font);
+                            onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
+                          }}
+                          fontSize={interactiveBlock1FontSize}
+                          onIncreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || interactiveBlock1FontSize;
+                              applyFormatToBlock1Content('fontSize', `${currentSize + 1}px`);
+                            } else {
+                              const newSize = interactiveBlock1FontSize + 1;
+                              setInteractiveBlock1FontSize(newSize);
+                              if (interactiveBlock1ContentRef.current) {
+                                interactiveBlock1ContentRef.current.focus();
+                                document.execCommand('fontSize', false, '7');
+                                const fontElements = interactiveBlock1ContentRef.current.querySelectorAll('font[size="7"]');
+                                fontElements.forEach((el) => {
+                                  const span = document.createElement('span');
+                                  span.style.fontSize = `${newSize}px`;
+                                  span.innerHTML = el.innerHTML;
+                                  el.replaceWith(span);
+                                });
+                                handleBlock1ContentInput();
+                              }
+                            }
+                          }}
+                          onDecreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || interactiveBlock1FontSize;
+                              applyFormatToBlock1Content('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                            } else {
+                              const newSize = Math.max(interactiveBlock1FontSize - 1, 8);
+                              setInteractiveBlock1FontSize(newSize);
+                              if (interactiveBlock1ContentRef.current) {
+                                interactiveBlock1ContentRef.current.focus();
+                                document.execCommand('fontSize', false, '7');
+                                const fontElements = interactiveBlock1ContentRef.current.querySelectorAll('font[size="7"]');
+                                fontElements.forEach((el) => {
+                                  const span = document.createElement('span');
+                                  span.style.fontSize = `${newSize}px`;
+                                  span.innerHTML = el.innerHTML;
+                                  el.replaceWith(span);
+                                });
+                                handleBlock1ContentInput();
+                              }
+                            }
+                          }}
+                          bold={interactiveBlock1Bold}
+                          italic={interactiveBlock1Italic}
+                          underline={interactiveBlock1Underline}
+                          strikethrough={interactiveBlock1Strikethrough}
+                          onToggleBold={() => applyFormatToBlock1Content('bold')}
+                          onToggleItalic={() => applyFormatToBlock1Content('italic')}
+                          onToggleUnderline={() => applyFormatToBlock1Content('underline')}
+                          onToggleStrikethrough={() => applyFormatToBlock1Content('strikeThrough')}
+                          align="left"
+                          onAlign={(align) => applyFormatToBlock1Content('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'))}
+                          onBulletedList={() => applyFormatToBlock1Content('insertUnorderedList')}
+                          onNumberedList={() => applyFormatToBlock1Content('insertOrderedList')}
+                          color="#111827"
+                          onColorChange={(color) => applyFormatToBlock1Content('foreColor', color)}
+                          backgroundColor={block1Background}
+                          onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { interactiveBlock1Background: bg })}
+                        />
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )
+              ) : (
+                <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: 'calc(100% + 10px)', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
               <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
                 <div className="flex-1 overflow-x-auto">
                   <TextBoxToolbar
@@ -3459,16 +4377,109 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     onNumberedList={() => applyFormatToBlock1Content('insertOrderedList')}
                     color="#111827"
                     onColorChange={(color) => applyFormatToBlock1Content('foreColor', color)}
-                    backgroundColor={block1Background}
-                    onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { interactiveBlock1Background: bg })}
-                  />
-                </div>
-              </div>
-            </div>
+                          backgroundColor={block1Background}
+                          onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { interactiveBlock1Background: bg })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
           )}
 
           {showInteractiveBlock2Toolbar && (
-            <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
+            <>
+              {interactiveBlockToolbarPosition === 'above' && interactiveBlockToolbarFixedPosition ? (
+                createPortal(
+                  <div 
+                    className="fixed flex flex-col gap-2" 
+                    style={{ 
+                      top: `${interactiveBlockToolbarFixedPosition.top}px`, 
+                      left: `${interactiveBlockToolbarFixedPosition.left}px`,
+                      width: `${interactiveBlockToolbarFixedPosition.width}px`,
+                      zIndex: 10000 
+                    }} 
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
+                      <div className="flex-1 overflow-x-auto">
+                        <TextBoxToolbar
+                          textStyle={interactiveBlock2TextStyle}
+                          onTextStyleChange={handleBlock2StyleChange}
+                          fontFamily={block2FontFamily}
+                          onFontFamilyChange={(font) => {
+                            applyFormatToBlock2Content('fontName', font);
+                            onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
+                          }}
+                          fontSize={interactiveBlock2FontSize}
+                          onIncreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || interactiveBlock2FontSize;
+                              applyFormatToBlock2Content('fontSize', `${currentSize + 1}px`);
+                            } else {
+                              const newSize = interactiveBlock2FontSize + 1;
+                              setInteractiveBlock2FontSize(newSize);
+                              if (interactiveBlock2ContentRef.current) {
+                                interactiveBlock2ContentRef.current.focus();
+                                document.execCommand('fontSize', false, '7');
+                                const fontElements = interactiveBlock2ContentRef.current.querySelectorAll('font[size="7"]');
+                                fontElements.forEach((el) => {
+                                  const span = document.createElement('span');
+                                  span.style.fontSize = `${newSize}px`;
+                                  span.innerHTML = el.innerHTML;
+                                  el.replaceWith(span);
+                                });
+                                handleBlock2ContentInput();
+                              }
+                            }
+                          }}
+                          onDecreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || interactiveBlock2FontSize;
+                              applyFormatToBlock2Content('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                            } else {
+                              const newSize = Math.max(interactiveBlock2FontSize - 1, 8);
+                              setInteractiveBlock2FontSize(newSize);
+                              if (interactiveBlock2ContentRef.current) {
+                                interactiveBlock2ContentRef.current.focus();
+                                document.execCommand('fontSize', false, '7');
+                                const fontElements = interactiveBlock2ContentRef.current.querySelectorAll('font[size="7"]');
+                                fontElements.forEach((el) => {
+                                  const span = document.createElement('span');
+                                  span.style.fontSize = `${newSize}px`;
+                                  span.innerHTML = el.innerHTML;
+                                  el.replaceWith(span);
+                                });
+                                handleBlock2ContentInput();
+                              }
+                            }
+                          }}
+                          bold={interactiveBlock2Bold}
+                          italic={interactiveBlock2Italic}
+                          underline={interactiveBlock2Underline}
+                          strikethrough={interactiveBlock2Strikethrough}
+                          onToggleBold={() => applyFormatToBlock2Content('bold')}
+                          onToggleItalic={() => applyFormatToBlock2Content('italic')}
+                          onToggleUnderline={() => applyFormatToBlock2Content('underline')}
+                          onToggleStrikethrough={() => applyFormatToBlock2Content('strikeThrough')}
+                          align="left"
+                          onAlign={(align) => applyFormatToBlock2Content('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'))}
+                          onBulletedList={() => applyFormatToBlock2Content('insertUnorderedList')}
+                          onNumberedList={() => applyFormatToBlock2Content('insertOrderedList')}
+                          color="#111827"
+                          onColorChange={(color) => applyFormatToBlock2Content('foreColor', color)}
+                          backgroundColor={block2Background}
+                          onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { interactiveBlock2Background: bg })}
+                        />
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )
+              ) : (
+                <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: 'calc(100% + 10px)', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
               <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
                 <div className="flex-1 overflow-x-auto">
                   <TextBoxToolbar
@@ -3538,12 +4549,14 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     onNumberedList={() => applyFormatToBlock2Content('insertOrderedList')}
                     color="#111827"
                     onColorChange={(color) => applyFormatToBlock2Content('foreColor', color)}
-                    backgroundColor={block2Background}
-                    onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { interactiveBlock2Background: bg })}
-                  />
-                </div>
-              </div>
-            </div>
+                          backgroundColor={block2Background}
+                          onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { interactiveBlock2Background: bg })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
           )}
 
           {/* Two boxes side by side */}
@@ -3640,6 +4653,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     onBlur={(e) => {
                       const relatedTarget = e.relatedTarget as HTMLElement;
                       if (!relatedTarget || !relatedTarget.closest('[data-text-toolbar-root]')) {
+                        // Save interactive block 1 content before blurring
+                        handleBlock1ContentInput();
                         setIsEditing(false);
                         setShowInteractiveBlock1Toolbar(false);
                       }
@@ -3829,6 +4844,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                     onBlur={(e) => {
                       const relatedTarget = e.relatedTarget as HTMLElement;
                       if (!relatedTarget || !relatedTarget.closest('[data-text-toolbar-root]')) {
+                        // Save interactive block 2 content before blurring
+                        handleBlock2ContentInput();
                         setIsEditing(false);
                         setShowInteractiveBlock2Toolbar(false);
                       }
@@ -3991,6 +5008,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Single container with both Question and Answer sections (always editable)
       return (
         <div 
+          ref={qaContainerRef}
           className={`relative group/box ${selectionClass}`}
           onClick={handleBoxClick} 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
@@ -4009,63 +5027,137 @@ const ElementBox: React.FC<ElementBoxProps> = ({
 
           {/* Toolbar - only show when a field is active */}
           {activeQAField && (
-            <div className="absolute left-0 right-0 flex items-center gap-2 bg-white rounded-lg shadow-2xl p-2 border border-gray-200" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
-              <div className="flex-1 overflow-x-auto">
-                <TextBoxToolbar
-                  textStyle={activeQAField === 'question' ? qaQuestionTextStyle : qaAnswerTextStyle}
-                  onTextStyleChange={() => {}}
-                  fontFamily={qaFontFamily}
-                  onFontFamilyChange={(font) => {
-                    if (activeQAField === 'question') {
-                      applyFormatToQuestion('fontName', font);
-                    } else {
-                      applyFormatToAnswer('fontName', font);
-                    }
-                    onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
-                  }}
-                  fontSize={activeQAField === 'question' ? qaQuestionFontSize : qaAnswerFontSize}
-                  onIncreaseFontSize={() => {
-                    const selection = window.getSelection();
-                    if (selection && selection.toString()) {
-                      const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || (activeQAField === 'question' ? qaQuestionFontSize : qaAnswerFontSize);
-                      if (activeQAField === 'question') {
-                        applyFormatToQuestion('fontSize', `${currentSize + 1}px`);
-                      } else {
-                        applyFormatToAnswer('fontSize', `${currentSize + 1}px`);
-                      }
-                    }
-                  }}
-                  onDecreaseFontSize={() => {
-                    const selection = window.getSelection();
-                    if (selection && selection.toString()) {
-                      const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || (activeQAField === 'question' ? qaQuestionFontSize : qaAnswerFontSize);
-                      if (activeQAField === 'question') {
-                        applyFormatToQuestion('fontSize', `${Math.max(currentSize - 1, 8)}px`);
-                      } else {
-                        applyFormatToAnswer('fontSize', `${Math.max(currentSize - 1, 8)}px`);
-                      }
-                    }
-                  }}
-                  onApplyTextStyle={() => {}}
-                  bold={activeQAField === 'question' ? qaQuestionBold : qaAnswerBold}
-                  italic={activeQAField === 'question' ? qaQuestionItalic : qaAnswerItalic}
-                  underline={activeQAField === 'question' ? qaQuestionUnderline : qaAnswerUnderline}
-                  strikethrough={activeQAField === 'question' ? qaQuestionStrikethrough : qaAnswerStrikethrough}
-                  onToggleBold={() => activeQAField === 'question' ? applyFormatToQuestion('bold') : applyFormatToAnswer('bold')}
-                  onToggleItalic={() => activeQAField === 'question' ? applyFormatToQuestion('italic') : applyFormatToAnswer('italic')}
-                  onToggleUnderline={() => activeQAField === 'question' ? applyFormatToQuestion('underline') : applyFormatToAnswer('underline')}
-                  onToggleStrikethrough={() => activeQAField === 'question' ? applyFormatToQuestion('strikeThrough') : applyFormatToAnswer('strikeThrough')}
-                  align="left"
-                  onAlign={(align) => activeQAField === 'question' ? applyFormatToQuestion('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right')) : applyFormatToAnswer('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'))}
-                  onBulletedList={() => activeQAField === 'question' ? applyFormatToQuestion('insertUnorderedList') : applyFormatToAnswer('insertUnorderedList')}
-                  onNumberedList={() => activeQAField === 'question' ? applyFormatToQuestion('insertOrderedList') : applyFormatToAnswer('insertOrderedList')}
-                  color="#111827"
-                  onColorChange={(color) => activeQAField === 'question' ? applyFormatToQuestion('foreColor', color) : applyFormatToAnswer('foreColor', color)}
-                  backgroundColor="transparent"
-                  onBackgroundColorChange={(bg) => activeQAField === 'question' ? applyFormatToQuestion('backColor', bg) : applyFormatToAnswer('backColor', bg)}
-                />
-              </div>
-            </div>
+            <>
+              {qaToolbarPosition === 'above' && qaToolbarFixedPosition ? (
+                createPortal(
+                  <div 
+                    className="fixed flex items-center gap-2 bg-white rounded-lg shadow-2xl p-2 border border-gray-200" 
+                    style={{ 
+                      top: `${qaToolbarFixedPosition.top}px`, 
+                      left: `${qaToolbarFixedPosition.left}px`,
+                      width: `${qaToolbarFixedPosition.width}px`,
+                      zIndex: 10000 
+                    }} 
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div className="flex-1 overflow-x-auto">
+                      <TextBoxToolbar
+                        textStyle={activeQAField === 'question' ? qaQuestionTextStyle : qaAnswerTextStyle}
+                        onTextStyleChange={() => {}}
+                        fontFamily={qaFontFamily}
+                        onFontFamilyChange={(font) => {
+                          if (activeQAField === 'question') {
+                            applyFormatToQuestion('fontName', font);
+                          } else {
+                            applyFormatToAnswer('fontName', font);
+                          }
+                          onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
+                        }}
+                        fontSize={activeQAField === 'question' ? qaQuestionFontSize : qaAnswerFontSize}
+                        onIncreaseFontSize={() => {
+                          const selection = window.getSelection();
+                          if (selection && selection.toString()) {
+                            const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || (activeQAField === 'question' ? qaQuestionFontSize : qaAnswerFontSize);
+                            if (activeQAField === 'question') {
+                              applyFormatToQuestion('fontSize', `${currentSize + 1}px`);
+                            } else {
+                              applyFormatToAnswer('fontSize', `${currentSize + 1}px`);
+                            }
+                          }
+                        }}
+                        onDecreaseFontSize={() => {
+                          const selection = window.getSelection();
+                          if (selection && selection.toString()) {
+                            const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || (activeQAField === 'question' ? qaQuestionFontSize : qaAnswerFontSize);
+                            if (activeQAField === 'question') {
+                              applyFormatToQuestion('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                            } else {
+                              applyFormatToAnswer('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                            }
+                          }
+                        }}
+                        onApplyTextStyle={() => {}}
+                        bold={activeQAField === 'question' ? qaQuestionBold : qaAnswerBold}
+                        italic={activeQAField === 'question' ? qaQuestionItalic : qaAnswerItalic}
+                        underline={activeQAField === 'question' ? qaQuestionUnderline : qaAnswerUnderline}
+                        strikethrough={activeQAField === 'question' ? qaQuestionStrikethrough : qaAnswerStrikethrough}
+                        onToggleBold={() => activeQAField === 'question' ? applyFormatToQuestion('bold') : applyFormatToAnswer('bold')}
+                        onToggleItalic={() => activeQAField === 'question' ? applyFormatToQuestion('italic') : applyFormatToAnswer('italic')}
+                        onToggleUnderline={() => activeQAField === 'question' ? applyFormatToQuestion('underline') : applyFormatToAnswer('underline')}
+                        onToggleStrikethrough={() => activeQAField === 'question' ? applyFormatToQuestion('strikeThrough') : applyFormatToAnswer('strikeThrough')}
+                        align="left"
+                        onAlign={(align) => activeQAField === 'question' ? applyFormatToQuestion('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right')) : applyFormatToAnswer('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'))}
+                        onBulletedList={() => activeQAField === 'question' ? applyFormatToQuestion('insertUnorderedList') : applyFormatToAnswer('insertUnorderedList')}
+                        onNumberedList={() => activeQAField === 'question' ? applyFormatToQuestion('insertOrderedList') : applyFormatToAnswer('insertOrderedList')}
+                        color="#111827"
+                        onColorChange={(color) => activeQAField === 'question' ? applyFormatToQuestion('foreColor', color) : applyFormatToAnswer('foreColor', color)}
+                        backgroundColor="transparent"
+                        onBackgroundColorChange={(bg) => activeQAField === 'question' ? applyFormatToQuestion('backColor', bg) : applyFormatToAnswer('backColor', bg)}
+                      />
+                    </div>
+                  </div>,
+                  document.body
+                )
+              ) : (
+                <div className="absolute left-0 right-0 flex items-center gap-2 bg-white rounded-lg shadow-2xl p-2 border border-gray-200" style={{ top: 'calc(100% + 10px)', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
+                  <div className="flex-1 overflow-x-auto">
+                    <TextBoxToolbar
+                      textStyle={activeQAField === 'question' ? qaQuestionTextStyle : qaAnswerTextStyle}
+                      onTextStyleChange={() => {}}
+                      fontFamily={qaFontFamily}
+                      onFontFamilyChange={(font) => {
+                        if (activeQAField === 'question') {
+                          applyFormatToQuestion('fontName', font);
+                        } else {
+                          applyFormatToAnswer('fontName', font);
+                        }
+                        onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
+                      }}
+                      fontSize={activeQAField === 'question' ? qaQuestionFontSize : qaAnswerFontSize}
+                      onIncreaseFontSize={() => {
+                        const selection = window.getSelection();
+                        if (selection && selection.toString()) {
+                          const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || (activeQAField === 'question' ? qaQuestionFontSize : qaAnswerFontSize);
+                          if (activeQAField === 'question') {
+                            applyFormatToQuestion('fontSize', `${currentSize + 1}px`);
+                          } else {
+                            applyFormatToAnswer('fontSize', `${currentSize + 1}px`);
+                          }
+                        }
+                      }}
+                      onDecreaseFontSize={() => {
+                        const selection = window.getSelection();
+                        if (selection && selection.toString()) {
+                          const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || (activeQAField === 'question' ? qaQuestionFontSize : qaAnswerFontSize);
+                          if (activeQAField === 'question') {
+                            applyFormatToQuestion('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                          } else {
+                            applyFormatToAnswer('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                          }
+                        }
+                      }}
+                      onApplyTextStyle={() => {}}
+                      bold={activeQAField === 'question' ? qaQuestionBold : qaAnswerBold}
+                      italic={activeQAField === 'question' ? qaQuestionItalic : qaAnswerItalic}
+                      underline={activeQAField === 'question' ? qaQuestionUnderline : qaAnswerUnderline}
+                      strikethrough={activeQAField === 'question' ? qaQuestionStrikethrough : qaAnswerStrikethrough}
+                      onToggleBold={() => activeQAField === 'question' ? applyFormatToQuestion('bold') : applyFormatToAnswer('bold')}
+                      onToggleItalic={() => activeQAField === 'question' ? applyFormatToQuestion('italic') : applyFormatToAnswer('italic')}
+                      onToggleUnderline={() => activeQAField === 'question' ? applyFormatToQuestion('underline') : applyFormatToAnswer('underline')}
+                      onToggleStrikethrough={() => activeQAField === 'question' ? applyFormatToQuestion('strikeThrough') : applyFormatToAnswer('strikeThrough')}
+                      align="left"
+                      onAlign={(align) => activeQAField === 'question' ? applyFormatToQuestion('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right')) : applyFormatToAnswer('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'))}
+                      onBulletedList={() => activeQAField === 'question' ? applyFormatToQuestion('insertUnorderedList') : applyFormatToAnswer('insertUnorderedList')}
+                      onNumberedList={() => activeQAField === 'question' ? applyFormatToQuestion('insertOrderedList') : applyFormatToAnswer('insertOrderedList')}
+                      color="#111827"
+                      onColorChange={(color) => activeQAField === 'question' ? applyFormatToQuestion('foreColor', color) : applyFormatToAnswer('foreColor', color)}
+                      backgroundColor="transparent"
+                      onBackgroundColorChange={(bg) => activeQAField === 'question' ? applyFormatToQuestion('backColor', bg) : applyFormatToAnswer('backColor', bg)}
+                    />
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {/* Q&A Container - Both Question and Answer with left purple accent bar */}
@@ -4116,6 +5208,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                       const relatedTarget = e.relatedTarget as HTMLElement;
                       // CRITICAL: Don't clear activeQAField immediately - wait to see if user is clicking Answer
                       if (!relatedTarget || !relatedTarget.closest('[data-text-toolbar-root]')) {
+                        // Save question content before blurring
+                        handleQuestionInput();
                         setIsEditing(false);
                         
                         // Wait to see if focus is moving to Answer box
@@ -4284,6 +5378,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                       const relatedTarget = e.relatedTarget as HTMLElement;
                       // Only clear active field if not clicking on toolbar
                       if (!relatedTarget || !relatedTarget.closest('[data-text-toolbar-root]')) {
+                        // Save answer content before blurring
+                        handleAnswerInput();
                         setIsEditing(false);
                         
                         // CRITICAL FIX: Don't clear activeQAField immediately on blur
@@ -4570,6 +5666,7 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       // Always in edit mode - no preview mode needed
       return (
         <div 
+          ref={captionPanelContainerRef}
           className="relative group/box flex flex-col gap-3" 
           style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
         >
@@ -4586,72 +5683,155 @@ const ElementBox: React.FC<ElementBoxProps> = ({
           />
           {/* Toolbar */}
           {showInsightsToolbar && (
-            <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: '-76px', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
-              <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
-                <div className="flex-1 overflow-x-auto">
-                  <TextBoxToolbar
-                    textStyle={insightsTextStyle}
-                    onTextStyleChange={(style) => {
-                      const defaultSize = style === 'header' ? 36 : style === 'sub-header' ? 22 : 18;
-                      const defaultColor = style === 'paragraph' ? '#6B7280' : '#111827';
-                      const isBold = style === 'header' || style === 'sub-header';
-                      setInsightsTextStyle(style);
-                      setInsightsFontSize(defaultSize);
-                      setInsightsBold(isBold);
-                      onTextBoxUpdate(layoutId, boxId, { 
-                        textStyle: style,
-                        fontSize: defaultSize,
-                        color: defaultColor,
-                        bold: isBold
-                      });
-                    }}
-                    fontFamily={captionFontFamily}
-                    onFontFamilyChange={(font) => {
-                      applyFormatToCaption('fontName', font);
-                      onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
-                    }}
-                    fontSize={insightsFontSize}
-                    onIncreaseFontSize={() => {
-                      const selection = window.getSelection();
-                      if (selection && selection.toString()) {
-                        const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
-                        applyFormatToCaption('fontSize', `${currentSize + 1}px`);
-                      }
-                    }}
-                    onDecreaseFontSize={() => {
-                      const selection = window.getSelection();
-                      if (selection && selection.toString()) {
-                        const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
-                        applyFormatToCaption('fontSize', `${Math.max(currentSize - 1, 8)}px`);
-                      }
-                    }}
-                    onApplyTextStyle={() => {}}
-                    bold={insightsBold}
-                    italic={insightsItalic}
-                    underline={insightsUnderline}
-                    strikethrough={insightsStrikethrough}
-                    onToggleBold={() => applyFormatToCaption('bold')}
-                    onToggleItalic={() => applyFormatToCaption('italic')}
-                    onToggleUnderline={() => applyFormatToCaption('underline')}
-                    onToggleStrikethrough={() => applyFormatToCaption('strikeThrough')}
-                    align={box.captionAlign || 'left'}
-                    onAlign={(align) => {
-                      applyFormatToCaption('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'));
-                      onTextBoxUpdate(layoutId, boxId, { captionAlign: align });
-                    }}
-                    onBulletedList={() => {}}
-                    onNumberedList={() => {}}
-                    color={box.captionColor || '#111827'}
-                    onColorChange={(color) => {
-                      applyFormatToCaption('foreColor', color);
-                      onTextBoxUpdate(layoutId, boxId, { captionColor: color });
-                    }}
-                    backgroundColor={backgroundColor}
-                    onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { backgroundColor: bg })}
-                  />
+            <>
+              {captionToolbarPosition === 'above' && captionToolbarFixedPosition ? (
+                createPortal(
+                  <div 
+                    className="fixed flex flex-col gap-2" 
+                    style={{ 
+                      top: `${captionToolbarFixedPosition.top}px`, 
+                      left: `${captionToolbarFixedPosition.left}px`,
+                      width: `${captionToolbarFixedPosition.width}px`,
+                      zIndex: 10000 
+                    }} 
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
+                      <div className="flex-1 overflow-x-auto">
+                        <TextBoxToolbar
+                          textStyle={insightsTextStyle}
+                          onTextStyleChange={(style) => {
+                            const defaultSize = style === 'header' ? 36 : style === 'sub-header' ? 22 : 18;
+                            const defaultColor = style === 'paragraph' ? '#6B7280' : '#111827';
+                            const isBold = style === 'header' || style === 'sub-header';
+                            setInsightsTextStyle(style);
+                            setInsightsFontSize(defaultSize);
+                            setInsightsBold(isBold);
+                            onTextBoxUpdate(layoutId, boxId, { 
+                              textStyle: style,
+                              fontSize: defaultSize,
+                              color: defaultColor,
+                              bold: isBold
+                            });
+                          }}
+                          fontFamily={captionFontFamily}
+                          onFontFamilyChange={(font) => {
+                            applyFormatToCaption('fontName', font);
+                            onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
+                          }}
+                          fontSize={insightsFontSize}
+                          onIncreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                              applyFormatToCaption('fontSize', `${currentSize + 1}px`);
+                            }
+                          }}
+                          onDecreaseFontSize={() => {
+                            const selection = window.getSelection();
+                            if (selection && selection.toString()) {
+                              const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                              applyFormatToCaption('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                            }
+                          }}
+                          onApplyTextStyle={() => {}}
+                          bold={insightsBold}
+                          italic={insightsItalic}
+                          underline={insightsUnderline}
+                          strikethrough={insightsStrikethrough}
+                          onToggleBold={() => applyFormatToCaption('bold')}
+                          onToggleItalic={() => applyFormatToCaption('italic')}
+                          onToggleUnderline={() => applyFormatToCaption('underline')}
+                          onToggleStrikethrough={() => applyFormatToCaption('strikeThrough')}
+                          align={box.captionAlign || 'left'}
+                          onAlign={(align) => {
+                            applyFormatToCaption('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'));
+                            onTextBoxUpdate(layoutId, boxId, { captionAlign: align });
+                          }}
+                          onBulletedList={() => {}}
+                          onNumberedList={() => {}}
+                          color={box.captionColor || '#111827'}
+                          onColorChange={(color) => {
+                            applyFormatToCaption('foreColor', color);
+                            onTextBoxUpdate(layoutId, boxId, { captionColor: color });
+                          }}
+                          backgroundColor={backgroundColor}
+                          onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { backgroundColor: bg })}
+                        />
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )
+              ) : (
+                <div className="absolute left-0 right-0 flex flex-col gap-2" style={{ top: 'calc(100% + 10px)', zIndex: 10000 }} onMouseDown={(e) => e.preventDefault()}>
+                  <div className="flex items-center gap-2 bg-white rounded-lg shadow-xl p-2 border border-gray-200">
+                    <div className="flex-1 overflow-x-auto">
+                      <TextBoxToolbar
+                        textStyle={insightsTextStyle}
+                        onTextStyleChange={(style) => {
+                          const defaultSize = style === 'header' ? 36 : style === 'sub-header' ? 22 : 18;
+                          const defaultColor = style === 'paragraph' ? '#6B7280' : '#111827';
+                          const isBold = style === 'header' || style === 'sub-header';
+                          setInsightsTextStyle(style);
+                          setInsightsFontSize(defaultSize);
+                          setInsightsBold(isBold);
+                          onTextBoxUpdate(layoutId, boxId, { 
+                            textStyle: style,
+                            fontSize: defaultSize,
+                            color: defaultColor,
+                            bold: isBold
+                          });
+                        }}
+                        fontFamily={captionFontFamily}
+                        onFontFamilyChange={(font) => {
+                          applyFormatToCaption('fontName', font);
+                          onTextBoxUpdate(layoutId, boxId, { fontFamily: font });
+                        }}
+                        fontSize={insightsFontSize}
+                        onIncreaseFontSize={() => {
+                          const selection = window.getSelection();
+                          if (selection && selection.toString()) {
+                            const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                            applyFormatToCaption('fontSize', `${currentSize + 1}px`);
+                          }
+                        }}
+                        onDecreaseFontSize={() => {
+                          const selection = window.getSelection();
+                          if (selection && selection.toString()) {
+                            const currentSize = parseInt(window.getComputedStyle(selection.anchorNode?.parentElement || document.body).fontSize) || insightsFontSize;
+                            applyFormatToCaption('fontSize', `${Math.max(currentSize - 1, 8)}px`);
+                          }
+                        }}
+                        onApplyTextStyle={() => {}}
+                        bold={insightsBold}
+                        italic={insightsItalic}
+                        underline={insightsUnderline}
+                        strikethrough={insightsStrikethrough}
+                        onToggleBold={() => applyFormatToCaption('bold')}
+                        onToggleItalic={() => applyFormatToCaption('italic')}
+                        onToggleUnderline={() => applyFormatToCaption('underline')}
+                        onToggleStrikethrough={() => applyFormatToCaption('strikeThrough')}
+                        align={box.captionAlign || 'left'}
+                        onAlign={(align) => {
+                          applyFormatToCaption('justify' + (align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'));
+                          onTextBoxUpdate(layoutId, boxId, { captionAlign: align });
+                        }}
+                        onBulletedList={() => {}}
+                        onNumberedList={() => {}}
+                        color={box.captionColor || '#111827'}
+                        onColorChange={(color) => {
+                          applyFormatToCaption('foreColor', color);
+                          onTextBoxUpdate(layoutId, boxId, { captionColor: color });
+                        }}
+                        backgroundColor={backgroundColor}
+                        onBackgroundColorChange={(bg) => onTextBoxUpdate(layoutId, boxId, { backgroundColor: bg })}
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              )}
+            </>
           )}
 
           {/* Caption Panel Card */}
@@ -5062,7 +6242,12 @@ const ElementBox: React.FC<ElementBoxProps> = ({
       return (
         <div 
           className={`relative group/box ${selectionClass}`}
-          style={{ gridColumn: `span ${width}`, minHeight: 0, height: '100%' }}
+          style={{ 
+            gridColumn: `span ${width}`, 
+            minHeight: 0, 
+            height: '100%',
+            overflow: showVariableDialog ? 'visible' : undefined
+          }}
           onClick={handleMetricCardClick}
         >
           {/* Three-dots menu - visible on hover */}
@@ -5322,16 +6507,28 @@ const ElementBox: React.FC<ElementBoxProps> = ({
               }
             }}
           >
-            {/* Variable Selection - Positioned beside the box within canvas */}
-            {showVariableDialog && (
+            {/* Variable Selection - Positioned beside the box within canvas or overlay for single element */}
+            {showVariableDialog && (() => {
+              // Calculate maxHeight for overlay mode based on card height
+              const overlayMaxHeight = variableDialogPosition.side === 'overlay' && metricCardRef.current
+                ? Math.min(600, metricCardRef.current.getBoundingClientRect().height - 32)
+                : 600;
+              
+              return (
               <div 
-                className={`absolute top-0 bg-white rounded-xl p-4 flex flex-col shadow-2xl border-2 border-gray-300 ${variableDialogPosition.side === 'right' ? 'left-full ml-2' : 'right-full mr-2'}`}
+                className={`absolute bg-white rounded-xl p-4 flex flex-col shadow-2xl border-2 border-gray-300 ${
+                  variableDialogPosition.side === 'overlay' 
+                    ? 'left-1/2 -translate-x-1/2' 
+                    : variableDialogPosition.side === 'right' 
+                    ? 'left-full ml-2 top-0' 
+                    : 'right-full mr-2 top-0'
+                }`}
                 style={{ 
                   width: `${variableDialogPosition.width}px`, 
-                  height: '100%', 
+                  height: variableDialogPosition.side === 'overlay' ? 'auto' : '100%', 
                   minHeight: '300px', 
-                  maxHeight: '600px',
-                  top: `${variableDialogPosition.top}px`,
+                  maxHeight: `${overlayMaxHeight}px`,
+                  top: variableDialogPosition.side === 'overlay' ? `${variableDialogPosition.top}px` : `${variableDialogPosition.top}px`,
                   zIndex: 9999
                 }}
               >
@@ -5390,7 +6587,8 @@ const ElementBox: React.FC<ElementBoxProps> = ({
                   </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* Header - Editable */}
             <div className="mb-4">
