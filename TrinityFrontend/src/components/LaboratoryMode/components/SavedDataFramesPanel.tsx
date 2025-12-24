@@ -770,6 +770,33 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         const txt = await res.text().catch(() => '');
         throw new Error(txt || 'Failed to save dataframe');
       }
+      
+      const saveResult = await res.json().catch(() => null);
+      // Dispatch dataframe-saved event to trigger DataUploadAtom update
+      if (saveResult?.minio_uploads && Array.isArray(saveResult.minio_uploads)) {
+        saveResult.minio_uploads.forEach((upload: any, index: number) => {
+          const objectName = upload?.minio_upload?.object_name || upload?.filename;
+          if (objectName) {
+            setTimeout(() => {
+              console.log(`[SavedDataFramesPanel] Dispatching dataframe-saved event for ${objectName}`);
+              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+                detail: { filePath: objectName, fileName: upload.filename || meta.file_name } 
+              }));
+            }, index * 100); // Stagger events slightly
+          }
+        });
+      } else {
+        // Fallback: dispatch event with available data
+        // Construct the actual object_name using prefix + fileKey + .arrow extension (this is how MinIO stores it)
+        const expectedObjectName = prefix ? `${prefix}${fileKey}.arrow` : `${fileKey}.arrow`;
+        setTimeout(() => {
+          console.log(`[SavedDataFramesPanel] Dispatching dataframe-saved event (fallback) for ${meta.file_name}`);
+          window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+            detail: { filePath: expectedObjectName, fileName: meta.file_name } 
+          }));
+        }, 100);
+      }
+      
       toast({ title: 'Dataframe saved', description: `${meta.file_name} uploaded successfully.` });
       // Construct the actual object_name using prefix + fileKey + .arrow extension (this is how MinIO stores it)
       const expectedObjectName = prefix ? `${prefix}${fileKey}.arrow` : `${fileKey}.arrow`;
@@ -4830,7 +4857,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         description={
           modeSwitchConfirmation.fromMode === 'direct'
             ? 'You are currently in Direct Review mode. Switching to Guided Mode will replace the Direct Review panel. Do you want to continue?'
-            : 'You are currently in Guided Mode. Switching to Direct Review will exit the Guided Mode workflow. Do you want to continue?'
+            : 'You are currently in Guided Mode. Switching to Direct Review will exit  workflow. Do you want to continue?'
         }
         icon={<AlertCircle className="w-5 h-5 text-white" />}
         confirmLabel="Yes, Switch"

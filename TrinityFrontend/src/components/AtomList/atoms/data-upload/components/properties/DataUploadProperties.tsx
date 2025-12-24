@@ -138,39 +138,159 @@ const DataUploadProperties: React.FC<Props> = ({ atomId }) => {
         ? new File([file], sanitizedFileName, { type: file.type, lastModified: file.lastModified })
         : file;
 
-      const form = new FormData();
-      form.append('file', sanitizedFile);
-      appendEnvFields(form);
-      
-      const res = await fetch(`${VALIDATE_API}/upload-file`, {
-        method: 'POST',
-        body: form,
-        credentials: 'include'
-      });
-      
-      const payload = await res.json().catch(() => null);
-      if (!res.ok || !payload) {
-        throw new Error(payload?.detail || 'Upload failed');
+      // Check if it's an Excel file - use multi-sheet endpoint
+      const isExcelFile = sanitizedFileName.toLowerCase().endsWith('.xlsx') || 
+                         sanitizedFileName.toLowerCase().endsWith('.xls');
+
+      if (isExcelFile) {
+        // Use multi-sheet Excel upload endpoint
+        const form = new FormData();
+        form.append('file', sanitizedFile);
+        appendEnvFields(form);
+        
+        const res = await fetch(`${VALIDATE_API}/upload-excel-multi-sheet`, {
+          method: 'POST',
+          body: form,
+          credentials: 'include'
+        });
+        
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => null);
+          const detail = errorData?.detail || (typeof errorData === 'string' ? errorData : '');
+          throw new Error(detail || 'Upload failed');
+        }
+        
+        const data = await res.json();
+        const sheetNames = Array.isArray(data.sheets) ? data.sheets : [];
+        const uploadSessionId = data.upload_session_id || data.session_id;
+        const fileName = data.file_name || sanitizedFileName;
+        
+        if (sheetNames.length === 0) {
+          throw new Error('No sheets found in Excel file');
+        }
+        
+        // For Properties panel, save the first sheet (or all sheets if only one)
+        // Use convert endpoint to save sheet(s)
+        for (let index = 0; index < sheetNames.length; index++) {
+          const sheetName = sheetNames[index];
+          const sheetIndex = index + 1; // 1-based index
+          const normalizedSheetName = sheetName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '') || 'Sheet';
+          
+          const convertForm = new FormData();
+          convertForm.append('upload_session_id', uploadSessionId);
+          convertForm.append('sheet_name', normalizedSheetName);
+          convertForm.append('original_filename', fileName);
+          convertForm.append('use_folder_structure', 'false');
+          convertForm.append('sheet_index', String(sheetIndex));
+          appendEnvFields(convertForm);
+          
+          const convertRes = await fetch(`${VALIDATE_API}/convert-session-sheet-to-arrow`, {
+            method: 'POST',
+            body: convertForm,
+            credentials: 'include'
+          });
+          
+          if (!convertRes.ok) {
+            const errorData = await convertRes.json().catch(() => null);
+            const errorText = errorData?.detail || await convertRes.text().catch(() => '');
+            console.warn(`Failed to convert sheet ${sheetName}:`, errorText);
+            continue;
+          }
+          
+          const convertData = await convertRes.json();
+          const sheetPath = convertData.file_path || '';
+          const displayFileName = convertData.file_name || `${fileName}_sheet${sheetIndex}`;
+          
+          if (sheetPath) {
+            // Dispatch dataframe-saved event to trigger refresh
+            window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+              detail: { filePath: sheetPath, fileName: displayFileName } 
+            }));
+          }
+        }
+        
+        toast({ 
+          title: 'File uploaded', 
+          description: `${sheetNames.length} sheet${sheetNames.length > 1 ? 's' : ''} from ${fileName} uploaded successfully.` 
+        });
+      } else {
+        // CSV or other file - use regular upload endpoint
+        const form = new FormData();
+        form.append('file', sanitizedFile);
+        appendEnvFields(form);
+        
+        const res = await fetch(`${VALIDATE_API}/upload-file`, {
+          method: 'POST',
+          body: form,
+          credentials: 'include'
+        });
+        
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || !payload) {
+          throw new Error(payload?.detail || 'Upload failed');
+        }
+        
+        const data = await waitForTaskResult(payload);
+        
+        // Save the file to saved dataframes (same as SavedDataFramesPanel)
+        const saveForm = new FormData();
+        saveForm.append('validator_atom_id', 'panel-upload');
+        saveForm.append('file_paths', JSON.stringify([data.file_path]));
+        const fileKey = deriveFileKey(data.file_name || sanitizedFileName);
+        saveForm.append('file_keys', JSON.stringify([fileKey]));
+        saveForm.append('overwrite', 'false');
+        appendEnvFields(saveForm);
+        
+        const saveRes = await fetch(`${VALIDATE_API}/save_dataframes`, {
+          method: 'POST',
+          body: saveForm,
+          credentials: 'include'
+        });
+        
+        if (!saveRes.ok) {
+          const txt = await saveRes.text().catch(() => '');
+          throw new Error(txt || 'Failed to save dataframe');
+        }
+        
+        const saveResult = await saveRes.json().catch(() => null);
+        
+        // Dispatch dataframe-saved event to trigger refresh
+        if (saveResult?.minio_uploads && Array.isArray(saveResult.minio_uploads)) {
+          saveResult.minio_uploads.forEach((upload: any) => {
+            const objectName = upload?.minio_upload?.object_name || upload?.filename;
+            if (objectName) {
+              window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+                detail: { filePath: objectName, fileName: data.file_name || sanitizedFileName } 
+              }));
+            }
+          });
+        } else {
+          // Fallback: dispatch event with available data
+          window.dispatchEvent(new CustomEvent('dataframe-saved', { 
+            detail: { filePath: data.file_path, fileName: data.file_name || sanitizedFileName } 
+          }));
+        }
+        
+        const uploadedFileInfo = {
+          name: data.file_name || sanitizedFileName,
+          path: data.file_path,
+          size: file.size,
+          fileKey: fileKey,
+          processed: false,
+        };
+        
+        // Start guided flow at U2 if guided mode is enabled
+        if (globalGuidedModeEnabled) {
+          setActiveGuidedFlow(atomId, 'U2', {
+            uploadedFiles: [uploadedFileInfo],
+            currentStage: 'U2',
+          });
+        }
+        
+        toast({ title: 'File uploaded', description: `${data.file_name || sanitizedFileName} uploaded successfully.` });
       }
       
-      const data = await waitForTaskResult(payload);
-      const fileKey = deriveFileKey(data.file_name || sanitizedFileName);
-      const uploadedFileInfo = {
-        name: data.file_name || sanitizedFileName,
-        path: data.file_path,
-        size: file.size,
-        fileKey: fileKey,
-        processed: false,
-      };
-      
-      // Start guided flow at U2 (U0 and U1 removed)
-      setActiveGuidedFlow(atomId, 'U2', {
-        uploadedFiles: [uploadedFileInfo],
-        currentStage: 'U2',
-      });
-      
-      toast({ title: 'File uploaded', description: `${data.file_name || sanitizedFileName} is ready for processing.` });
-      // Refresh saved dataframes list in case backend saved it
+      // Refresh saved dataframes list
       fetchSavedDataframes();
     } catch (err: any) {
       toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });

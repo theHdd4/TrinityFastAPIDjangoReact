@@ -971,16 +971,16 @@ async def convert_session_sheet_to_arrow_endpoint(
     
     Args:
         upload_session_id: The upload session ID
-        sheet_name: The normalized sheet name
+        sheet_name: The normalized sheet name (based on actual Excel sheet name)
         original_filename: Original Excel filename
         use_folder_structure: "true" or "false" - whether to use folder structure
-        sheet_index: Optional 1-based index of the sheet (e.g., "1", "2", "3"). Used for flat file naming.
+        sheet_index: Optional 1-based index of the sheet (deprecated, sheet_name is now used instead)
         client_name, app_name, project_name: Environment context
         
     Returns:
         {
             "file_path": "path/to/file.arrow",
-            "file_name": "filename_sheet1" or "filename (sheet_name)",
+            "file_name": "filename_Base_Sheet" or "filename (Base_Sheet)" - uses actual sheet name,
             "file_key": "file_key"
         }
     """

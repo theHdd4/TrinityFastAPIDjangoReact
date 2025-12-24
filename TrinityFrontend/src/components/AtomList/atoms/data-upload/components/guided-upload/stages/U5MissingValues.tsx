@@ -763,7 +763,8 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
                 {columns.map((column, index) => {
                   const treatmentOptions = getTreatmentOptions(column.dataType, column.columnRole);
                   const barColor = getMissingColor(column.missingPercent);
-                  const sampleValuesText = Array.from(new Set(column.sampleValues.map(v => String(v)))).slice(0, 5).join(', ');
+                  const maxSampleValues = isMaximized ? 20 : 5;
+                  const sampleValuesText = Array.from(new Set(column.sampleValues.map(v => String(v)))).slice(0, maxSampleValues).join(', ');
                   const fullSampleValuesText = Array.from(new Set(column.sampleValues.map(v => String(v)))).join(', ');
                   
                   return (
@@ -804,7 +805,7 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
                           ) : (
                             <>
                               {sampleValuesText}
-                              {Array.from(new Set(column.sampleValues.map(v => String(v)))).length > 5 && '...'}
+                              {Array.from(new Set(column.sampleValues.map(v => String(v)))).length > maxSampleValues && '...'}
                             </>
                           )}
                         </div>

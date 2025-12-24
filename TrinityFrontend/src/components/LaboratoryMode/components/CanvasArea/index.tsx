@@ -1261,7 +1261,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   }, [subMode]);
 
   // Helper function to render inline guided flow for an atom
-  const renderInlineGuidedFlow = (atom: DroppedAtom) => {
+  const renderInlineGuidedFlow = (atom: DroppedAtom, cardId?: string) => {
     // Do not render inline guided workflow when global guided mode is turned off
     if (
       !globalGuidedModeEnabled ||
@@ -1281,6 +1281,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     if (currentStage === 'U0') {
       return null;
     }
+    
+    // Check if the card containing this atom is expanded (maximized)
+    const isCardMaximized = cardId ? expandedCard === cardId : false;
     
     return (
       <div className="mt-2">
@@ -1305,6 +1308,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           savedState={activeGuidedFlows[atom.id]?.state}
           initialStage={activeGuidedFlows[atom.id]?.currentStage}
           existingDataframe={existingDataframe}
+          isMaximized={isCardMaximized}
         />
       </div>
     );
@@ -5784,7 +5788,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                                 </AtomBox>
                                                 
                                                 {/* Inline Guided Flow - Renders below atom when active */}
-                                                {renderInlineGuidedFlow(atom)}
+                                                {renderInlineGuidedFlow(atom, card.id)}
                                               </React.Fragment>
                                               ))}
                                             </div>
@@ -6100,7 +6104,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                   )}
                                 </AtomBox>
                                 {/* Inline Guided Flow - Renders below atom when active */}
-                                {renderInlineGuidedFlow(atom)}
+                                {renderInlineGuidedFlow(atom, card.id)}
                               </React.Fragment>
                               ))}
                             </div>
@@ -6298,7 +6302,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                             </div>
                           </AtomBox>
                           {/* Inline Guided Flow - Renders below atom when active */}
-                          {renderInlineGuidedFlow(atom)}
+                          {renderInlineGuidedFlow(atom, card.id)}
                         </React.Fragment>
                         ))}
                       </div>
@@ -6642,7 +6646,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                               )}
                             </AtomBox>
                     {/* Inline Guided Flow - Renders below atom when active */}
-                    {renderInlineGuidedFlow(atom)}
+                    {renderInlineGuidedFlow(atom, card.id)}
                   </React.Fragment>
                           ))}
                         </div>
@@ -6830,7 +6834,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                             </div>
                           </AtomBox>
                           {/* Inline Guided Flow - Renders below atom when active */}
-                          {renderInlineGuidedFlow(atom)}
+                          {renderInlineGuidedFlow(atom, card.id)}
                         </React.Fragment>
                         ))}
                       </div>

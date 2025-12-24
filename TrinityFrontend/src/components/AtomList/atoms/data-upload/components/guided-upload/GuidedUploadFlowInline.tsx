@@ -34,6 +34,8 @@ interface GuidedUploadFlowInlineProps {
   savedState?: Partial<GuidedUploadFlowState>;
   /** Callback when flow should be closed */
   onClose?: () => void;
+  /** Whether the flow is in maximization mode (shows 20 rows instead of 5) */
+  isMaximized?: boolean;
 }
 
 // Only U2-U6 are used now (U0, U1, and U7 removed)
@@ -88,6 +90,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   initialStage,
   savedState,
   onClose,
+  isMaximized = false,
 }) => {
   // CRITICAL FIX: If existingDataframe is provided, merge its path into savedState BEFORE initializing the hook
   // This ensures the correct path (with folder structure) is used even if savedState has a wrong/stripped path
@@ -752,6 +755,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       onRegisterContinueDisabled={(getDisabled) => {
                         u2ContinueDisabledRef.current = getDisabled;
                       }}
+                      isMaximized={isMaximized}
                     />
                   ) : state.currentStage === 'U6' ? (
                     <StageComponent 
@@ -759,9 +763,10 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       onNext={handleNext} 
                       onBack={handleBack}
                       onGoToStage={goToStage}
+                      isMaximized={isMaximized}
                     />
                   ) : (
-                    <StageComponent flow={flow} onNext={handleNext} onBack={handleBack} />
+                    <StageComponent flow={flow} onNext={handleNext} onBack={handleBack} isMaximized={isMaximized} />
                   )}
                 </div>
 
@@ -835,6 +840,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       onRestart={handleRestart}
                       onCancel={handleClose}
                       onStageDataChange={() => handleCompletedStageChange(stage)}
+                      isMaximized={isMaximized}
                     />
                   ) : stage === 'U3' ? (
                     <StageComponent 
@@ -842,6 +848,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       onNext={() => {}} 
                       onBack={() => {}}
                       onStageDataChange={() => handleCompletedStageChange(stage)}
+                      isMaximized={isMaximized}
                     />
                   ) : stage === 'U4' ? (
                     <StageComponent 
@@ -849,6 +856,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       onNext={() => {}} 
                       onBack={() => {}}
                       onStageDataChange={() => handleCompletedStageChange(stage)}
+                      isMaximized={isMaximized}
                     />
                   ) : stage === 'U5' ? (
                     <StageComponent 
@@ -856,6 +864,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       onNext={() => {}} 
                       onBack={() => {}}
                       onStageDataChange={() => handleCompletedStageChange(stage)}
+                      isMaximized={isMaximized}
                     />
                   ) : stage === 'U6' ? (
                     <StageComponent 
@@ -864,6 +873,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       onBack={() => {}}
                       onGoToStage={goToStage}
                       onStageDataChange={() => handleCompletedStageChange(stage)}
+                      isMaximized={isMaximized}
                     />
                   ) : (
                     <StageComponent 
@@ -871,6 +881,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
                       onNext={() => {}} 
                       onBack={() => {}}
                       onStageDataChange={() => handleCompletedStageChange(stage)}
+                      isMaximized={isMaximized}
                     />
                   )}
                 </div>
@@ -1015,7 +1026,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
 
   return (
     <>
-      <div className="w-full mt-2 flex flex-col">
+      <div className="w-full mt-2 flex flex-col" style={{ maxWidth: '100%', width: '100%' }}>
         {/* Render only visible stages (U2-U6) */}
         {VISIBLE_STAGES.map(stage => renderStageItem(stage))}
       </div>

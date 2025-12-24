@@ -971,6 +971,60 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
     });
   };
 
+  /**
+   * Simple \"first time\" upload experience shown when there are no saved
+   * dataframes yet. This mirrors the Initialize screen (image 2) with a
+   * single large drop zone and the same upload behaviour.
+   */
+  const SimpleDataUploadEmptyState: React.FC = () => (
+    <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex items-center justify-center p-4">
+      <div className="w-full max-w-lg">
+        <div
+          className={`w-full min-h-[180px] md:min-h-[200px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center text-center bg-white/70 backdrop-blur-sm transition-all duration-300 cursor-pointer ${
+            isDragOver
+              ? 'border-blue-400 bg-blue-50'
+              : 'border-blue-200 hover:border-blue-400 hover:bg-blue-50/40'
+          }`}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onClick={handleUploadAreaClick}
+        >
+          <div
+            className={`mb-3 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md transform transition-transform duration-300 ${
+              isDragOver ? 'scale-110' : 'hover:scale-105'
+            } w-12 h-12`}
+          >
+            <Upload className="text-white w-6 h-6" />
+          </div>
+          <p className="text-sm font-medium text-gray-800 mb-1">
+            {isDragOver
+              ? 'Drop files here to begin your analysis'
+              : 'To begin your analysis, drag and drop files or click to upload'}
+          </p>
+          <p className="text-xs text-gray-500">CSV or Excel</p>
+          {uploadError && (
+            <div className="mt-4 max-w-xl w-full px-4">
+              <div className="p-2 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-xs text-red-600">{uploadError}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Hidden file input used by the simple empty-state panel.
+            This reuses the same upload pipeline as the full layout. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          onChange={handleFileInput}
+        />
+      </div>
+    </div>
+  );
+
   interface UploadPanelRightProps {
     onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
     onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -991,7 +1045,7 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
       <div className="flex-1 p-3 flex flex-col">
         {/* Upload Drop Zone */}
         <div
-          className={`flex-1 border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer ${
+          className={`flex-1 border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer m-2 ${
             isDragOver
               ? 'border-blue-400 bg-blue-50'
               : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/30'
@@ -1028,6 +1082,13 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const hasActiveGuidedFlow = activeGuidedFlows[atomId] && isGuidedModeActiveForAtom(atomId);
   const flowState = activeGuidedFlows[atomId];
   const existingDataframe = flowState?.state?.initialFile as { name: string; path: string; size?: number } | undefined;
+  const hasSavedDataframes = savedDataframes.length > 0;
+
+  // When there are no saved dataframes yet, show the simple Initialize-style
+  // panel (image 2) for the very first experience in Data Upload.
+  if (!hasSavedDataframes && !isLoading) {
+    return <SimpleDataUploadEmptyState />;
+  }
 
   return (
     <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex flex-col">

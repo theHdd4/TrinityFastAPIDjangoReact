@@ -555,13 +555,9 @@ def convert_session_sheet_to_arrow(upload_session_id: str, sheet_name: str, orig
             arrow_file_key = f"{excel_folder_name}/sheets/{sheet_name}"
             arrow_object_name = f"{prefix}{arrow_file_key}.arrow"
         else:
-            # Flat structure: use sheet index if provided, otherwise use sheet_name
-            if sheet_index is not None:
-                # Use format: {excel_filename}_sheet{index}.arrow
-                arrow_file_key = f"{base_file_key}_sheet{sheet_index}"
-            else:
-                # Fallback to sheet name: {excel_filename}_{sheet_name}.arrow
-                arrow_file_key = f"{base_file_key}_{sheet_name}"
+            # Flat structure: always use the actual sheet name (normalized) instead of index
+            # This preserves the original sheet names like "Base Sheet" instead of generic "Sheet1", "Sheet2"
+            arrow_file_key = f"{base_file_key}_{sheet_name}"
             arrow_object_name = f"{prefix}{arrow_file_key}.arrow"
         
         arrow_buffer = io.BytesIO()
@@ -595,12 +591,10 @@ def convert_session_sheet_to_arrow(upload_session_id: str, sheet_name: str, orig
             # Determine display file name
             if use_folder_structure:
                 display_file_name = f"{original_filename} ({sheet_name})"
-            elif sheet_index is not None:
-                # Use format: filename_sheet{index}
-                base_name = Path(original_filename).stem
-                display_file_name = f"{base_name}_sheet{sheet_index}"
             else:
-                display_file_name = original_filename
+                # Use the actual sheet name in the display name
+                base_name = Path(original_filename).stem
+                display_file_name = f"{base_name}_{sheet_name}"
             
             result = {
                 "file_path": arrow_object_name,

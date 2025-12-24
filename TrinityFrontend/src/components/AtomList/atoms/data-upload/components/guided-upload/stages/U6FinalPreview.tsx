@@ -708,7 +708,8 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
 
                   // Build unique sample values preview (match behavior from U3/U4 tables)
                   const uniqueSampleValues = Array.from(new Set(col.sampleValues || []));
-                  const previewSampleValues = uniqueSampleValues.slice(0, 5).join(', ');
+                  const maxSampleValues = isMaximized ? 20 : 5;
+                  const previewSampleValues = uniqueSampleValues.slice(0, maxSampleValues).join(', ');
                   const fullSampleValuesText = uniqueSampleValues.join(', ');
 
                   return (
@@ -730,7 +731,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
                               title={fullSampleValuesText}
                             >
                               {previewSampleValues}
-                              {uniqueSampleValues.length > 5 && '...'}
+                              {uniqueSampleValues.length > maxSampleValues && '...'}
                             </div>
                           )}
                         </div>

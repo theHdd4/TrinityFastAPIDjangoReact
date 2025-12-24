@@ -544,7 +544,8 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                 {columns.map((column, index) => {
                   const isDeleted = !column.keep;
                   const selectValue = column.keep ? 'keep' : 'delete';
-                  const sampleValuesText = Array.from(new Set(column.sampleValues)).slice(0, 5).join(', ');
+                  const maxSampleValues = isMaximized ? 20 : 5;
+                  const sampleValuesText = Array.from(new Set(column.sampleValues)).slice(0, maxSampleValues).join(', ');
                   const fullSampleValuesText = Array.from(new Set(column.sampleValues)).join(', ');
                   return (
                     <tr
@@ -601,7 +602,7 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
                           ) : (
                             <>
                               {sampleValuesText}
-                              {Array.from(new Set(column.sampleValues)).length > 5 && '...'}
+                              {Array.from(new Set(column.sampleValues)).length > maxSampleValues && '...'}
                             </>
                           )}
                         </div>
