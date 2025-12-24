@@ -37,6 +37,10 @@ from app.features.data_upload.app.database import (
     save_guided_workflow_state,
     get_guided_workflow_state,
     delete_guided_workflow_state,
+    save_footprint_event,
+    get_footprint_events,
+    save_workflow_summary,
+    get_workflow_summary,
 )
 
 from app.redis_cache import cache_master_config
@@ -2173,16 +2177,54 @@ async def save_dataframes(
                 delimiter = CSVReader._detect_delimiter(content, encoding)
                 max_cols = CSVReader._find_max_columns(content, encoding, delimiter, sample_rows=0)
                 
-                # Create schema with all columns
-                if max_cols > 0:
-                    schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
-                    batched_kwargs = CSV_READ_KWARGS.copy()
-                    batched_kwargs["schema"] = schema
+                # For better data type detection, read a sample with RobustFileReader to infer types
+                # Then use that schema for batched reading to ensure consistent type detection
+                # This ensures data types are properly detected even for large files
+                try:
+                    # Read a sample (first 50MB or entire file if smaller) with RobustFileReader
+                    # to get proper type inference (same as guided workflow)
+                    sample_size = min(50_000_000, len(content))
+                    sample_content = content[:sample_size]
+                    df_result, _ = RobustFileReader.read_file_to_pandas(
+                        content=sample_content,
+                        filename=filename,
+                        auto_detect_header=True,
+                        return_raw=False,
+                    )
+                    if isinstance(df_result, dict):
+                        df_result = list(df_result.values())[0]
+                    
+                    # Convert to Polars and get schema for type inference
+                    sample_pl = pl.from_pandas(df_result)
+                    # Get the schema from RobustFileReader result
+                    inferred_schema = sample_pl.schema
+                    
+                    # Ensure schema has enough columns (pad with Utf8 if needed for ragged lines)
+                    if max_cols > len(inferred_schema):
+                        # Extend schema with Utf8 for additional columns that might appear in later rows
+                        extended_schema = dict(inferred_schema)
+                        for i in range(len(inferred_schema), max_cols):
+                            extended_schema[f"col_{i}"] = pl.Utf8
+                        batched_kwargs = CSV_READ_KWARGS.copy()
+                        batched_kwargs["schema"] = extended_schema
+                    else:
+                        batched_kwargs = CSV_READ_KWARGS.copy()
+                        batched_kwargs["schema"] = inferred_schema
+                    
                     batched_kwargs["truncate_ragged_lines"] = False
                     batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
-                else:
-                    batched_kwargs = CSV_READ_KWARGS.copy()
-                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
+                except Exception as e:
+                    logger.warning(f"Failed to infer schema with RobustFileReader for batched reading, using fallback: {e}")
+                    # Fallback: Create schema with all columns as Utf8 (original behavior)
+                    if max_cols > 0:
+                        schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
+                        batched_kwargs = CSV_READ_KWARGS.copy()
+                        batched_kwargs["schema"] = schema
+                        batched_kwargs["truncate_ragged_lines"] = False
+                        batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
+                    else:
+                        batched_kwargs = CSV_READ_KWARGS.copy()
+                        batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                 
                 reader = pl.read_csv_batched(
                     csv_path, batch_size=1_000_000, **batched_kwargs
@@ -2222,29 +2264,78 @@ async def save_dataframes(
                 df_pl = None
             else:
                 data_bytes = fileobj.read()
-                # Use pl.read_csv with CSV_READ_KWARGS for proper dtype inference
-                # This matches the old routes behavior and preserves numeric types
-                # Add ignore_errors to handle mixed dtype columns (e.g., "allpacksize" in numeric column)
-                read_kwargs = CSV_READ_KWARGS.copy()
-                read_kwargs["ignore_errors"] = True  # Convert unparseable values to null instead of failing
-                df_pl = pl.read_csv(io.BytesIO(data_bytes), **read_kwargs)
+                # Use RobustFileReader for proper data type detection (same as guided workflow)
+                # This ensures consistent data type detection between guided workflow and direct mode
+                try:
+                    df_result, file_metadata = RobustFileReader.read_file_to_pandas(
+                        content=data_bytes,
+                        filename=filename,
+                        auto_detect_header=True,
+                        return_raw=False,
+                    )
+                    # Handle both single DataFrame and dict (multiple sheets)
+                    if isinstance(df_result, dict):
+                        df = list(df_result.values())[0]  # Use first sheet
+                    else:
+                        df = df_result
+                    
+                    # Convert to Polars for consistency with existing code
+                    df_pl = pl.from_pandas(df)
+                    df_pl = data_upload_service._normalize_column_names(df_pl)
+                    arrow_buf = io.BytesIO()
+                    df_pl.write_ipc(arrow_buf)
+                    arrow_bytes = arrow_buf.getvalue()
+                except Exception as e:
+                    logger.warning(f"RobustFileReader failed for {filename}, falling back to pl.read_csv: {e}")
+                    # Fallback to original method if RobustFileReader fails
+                    read_kwargs = CSV_READ_KWARGS.copy()
+                    read_kwargs["ignore_errors"] = True  # Convert unparseable values to null instead of failing
+                    df_pl = pl.read_csv(io.BytesIO(data_bytes), **read_kwargs)
+                    df_pl = data_upload_service._normalize_column_names(df_pl)
+                    arrow_buf = io.BytesIO()
+                    df_pl.write_ipc(arrow_buf)
+                    arrow_bytes = arrow_buf.getvalue()
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            data_bytes = fileobj.read()
+            # Use RobustFileReader for proper data type detection (same as guided workflow)
+            # This ensures consistent data type detection between guided workflow and direct mode
+            try:
+                df_result, file_metadata = RobustFileReader.read_file_to_pandas(
+                    content=data_bytes,
+                    filename=filename,
+                    auto_detect_header=True,
+                    return_raw=False,
+                )
+                # Handle both single DataFrame and dict (multiple sheets)
+                if isinstance(df_result, dict):
+                    df = list(df_result.values())[0]  # Use first sheet
+                else:
+                    df = df_result
+                
+                # Convert to Polars for consistency with existing code
+                df_pl = pl.from_pandas(df)
                 df_pl = data_upload_service._normalize_column_names(df_pl)
+                if df_pl.height == 0:
+                    uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
+                    flights.append({"file_key": key})
+                    continue
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)
                 arrow_bytes = arrow_buf.getvalue()
-        elif filename.lower().endswith((".xls", ".xlsx")):
-            data_bytes = fileobj.read()
-            reader = fastexcel.read_excel(data_bytes)
-            sheet = reader.load_sheet_by_idx(0)
-            df_pl = sheet.to_polars()
-            df_pl = data_upload_service._normalize_column_names(df_pl)
-            if df_pl.height == 0:
-                uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
-                flights.append({"file_key": key})
-                continue
-            arrow_buf = io.BytesIO()
-            df_pl.write_ipc(arrow_buf)
-            arrow_bytes = arrow_buf.getvalue()
+            except Exception as e:
+                logger.warning(f"RobustFileReader failed for {filename}, falling back to fastexcel: {e}")
+                # Fallback to original method if RobustFileReader fails
+                reader = fastexcel.read_excel(data_bytes)
+                sheet = reader.load_sheet_by_idx(0)
+                df_pl = sheet.to_polars()
+                df_pl = data_upload_service._normalize_column_names(df_pl)
+                if df_pl.height == 0:
+                    uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
+                    flights.append({"file_key": key})
+                    continue
+                arrow_buf = io.BytesIO()
+                df_pl.write_ipc(arrow_buf)
+                arrow_bytes = arrow_buf.getvalue()
         elif filename.lower().endswith(".arrow"):
             arrow_bytes = fileobj.read()
             df_pl = pl.read_ipc(io.BytesIO(arrow_bytes))
@@ -5474,7 +5565,12 @@ async def get_guided_flow_state(
     app_name: str = Query(""),
     project_name: str = Query(""),
 ):
-    """Retrieve persisted guided flow state from Redis."""
+    """
+    [DEPRECATED] Retrieve persisted guided flow state from Redis.
+    
+    This endpoint is deprecated. Use /guided-workflow/get-summary instead.
+    Kept for backward compatibility during migration.
+    """
     try:
         key_parts = ("guided_flow_state", client_name, app_name, project_name)
         cached_state_str = redis_client.get(key_parts)
@@ -5495,7 +5591,12 @@ async def get_guided_flow_state(
 
 @router.post("/save-guided-flow-state")
 async def save_guided_flow_state(request: Request):
-    """Save guided flow state to Redis."""
+    """
+    [DEPRECATED] Save guided flow state to Redis.
+    
+    This endpoint is deprecated. Use /guided-workflow/track-event and /guided-workflow/save-summary instead.
+    Kept for backward compatibility during migration.
+    """
     try:
         body = await request.json()
         client_name = body.get("client_name", "")
@@ -6082,4 +6183,414 @@ async def delete_guided_workflow_state_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error deleting guided workflow state: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# NEW FOOTPRINT TRACKING ENDPOINTS
+# ============================================================================
+
+@router.post("/guided-workflow/track-event")
+async def track_footprint_event(request: Request):
+    """
+    Track a single user interaction event.
+    Similar to how column classifier saves config, but for events.
+    
+    Expected JSON body:
+    {
+        "session_id": str,
+        "event_type": str,  # "click", "edit", "navigation", etc.
+        "stage": str,  # "U2", "U3", "U4", "U5", "U6"
+        "action": str,  # "header_selection", "column_edit", etc.
+        "target": str,  # What was interacted with
+        "client_name": str,
+        "app_name": str,
+        "project_name": str,
+        "file_name": str | None,
+        "user_id": str,
+        "details": dict | None,
+        "before_value": any | None,
+        "after_value": any | None,
+        "metadata": dict | None,
+    }
+    """
+    try:
+        body = await request.json()
+        
+        session_id = body.get("session_id", "")
+        event_type = body.get("event_type", "")
+        stage = body.get("stage", "")
+        action = body.get("action", "")
+        target = body.get("target", "")
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+        file_name = body.get("file_name")
+        user_id = body.get("user_id", "")
+        details = body.get("details")
+        before_value = body.get("before_value")
+        after_value = body.get("after_value")
+        metadata = body.get("metadata")
+        
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        if not event_type:
+            raise HTTPException(status_code=400, detail="event_type is required")
+        if not stage:
+            raise HTTPException(status_code=400, detail="stage is required")
+        if not action:
+            raise HTTPException(status_code=400, detail="action is required")
+        
+        result = save_footprint_event(
+            session_id=session_id,
+            event_type=event_type,
+            stage=stage,
+            action=action,
+            target=target,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            file_name=file_name,
+            user_id=user_id,
+            details=details,
+            before_value=before_value,
+            after_value=after_value,
+            metadata=metadata,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to save event"))
+        
+        return {
+            "status": "success",
+            "event_id": result.get("event_id"),
+            "mongo_id": result.get("mongo_id"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error tracking footprint event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/guided-workflow/track-batch")
+async def track_footprint_batch(request: Request):
+    """
+    Track multiple events in one call for performance.
+    
+    Expected JSON body:
+    {
+        "events": [
+            {
+                "session_id": str,
+                "event_type": str,
+                "stage": str,
+                "action": str,
+                "target": str,
+                "client_name": str,
+                "app_name": str,
+                "project_name": str,
+                "file_name": str | None,
+                "user_id": str,
+                "details": dict | None,
+                "before_value": any | None,
+                "after_value": any | None,
+                "metadata": dict | None,
+            },
+            ...
+        ]
+    }
+    """
+    try:
+        body = await request.json()
+        events = body.get("events", [])
+        
+        if not events:
+            raise HTTPException(status_code=400, detail="events array is required and cannot be empty")
+        
+        results = []
+        errors = []
+        
+        for event_data in events:
+            try:
+                session_id = event_data.get("session_id", "")
+                event_type = event_data.get("event_type", "")
+                stage = event_data.get("stage", "")
+                action = event_data.get("action", "")
+                target = event_data.get("target", "")
+                client_name = event_data.get("client_name", "")
+                app_name = event_data.get("app_name", "")
+                project_name = event_data.get("project_name", "")
+                file_name = event_data.get("file_name")
+                user_id = event_data.get("user_id", "")
+                details = event_data.get("details")
+                before_value = event_data.get("before_value")
+                after_value = event_data.get("after_value")
+                metadata = event_data.get("metadata")
+                
+                if not session_id or not event_type or not stage or not action:
+                    errors.append({"event": event_data, "error": "Missing required fields"})
+                    continue
+                
+                result = save_footprint_event(
+                    session_id=session_id,
+                    event_type=event_type,
+                    stage=stage,
+                    action=action,
+                    target=target,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    file_name=file_name,
+                    user_id=user_id,
+                    details=details,
+                    before_value=before_value,
+                    after_value=after_value,
+                    metadata=metadata,
+                )
+                
+                if result.get("status") == "success":
+                    results.append({
+                        "event_id": result.get("event_id"),
+                        "status": "success",
+                    })
+                else:
+                    errors.append({
+                        "event": event_data,
+                        "error": result.get("error", "Unknown error"),
+                    })
+            except Exception as e:
+                errors.append({
+                    "event": event_data,
+                    "error": str(e),
+                })
+        
+        return {
+            "status": "success" if not errors else "partial_success",
+            "saved_count": len(results),
+            "error_count": len(errors),
+            "results": results,
+            "errors": errors if errors else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error tracking footprint batch: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/guided-workflow/get-summary")
+async def get_workflow_summary_endpoint(
+    client_name: str = Query(""),
+    app_name: str = Query(""),
+    project_name: str = Query(""),
+    file_name: str = Query(None),
+    bypass_cache: str = Query("false"),
+):
+    """
+    Get latest workflow summary (Redis → MongoDB fallback).
+    Mirrors get_classifier_config pattern.
+    """
+    try:
+        should_bypass_cache = bypass_cache.lower() == "true"
+        
+        if not should_bypass_cache:
+            # Try Redis first
+            key = f"guided_workflow_summary:{client_name}:{app_name}:{project_name}"
+            if file_name:
+                from urllib.parse import quote
+                safe_file = quote(file_name, safe="")
+                specific_key = f"{key}:{safe_file}"
+                cached_specific = redis_client.get(specific_key)
+                if cached_specific:
+                    try:
+                        return {
+                            "status": "success",
+                            "source": "redis",
+                            "summary": json.loads(cached_specific),
+                        }
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON in cached summary for {specific_key}")
+            
+            cached = redis_client.get(key)
+            if cached:
+                try:
+                    data = json.loads(cached)
+                    if file_name:
+                        stored_file = data.get("file_name")
+                        if stored_file and stored_file != file_name:
+                            data = None
+                    if data is not None:
+                        return {
+                            "status": "success",
+                            "source": "redis",
+                            "summary": data,
+                        }
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in cached summary for {key}")
+        
+        # Bypass cache or cache miss - fetch from MongoDB
+        result = get_workflow_summary(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            file_name=file_name,
+        )
+        
+        if result.get("status") == "success" and result.get("summary"):
+            # Update Redis cache
+            summary = result.get("summary")
+            key = f"guided_workflow_summary:{client_name}:{app_name}:{project_name}"
+            redis_client.setex(key, 3600, json.dumps(summary, default=str))  # 1 hour TTL
+            if file_name:
+                from urllib.parse import quote
+                safe_file = quote(file_name, safe="")
+                specific_key = f"{key}:{safe_file}"
+                redis_client.setex(specific_key, 3600, json.dumps(summary, default=str))
+            
+            return {
+                "status": "success",
+                "source": "mongo",
+                "summary": summary,
+            }
+        
+        if result.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail="Summary not found")
+        
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to get summary"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting workflow summary: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/guided-workflow/get-events")
+async def get_footprint_events_endpoint(
+    client_name: str = Query(""),
+    app_name: str = Query(""),
+    project_name: str = Query(""),
+    file_name: str = Query(None),
+    session_id: str = Query(None),
+    limit: int = Query(1000),
+):
+    """
+    Get all events for a workflow session.
+    """
+    try:
+        result = get_footprint_events(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            file_name=file_name,
+            session_id=session_id,
+            limit=limit,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to get events"))
+        
+        return {
+            "status": "success",
+            "events": result.get("events", []),
+            "count": result.get("count", 0),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting footprint events: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/guided-workflow/save-summary")
+async def save_workflow_summary_endpoint(request: Request):
+    """
+    Manually save/update workflow summary (for stage completion).
+    Also updates Redis cache.
+    
+    Expected JSON body:
+    {
+        "session_id": str,
+        "current_stage": str,
+        "client_name": str,
+        "app_name": str,
+        "project_name": str,
+        "file_name": str | None,
+        "user_id": str,
+        "uploaded_files": list | None,
+        "header_selections": dict | None,
+        "column_name_edits": dict | None,
+        "data_type_selections": dict | None,
+        "missing_value_strategies": dict | None,
+        "file_metadata": dict | None,
+    }
+    """
+    try:
+        body = await request.json()
+        
+        session_id = body.get("session_id", "")
+        current_stage = body.get("current_stage", "")
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+        file_name = body.get("file_name")
+        user_id = body.get("user_id", "")
+        uploaded_files = body.get("uploaded_files")
+        header_selections = body.get("header_selections")
+        column_name_edits = body.get("column_name_edits")
+        data_type_selections = body.get("data_type_selections")
+        missing_value_strategies = body.get("missing_value_strategies")
+        file_metadata = body.get("file_metadata")
+        
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        if not current_stage:
+            raise HTTPException(status_code=400, detail="current_stage is required")
+        
+        result = save_workflow_summary(
+            session_id=session_id,
+            current_stage=current_stage,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            file_name=file_name,
+            user_id=user_id,
+            uploaded_files=uploaded_files,
+            header_selections=header_selections,
+            column_name_edits=column_name_edits,
+            data_type_selections=data_type_selections,
+            missing_value_strategies=missing_value_strategies,
+            file_metadata=file_metadata,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to save summary"))
+        
+        # Update Redis cache
+        summary_result = get_workflow_summary(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            file_name=file_name,
+        )
+        
+        if summary_result.get("status") == "success" and summary_result.get("summary"):
+            summary = summary_result.get("summary")
+            key = f"guided_workflow_summary:{client_name}:{app_name}:{project_name}"
+            redis_client.setex(key, 3600, json.dumps(summary, default=str))  # 1 hour TTL
+            if file_name:
+                from urllib.parse import quote
+                safe_file = quote(file_name, safe="")
+                specific_key = f"{key}:{safe_file}"
+                redis_client.setex(specific_key, 3600, json.dumps(summary, default=str))
+        
+        return {
+            "status": "success",
+            "mongo_id": result.get("mongo_id"),
+            "operation": result.get("operation"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving workflow summary: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

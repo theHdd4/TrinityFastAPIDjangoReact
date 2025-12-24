@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { UPLOAD_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow, DataTypeSelection } from '../useGuidedUploadFlow';
+import { useGuidedFlowFootprints } from '@/components/LaboratoryMode/hooks/useGuidedFlowFootprints';
 
 interface U4ReviewDataTypesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -166,6 +167,7 @@ function classifyColumnRole(columnName: string, columnType: string, dtype: strin
 
 export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNext, onBack, isMaximized = false }) => {
   const { state, setDataTypeSelections } = flow;
+  const { trackEvent } = useGuidedFlowFootprints();
   const { uploadedFiles, columnNameEdits, dataTypeSelections, selectedFileIndex } = state;
 
   // Only process the file selected in U1
@@ -398,6 +400,21 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
 
   const handleSuggestedTypeChange = (columnName: string, newType: string) => {
     console.log('🔧 handleSuggestedTypeChange called:', { columnName, newType });
+    const column = columns.find(c => c.columnName === columnName);
+    if (column) {
+      trackEvent({
+        event_type: 'edit',
+        stage: 'U4',
+        action: 'data_type_select',
+        target: `column_${columnName}`,
+        details: {
+          file_name: currentFile?.name,
+          column_name: columnName,
+        },
+        before_value: column.dataType,
+        after_value: newType,
+      });
+    }
     setColumns(prev => prev.map(col => {
       if (col.columnName === columnName) {
         const newRole = classifyRoleFromDataType(newType);
@@ -437,6 +454,21 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
   };
 
   const handleRoleChange = (columnName: string, newRole: 'identifier' | 'measure') => {
+    const column = columns.find(c => c.columnName === columnName);
+    if (column) {
+      trackEvent({
+        event_type: 'edit',
+        stage: 'U4',
+        action: 'column_role_change',
+        target: `column_${columnName}`,
+        details: {
+          file_name: currentFile?.name,
+          column_name: columnName,
+        },
+        before_value: column.columnRole,
+        after_value: newRole,
+      });
+    }
     setColumns(prev => prev.map(col =>
       col.columnName === columnName 
         ? { ...col, columnRole: newRole, tag: 'edited_by_user' as const }

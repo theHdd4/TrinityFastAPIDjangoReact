@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { UPLOAD_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow, ColumnNameEdit } from '../useGuidedUploadFlow';
+import { useGuidedFlowFootprints } from '@/components/LaboratoryMode/hooks/useGuidedFlowFootprints';
 
 interface U3ReviewColumnNamesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -72,6 +73,7 @@ function generateRuleBasedSuggestion(columnName: string): { cleaned: string; rea
 export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, onNext, onBack, isMaximized = false }) => {
   const { state, setColumnNameEdits } = flow;
   const { uploadedFiles, columnNameEdits, selectedFileIndex } = state;
+  const { trackEvent } = useGuidedFlowFootprints();
   const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
   const currentFile = uploadedFiles[chosenIndex];
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
@@ -179,6 +181,23 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
   }, [currentFile, columnNameEdits]);
 
   const handleNameChange = (index: number, newName: string) => {
+    const column = columns[index];
+    if (column) {
+      // Track column name edit
+      trackEvent({
+        event_type: 'edit',
+        stage: 'U3',
+        action: 'column_name_edit',
+        target: `column_${column.originalName}`,
+        details: {
+          file_name: currentFile?.name,
+          column_index: index,
+          original_name: column.originalName,
+        },
+        before_value: column.editedName,
+        after_value: newName,
+      });
+    }
     setColumns(prev => prev.map((col, idx) =>
       idx === index ? { ...col, editedName: newName, tag: 'edited_by_user' as const } : col
     ));
@@ -186,6 +205,23 @@ export const U3ReviewColumnNames: React.FC<U3ReviewColumnNamesProps> = ({ flow, 
 
   const handleKeepToggle = (index: number, keep: boolean) => {
     console.log('handleKeepToggle called:', index, keep);
+    const column = columns[index];
+    if (column) {
+      // Track column keep/remove toggle
+      trackEvent({
+        event_type: 'click',
+        stage: 'U3',
+        action: keep ? 'column_keep' : 'column_remove',
+        target: `column_${column.originalName}`,
+        details: {
+          file_name: currentFile?.name,
+          column_index: index,
+          column_name: column.originalName,
+        },
+        before_value: column.keep,
+        after_value: keep,
+      });
+    }
     setColumns(prev => {
       const updated = prev.map((col, idx) =>
         idx === index ? { ...col, keep } : col

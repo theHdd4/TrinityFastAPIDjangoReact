@@ -8,6 +8,7 @@ import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
+import { useGuidedFlowFootprints } from '@/components/LaboratoryMode/hooks/useGuidedFlowFootprints';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 // Helper to extract filename from path
@@ -69,6 +70,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
 
   // Hooks for finalization and closing guided mode
   const { markFileAsPrimed } = useGuidedFlowPersistence();
+  const { trackEvent } = useGuidedFlowFootprints();
   const { setGlobalGuidedMode, removeActiveGuidedFlow, activeGuidedFlows } = useLaboratoryStore();
   
   // Find atomId from active guided flows
@@ -348,6 +350,16 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
   };
 
   const handleSave = async () => {
+    // Track priming action
+    trackEvent({
+      event_type: 'click',
+      stage: 'U6',
+      action: 'priming_save',
+      target: 'save_button',
+      details: {
+        file_name: currentFile?.name,
+      },
+    }, { immediate: true });
     if (!currentFile) return;
 
     setSaving(true);

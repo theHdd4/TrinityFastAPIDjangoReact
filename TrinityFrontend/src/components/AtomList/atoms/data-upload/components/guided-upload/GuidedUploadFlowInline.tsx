@@ -8,7 +8,7 @@ import { U4ReviewDataTypes } from './stages/U4ReviewDataTypes';
 import { U5MissingValues } from './stages/U5MissingValues';
 import { U6FinalPreview } from './stages/U6FinalPreview';
 import { ArrowLeft, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Maximize2 } from 'lucide-react';
-import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
+import { useGuidedFlowFootprints } from '@/components/LaboratoryMode/hooks/useGuidedFlowFootprints';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { UPLOAD_API } from '@/lib/api';
@@ -130,8 +130,16 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   
   const flow = useGuidedUploadFlow(mergedSavedState);
   const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage, updateUploadedFilePath } = flow;
-  const { saveState, markFileAsPrimed } = useGuidedFlowPersistence();
+  const { trackEvent, saveSummary, flushQueue } = useGuidedFlowFootprints();
   const { setActiveGuidedFlow, updateGuidedFlowStage, removeActiveGuidedFlow } = useLaboratoryStore();
+  
+  // Get current file for event tracking
+  const currentFile = useMemo(() => {
+    const selectedIndex = state.selectedFileIndex !== undefined && state.selectedFileIndex < state.uploadedFiles.length
+      ? state.selectedFileIndex
+      : 0;
+    return state.uploadedFiles[selectedIndex] || null;
+  }, [state.uploadedFiles, state.selectedFileIndex]);
   
   // Get the store's current stage for this atom to sync with right panel clicks
   const storeCurrentStage = useLaboratoryStore((s) => s.activeGuidedFlows[atomId]?.currentStage);
@@ -285,7 +293,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     }
   }, [existingDataframe, initialStage, effectiveInitialStage, savedState, state.currentStage, state.uploadedFiles.length, state.uploadedFiles, addUploadedFiles, updateUploadedFilePath, goToStage]);
 
-  // Debounced save function
+  // Debounced save function - now uses footprint tracking
   const debouncedSave = useCallback((stateToSave: GuidedUploadFlowState) => {
     // Clear any pending save
     if (saveTimeoutRef.current) {
@@ -294,10 +302,15 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     
     // Debounce save by 500ms
     saveTimeoutRef.current = setTimeout(() => {
-      saveState(stateToSave);
+      // Save summary using new footprint system
+      saveSummary(
+        stateToSave.currentStage,
+        stateToSave,
+        currentFile?.name
+      );
       saveTimeoutRef.current = null;
     }, 500);
-  }, [saveState]);
+  }, [saveSummary, currentFile]);
 
   // Update store when state changes (only on actual meaningful changes)
   // Use stateString to prevent unnecessary re-renders
@@ -320,6 +333,20 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
       // Track stage changes separately
       const stageChanged = prevStageRef.current !== state.currentStage;
       if (stageChanged) {
+        // Track stage navigation event
+        trackEvent({
+          event_type: 'navigation',
+          stage: state.currentStage,
+          action: prevStageRef.current ? 'stage_change' : 'stage_init',
+          target: `stage_${state.currentStage}`,
+          details: {
+            from_stage: prevStageRef.current,
+            to_stage: state.currentStage,
+          },
+          before_value: prevStageRef.current,
+          after_value: state.currentStage,
+        }, { immediate: true });
+        
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GuidedUploadFlowInline.tsx:177',message:'Stage changed detected',data:{from:prevStageRef.current,to:state.currentStage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
@@ -390,6 +417,20 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
     
     // Only allow backward navigation from the right panel (going to completed steps)
     if (storeIndex < currentIndex) {
+      // Track stage jump event
+      trackEvent({
+        event_type: 'click',
+        stage: storeCurrentStage,
+        action: 'stage_navigation_jump',
+        target: `stage_indicator_${storeCurrentStage}`,
+        details: {
+          from_stage: state.currentStage,
+          to_stage: storeCurrentStage,
+        },
+        before_value: state.currentStage,
+        after_value: storeCurrentStage,
+      }, { immediate: true });
+      
       lastInternalStageRef.current = storeCurrentStage;
       goToStage(storeCurrentStage);
     }
@@ -398,6 +439,17 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   // No need to mark as primed here - U6FinalPreview handles it
 
   const handleNext = async () => {
+    // Track next button click
+    trackEvent({
+      event_type: 'click',
+      stage: state.currentStage,
+      action: 'stage_navigation_next',
+      target: 'next_button',
+      details: {
+        from_stage: state.currentStage,
+      },
+    }, { immediate: true });
+    
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/f74def83-6ab6-4eaa-b691-535eeb501a5a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GuidedUploadFlowInline.tsx:221',message:'handleNext called',data:{currentStage:state.currentStage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
     // #endregion
@@ -484,6 +536,17 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   };
 
   const handleBack = () => {
+    // Track back button click
+    trackEvent({
+      event_type: 'click',
+      stage: state.currentStage,
+      action: 'stage_navigation_back',
+      target: 'back_button',
+      details: {
+        from_stage: state.currentStage,
+      },
+    }, { immediate: true });
+    
     // U2 is the first stage - if at U2, close the guided flow
     if (state.currentStage === 'U2') {
       onClose?.();
@@ -493,6 +556,17 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   };
 
   const handleRestart = () => {
+    // Track restart click
+    trackEvent({
+      event_type: 'click',
+      stage: state.currentStage,
+      action: 'restart_click',
+      target: 'restart_button',
+      details: {
+        from_stage: state.currentStage,
+      },
+    }, { immediate: true });
+    
     restartFlow();
   };
 
@@ -576,6 +650,20 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   }, [state.currentStage]);
 
   const toggleCompletedStage = useCallback((stage: UploadStage) => {
+    const wasExpanded = expandedCompletedStages.has(stage);
+    
+    // Track stage expand/collapse
+    trackEvent({
+      event_type: 'click',
+      stage: stage,
+      action: wasExpanded ? 'stage_collapse' : 'stage_expand',
+      target: `stage_header_${stage}`,
+      details: {
+        stage,
+        was_expanded: wasExpanded,
+      },
+    });
+    
     setExpandedCompletedStages(prev => {
       const next = new Set(prev);
       if (next.has(stage)) {

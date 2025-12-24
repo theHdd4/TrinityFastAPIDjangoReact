@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { saveFileToSavedDataFrames } from '../utils/saveFileHelper';
 import { toast } from '@/hooks/use-toast';
 import { truncateFileName } from '@/utils/truncateFileName';
+import { useGuidedFlowFootprints } from '@/components/LaboratoryMode/hooks/useGuidedFlowFootprints';
 
 interface U2UnderstandingFilesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -59,6 +60,7 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
   isMaximized = false
 }) => {
   const { state, setHeaderSelection, updateFileSheetSelection, updateUploadedFilePath } = flow;
+  const { trackEvent } = useGuidedFlowFootprints();
   const { uploadedFiles, headerSelections, selectedFileIndex: savedSelectedIndex } = state;
   
   // Get the selected file from U1 - this is the ONLY file we process in steps 3-8
@@ -228,7 +230,24 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
 
   // Handle header selection change - always in multi-row mode
   const handleHeaderSelectionChange = (rowIndex: number | 'none') => {
+    const previousSelection = selectedHeaderRows;
+    const previousHeaderRow = selectedHeaderRow;
+    
     if (rowIndex === 'none') {
+      // Track header removal
+      trackEvent({
+        event_type: 'selection',
+        stage: 'U2',
+        action: 'header_row_remove',
+        target: 'header_selection',
+        details: {
+          file_name: currentFile?.name,
+          previous_selection: previousSelection,
+        },
+        before_value: previousSelection,
+        after_value: [],
+      });
+      
       setSelectedHeaderRow(0);
       setSelectedHeaderRows([]);
       if (currentFile && previewData) {
@@ -249,9 +268,41 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       if (isSelected) {
         // Remove from selection
         newSelection = prev.filter(r => r !== rowIndex).sort((a, b) => a - b);
+        
+        // Track header row deselection
+        trackEvent({
+          event_type: 'selection',
+          stage: 'U2',
+          action: 'header_row_deselect',
+          target: `row_${rowIndex}`,
+          details: {
+            file_name: currentFile?.name,
+            row_index: rowIndex,
+            previous_selection: prev,
+            new_selection: newSelection,
+          },
+          before_value: prev,
+          after_value: newSelection,
+        });
       } else {
         // Add to selection (keep sorted)
         newSelection = [...prev, rowIndex].sort((a, b) => a - b);
+        
+        // Track header row selection
+        trackEvent({
+          event_type: 'selection',
+          stage: 'U2',
+          action: 'header_row_select',
+          target: `row_${rowIndex}`,
+          details: {
+            file_name: currentFile?.name,
+            row_index: rowIndex,
+            previous_selection: prev,
+            new_selection: newSelection,
+          },
+          before_value: prev,
+          after_value: newSelection,
+        });
       }
       
       // Update single header row to first selected row
@@ -314,6 +365,18 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
 
   // Apply header selection (used by both direct continue and merge dialog)
   const applyHeaderSelection = useCallback(async () => {
+    // Track header application
+    trackEvent({
+      event_type: 'click',
+      stage: 'U2',
+      action: 'header_apply',
+      target: 'apply_header_button',
+      details: {
+        file_name: currentFile?.name,
+        selected_rows: selectedHeaderRows,
+        header_row_count: headerRowCount,
+      },
+    }, { immediate: true });
     if (!currentFile || !previewData) return;
     
     setShowMergeDialog(false);
@@ -520,7 +583,23 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
                 return (
                   <button
                     key={idx}
-                    onClick={() => updateFileSheetSelection(currentFile.name, sheet)}
+                    onClick={() => {
+                      // Track sheet selection
+                      trackEvent({
+                        event_type: 'selection',
+                        stage: 'U2',
+                        action: 'sheet_selection',
+                        target: `sheet_${sheet}`,
+                        details: {
+                          file_name: currentFile.name,
+                          sheet_name: sheet,
+                          previous_sheet: currentFile.selectedSheet,
+                        },
+                        before_value: currentFile.selectedSheet,
+                        after_value: sheet,
+                      });
+                      updateFileSheetSelection(currentFile.name, sheet);
+                    }}
                     className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                       isSelected
                         ? 'bg-[#458EE2] text-white'
@@ -711,7 +790,15 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setShowMergeDialog(false)}
+              onClick={() => {
+                trackEvent({
+                  event_type: 'click',
+                  stage: 'U2',
+                  action: 'merge_dialog_cancel',
+                  target: 'merge_dialog_cancel_button',
+                });
+                setShowMergeDialog(false);
+              }}
               disabled={applyingHeader}
             >
               Go Back

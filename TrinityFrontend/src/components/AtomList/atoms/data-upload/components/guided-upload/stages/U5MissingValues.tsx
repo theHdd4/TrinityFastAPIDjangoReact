@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { UPLOAD_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow, MissingValueStrategy } from '../useGuidedUploadFlow';
+import { useGuidedFlowFootprints } from '@/components/LaboratoryMode/hooks/useGuidedFlowFootprints';
 
 interface U5MissingValuesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -150,6 +151,7 @@ function getMissingColor(missingPercent: number): string {
 
 export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, onBack, isMaximized = false }) => {
   const { state, setMissingValueStrategies } = flow;
+  const { trackEvent } = useGuidedFlowFootprints();
   const { uploadedFiles, dataTypeSelections, missingValueStrategies, selectedFileIndex, columnNameEdits } = state;
   const chosenIndex = selectedFileIndex !== undefined && selectedFileIndex < uploadedFiles.length ? selectedFileIndex : 0;
   const [columns, setColumns] = useState<ColumnMissingInfo[]>([]);
@@ -417,6 +419,22 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
 
   const handleTreatmentChange = (columnName: string, treatment: MissingValueStrategy['strategy']) => {
     console.log('🔧 U5 handleTreatmentChange called:', { columnName, treatment });
+    const column = columns.find(c => c.columnName === columnName);
+    if (column) {
+      trackEvent({
+        event_type: 'edit',
+        stage: 'U5',
+        action: 'missing_value_strategy_select',
+        target: `column_${columnName}`,
+        details: {
+          file_name: currentFile?.name,
+          column_name: columnName,
+          strategy: treatment,
+        },
+        before_value: column.selectedTreatment,
+        after_value: treatment,
+      });
+    }
     updateColumns(prev =>
       prev.map(col => {
         if (col.columnName === columnName) {
@@ -462,6 +480,21 @@ export const U5MissingValues: React.FC<U5MissingValuesProps> = ({ flow, onNext, 
   };
 
   const handleCustomValueChange = (columnName: string, value: string) => {
+    const column = columns.find(c => c.columnName === columnName);
+    if (column) {
+      trackEvent({
+        event_type: 'edit',
+        stage: 'U5',
+        action: 'missing_value_custom_value',
+        target: `column_${columnName}`,
+        details: {
+          file_name: currentFile?.name,
+          column_name: columnName,
+        },
+        before_value: column.customValue,
+        after_value: value,
+      });
+    }
     updateColumns(prev =>
       prev.map(col =>
         col.columnName === columnName
