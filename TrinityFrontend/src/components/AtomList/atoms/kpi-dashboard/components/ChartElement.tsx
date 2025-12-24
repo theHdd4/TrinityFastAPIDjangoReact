@@ -353,6 +353,34 @@ const ChartElement: React.FC<ChartElementProps> = ({
     }, 0);
   }, [chartConfig, updateChartConfig]);
 
+  const handleXAxisLabelChange = useCallback((label: string) => {
+    setChartSettings(prev => ({ ...prev, customXAxisLabel: label }));
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          chartConfig: {
+            ...chartConfig.chartConfig,
+            customXAxisLabel: label,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
+  const handleYAxisLabelChange = useCallback((label: string) => {
+    setChartSettings(prev => ({ ...prev, customYAxisLabel: label }));
+    setTimeout(() => {
+      if (chartConfig) {
+        updateChartConfig({
+          chartConfig: {
+            ...chartConfig.chartConfig,
+            customYAxisLabel: label,
+          },
+        });
+      }
+    }, 0);
+  }, [chartConfig, updateChartConfig]);
+
   // Backend-required callback (chart type change) - requires API call
   const handleChartTypeChange = useCallback(async (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart') => {
     if (!chartConfig || !fileId) {
@@ -749,6 +777,8 @@ const ChartElement: React.FC<ChartElementProps> = ({
     onSeriesSettingsChange: handleSeriesSettingsChange,
     onChartTypeChange: handleChartTypeChange,
     onTitleChange: handleTitleChange,
+    onXAxisLabelChange: handleXAxisLabelChange,
+    onYAxisLabelChange: handleYAxisLabelChange,
   };
 
   const showNote = chartConfig?.showNote || false;

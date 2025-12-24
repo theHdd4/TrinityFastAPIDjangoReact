@@ -10,10 +10,6 @@ import {
   Flame,
   History,
   Italic,
-  List,
-  ListOrdered,
-  Minus,
-  Plus,
   Search,
   Sparkles as SparklesIcon,
   Strikethrough,
@@ -246,8 +242,9 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
   return (
     <div
-      className="relative flex w-full max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-background/95 px-2.5 py-2.5 pr-12 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg"
+      className="relative flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-background/95 px-2.5 py-2.5 pr-12 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg shrink-0"
       data-text-toolbar-root
+      style={{ minWidth: 'fit-content' }}
     >
 
       {onDelete && (
@@ -544,27 +541,8 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
       <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-        onClick={onDecreaseFontSize}
-        type="button"
-        onMouseDown={handleToolbarMouseDown}
-      >
-        <Minus className="h-4 w-4" />
-      </Button>
+      {/* Font size display (read-only) - increment/decrement buttons removed */}
       <span className="w-8 shrink-0 text-center text-sm font-semibold text-foreground">{fontSize}</span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-        onClick={onIncreaseFontSize}
-        type="button"
-        onMouseDown={handleToolbarMouseDown}
-      >
-        <Plus className="h-4 w-4" />
-      </Button>
 
       <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
@@ -648,28 +626,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
       <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-        onClick={() => onBulletedList?.()}
-        type="button"
-        onMouseDown={handleToolbarMouseDown}
-      >
-        <List className="h-4 w-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-        onClick={() => onNumberedList?.()}
-        type="button"
-        onMouseDown={handleToolbarMouseDown}
-      >
-        <ListOrdered className="h-4 w-4" />
-      </Button>
-
-      <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
+      {/* Bullet point options removed - not currently working */}
 
       <Popover open={colorPopoverOpen} onOpenChange={setColorPopoverOpen}>
         <PopoverTrigger asChild>

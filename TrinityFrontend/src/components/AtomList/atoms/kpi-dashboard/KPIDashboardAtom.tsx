@@ -162,19 +162,10 @@ const KPIDashboardAtom: React.FC<KPIDashboardAtomProps> = ({ atomId }) => {
   }, [atom?.metadata, atom?.settings]);
 
   const handleDataUpload = (uploadedData: KPIDashboardData) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardAtom.tsx:156',message:'handleDataUpload entry',data:{atomId,updateSettingsType:typeof updateSettings,updateSettingsIsFunc:typeof updateSettings==='function',uploadedDataType:typeof uploadedData,hasHeaders:!!uploadedData.headers,headersIsArray:Array.isArray(uploadedData.headers),hasRows:!!uploadedData.rows,rowsIsArray:Array.isArray(uploadedData.rows),fileName:uploadedData.fileName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardAtom.tsx:160',message:'Before updateSettings call',data:{settingsKeys:Object.keys(settings)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     updateSettings(atomId, {
       ...settings,
       data: uploadedData
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardAtom.tsx:164',message:'After updateSettings call',data:{success:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
   };
 
   const handleSettingsChange = (newSettings: Partial<KPIDashboardSettings>) => {

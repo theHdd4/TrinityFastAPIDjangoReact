@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffe
 import { createPortal } from 'react-dom';
 
 // Separate component for axis label editing to prevent re-renders
-const AxisLabelEditor = React.memo(({ 
+const AxisLabelEditor = ({ 
   xAxisLabel, 
   yAxisLabel, 
   customXAxisLabel, 
@@ -23,14 +23,65 @@ const AxisLabelEditor = React.memo(({
   onSave: (x: string, y: string, t: string) => void;
   onCancel: () => void;
 }) => {
-  const [tempX, setTempX] = useState(customXAxisLabel || xAxisLabel || '');
-  const [tempY, setTempY] = useState(customYAxisLabel || yAxisLabel || '');
-  const [tempTitle, setTempTitle] = useState(customTitle || title || '');
+  // DEBUG: Log component mount and props
+  console.log('[AxisLabelEditor] Component rendering/mounting', {
+    customXAxisLabel,
+    customYAxisLabel,
+    customTitle,
+    xAxisLabel,
+    yAxisLabel,
+    title,
+    timestamp: Date.now()
+  });
 
+  // Initialize state with prop values using function initializer
+  // This runs once when component mounts (which happens fresh each time modal opens due to key prop)
+  const [tempX, setTempX] = useState(() => {
+    const initialX = customXAxisLabel || xAxisLabel || '';
+    console.log('[AxisLabelEditor] Initializing tempX:', initialX);
+    return initialX;
+  });
+  const [tempY, setTempY] = useState(() => {
+    const initialY = customYAxisLabel || yAxisLabel || '';
+    console.log('[AxisLabelEditor] Initializing tempY:', initialY);
+    return initialY;
+  });
+  const [tempTitle, setTempTitle] = useState(() => {
+    const initialTitle = customTitle || title || '';
+    console.log('[AxisLabelEditor] Initializing tempTitle:', initialTitle);
+    return initialTitle;
+  });
+  
+  // DEBUG: Log state values on every render
   useEffect(() => {
-    setTempX(customXAxisLabel || xAxisLabel || '');
-    setTempY(customYAxisLabel || yAxisLabel || '');
-    setTempTitle(customTitle || title || '');
+    console.log('[AxisLabelEditor] State values:', { tempX, tempY, tempTitle });
+  });
+
+  // Track initial props to detect actual changes (not just initial mount)
+  const prevPropsRef = useRef({ customXAxisLabel, customYAxisLabel, customTitle, xAxisLabel, yAxisLabel, title });
+  
+  // DEBUG: Log when props actually change (not on initial mount)
+  useEffect(() => {
+    const prev = prevPropsRef.current;
+    const changed = 
+      prev.customXAxisLabel !== customXAxisLabel ||
+      prev.customYAxisLabel !== customYAxisLabel ||
+      prev.customTitle !== customTitle ||
+      prev.xAxisLabel !== xAxisLabel ||
+      prev.yAxisLabel !== yAxisLabel ||
+      prev.title !== title;
+    
+    if (changed) {
+      console.log('[AxisLabelEditor] Props actually changed:', {
+        customXAxisLabel,
+        customYAxisLabel,
+        customTitle,
+        xAxisLabel,
+        yAxisLabel,
+        title
+      });
+      prevPropsRef.current = { customXAxisLabel, customYAxisLabel, customTitle, xAxisLabel, yAxisLabel, title };
+    }
   }, [customXAxisLabel, customYAxisLabel, customTitle, xAxisLabel, yAxisLabel, title]);
 
   return (
@@ -41,6 +92,14 @@ const AxisLabelEditor = React.memo(({
         top: position.y,
         minWidth: '280px',
         maxHeight: '400px'
+      }}
+      onMouseDown={(e) => {
+        // Prevent overlay from closing the modal when clicking inside
+        e.stopPropagation();
+      }}
+      onClick={(e) => {
+        // Prevent overlay from closing the modal when clicking inside
+        e.stopPropagation();
       }}
     >
       <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-3">
@@ -56,7 +115,24 @@ const AxisLabelEditor = React.memo(({
           <input
             type="text"
             value={tempTitle}
-            onChange={(e) => setTempTitle(e.target.value)}
+            onChange={(e) => {
+              const newValue = e.target.value;
+              console.log('[AxisLabelEditor] Title input onChange FIRED:', newValue, 'Current tempTitle:', tempTitle, 'Event:', e);
+              e.stopPropagation(); // Prevent event bubbling
+              setTempTitle(newValue);
+            }}
+            onMouseDown={(e) => {
+              console.log('[AxisLabelEditor] Title input onMouseDown');
+              e.stopPropagation(); // Critical: prevent overlay from intercepting
+            }}
+            onFocus={(e) => {
+              console.log('[AxisLabelEditor] Title input onFocus');
+              e.stopPropagation();
+            }}
+            onKeyDown={(e) => {
+              console.log('[AxisLabelEditor] Title input onKeyDown:', e.key, 'Current value:', (e.target as HTMLInputElement).value);
+              e.stopPropagation();
+            }}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             placeholder={title || 'Enter chart title'}
           />
@@ -70,7 +146,24 @@ const AxisLabelEditor = React.memo(({
           <input
             type="text"
             value={tempX}
-            onChange={(e) => setTempX(e.target.value)}
+            onChange={(e) => {
+              const newValue = e.target.value;
+              console.log('[AxisLabelEditor] X-Axis input onChange FIRED:', newValue, 'Current tempX:', tempX, 'Event:', e);
+              e.stopPropagation(); // Prevent event bubbling
+              setTempX(newValue);
+            }}
+            onMouseDown={(e) => {
+              console.log('[AxisLabelEditor] X-Axis input onMouseDown');
+              e.stopPropagation(); // Critical: prevent overlay from intercepting
+            }}
+            onFocus={(e) => {
+              console.log('[AxisLabelEditor] X-Axis input onFocus');
+              e.stopPropagation();
+            }}
+            onKeyDown={(e) => {
+              console.log('[AxisLabelEditor] X-Axis input onKeyDown:', e.key, 'Current value:', (e.target as HTMLInputElement).value);
+              e.stopPropagation();
+            }}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             placeholder={xAxisLabel || 'Enter X-axis label'}
           />
@@ -84,7 +177,24 @@ const AxisLabelEditor = React.memo(({
           <input
             type="text"
             value={tempY}
-            onChange={(e) => setTempY(e.target.value)}
+            onChange={(e) => {
+              const newValue = e.target.value;
+              console.log('[AxisLabelEditor] Y-Axis input onChange FIRED:', newValue, 'Current tempY:', tempY, 'Event:', e);
+              e.stopPropagation(); // Prevent event bubbling
+              setTempY(newValue);
+            }}
+            onMouseDown={(e) => {
+              console.log('[AxisLabelEditor] Y-Axis input onMouseDown');
+              e.stopPropagation(); // Critical: prevent overlay from intercepting
+            }}
+            onFocus={(e) => {
+              console.log('[AxisLabelEditor] Y-Axis input onFocus');
+              e.stopPropagation();
+            }}
+            onKeyDown={(e) => {
+              console.log('[AxisLabelEditor] Y-Axis input onKeyDown:', e.key, 'Current value:', (e.target as HTMLInputElement).value);
+              e.stopPropagation();
+            }}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             placeholder={yAxisLabel || 'Enter Y-axis label'}
           />
@@ -113,7 +223,7 @@ const AxisLabelEditor = React.memo(({
       </div>
     </div>
   );
-});
+};
 import "./chart.css";
 import {
   BarChart,
@@ -185,6 +295,10 @@ interface Props {
   onDataLabelsToggle?: (enabled: boolean) => void; // Callback for data labels toggle
   onSave?: () => void; // Callback for save action
   onTitleChange?: (title: string) => void; // Callback for title changes
+  onXAxisLabelChange?: (label: string) => void; // Callback for X-axis label changes
+  onYAxisLabelChange?: (label: string) => void; // Callback for Y-axis label changes
+  customXAxisLabel?: string; // Custom X-axis label from parent
+  customYAxisLabel?: string; // Custom Y-axis label from parent
   sortOrder?: 'asc' | 'desc' | null; // Current sort order
   onSortChange?: (order: 'asc' | 'desc' | null) => void; // Callback when sorting changes
   sortColumn?: string; // Column to sort by
@@ -521,6 +635,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
   onDataLabelsToggle,
   onSave,
   onTitleChange,
+  onXAxisLabelChange,
+  onYAxisLabelChange,
+  customXAxisLabel: propCustomXAxisLabel,
+  customYAxisLabel: propCustomYAxisLabel,
   sortOrder,
   onSortChange, // Callback when sorting changes
   sortColumn: propSortColumn, // Column to sort by
@@ -607,6 +725,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showSortSubmenu, setShowSortSubmenu] = useState(false);
   const [showChartTypeSubmenu, setShowChartTypeSubmenu] = useState(false);
   const [showAxisLabelSubmenu, setShowAxisLabelSubmenu] = useState(false);
+  const [axisLabelEditorKey, setAxisLabelEditorKey] = useState(0); // Key to force remount when modal opens
   const [showAxisToggleSubmenu, setShowAxisToggleSubmenu] = useState(false);
   const [showSeriesSettingsSubmenu, setShowSeriesSettingsSubmenu] = useState(false);
   const [colorSubmenuPos, setColorSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -825,7 +944,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return `chart_labels_${chartId}`;
   };
   
+  // Use prop values if provided, otherwise use localStorage
   const [customXAxisLabel, setCustomXAxisLabel] = useState<string>(() => {
+    if (propCustomXAxisLabel !== undefined) {
+      return propCustomXAxisLabel;
+    }
     try {
       return localStorage.getItem(`${getStorageKey()}_x`) || '';
     } catch {
@@ -833,12 +956,28 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }
   });
   const [customYAxisLabel, setCustomYAxisLabel] = useState<string>(() => {
+    if (propCustomYAxisLabel !== undefined) {
+      return propCustomYAxisLabel;
+    }
     try {
       return localStorage.getItem(`${getStorageKey()}_y`) || '';
     } catch {
       return '';
     }
   });
+  
+  // Sync local state with props when they change
+  useEffect(() => {
+    if (propCustomXAxisLabel !== undefined) {
+      setCustomXAxisLabel(propCustomXAxisLabel);
+    }
+  }, [propCustomXAxisLabel]);
+  
+  useEffect(() => {
+    if (propCustomYAxisLabel !== undefined) {
+      setCustomYAxisLabel(propCustomYAxisLabel);
+    }
+  }, [propCustomYAxisLabel]);
   const [showXAxisLabelDialog, setShowXAxisLabelDialog] = useState(false);
   const [showYAxisLabelDialog, setShowYAxisLabelDialog] = useState(false);
   const [tempXAxisLabel, setTempXAxisLabel] = useState<string>('');
@@ -1082,6 +1221,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
   }, []);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
+    // Don't close if clicking on a submenu/modal
+    const target = e.target as HTMLElement;
+    if (target.closest('.axis-label-submenu') || 
+        target.closest('.axis-toggle-submenu') ||
+        target.closest('.color-submenu') ||
+        target.closest('.sort-submenu') ||
+        target.closest('.chart-type-submenu') ||
+        target.closest('.series-settings-submenu')) {
+      return; // Don't close if clicking inside a submenu
+    }
     e.preventDefault();
     e.stopPropagation();
     setShowContextMenu(false);
@@ -1106,7 +1255,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (!menuRect) {
       // Fallback if menu ref not available
       setAxisLabelSubmenuPos({ x: buttonRect.right + 4, y: buttonRect.top });
+      setAxisLabelEditorKey(prev => {
+        const newKey = prev + 1;
+        console.log('[RechartsChartRenderer] Opening axis label modal - incrementing key:', prev, '->', newKey);
+        return newKey;
+      }); // Force remount with new key
       setShowAxisLabelSubmenu(true);
+      console.log('[RechartsChartRenderer] Setting showAxisLabelSubmenu to true');
       return;
     }
     
@@ -1138,7 +1293,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }
     
     setAxisLabelSubmenuPos({ x, y });
+    setAxisLabelEditorKey(prev => {
+      const newKey = prev + 1;
+      console.log('[RechartsChartRenderer] Opening axis label modal - incrementing key:', prev, '->', newKey);
+      return newKey;
+    }); // Force remount with new key
     setShowAxisLabelSubmenu(true);
+    console.log('[RechartsChartRenderer] Setting showAxisLabelSubmenu to true, position:', { x, y });
   }, [customXAxisLabel, xAxisLabel, customYAxisLabel, yAxisLabel, closeAllSubmenus]);
 
   // Handler for axis toggle submenu
@@ -2848,10 +3009,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Axis Label Submenu component - completely isolated
   const AxisLabelSubmenu = () => {
-    if (!showAxisLabelSubmenu) return null;
+    if (!showAxisLabelSubmenu) {
+      console.log('[RechartsChartRenderer] AxisLabelSubmenu: showAxisLabelSubmenu is false, returning null');
+      return null;
+    }
+
+    console.log('[RechartsChartRenderer] AxisLabelSubmenu: Rendering with key:', axisLabelEditorKey, 'showAxisLabelSubmenu:', showAxisLabelSubmenu, 'customXAxisLabel:', customXAxisLabel, 'customYAxisLabel:', customYAxisLabel, 'customTitle:', customTitle);
 
     return createPortal(
       <AxisLabelEditor
+        key={`axis-label-editor-${axisLabelEditorKey}`} // Force remount when modal opens
         xAxisLabel={xAxisLabel}
         yAxisLabel={yAxisLabel}
         customXAxisLabel={customXAxisLabel}
@@ -2864,9 +3031,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
           setCustomYAxisLabel(y);
           setCustomTitle(t);
           setShowAxisLabelSubmenu(false);
-          // Call onTitleChange callback if title changed
+          // Call parent callbacks if provided
           if (onTitleChange && t !== customTitle) {
             onTitleChange(t);
+          }
+          if (onXAxisLabelChange && x !== customXAxisLabel) {
+            onXAxisLabelChange(x);
+          }
+          if (onYAxisLabelChange && y !== customYAxisLabel) {
+            onYAxisLabelChange(y);
           }
         }}
         onCancel={() => {
@@ -5399,8 +5572,23 @@ const RechartsChartRenderer: React.FC<Props> = ({
               bottom: 0,
               background: 'transparent',
               zIndex: 9998,
+              pointerEvents: 'auto',
             }}
-            onMouseDown={handleOverlayClick}
+            onMouseDown={(e) => {
+              // Check if click is inside any submenu - if so, don't close
+              const target = e.target as HTMLElement;
+              if (target.closest('.axis-label-submenu') || 
+                  target.closest('.axis-toggle-submenu') ||
+                  target.closest('.color-submenu') ||
+                  target.closest('.sort-submenu') ||
+                  target.closest('.chart-type-submenu') ||
+                  target.closest('.series-settings-submenu') ||
+                  target.closest('[role="menu"]')) {
+                // Click is inside a submenu, let it handle the event
+                return;
+              }
+              handleOverlayClick(e);
+            }}
           />
         )}
         <ContextMenu />
