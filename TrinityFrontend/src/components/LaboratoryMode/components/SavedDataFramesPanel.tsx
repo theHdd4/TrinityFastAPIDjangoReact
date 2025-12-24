@@ -1836,6 +1836,23 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
+    let abortController: AbortController | null = null;
+    let heavyOperationActive = false;
+    
+    // Listen for heavy operation events (unpivot, compute, etc.)
+    const handleHeavyOperationStart = () => {
+      heavyOperationActive = true;
+      // Cancel any ongoing requests
+      if (abortController) {
+        abortController.abort();
+      }
+      console.log('[SavedDataFramesPanel] Heavy operation detected, pausing polling');
+    };
+    
+    const handleHeavyOperationEnd = () => {
+      heavyOperationActive = false;
+      console.log('[SavedDataFramesPanel] Heavy operation ended, resuming polling');
+    };
     
     // Listen for dataframe-saved events to trigger refresh
     const handleDataframeSaved = (event?: Event) => {
@@ -1892,6 +1909,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     window.addEventListener('dataframe-saved', handleDataframeSaved);
     window.addEventListener('force-refresh-priming-status', handleForceRefreshPrimingStatus);
     window.addEventListener('priming-status-changed', handlePrimingStatusChanged);
+    window.addEventListener('heavy-operation-start', handleHeavyOperationStart);
+    window.addEventListener('heavy-operation-end', handleHeavyOperationEnd);
 
     const load = async () => {
       setLoading(true);
@@ -1900,6 +1919,14 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         let lastReloadToken = reloadToken; // Track reload token to force immediate refresh when changed
         while (!cancelled) {
           attempt += 1;
+          
+          // Pause polling if heavy operation is active
+          if (heavyOperationActive) {
+            console.log('[SavedDataFramesPanel] Heavy operation active, waiting...');
+            await sleep(5000); // Wait 5 seconds before checking again
+            continue;
+          }
+          
           const { env: storedEnv, target } = readExpectedContext();
           
           // If reloadToken changed, reset attempt counter to force immediate refresh
@@ -1915,6 +1942,10 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               await sleep(delay);
             }
           };
+          
+          // Create new AbortController for this polling cycle
+          abortController = new AbortController();
+          const signal = abortController.signal;
 
           if (!target.project) {
             await waitForNextPoll();
@@ -1947,12 +1978,18 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 app_name: target.app || env.APP_NAME || '',
                 project_name: target.project || env.PROJECT_NAME || '',
               };
+              // Add timeout for session init fetch using main abortController
+              const sessionTimeoutId = setTimeout(() => abortController.abort(), 10000); // 10s timeout
+              
               const redisRes = await fetch(`${SESSION_API}/init`, {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
+                signal: signal // Use existing abortController signal
               });
+              clearTimeout(sessionTimeoutId);
+              
               if (redisRes.ok) {
                 const redisData = await redisRes.json();
                 const redisEnv = redisData.state?.envvars;
@@ -1968,17 +2005,29 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   }
                 }
               }
-            } catch (err) {
-              console.warn('Redis env fetch failed', err);
+            } catch (err: any) {
+              if (err?.name === 'AbortError') {
+                console.warn('Redis env fetch aborted or timed out');
+              } else {
+                console.warn('Redis env fetch failed', err);
+              }
             }
           }
 
           let resolvedPrefix = '';
           try {
+            // Add timeout for get_object_prefix fetch using main abortController
+            const prefTimeoutId = setTimeout(() => abortController.abort(), 10000); // 10s timeout
+            
             const prefRes = await fetch(
               `${VALIDATE_API}/get_object_prefix?${query}`,
-              { credentials: 'include' }
+              { 
+                credentials: 'include',
+                signal: signal // Use existing abortController signal
+              }
             );
+            clearTimeout(prefTimeoutId);
+            
             if (prefRes.ok) {
               const prefData = await prefRes.json();
               resolvedPrefix = prefData.prefix || '';
@@ -1998,16 +2047,28 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             } else {
               console.warn('get_object_prefix failed', prefRes.status);
             }
-          } catch (err) {
-            console.warn('get_object_prefix failed', err);
+          } catch (err: any) {
+            if (err?.name === 'AbortError') {
+              console.warn('get_object_prefix request aborted or timed out');
+            } else {
+              console.warn('get_object_prefix failed', err);
+            }
           }
 
           let data: any = null;
           try {
+            // Add timeout for list_saved_dataframes fetch using main abortController
+            const listTimeoutId = setTimeout(() => abortController.abort(), 15000); // 15s timeout
+            
             const listRes = await fetch(
               `${VALIDATE_API}/list_saved_dataframes?${query}`,
-              { credentials: 'include' }
+              { 
+                credentials: 'include',
+                signal: signal // Use existing abortController signal
+              }
             );
+            clearTimeout(listTimeoutId);
+            
             if (!listRes.ok) {
               console.warn('list_saved_dataframes failed', listRes.status);
               await waitForNextPoll();
@@ -2020,8 +2081,12 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               await waitForNextPoll();
               continue;
             }
-          } catch (err) {
-            console.warn('list_saved_dataframes request failed', err);
+          } catch (err: any) {
+            if (err?.name === 'AbortError') {
+              console.warn('list_saved_dataframes request aborted or timed out');
+            } else {
+              console.warn('list_saved_dataframes request failed', err);
+            }
             await waitForNextPoll();
             continue;
           }

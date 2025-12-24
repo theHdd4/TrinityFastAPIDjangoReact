@@ -266,6 +266,12 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     const runCompute = async () => {
       setIsComputing(true);
       setComputeError(null);
+      
+      // Emit heavy-operation-start event to pause SavedDataFramesPanel polling
+      window.dispatchEvent(new CustomEvent('heavy-operation-start', {
+        detail: { operation: 'unpivot', atomId, type: 'compute' }
+      }));
+      
       updateSettings(atomId, {
         unpivotStatus: 'pending',
         unpivotError: null,
@@ -368,6 +374,13 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
               unpivotUpdatedAt: retryResult.updated_at,
               computationTime: retryResult.computation_time,
             });
+            setIsComputing(false);
+            setComputeError(null);
+            
+            // Emit heavy-operation-end event to resume SavedDataFramesPanel polling
+            window.dispatchEvent(new CustomEvent('heavy-operation-end', {
+              detail: { operation: 'unpivot', atomId, type: 'compute' }
+            }));
             return;
           }
           const text = await computeResponse.text().catch(() => '');
@@ -388,8 +401,17 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         });
         setIsComputing(false);
         setComputeError(null);
+        
+        // Emit heavy-operation-end event to resume SavedDataFramesPanel polling
+        window.dispatchEvent(new CustomEvent('heavy-operation-end', {
+          detail: { operation: 'unpivot', atomId, type: 'compute' }
+        }));
       } catch (error) {
         if ((error as any)?.name === 'AbortError') {
+          // Emit end event even on abort
+          window.dispatchEvent(new CustomEvent('heavy-operation-end', {
+            detail: { operation: 'unpivot', atomId, type: 'compute' }
+          }));
           return;
         }
         const message =
@@ -402,6 +424,11 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
           unpivotStatus: 'failed',
           unpivotError: message,
         });
+        
+        // Emit heavy-operation-end event on error
+        window.dispatchEvent(new CustomEvent('heavy-operation-end', {
+          detail: { operation: 'unpivot', atomId, type: 'compute' }
+        }));
       }
     };
 
@@ -441,6 +468,12 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     const runPreview = async () => {
       setIsComputing(true);
       setComputeError(null);
+      
+      // Emit heavy-operation-start event to pause SavedDataFramesPanel polling
+      window.dispatchEvent(new CustomEvent('heavy-operation-start', {
+        detail: { operation: 'unpivot', atomId, type: 'preview' }
+      }));
+      
       updateSettings(atomId, {
         unpivotStatus: 'pending',
         unpivotError: null,
@@ -539,6 +572,13 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
               unpivotUpdatedAt: retryResult.updated_at,
               computationTime: retryResult.computation_time,
             });
+            setIsComputing(false);
+            setComputeError(null);
+            
+            // Emit heavy-operation-end event to resume SavedDataFramesPanel polling
+            window.dispatchEvent(new CustomEvent('heavy-operation-end', {
+              detail: { operation: 'unpivot', atomId, type: 'preview' }
+            }));
             return;
           }
           const text = await computeResponse.text().catch(() => '');
@@ -559,8 +599,17 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         });
         setIsComputing(false);
         setComputeError(null);
+        
+        // Emit heavy-operation-end event to resume SavedDataFramesPanel polling
+        window.dispatchEvent(new CustomEvent('heavy-operation-end', {
+          detail: { operation: 'unpivot', atomId, type: 'preview' }
+        }));
       } catch (error) {
         if ((error as any)?.name === 'AbortError') {
+          // Emit end event even on abort
+          window.dispatchEvent(new CustomEvent('heavy-operation-end', {
+            detail: { operation: 'unpivot', atomId, type: 'preview' }
+          }));
           return;
         }
         const message =
@@ -573,6 +622,11 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
           unpivotStatus: 'failed',
           unpivotError: message,
         });
+        
+        // Emit heavy-operation-end event on error
+        window.dispatchEvent(new CustomEvent('heavy-operation-end', {
+          detail: { operation: 'unpivot', atomId, type: 'preview' }
+        }));
       }
     };
 

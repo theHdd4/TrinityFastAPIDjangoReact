@@ -438,16 +438,26 @@ export const InlineGroupByGuidedFlow: React.FC<InlineGroupByGuidedFlowProps> = (
             description: `GroupBy completed! ${allRows.length} rows processed.`,
           });
           
-          // Close guided mode after successful operation
-          updateSettings(atomId, { showGuidedMode: false });
+          // Scroll to preview table section
+          setTimeout(() => {
+            const previewElement = document.querySelector(`[data-groupby-preview="${atomId}"]`);
+            if (previewElement) {
+              previewElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
         } else {
           toast({
             title: 'Success',
             description: 'GroupBy operation completed successfully.',
           });
           
-          // Close guided mode after successful operation
-          updateSettings(atomId, { showGuidedMode: false });
+          // Scroll to preview table section
+          setTimeout(() => {
+            const previewElement = document.querySelector(`[data-groupby-preview="${atomId}"]`);
+            if (previewElement) {
+              previewElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
         }
       } else {
         toast({
