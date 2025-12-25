@@ -159,8 +159,8 @@ const MetricsInputFiles: React.FC<MetricsInputFilesProps> = ({ cardId }) => {
 
     if (checked) {
       openMetricGuidedFlow();
-      // Dispatch event to open the guided panel sidebar
-      window.dispatchEvent(new CustomEvent('open-guided-panel'));
+      // Note: Metric guided mode is separate from global guided mode
+      // We don't dispatch 'open-guided-panel' to keep it isolated
     } else {
       closeMetricGuidedFlow();
     }
