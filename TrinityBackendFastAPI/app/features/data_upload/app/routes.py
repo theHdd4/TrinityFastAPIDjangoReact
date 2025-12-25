@@ -75,6 +75,16 @@ logger = logging.getLogger(__name__)
 from app.features.data_upload_validate.app.validators.custom_validator import perform_enhanced_validation
 from app.features.data_upload_validate import service as data_upload_service
 from app.features.data_upload_validate.file_ingestion import RobustFileReader
+from app.features.data_upload.app.dtype_handler import (
+    detect_column_types,
+    apply_dtypes_to_dataframe,
+    preserve_polars_to_pandas_dtypes,
+    save_dtypes_to_mongo,
+    get_dtypes_from_mongo,
+    update_modified_dtypes,
+    get_current_dtype,
+    convert_pandas_to_polars_with_dtype_preservation,
+)
 
 # Config directory
 CUSTOM_CONFIG_DIR = data_upload_service.CUSTOM_CONFIG_DIR
@@ -579,7 +589,7 @@ async def upload_excel_multi_sheet(
 ):
     """
     Upload an Excel file and extract all sheets automatically.
-    Each sheet is stored separately in MinIO as a Parquet file.
+    Each sheet is stored separately in MinIO as an Arrow file (same as CSV files).
     Supports large files up to 2GB with chunked reading.
     
     Returns:
@@ -664,11 +674,54 @@ async def upload_excel_multi_sheet(
         )
         
         # Extract all sheets and store in MinIO
-        result = extract_all_sheets_from_excel(
-            excel_content=content,
-            upload_session_id=upload_session_id,
-            prefix=prefix
-        )
+        try:
+            result = extract_all_sheets_from_excel(
+                excel_content=content,
+                upload_session_id=upload_session_id,
+                prefix=prefix
+            )
+        except ValueError as e:
+            error_msg = str(e)
+            # Check if this is a single sheet or empty file - upload as normal xlsx
+            if "SINGLE_SHEET_OR_EMPTY:" in error_msg:
+                logger.info(
+                    "data_upload.multi_sheet.single_sheet file=%s session_id=%s - uploading as normal xlsx",
+                    file.filename,
+                    upload_session_id,
+                )
+                # Upload as normal xlsx file using process_temp_upload
+                from app.features.data_upload_validate import service as data_upload_service
+                import base64
+                
+                tmp_prefix = prefix + "tmp/"
+                upload_result = data_upload_service.process_temp_upload(
+                    file_b64=base64.b64encode(content).decode("utf-8"),
+                    filename=file.filename,
+                    tmp_prefix=tmp_prefix,
+                    sheet_name=None,
+                )
+                
+                # Free memory
+                del content
+                gc.collect()
+                
+                # Return response in similar format but indicating it's a single file upload
+                return {
+                    "status": "success",
+                    "upload_session_id": upload_session_id,
+                    "session_id": upload_session_id,
+                    "file_name": file.filename,
+                    "file_size_mb": total_size / (1024 * 1024),
+                    "sheet_count": 1,
+                    "sheets": [upload_result.get("file_key", file.filename)],
+                    "sheet_details": [],
+                    "original_file_path": upload_result.get("file_key", ""),
+                    "single_sheet_upload": True,  # Flag to indicate this was uploaded as normal file
+                    "file_key": upload_result.get("file_key", ""),
+                }
+            else:
+                # Re-raise other ValueError exceptions
+                raise
         
         # Free memory after processing
         del content
@@ -3694,26 +3747,57 @@ async def change_workbook_sheet(
         raise HTTPException(status_code=400, detail=f"Failed to read workbook: {exc}")
 
     try:
-        # Use ExcelReader to preserve all columns (single approach, no duplication)
-        from app.features.data_upload_validate.file_ingestion.readers.excel_reader import ExcelReader
-        dfs_dict, excel_metadata = ExcelReader.read(
-            content=workbook_bytes,
-            sheet_name=sheet_name_clean,
-            auto_detect_header=True,
-            return_raw=False,
-        )
+        # Use fastexcel to read Excel (same approach as CSV uses pl.read_csv)
+        reader = fastexcel.read_excel(workbook_bytes)
         
-        # Get sheet names from metadata
-        sheet_names = excel_metadata.get("sheet_names", [])
-        if sheet_name_clean not in sheet_names:
-            raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name_clean}' not found")
+        # Get sheet count by iterating through sheets until we get an error
+        sheet_count = 0
+        sheet_names = []
+        max_sheets_to_check = 100  # Safety limit
         
-        # Handle both single DataFrame and dict (multiple sheets)
-        if isinstance(dfs_dict, dict):
-            df = dfs_dict[sheet_name_clean]
-        else:
-            df = dfs_dict
-        df_pl = pl.from_pandas(df)
+        while sheet_count < max_sheets_to_check:
+            try:
+                sheet = reader.load_sheet_by_idx(sheet_count)
+                # Try to get sheet name
+                try:
+                    sheet_name = sheet.name() if hasattr(sheet, 'name') and callable(getattr(sheet, 'name', None)) else f"Sheet{sheet_count + 1}"
+                except:
+                    sheet_name = f"Sheet{sheet_count + 1}"
+                sheet_names.append(sheet_name)
+                sheet_count += 1
+            except IndexError:
+                # IndexError means we've reached the end of sheets
+                break
+            except Exception as e:
+                # For other exceptions, log and try to continue
+                logger.warning(f"Error loading sheet {sheet_count}: {e}")
+                # If it's the first sheet (index 0), this might be a real error
+                if sheet_count == 0:
+                    logger.error(f"Failed to load first sheet: {e}")
+                    raise HTTPException(status_code=400, detail=f"Failed to read Excel file: {str(e)}")
+                break
+        
+        if sheet_count == 0:
+            raise HTTPException(status_code=400, detail="Excel file contains no sheets")
+        
+        # Find the sheet index by name
+        sheet_idx = None
+        for idx in range(sheet_count):
+            if sheet_names[idx] == sheet_name_clean:
+                sheet_idx = idx
+                break
+        
+        if sheet_idx is None:
+            raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name_clean}' not found. Available sheets: {sheet_names}")
+        
+        # Load the selected sheet using fastexcel (same as CSV approach)
+        sheet = reader.load_sheet_by_idx(sheet_idx)
+        df_pl = sheet.to_polars()
+        
+        # Normalize column names (same as CSV does)
+        df_pl = data_upload_service._normalize_column_names(df_pl)
+        
+        # Convert directly to Arrow (same as CSV does)
         arrow_buf = io.BytesIO()
         df_pl.write_ipc(arrow_buf)
         arrow_bytes = arrow_buf.getvalue()
@@ -3726,7 +3810,7 @@ async def change_workbook_sheet(
         )
         flight_path = metadata.get("flight_path")
         if flight_path:
-            upload_dataframe(df, flight_path)
+            upload_dataframe(df_pl.to_pandas(), flight_path)
         metadata["selected_sheet"] = sheet_name_clean
         metadata["sheet_names"] = sheet_names
         metadata["has_multiple_sheets"] = len(sheet_names) > 1
@@ -3937,6 +4021,10 @@ async def get_file_metadata(request: Request):
     """
     Get metadata for a file including column dtypes, missing values, and sample data.
     Expects JSON body with 'file_path' key.
+    
+    This endpoint is used by both guided mode and direct mode. For consistency:
+    - Arrow files (processed files from guided mode) are read directly
+    - CSV/Excel files use RobustFileReader with auto_detect_header=True to match guided mode's behavior
     """
     try:
         body = await request.json()
@@ -3949,27 +4037,68 @@ async def get_file_metadata(request: Request):
         data = read_minio_object(file_path)
         filename = Path(file_path).name
         
-        # Parse based on file type using RobustFileReader
-        if filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
-            # Use RobustFileReader which handles column preservation automatically
+        # Parse based on file type
+        # For Arrow files (processed files from guided mode), read directly
+        # This ensures we get the exact column names and types as processed in guided mode
+        if filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+            # Log Polars dtypes before conversion
+            polars_dtypes = {col: str(dtype) for col, dtype in zip(df_pl.columns, df_pl.dtypes)}
+            logger.info(f"Arrow file Polars dtypes: {polars_dtypes}")
+            
+            # Convert to Pandas and fix dtype mapping using dtype_handler
+            df = df_pl.to_pandas()
+            df = preserve_polars_to_pandas_dtypes(df_pl, df)
+            
+            # Try to load saved dtypes from MongoDB (for user-modified dtypes)
+            saved_dtypes = get_dtypes_from_mongo(file_path)
+            if saved_dtypes:
+                modified_dtypes = saved_dtypes.get("modified_dtypes", {})
+                if modified_dtypes:
+                    # Apply user-modified dtypes if they exist
+                    logger.info(f"Applying user-modified dtypes from MongoDB: {modified_dtypes}")
+                    for col_name, dtype_str in modified_dtypes.items():
+                        if col_name in df.columns:
+                            try:
+                                if dtype_str == 'Int64':
+                                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce').astype('Int64')
+                                elif dtype_str == 'Int32':
+                                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce').astype('Int32')
+                                elif dtype_str == 'float64':
+                                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce').astype('float64')
+                                elif dtype_str == 'datetime64[ns]':
+                                    df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
+                                elif dtype_str == 'boolean':
+                                    bool_col = df[col_name].astype(str).str.lower().str.strip()
+                                    bool_map = {'true': True, 'false': False, '1': True, '0': False, 'yes': True, 'no': False}
+                                    df[col_name] = bool_col.map(bool_map).astype('boolean')
+                                # object/string types don't need conversion
+                            except Exception as e:
+                                logger.warning(f"Failed to apply modified dtype {dtype_str} to column {col_name}: {e}")
+            
+            # Log Pandas dtypes after conversion and fixes
+            pandas_dtypes = {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)}
+            logger.info(f"Arrow file Pandas dtypes after conversion and fixes: {pandas_dtypes}")
+        elif filename.lower().endswith(".csv") or filename.lower().endswith((".xls", ".xlsx")):
+            # For CSV/Excel files, use RobustFileReader with auto_detect_header=True
+            # This matches the same logic used in guided mode after header selection
+            # RobustFileReader handles column preservation and header detection consistently
             df_result, _ = RobustFileReader.read_file_to_pandas(
                 content=data,
                 filename=filename,
-                auto_detect_header=True,
-                return_raw=False,
+                auto_detect_header=True,  # Auto-detect headers like guided mode does
+                return_raw=False,  # Return processed DataFrame with headers applied
             )
             # Handle both single DataFrame and dict (multiple sheets)
             if isinstance(df_result, dict):
                 df = list(df_result.values())[0]  # Use first sheet
             else:
                 df = df_result
-        elif filename.lower().endswith(".arrow"):
-            df_pl = pl.read_ipc(io.BytesIO(data))
-            df = df_pl.to_pandas()
         else:
             raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
         
-        # Collect column metadata
+        # Collect column metadata with consistent format
+        # This format is used by both guided mode (U4) and direct mode processing panel
         columns_info = []
         for col in df.columns:
             col_data = df[col]
@@ -3977,12 +4106,37 @@ async def get_file_metadata(request: Request):
             total_rows = len(df)
             missing_percentage = (missing_count / total_rows * 100) if total_rows > 0 else 0
             
-            # Get sample values (non-null)
+            # Get sample values (non-null, converted to Python native types for JSON serialization)
             sample_values = col_data.dropna().head(5).tolist()
+            # Convert numpy/pandas types to Python native types for JSON serialization
+            sample_values = [
+                float(val) if pd.api.types.is_numeric_dtype(col_data) and pd.notna(val) else
+                str(val) if pd.notna(val) else None
+                for val in sample_values
+            ]
+            
+            # Get current dtype (modified if exists, otherwise original from DataFrame)
+            current_dtype = str(col_data.dtype)
+            
+            # Try to get saved dtypes from MongoDB for this file
+            saved_dtypes = get_dtypes_from_mongo(file_path)
+            original_dtype = None
+            modified_dtype = None
+            if saved_dtypes:
+                original_dtypes = saved_dtypes.get("original_dtypes", {})
+                modified_dtypes = saved_dtypes.get("modified_dtypes", {})
+                if str(col) in original_dtypes:
+                    original_dtype = original_dtypes[str(col)]
+                if str(col) in modified_dtypes:
+                    modified_dtype = modified_dtypes[str(col)]
+                    # Use modified dtype as current if it exists
+                    current_dtype = modified_dtype
             
             columns_info.append({
-                "name": str(col),
-                "dtype": str(col_data.dtype),
+                "name": str(col),  # Column name (already processed/edited in guided mode for Arrow files)
+                "dtype": current_dtype,  # Current dtype (modified if exists, otherwise original)
+                "original_dtype": original_dtype,  # Original detected dtype from file
+                "modified_dtype": modified_dtype,  # User-modified dtype (if exists)
                 "missing_count": missing_count,
                 "missing_percentage": round(missing_percentage, 2),
                 "sample_values": sample_values,
@@ -3996,6 +4150,62 @@ async def get_file_metadata(request: Request):
         
     except Exception as e:
         logger.error(f"Error getting file metadata: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/update-column-dtype")
+async def update_column_dtype(request: Request):
+    """
+    Update the dtype for a specific column (user-modified dtype).
+    This allows users to change dtypes from the original detected types.
+    """
+    try:
+        body = await request.json()
+        file_path = body.get("file_path")
+        column_name = body.get("column_name")
+        new_dtype = body.get("new_dtype")
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+        user_id = body.get("user_id", "")
+        
+        if not file_path or not column_name or not new_dtype:
+            raise HTTPException(status_code=400, detail="file_path, column_name, and new_dtype are required")
+        
+        # Validate dtype
+        valid_dtypes = ['Int64', 'Int32', 'float64', 'datetime64[ns]', 'boolean', 'object']
+        if new_dtype not in valid_dtypes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid dtype. Must be one of: {', '.join(valid_dtypes)}"
+            )
+        
+        # Update the modified dtype in MongoDB
+        result = update_modified_dtypes(
+            file_path=file_path,
+            column_name=column_name,
+            new_dtype=new_dtype,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            user_id=user_id,
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("error", "Failed to update dtype"))
+        
+        return {
+            "status": "success",
+            "file_path": file_path,
+            "column_name": column_name,
+            "new_dtype": new_dtype,
+            "message": f"Dtype for column '{column_name}' updated to '{new_dtype}'",
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating column dtype: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -4171,48 +4381,18 @@ def _read_csv_rows_simple(content: bytes, pad_rows: bool = True) -> List[List[st
 
 def _read_excel_rows_simple(content: bytes, sheet_name: Optional[str] = None) -> List[List[str]]:
     """
-    Read Excel file row by row using pandas with header=None to get ALL rows as data.
-    This ensures we get actual column headers from the file, not pandas-generated names.
-    Returns list of rows, each row is a list of cell values.
+    Read Excel file row by row using openpyxl directly to get ALL rows as data.
+    This ensures we get actual cell values from the file without any pandas DataFrame
+    column naming interference. Returns list of rows, each row is a list of cell values.
     
-    IMPORTANT: We preserve original dtypes during reading, then convert to strings only for
-    the row-by-row representation. This allows proper dtype detection later.
+    CRITICAL: Using openpyxl directly avoids pandas column index issues (0, 1, 2, 3...)
+    that can appear as an extra row. This reads the raw Excel file cell-by-cell.
     """
     excel_file = io.BytesIO(content)
     
-    # Use pandas with header=None to read ALL rows as data (including headers)
-    # This ensures we get the actual column names from the Excel file, not "col_0", "col_1", etc.
-    # CRITICAL: Don't use dtype=str here - let pandas infer types so we can preserve numeric/datetime types
     try:
-        df = pd.read_excel(
-            excel_file,
-            sheet_name=sheet_name,
-            header=None,  # Read all rows as data, don't treat first row as column names
-            engine='openpyxl',
-            # REMOVED dtype=str - let pandas infer types naturally
-            # This preserves numeric types (int64, float64) and datetime types
-            na_filter=True,  # Convert empty cells to NaN (pandas default)
-        )
-        
-        # Convert DataFrame to list of lists
-        # Convert values to strings for row representation, but preserve type information
-        rows = []
-        for _, row in df.iterrows():
-            row_values = []
-            for val in row:
-                if pd.isna(val):
-                    row_values.append('')
-                else:
-                    # Convert to string but preserve the original value's type information
-                    # This allows downstream code to detect numeric/datetime types
-                    row_values.append(str(val))
-            rows.append(row_values)
-        
-        return rows
-    except Exception as e:
-        logger.error(f"Error reading Excel file with pandas: {e}")
-        # Fallback to openpyxl if pandas fails
-        excel_file.seek(0)  # Reset file pointer
+        # Use openpyxl directly - reads raw Excel cells without any pandas DataFrame overhead
+        # This completely avoids any column naming issues that pandas might introduce
         workbook = openpyxl.load_workbook(excel_file, data_only=True, read_only=True)
         
         if sheet_name:
@@ -4225,12 +4405,32 @@ def _read_excel_rows_simple(content: bytes, sheet_name: Optional[str] = None) ->
             sheet = workbook.active
         
         rows = []
+        # Read all rows directly from Excel file using openpyxl
+        # iter_rows(values_only=True) returns ONLY actual cell values - no column names or indices
+        # This reads raw Excel cells exactly as they appear in the file
         for row in sheet.iter_rows(values_only=True):
+            # Convert each cell value to string, handling None as empty string
+            # IMPORTANT: We're reading actual cell values, NOT column names or indices
             row_values = [str(cell) if cell is not None else '' for cell in row]
             rows.append(row_values)
         
         workbook.close()
+        
+        logger.debug(f"Read {len(rows)} rows from Excel file using openpyxl (first row has {len(rows[0]) if rows else 0} cells)")
+        
+        # CRITICAL: Ensure we're not accidentally including any column names or indices
+        # openpyxl's iter_rows(values_only=True) only returns actual cell values, never column names
+        # This is the correct way to read Excel files without any pandas DataFrame column naming issues
         return rows
+        
+    except Exception as e:
+        logger.error(f"Error reading Excel file with openpyxl: {e}")
+        # Don't use pandas fallback as it can introduce column naming issues (0, 1, 2, 3...)
+        # Instead, raise the error so user knows there's an issue with the file
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Failed to read Excel file with openpyxl: {str(e)}. Please ensure the file is a valid Excel file."
+        )
 
 
 def _separate_rows_simple(all_rows: List[List[str]]) -> tuple[List[List[str]], List[List[str]], int]:
@@ -4478,13 +4678,10 @@ async def get_file_preview(
             # Extract column names as first row
             column_names = df.columns.tolist()
             logger.info(f"Arrow file column names (first 10): {column_names[:10]}")
-            # Reset columns to numeric indices
-            df.columns = range(len(df.columns))
-            # Prepend column names as first row
-            first_row_df = pd.DataFrame([column_names], columns=df.columns)
-            df = pd.concat([first_row_df, df], ignore_index=True)
-            # Convert DataFrame to list of lists (preserve original lengths)
-            all_rows = [list(row) for row in df.values]
+            # Convert DataFrame values to list of lists (preserve original data)
+            data_rows = [list(row) for row in df.values]
+            # Prepend column names as first row (don't reset to numeric indices to avoid showing 0,1,2,3...)
+            all_rows = [column_names] + data_rows
         elif filename.lower().endswith(".csv"):
             # Use Python's csv module - reads ALL rows including headers as data
             # This ensures we get actual column headers from CSV, not "col_0", "col_1"
@@ -4614,6 +4811,23 @@ async def get_file_preview(
                    f"data_rows_start={data_start_idx}, "
                    f"has_description_rows={len(description_rows) > 0}")
         
+        # Enhanced logging for debugging numeric headers issue
+        if data_rows_structured:
+            first_row = data_rows_structured[0]
+            logger.info(f"First data row structure: row_index={first_row.get('row_index')}, "
+                       f"cells_count={len(first_row.get('cells', []))}, "
+                       f"first_5_cells={first_row.get('cells', [])[:5]}")
+            # Check if first row contains numeric headers
+            first_row_cells = first_row.get('cells', [])
+            if first_row_cells:
+                numeric_check = all(
+                    str(cell).strip().isdigit() 
+                    for cell in first_row_cells[:10] 
+                    if cell and str(cell).strip()
+                )
+                if numeric_check and len(first_row_cells) > 5:
+                    logger.warning(f"⚠️ First data row appears to contain numeric headers: {first_row_cells[:10]}")
+        
         return response_data
         
     except HTTPException:
@@ -4676,10 +4890,15 @@ async def get_row_issues(
 
         # Read all rows (un-padded) to keep true column counts
         if filename.lower().endswith(".arrow"):
+            # Handle Arrow files - extract column names as first row
             df_pl = pl.read_ipc(io.BytesIO(data))
             df = df_pl.to_pandas()
-            df.columns = range(len(df.columns))
-            all_rows = [list(row) for row in df.values]
+            # Extract column names as first row
+            column_names = df.columns.tolist()
+            # Convert DataFrame values to list of lists (preserve original data)
+            data_rows = [list(row) for row in df.values]
+            # Prepend column names as first row (don't reset to numeric indices to avoid showing 0,1,2,3...)
+            all_rows = [column_names] + data_rows
         elif filename.lower().endswith(".csv"):
             all_rows = _read_csv_rows_simple(data, pad_rows=False)
         elif filename.lower().endswith((".xls", ".xlsx")):
@@ -4775,13 +4994,10 @@ async def apply_header_selection(
             df = df_pl.to_pandas()
             # Extract column names as first row
             column_names = df.columns.tolist()
-            # Reset columns to numeric indices
-            df.columns = range(len(df.columns))
-            # Prepend column names as first row
-            first_row_df = pd.DataFrame([column_names], columns=df.columns)
-            df = pd.concat([first_row_df, df], ignore_index=True)
-            # Convert DataFrame to list of lists (preserve original lengths)
-            all_rows = [list(row) for row in df.values]
+            # Convert DataFrame values to list of lists (preserve original data)
+            data_rows = [list(row) for row in df.values]
+            # Prepend column names as first row (don't reset to numeric indices to avoid showing 0,1,2,3...)
+            all_rows = [column_names] + data_rows
         elif filename.lower().endswith(".csv"):
             # Use Python's csv module - DON'T pad rows so we can detect column count differences
             all_rows = _read_csv_rows_simple(data, pad_rows=False)
@@ -4876,52 +5092,20 @@ async def apply_header_selection(
                 headers.append(val_str)
         
         # Now create DataFrame from data rows (skip header rows)
-        # CRITICAL: Let pandas infer types naturally instead of forcing all to string
-        # This preserves numeric and datetime types from the original file
+        # CRITICAL: Create DataFrame from string rows and infer types properly to preserve dtypes
         data_rows_only = padded_data_rows[header_row + header_row_count:]
         df_data = pd.DataFrame(data_rows_only)
         
-        # Try to infer types for each column (preserve numeric/datetime types)
-        # This is important because _read_excel_rows_simple and _read_csv_rows_simple
-        # return string values, but we want pandas to detect the actual types
-        for col_idx in range(len(df_data.columns)):
-            col_data = df_data.iloc[:, col_idx]
-            
-            # Skip if column is all empty
-            if col_data.astype(str).str.strip().eq('').all():
-                continue
-            
-            # Try to convert to numeric first (handles int and float)
-            try:
-                numeric_col = pd.to_numeric(col_data, errors='coerce')
-                # If most values converted successfully, use numeric type
-                non_null_count = numeric_col.notna().sum()
-                total_count = len(col_data)
-                if total_count > 0 and non_null_count >= total_count * 0.8:  # At least 80% numeric
-                    df_data.iloc[:, col_idx] = numeric_col
-                    logger.debug(f"Column {col_idx}: inferred numeric type (converted {non_null_count}/{total_count} values)")
-                    continue
-            except Exception as e:
-                logger.debug(f"Column {col_idx}: numeric conversion failed: {e}")
-                pass
-            
-            # Try to convert to datetime
-            try:
-                datetime_col = pd.to_datetime(col_data, errors='coerce')
-                # If most values converted successfully, use datetime type
-                non_null_count = datetime_col.notna().sum()
-                total_count = len(col_data)
-                if total_count > 0 and non_null_count >= total_count * 0.8:  # At least 80% datetime
-                    df_data.iloc[:, col_idx] = datetime_col
-                    logger.debug(f"Column {col_idx}: inferred datetime type (converted {non_null_count}/{total_count} values)")
-                    continue
-            except Exception as e:
-                logger.debug(f"Column {col_idx}: datetime conversion failed: {e}")
-                pass
-            
-            # Otherwise keep as object/string (default)
-            # This preserves text columns
+        # Use dtype_handler to detect and apply types
+        logger.info(f"Starting type inference for {len(df_data.columns)} columns with {len(df_data)} rows")
+        detected_dtypes = detect_column_types(df_data)
+        df_data = apply_dtypes_to_dataframe(df_data, detected_dtypes)
         
+        # Log final dtypes for verification
+        dtype_summary = {col: str(df_data[col].dtype) for col in df_data.columns}
+        logger.info(f"Type inference complete. Final dtypes: {dtype_summary}")
+        
+        # df_data now has proper dtypes (int, float, datetime, boolean, or object/string)
         # df_data already contains only data rows (header rows were excluded above)
         df_processed = df_data.copy()
         
@@ -4968,30 +5152,8 @@ async def apply_header_selection(
         df_processed = DataCleaner.remove_empty_columns(df_processed)
         df_processed = df_processed.reset_index(drop=True)
         
-        # CRITICAL FIX: Replace empty strings with NaN before converting to Polars
-        # Polars will fail if it tries to convert empty strings to numeric types
-        # Replace empty strings and whitespace-only strings with NaN for all object columns
-        for col in df_processed.columns:
-            if df_processed[col].dtype == 'object':
-                # Replace empty strings, whitespace-only strings, and null-like strings with NaN
-                df_processed[col] = df_processed[col].replace(['', ' ', '  ', 'None', 'null', 'NULL', 'nan', 'NaN', 'N/A', 'n/a'], pd.NA)
-        
-        # Convert to Polars and save as Arrow
-        # Use nan_to_null=True to convert pandas NaN to Polars null
-        # This prevents Polars from trying to convert empty strings to numeric types
-        try:
-            df_pl = pl.from_pandas(df_processed, nan_to_null=True)
-        except Exception as e:
-            # If conversion fails due to type inference issues, convert all to string first
-            logger.warning(f"Direct Polars conversion failed: {e}. Converting all columns to string first, then inferring types.")
-            # Convert all columns to string first (this prevents type inference errors)
-            df_processed_str = df_processed.astype(str)
-            # Replace string representations of NaN/None/empty with None
-            df_processed_str = df_processed_str.replace(['nan', 'None', 'null', 'NULL', 'NaN', '<NA>', 'NaT', ''], None)
-            # Convert to Polars with all columns as string
-            df_pl = pl.from_pandas(df_processed_str, nan_to_null=True)
-            # Now let Polars infer proper types - it will handle None/null values gracefully
-            # Polars can infer types from string data when null values are properly set
+        # Convert to Polars using dtype_handler to preserve dtypes
+        df_pl = convert_pandas_to_polars_with_dtype_preservation(df_processed)
         
         # Save to MinIO
         arrow_buf = io.BytesIO()
@@ -5010,6 +5172,17 @@ async def apply_header_selection(
         if result.get("status") != "success":
             raise HTTPException(status_code=500, detail=result.get("error_message", "Failed to save processed file"))
         
+        # Save original dtypes to MongoDB
+        original_dtypes = {col: str(dtype) for col, dtype in zip(df_processed.columns, df_processed.dtypes)}
+        save_result = save_dtypes_to_mongo(
+            file_path=result["object_name"],
+            original_dtypes=original_dtypes,
+            client_name=client_id,
+            app_name=app_id,
+            project_name=project_id,
+        )
+        logger.info(f"Saved original dtypes to MongoDB: {save_result}")
+        
         return {
             "status": "success",
             "file_path": result["object_name"],
@@ -5019,6 +5192,7 @@ async def apply_header_selection(
             "header_row_applied": header_row,
             "header_row_count": header_row_count,
             "description_rows_count": len(description_rows),
+            "original_dtypes": original_dtypes,
         }
         
     except HTTPException:

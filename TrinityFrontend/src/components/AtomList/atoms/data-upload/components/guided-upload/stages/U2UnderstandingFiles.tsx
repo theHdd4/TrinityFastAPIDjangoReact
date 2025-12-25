@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { saveFileToSavedDataFrames } from '../utils/saveFileHelper';
 import { toast } from '@/hooks/use-toast';
@@ -167,6 +167,19 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
 
         const data: FilePreviewResponse = await res.json();
         console.log('File preview response:', data);
+        
+        // Enhanced logging for debugging numeric headers issue
+        console.log('=== FILE PREVIEW API RESPONSE STRUCTURE ===');
+        console.log('Total data rows:', data.data_rows?.length || 0);
+        console.log('Column count:', data.column_count);
+        console.log('First data row structure:', data.data_rows?.[0]);
+        if (data.data_rows && data.data_rows.length > 0) {
+          const firstRow = data.data_rows[0];
+          console.log('First row cells count:', firstRow.cells?.length || 0);
+          console.log('First row first 5 cells:', firstRow.cells?.slice(0, 5));
+          console.log('First row all cells:', firstRow.cells);
+        }
+        console.log('=== END API RESPONSE STRUCTURE ===');
         
         setPreviewData(data);
         

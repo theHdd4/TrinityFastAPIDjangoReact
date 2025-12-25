@@ -138,6 +138,50 @@ def read_minio_object(object_name: str) -> bytes:
             pass
 
 
+def _safe_pandas_to_polars(df_pandas: pd.DataFrame) -> pl.DataFrame:
+    """
+    Safely convert pandas DataFrame to Polars DataFrame, handling mixed types.
+    
+    The issue: pandas object columns can contain both strings and NaN (float) values,
+    which causes Polars conversion to fail when trying to convert to string type.
+    
+    Solution: Convert all object columns to string, replacing NaN with None before conversion.
+    """
+    import numpy as np
+    
+    # Create a copy to avoid modifying the original
+    df_clean = df_pandas.copy()
+    
+    # Convert all object columns to string, handling NaN properly
+    for col in df_clean.columns:
+        if df_clean[col].dtype == 'object':
+            # Object columns may contain mixed types (strings + NaN floats)
+            # Convert to string, handling NaN values properly
+            # Use fillna('') first to convert NaN to empty string, then convert to string type
+            # This ensures the column dtype becomes string before Polars conversion
+            df_clean[col] = df_clean[col].fillna('').astype(str)
+            # Replace empty strings (from NaN) back to None for Polars
+            df_clean[col] = df_clean[col].replace('', None)
+        elif pd.api.types.is_float_dtype(df_clean[col]):
+            # For float columns, keep NaN as None (Polars handles None better)
+            df_clean[col] = df_clean[col].where(pd.notna(df_clean[col]), None)
+    
+    # Convert to Polars with nan_to_null to handle remaining NaN values
+    try:
+        df_pl = pl.from_pandas(df_clean, nan_to_null=True)
+    except Exception as e:
+        # If conversion still fails, try a more aggressive approach: convert everything to string
+        logger.warning(f"Initial pandas to polars conversion failed: {e}, trying string conversion fallback")
+        df_clean = df_pandas.copy()
+        for col in df_clean.columns:
+            # Convert all values to string, handling NaN properly
+            df_clean[col] = df_clean[col].fillna('').astype(str)
+            df_clean[col] = df_clean[col].replace('', None)
+        df_pl = pl.from_pandas(df_clean, nan_to_null=True)
+    
+    return df_pl
+
+
 def _normalize_column_names(df: pl.DataFrame) -> pl.DataFrame:
     """Normalize column names: replace blank/empty names with 'Unnamed: 0', 'Unnamed: 1', etc. (like Excel)."""
     columns = df.columns
@@ -191,6 +235,9 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
         # Ensure has_header is set (default True, but be explicit)
         has_header = kwargs_polars.get("has_header", True)
         
+        # Variable to store headers for renaming after reading (to preserve types)
+        headers_to_rename = None
+        
         # CRITICAL FIX: Read header row first to preserve original column names
         # If we need to use a schema, we must extract headers first
         original_headers = None
@@ -213,22 +260,35 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
                 logger.warning(f"_smart_csv_parse: Failed to extract headers: {e}, using generic names")
                 original_headers = None
         
-        # If we found max columns, create schema to ensure all columns are read
+        # If we found max columns, ensure all columns are read
+        # CRITICAL: Don't force schema to Utf8 - let Polars infer types naturally
+        # This preserves data types like Excel files do (similar to how fastexcel preserves types)
         if max_cols > 0:
-            # Use original headers if available, otherwise use generic names
+            # Ensure we're inferring schema (types) - this is the key to preserving types
+            # Use a high infer_schema_length to sample enough rows for accurate type inference
+            kwargs_polars["infer_schema_length"] = max(kwargs_polars.get("infer_schema_length", 10_000), 10_000)
+            kwargs_polars["try_parse_dates"] = True  # Try to parse dates automatically
+            
+            # Use original headers if available
             if original_headers:
-                schema = {header: pl.Utf8 for header in original_headers}
-                # When using schema, set has_header=False since we already extracted headers
+                # When we've extracted headers, set has_header=False and skip the header row
                 # CRITICAL: Skip the first row (header row) when reading since we already extracted it
                 kwargs_polars["has_header"] = False
                 kwargs_polars["skip_rows"] = 1  # Skip the header row we already extracted
-            else:
-                schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
-            kwargs_polars["schema"] = schema
-            logger.debug(f"_smart_csv_parse: Using schema with {max_cols} columns, has_header={kwargs_polars.get('has_header', False)}, skip_rows={kwargs_polars.get('skip_rows', 0)}")
+                # Pad or truncate headers to match max_cols
+                headers_to_rename = original_headers[:max_cols] if len(original_headers) >= max_cols else original_headers + [f"col_{i}" for i in range(len(original_headers), max_cols)]
+            
+            logger.debug(f"_smart_csv_parse: Preserving types with infer_schema_length={kwargs_polars.get('infer_schema_length')}, max_cols={max_cols}, has_header={kwargs_polars.get('has_header', False)}, skip_rows={kwargs_polars.get('skip_rows', 0)}")
         
         try:
             df = pl.read_csv(io.BytesIO(content), **kwargs_polars)
+            
+            # Rename columns if we extracted headers earlier (to preserve types, we rename after reading)
+            if headers_to_rename and len(df.columns) == len(headers_to_rename):
+                df = df.rename(dict(zip(df.columns, headers_to_rename)))
+            elif headers_to_rename:
+                logger.warning(f"_smart_csv_parse: Column count mismatch: df has {len(df.columns)}, headers has {len(headers_to_rename)}")
+            
             df = _normalize_column_names(df)
             
             # Verify we got all columns
@@ -239,6 +299,7 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
                     df = df.with_columns(pl.lit(None).alias(f"col_{i}"))
             
             metadata["parsing_method"] = "column_preserving"
+            metadata["type_preservation"] = "enabled"  # Flag to indicate types are preserved
             return df, warnings, metadata
         except Exception as polars_error:
             logger.warning(f"_smart_csv_parse: Polars read failed: {polars_error}, trying pandas fallback")
@@ -251,7 +312,8 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
                     auto_detect_header=kwargs_polars.get("has_header", True),
                     return_raw=False,
                 )
-                df = pl.from_pandas(df_pandas)
+                # Use safe conversion to handle mixed types
+                df = _safe_pandas_to_polars(df_pandas)
                 df = _normalize_column_names(df)
                 metadata.update(csv_metadata)
                 metadata["parsing_method"] = "pandas_fallback"
@@ -382,7 +444,8 @@ def process_temp_upload(
                     sheet_names = excel_metadata.get("sheet_names", ["Sheet1"])
                     selected_sheet = sheet_names[0]
                 
-                df_pl = pl.from_pandas(df_pandas)
+                # Use safe conversion to handle mixed types (strings + NaN floats)
+                df_pl = _safe_pandas_to_polars(df_pandas)
                 df_pl = _normalize_column_names(df_pl)
                 sheet_details = {
                     "sheet_names": sheet_names,
@@ -523,7 +586,8 @@ def run_validation(
                             df = list(df_result.values())[0]  # Use first sheet
                         else:
                             df = df_result
-                        df_pl = pl.from_pandas(df)
+                        # Use safe conversion to handle mixed types
+                        df_pl = _safe_pandas_to_polars(df)
                         df_pl = _normalize_column_names(df_pl)
                         df = df_pl.to_pandas()
                     except Exception as fallback_error:
@@ -571,7 +635,8 @@ def run_validation(
                             df = list(df_result.values())[0]  # Use first sheet
                         else:
                             df = df_result
-                        df_pl = pl.from_pandas(df)
+                        # Use safe conversion to handle mixed types
+                        df_pl = _safe_pandas_to_polars(df)
                         df_pl = _normalize_column_names(df_pl)
                         df = df_pl.to_pandas()
                     except Exception as fallback_error:

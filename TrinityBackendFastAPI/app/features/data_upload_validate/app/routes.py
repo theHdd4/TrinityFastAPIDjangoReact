@@ -613,7 +613,7 @@ async def upload_excel_multi_sheet(
 ):
     """
     Upload an Excel file and extract all sheets automatically.
-    Each sheet is stored separately in MinIO as a Parquet file.
+    Each sheet is stored separately in MinIO as an Arrow file (same as CSV files).
     Supports large files up to 2GB with chunked reading.
     
     Returns:
@@ -628,6 +628,13 @@ async def upload_excel_multi_sheet(
     import gc
     
     start_time = perf_counter()
+    
+    # Validate file and filename
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="File must have a filename"
+        )
     
     # Validate file type
     if not file.filename.lower().endswith(('.xlsx', '.xls')):
@@ -698,11 +705,86 @@ async def upload_excel_multi_sheet(
         )
         
         # Extract all sheets and store in MinIO
-        result = extract_all_sheets_from_excel(
-            excel_content=content,
-            upload_session_id=upload_session_id,
-            prefix=prefix
-        )
+        try:
+            result = extract_all_sheets_from_excel(
+                excel_content=content,
+                upload_session_id=upload_session_id,
+                prefix=prefix
+            )
+        except ValueError as e:
+            error_msg = str(e)
+            logger.warning(
+                "data_upload.multi_sheet.value_error file=%s session_id=%s error=%s",
+                file.filename,
+                upload_session_id,
+                error_msg,
+            )
+            # Check if this is a single sheet or empty file - upload as normal xlsx
+            if "SINGLE_SHEET_OR_EMPTY:" in error_msg:
+                logger.info(
+                    "data_upload.multi_sheet.single_sheet file=%s session_id=%s - uploading as normal xlsx",
+                    file.filename,
+                    upload_session_id,
+                )
+                # Upload as normal xlsx file using process_temp_upload
+                from app.features.data_upload_validate import service as data_upload_service
+                import base64
+                
+                tmp_prefix = prefix + "tmp/"
+                try:
+                    upload_result = data_upload_service.process_temp_upload(
+                        file_b64=base64.b64encode(content).decode("utf-8"),
+                        filename=file.filename,
+                        tmp_prefix=tmp_prefix,
+                        sheet_name=None,
+                    )
+                except Exception as upload_error:
+                    logger.error(
+                        "data_upload.multi_sheet.fallback_upload_failed file=%s session_id=%s error=%s",
+                        file.filename,
+                        upload_session_id,
+                        str(upload_error),
+                        exc_info=True,
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to upload single-sheet Excel file: {str(upload_error)}"
+                    )
+                
+                # Free memory
+                del content
+                gc.collect()
+                
+                # Return response in similar format but indicating it's a single file upload
+                # For single-sheet uploads, the file is already saved, so return the arrow_path
+                arrow_path = upload_result.get("arrow_path") or upload_result.get("file_path", "")
+                file_key = Path(file.filename).stem + ".arrow"  # Extract file key from arrow_path if needed
+                
+                return {
+                    "status": "success",
+                    "upload_session_id": upload_session_id,
+                    "session_id": upload_session_id,
+                    "file_name": file.filename,
+                    "file_size_mb": total_size / (1024 * 1024),
+                    "sheet_count": 1,
+                    "sheets": [Path(file.filename).stem],  # Use stem as sheet name for display
+                    "sheet_details": [],
+                    "original_file_path": upload_result.get("file_path", ""),
+                    "arrow_path": arrow_path,  # The actual Arrow file path that was saved
+                    "single_sheet_upload": True,  # Flag to indicate this was uploaded as normal file
+                    "file_key": file_key,
+                }
+            else:
+                # Log the error before re-raising
+                logger.error(
+                    "data_upload.multi_sheet.extract_error file=%s session_id=%s error=%s",
+                    file.filename,
+                    upload_session_id,
+                    error_msg,
+                    exc_info=True,
+                )
+                # Re-raise other ValueError exceptions
+                raise
         
         # Free memory after processing
         del content
@@ -739,12 +821,15 @@ async def upload_excel_multi_sheet(
     except HTTPException:
         raise
     except ValueError as e:
+        error_msg = str(e)
         logger.error(
-            "data_upload.multi_sheet.failed session_id=%s error=%s",
+            "data_upload.multi_sheet.failed session_id=%s file=%s error=%s",
             upload_session_id,
-            str(e),
+            file.filename if file.filename else "unknown",
+            error_msg,
+            exc_info=True,
         )
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=error_msg)
     except MemoryError as e:
         logger.error(
             "data_upload.multi_sheet.memory_error session_id=%s error=%s",
@@ -4586,13 +4671,10 @@ async def get_file_preview(
             # Extract column names as first row
             column_names = df.columns.tolist()
             logger.info(f"Arrow file column names (first 10): {column_names[:10]}")
-            # Reset columns to numeric indices
-            df.columns = range(len(df.columns))
-            # Prepend column names as first row
-            first_row_df = pd.DataFrame([column_names], columns=df.columns)
-            df = pd.concat([first_row_df, df], ignore_index=True)
-            # Convert DataFrame to list of lists (preserve original lengths)
-            all_rows = [list(row) for row in df.values]
+            # Convert DataFrame values to list of lists (preserve original data)
+            data_rows = [list(row) for row in df.values]
+            # Prepend column names as first row (don't reset to numeric indices to avoid showing 0,1,2,3...)
+            all_rows = [column_names] + data_rows
         elif filename.lower().endswith(".csv"):
             # Use Python's csv module - reads ALL rows including headers as data
             # This ensures we get actual column headers from CSV, not "col_0", "col_1"
@@ -4777,10 +4859,15 @@ async def get_row_issues(
 
         # Read all rows (un-padded) to keep true column counts
         if filename.lower().endswith(".arrow"):
+            # Handle Arrow files - extract column names as first row
             df_pl = pl.read_ipc(io.BytesIO(data))
             df = df_pl.to_pandas()
-            df.columns = range(len(df.columns))
-            all_rows = [list(row) for row in df.values]
+            # Extract column names as first row
+            column_names = df.columns.tolist()
+            # Convert DataFrame values to list of lists (preserve original data)
+            data_rows = [list(row) for row in df.values]
+            # Prepend column names as first row (don't reset to numeric indices to avoid showing 0,1,2,3...)
+            all_rows = [column_names] + data_rows
         elif filename.lower().endswith(".csv"):
             all_rows = _read_csv_rows_simple(data, pad_rows=False)
         elif filename.lower().endswith((".xls", ".xlsx")):
@@ -4876,13 +4963,10 @@ async def apply_header_selection(
             df = df_pl.to_pandas()
             # Extract column names as first row
             column_names = df.columns.tolist()
-            # Reset columns to numeric indices
-            df.columns = range(len(df.columns))
-            # Prepend column names as first row
-            first_row_df = pd.DataFrame([column_names], columns=df.columns)
-            df = pd.concat([first_row_df, df], ignore_index=True)
-            # Convert DataFrame to list of lists (preserve original lengths)
-            all_rows = [list(row) for row in df.values]
+            # Convert DataFrame values to list of lists (preserve original data)
+            data_rows = [list(row) for row in df.values]
+            # Prepend column names as first row (don't reset to numeric indices to avoid showing 0,1,2,3...)
+            all_rows = [column_names] + data_rows
         elif filename.lower().endswith(".csv"):
             # Use Python's csv module - DON'T pad rows so we can detect column count differences
             all_rows = _read_csv_rows_simple(data, pad_rows=False)
