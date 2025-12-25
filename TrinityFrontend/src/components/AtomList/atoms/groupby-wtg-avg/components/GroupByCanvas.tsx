@@ -909,7 +909,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       ) : resultsError ? (
         <div className="p-4 text-red-600">{resultsError}</div>
       ) : results && results.length > 0 ? (
-        <div className="mt-0">
+        <div className="mt-0" data-groupby-preview={atomId}>
           <Table
             headers={resultsHeaders.map((header, index) => (
               <ContextMenu key={header}>

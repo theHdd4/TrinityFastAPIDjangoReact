@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, Settings } from 'lucide-react';
+import { Upload, Settings, Plus, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -33,6 +33,8 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   const previousDataSourceRef = useRef<string | undefined>(settings.dataSource);
   // State for perform button loading
   const [performLoading, setPerformLoading] = useState(false);
+  // State for expanded measure card indices (Set to allow multiple cards open)
+  const [expandedMeasureIndices, setExpandedMeasureIndices] = useState<Set<number>>(new Set());
 
   // ------------------------------
   // Initial lists
@@ -306,8 +308,20 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     updateSettings(atomId, { selectedAggregationMethods: newSelected });
   }, [selectedAggregationMethods, atomId, updateSettings]);
 
-  // Get selected measures configuration from settings
-  const selectedMeasures = settings.selectedMeasures || [];
+  // Get selected measures configuration from settings and normalize to objects
+  const rawSelectedMeasures = settings.selectedMeasures || [];
+  const selectedMeasures: Array<{ field: string; aggregator: string; weight_by?: string; rename_to?: string }> = 
+    rawSelectedMeasures.map((m: any) => {
+      if (typeof m === 'string') {
+        return { field: m, aggregator: 'Sum', weight_by: '', rename_to: '' };
+      }
+      return {
+        field: m.field || '',
+        aggregator: m.aggregator || '',
+        weight_by: m.weight_by || '',
+        rename_to: m.rename_to || ''
+      };
+    }); // Keep all measures including empty ones for UI
 
   // Helper to normalize column names
   const normalizeColumnName = (value: string | undefined | null) => {
@@ -315,41 +329,101 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     return value.trim().toLowerCase();
   };
 
-  // Update measure configuration (aggregator, weight_by, rename_to)
-  const updateMeasureConfig = useCallback((measure: string, field: 'aggregator' | 'weight_by' | 'rename_to', value: string) => {
-    // Find existing measure config or create new one
-    const existingIndex = selectedMeasures.findIndex((m: any) => 
-      (typeof m === 'string' ? m : m.field) === measure
-    );
-    
-    let newMeasures;
-    if (existingIndex >= 0) {
-      // Update existing measure config
-      newMeasures = selectedMeasures.map((m: any, i: number) => {
-        if (i === existingIndex) {
-          const currentMeasure = typeof m === 'string' ? { field: m, aggregator: 'Sum', weight_by: '', rename_to: '' } : m;
-          return { ...currentMeasure, [field]: value };
-        }
-        return m;
-      });
-    } else {
-      // Add new measure config
-      newMeasures = [...selectedMeasures, { field: measure, aggregator: field === 'aggregator' ? value : 'Sum', weight_by: field === 'weight_by' ? value : '', rename_to: field === 'rename_to' ? value : '' }];
+  // Helper to generate card title
+  const getMeasureCardTitle = useCallback((config: { field: string; aggregator: string; weight_by?: string; rename_to?: string }) => {
+    if (config.rename_to && config.rename_to.trim()) {
+      return config.rename_to.trim();
     }
-    
+    if (config.field) {
+      if (config.aggregator && config.aggregator.trim()) {
+        const aggLower = config.aggregator.toLowerCase().replace(/\s+/g, '_');
+        return `${config.field}_${aggLower}`;
+      }
+      // Show just field name if aggregator is not selected yet
+      return config.field;
+    }
+    return 'Select measure & method';
+  }, []);
+
+  // Update measure configuration at a specific index
+  const updateMeasureConfigAtIndex = useCallback((index: number, updates: Partial<{ field: string; aggregator: string; weight_by: string; rename_to: string }>) => {
+    const newMeasures = selectedMeasures.map((m, i) => {
+      if (i === index) {
+        return { ...m, ...updates };
+      }
+      return m;
+    });
     updateSettings(atomId, { selectedMeasures: newMeasures });
   }, [selectedMeasures, atomId, updateSettings]);
 
-  // Get measure config for a specific measure
-  const getMeasureConfig = useCallback((measure: string) => {
-    const config = selectedMeasures.find((m: any) => 
-      (typeof m === 'string' ? m : m.field) === measure
-    );
-    if (!config || typeof config === 'string') {
-      return { aggregator: 'Sum', weight_by: '', rename_to: '' };
+  // Add a new measure card
+  const handleAddMeasure = useCallback(() => {
+    const newMeasure = { field: '', aggregator: '', weight_by: '', rename_to: '' };
+    const newMeasures = [...selectedMeasures, newMeasure];
+    updateSettings(atomId, { selectedMeasures: newMeasures });
+    
+    // Find the last configured card (has both field and aggregator)
+    let lastConfiguredIndex = -1;
+    for (let i = selectedMeasures.length - 1; i >= 0; i--) {
+      if (selectedMeasures[i].field && selectedMeasures[i].aggregator) {
+        lastConfiguredIndex = i;
+        break;
+      }
     }
-    return { aggregator: config.aggregator || 'Sum', weight_by: config.weight_by || '', rename_to: config.rename_to || '' };
-  }, [selectedMeasures]);
+    
+    // Close the last configured card if found, otherwise keep existing expanded cards
+    if (lastConfiguredIndex >= 0) {
+      setExpandedMeasureIndices(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(lastConfiguredIndex);
+        return newSet;
+      });
+    }
+    
+    // Expand the newly added card
+    const newIndex = newMeasures.length - 1;
+    setExpandedMeasureIndices(prev => new Set([...prev, newIndex]));
+  }, [selectedMeasures, atomId, updateSettings]);
+
+  // Remove a measure card
+  const handleRemoveMeasure = useCallback((index: number) => {
+    const newMeasures = selectedMeasures.filter((_, i) => i !== index);
+    updateSettings(atomId, { selectedMeasures: newMeasures });
+    
+    // Adjust expanded indices
+    setExpandedMeasureIndices(prev => {
+      const newSet = new Set<number>();
+      prev.forEach(i => {
+        if (i < index) {
+          newSet.add(i);
+        } else if (i > index) {
+          newSet.add(i - 1);
+        }
+        // i === index is removed, so don't add it
+      });
+      return newSet;
+    });
+  }, [selectedMeasures, atomId, updateSettings]);
+
+  // Toggle card expansion (allow multiple cards open)
+  const handleToggleCard = useCallback((index: number) => {
+    setExpandedMeasureIndices(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(index)) {
+        newSet.delete(index);
+      } else {
+        newSet.add(index);
+      }
+      return newSet;
+    });
+  }, []);
+
+  // Initialize: expand first card if it exists and no cards are expanded
+  useEffect(() => {
+    if (selectedMeasures.length > 0 && expandedMeasureIndices.size === 0) {
+      setExpandedMeasureIndices(new Set([0]));
+    }
+  }, [selectedMeasures.length]); // Only run when length changes
 
   // Get numeric columns for Weight By dropdown
   const numericColumns = (settings.allColumns || []).filter(
@@ -367,16 +441,14 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
       // Collect identifiers, measures, aggregations, and measure config
       const identifiers = selectedIdentifiers.map((id: string) => normalizeColumnName(id)).filter(Boolean);
       
-      // Build proper selectedMeasures array with configurations
-      const measuresWithConfig = localSelectedMeasures.map((measure: string) => {
-        const config = getMeasureConfig(measure);
-        return {
-          field: measure,
-          aggregator: config.aggregator,
-          weight_by: config.weight_by,
-          rename_to: config.rename_to
-        };
-      });
+      // Use selectedMeasures directly (already normalized to objects)
+      // Filter out incomplete measures and ensure aggregator defaults to 'Sum' if missing
+      const measuresWithConfig = selectedMeasures
+        .filter(m => m.field && m.aggregator)
+        .map(m => ({
+          ...m,
+          aggregator: m.aggregator || 'Sum'
+        }));
       
       // Build aggregations object from measure config
       const aggregations: Record<string, any> = {};
@@ -387,6 +459,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
       const renameSeen = new Set<string>();
 
       // Use measuresWithConfig to build aggregations
+      // Key = unique output column name (rename_to), allows same source column with different aggregations
       measuresWithConfig.forEach((measure: any) => {
         if (measure.field && measure.aggregator) {
           // Map aggregator names to backend-friendly keys
@@ -398,9 +471,11 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
           const normalizedField = normalizeColumnName(measure.field);
           if (!normalizedField) return;
 
-          const aggObj: any = { agg: aggKey };
-          
-          // Validate rename uniqueness
+          // Generate default column name: field_aggregator
+          const defaultRenameTo = `${normalizedField}_${aggKey}`;
+
+          // Determine the output column name (unique key)
+          let outputColumnName: string;
           if (measure.rename_to && measure.rename_to.trim()) {
             const renameLower = measure.rename_to.trim().toLowerCase();
             if (renameSeen.has(renameLower) || existingColsLower.has(renameLower)) {
@@ -413,13 +488,33 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
               throw new Error(`Duplicate or existing column name: ${measure.rename_to}`);
             }
             renameSeen.add(renameLower);
-            aggObj.rename_to = measure.rename_to.trim();
+            outputColumnName = measure.rename_to.trim();
+          } else {
+            // Auto-generate rename_to if not provided
+            // Check for duplicate auto-generated names (e.g., two value_max)
+            let finalRenameTo = defaultRenameTo;
+            let counter = 1;
+            while (renameSeen.has(finalRenameTo.toLowerCase())) {
+              finalRenameTo = `${defaultRenameTo}_${counter}`;
+              counter++;
+            }
+            renameSeen.add(finalRenameTo.toLowerCase());
+            outputColumnName = finalRenameTo;
           }
+          
+          // Build aggregation object with source column reference
+          const aggObj: any = { 
+            agg: aggKey,
+            column: normalizedField,  // Source column for aggregation
+            rename_to: outputColumnName
+          };
           
           if (aggKey === 'weighted_mean' && measure.weight_by) {
             aggObj.weight_by = normalizeColumnName(measure.weight_by);
           }
-          aggregations[normalizedField] = aggObj;
+          
+          // Use output column name as key (allows multiple aggregations on same source column)
+          aggregations[outputColumnName] = aggObj;
         }
       });
 
@@ -857,47 +952,84 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-green-500"
+          <Card className="border-l-4 border-l-green-500 flex flex-col flex-1 min-h-0"
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, 'measures')}>
-            <CardHeader className="py-3">
+            <CardHeader className="py-3 flex-shrink-0">
               <CardTitle className="text-sm">Measures Configuration</CardTitle>
             </CardHeader>
-            <CardContent className="py-3">
-               <div className="space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-                 {measureList.map((measure: string) => {
-                   const isSelected = localSelectedMeasures.includes(measure);
-                   const config = getMeasureConfig(measure);
-                   return (
-                     <div
-                        key={measure}
-                        className={`border border-gray-200 rounded-lg bg-gradient-to-r from-green-50/50 to-emerald-50/50 ${isSelected ? 'p-2' : 'p-1.5'}`}
-                      >
-                       <div
-                         title={measure}
-                         className={`cursor-pointer select-none ${isSelected ? 'mb-1' : ''}`}
-                         onClick={() => toggleMeasure(measure)}
-                         draggable
-                         onDragStart={(e) => handleDragStart(e, { item: measure, source: 'measures' })}
-                       >
-                         <CheckboxTemplate
-                           id={measure}
-                           label={measure}
-                           checked={isSelected}
-                           onCheckedChange={() => toggleMeasure(measure)}
-                           labelClassName="text-xs font-medium cursor-pointer capitalize truncate max-w-full"
-                         />
-                       </div>
-                      {isSelected && (
-                        <div className="ml-5 space-y-1.5 mt-1.5">
+            <CardContent className="py-3 flex flex-col flex-1 min-h-0">
+              <div className="space-y-2 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                {selectedMeasures.map((measureConfig, index) => {
+                  const isExpanded = expandedMeasureIndices.has(index);
+                  const cardTitle = getMeasureCardTitle(measureConfig);
+                  
+                  // Allow same column to be used in multiple cards (user can have value_max, value_min, etc.)
+                  const availableColumns = numericColumns;
+                  
+                  return (
+                    <div
+                      key={index}
+                      className="border border-gray-200 rounded-lg bg-gradient-to-r from-green-50/50 to-emerald-50/50"
+                    >
+                      {/* Card Header - Always visible */}
+                      <div className="flex items-center justify-between p-2">
+                        <div
+                          className="flex items-center flex-1 cursor-pointer select-none"
+                          onClick={() => handleToggleCard(index)}
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="w-4 h-4 mr-2 text-gray-600" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 mr-2 text-gray-600" />
+                          )}
+                          <span className="text-xs font-medium text-gray-800 truncate" title={cardTitle}>
+                            {cardTitle}
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveMeasure(index);
+                          }}
+                          className="p-1.5 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                          title="Delete measure"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      
+                      {/* Card Content - Only visible when expanded */}
+                      {isExpanded && (
+                        <div className="px-2 pb-2 space-y-1.5 border-t border-gray-200 pt-2">
                           <div>
-                            <Label className="text-[10px] text-gray-600 mb-0.5">Method</Label>
-                            <Select 
-                              value={config.aggregator} 
-                              onValueChange={(value) => updateMeasureConfig(measure, 'aggregator', value)}
+                            <Label className="text-[10px] text-gray-600 mb-0.5">Measure Column</Label>
+                            <Select
+                              value={measureConfig.field || undefined}
+                              onValueChange={(value) => updateMeasureConfigAtIndex(index, { field: value })}
                             >
                               <SelectTrigger className="h-7 text-[10px] bg-white">
-                                <SelectValue placeholder="Select method" />
+                                <SelectValue placeholder="Select a measure" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableColumns.length > 0 ? (
+                                  availableColumns.map((col: string) => (
+                                    <SelectItem key={col} value={col} className="text-[10px]">{col}</SelectItem>
+                                  ))
+                                ) : (
+                                  <div className="p-2 text-[10px] text-gray-500">No numeric columns available</div>
+                                )}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-[10px] text-gray-600 mb-0.5">Method</Label>
+                            <Select
+                              value={measureConfig.aggregator || undefined}
+                              onValueChange={(value) => updateMeasureConfigAtIndex(index, { aggregator: value })}
+                            >
+                              <SelectTrigger className="h-7 text-[10px] bg-white">
+                                <SelectValue placeholder="Select a method" />
                               </SelectTrigger>
                               <SelectContent>
                                 {selectedAggregationMethods.map((agg: string) => (
@@ -906,12 +1038,12 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                               </SelectContent>
                             </Select>
                           </div>
-                          {config.aggregator === 'Weighted Mean' && (
+                          {measureConfig.aggregator === 'Weighted Mean' && (
                             <div>
                               <Label className="text-[10px] text-gray-600 mb-0.5">Weight By</Label>
-                              <Select 
-                                value={config.weight_by || ''} 
-                                onValueChange={(value) => updateMeasureConfig(measure, 'weight_by', value)}
+                              <Select
+                                value={measureConfig.weight_by || undefined}
+                                onValueChange={(value) => updateMeasureConfigAtIndex(index, { weight_by: value })}
                               >
                                 <SelectTrigger className="h-7 text-[10px] bg-white">
                                   <SelectValue placeholder="Select weight column" />
@@ -928,20 +1060,33 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                               </Select>
                             </div>
                           )}
-                           <div>
-                             <Label className="text-[10px] text-gray-600 mb-0.5">Rename To</Label>
-                             <Input
-                               placeholder="New column name"
-                               value={config.rename_to || ''}
-                               onChange={(e) => updateMeasureConfig(measure, 'rename_to', e.target.value)}
-                               className="h-7 text-[10px] bg-white placeholder:text-[9px]"
-                             />
-                           </div>
+                          <div>
+                            <Label className="text-[10px] text-gray-600 mb-0.5">Rename To (Optional)</Label>
+                            <Input
+                              placeholder="New column name"
+                              value={measureConfig.rename_to || ''}
+                              onChange={(e) => updateMeasureConfigAtIndex(index, { rename_to: e.target.value })}
+                              className="h-7 text-[10px] bg-white placeholder:text-[9px]"
+                            />
+                          </div>
                         </div>
                       )}
                     </div>
                   );
                 })}
+              </div>
+              
+              {/* Add Measure Button */}
+              <div className="mt-3 pt-2 border-t flex-shrink-0">
+                <Button
+                  onClick={handleAddMeasure}
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-xs h-8"
+                >
+                  <Plus className="w-3 h-3 mr-1" />
+                  Add Measure
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -975,7 +1120,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
            <div className="sticky bottom-0 left-0 right-0 mt-3 bg-white border-t pt-3 z-10">
              <Button
                onClick={handlePerform}
-               disabled={performLoading || selectedIdentifiers.length === 0 || localSelectedMeasures.length === 0}
+               disabled={performLoading || selectedIdentifiers.length === 0 || selectedMeasures.length === 0 || selectedMeasures.every(m => !m.field || !m.aggregator)}
                className="w-full bg-green-600 hover:bg-green-700 text-white py-2 text-sm h-9"
              >
                {performLoading ? 'Processing...' : 'Perform'}

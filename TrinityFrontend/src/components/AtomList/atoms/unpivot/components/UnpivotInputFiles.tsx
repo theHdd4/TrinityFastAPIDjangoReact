@@ -2,14 +2,12 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
-import { RefreshCcw } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import {
   UnpivotSettings as UnpivotSettingsType,
   DEFAULT_UNPIVOT_SETTINGS,
   useLaboratoryStore,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { cn } from '@/lib/utils';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, UNPIVOT_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 
@@ -211,10 +209,21 @@ const UnpivotInputFiles: React.FC<UnpivotInputFilesProps> = ({ atomId }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Refresh columns when dataset path changes
-  useEffect(() => {
-    if (settings.datasetPath && (!settings.dataSourceColumns || settings.dataSourceColumns.length === 0)) {
+  // Auto-fetch columns when dataset path changes (similar to GroupBy)
+  const initFetchedRef = React.useRef<string>('');
+  
+  // Initialize ref if data already exists (prevents re-fetch on properties panel open)
+  React.useEffect(() => {
+    if (settings.datasetPath && settings.dataSourceColumns && settings.dataSourceColumns.length > 0 && !initFetchedRef.current) {
+      initFetchedRef.current = settings.datasetPath;
+    }
+  }, []);
+  
+  // Refresh columns when dataset path changes (only if not already fetched)
+  React.useEffect(() => {
+    if (settings.datasetPath && settings.datasetPath !== initFetchedRef.current && (!settings.dataSourceColumns || settings.dataSourceColumns.length === 0)) {
       console.log('UnpivotInputFiles: Dataset path changed but no columns, fetching...', settings.datasetPath);
+      initFetchedRef.current = settings.datasetPath;
       handleFrameChange(settings.datasetPath).catch((err) => {
         console.error('UnpivotInputFiles: Failed to refresh columns', err);
       });
@@ -222,42 +231,62 @@ const UnpivotInputFiles: React.FC<UnpivotInputFilesProps> = ({ atomId }) => {
   }, [settings.datasetPath, settings.dataSourceColumns, handleFrameChange]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Label className="text-sm font-medium">Dataset</Label>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={fetchAvailableFrames}
+    <div className="space-y-4 px-2 pb-2">
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #cbd5e0;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #a0aec0;
+        }
+      `}</style>
+      <Card className="p-4 space-y-3">
+        <label className="text-sm font-medium text-gray-700 block">Data Source</label>
+        <Select 
+          value={settings.datasetPath || ''} 
+          onValueChange={handleFrameChange}
           disabled={isLoading}
-          className="h-7 px-2"
         >
-          <RefreshCcw className={cn('h-3 w-3', isLoading && 'animate-spin')} />
-        </Button>
-      </div>
+          <SelectTrigger className="bg-white border-gray-300">
+            <SelectValue placeholder="Choose a saved dataframe..." />
+          </SelectTrigger>
+          <SelectContent>
+            {(Array.isArray(frames) ? frames : []).map(f => (
+              <SelectItem key={f.object_name} value={f.object_name}>
+                {f.csv_name?.split('/').pop() || f.object_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-      <Select
-        value={settings.datasetPath || ''}
-        onValueChange={handleFrameChange}
-        disabled={isLoading}
-      >
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder="Select a dataset" />
-        </SelectTrigger>
-        <SelectContent>
-          {frames.map((frame) => (
-            <SelectItem key={frame.object_name} value={frame.object_name}>
-              {frame.csv_name || frame.object_name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        {/* Show Data Summary Toggle - Only when data source is selected */}
+        {settings.datasetPath && (
+          <div className="flex items-center justify-between pt-4 border-t mt-4">
+            <Label className="text-xs">Show Data Summary</Label>
+            <Switch
+              checked={settings.showDataSummary || false}
+              onCheckedChange={(checked) => {
+                updateSettings(atomId, { showDataSummary: !!checked });
+              }}
+            />
+          </div>
+        )}
 
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 p-2 rounded">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="text-sm text-red-600 bg-red-50 p-2 rounded mt-2">
+            {error}
+          </div>
+        )}
+      </Card>
     </div>
   );
 };

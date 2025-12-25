@@ -2177,54 +2177,46 @@ async def save_dataframes(
                 delimiter = CSVReader._detect_delimiter(content, encoding)
                 max_cols = CSVReader._find_max_columns(content, encoding, delimiter, sample_rows=0)
                 
-                # For better data type detection, read a sample with RobustFileReader to infer types
-                # Then use that schema for batched reading to ensure consistent type detection
-                # This ensures data types are properly detected even for large files
-                try:
-                    # Read a sample (first 50MB or entire file if smaller) with RobustFileReader
-                    # to get proper type inference (same as guided workflow)
-                    sample_size = min(50_000_000, len(content))
-                    sample_content = content[:sample_size]
-                    df_result, _ = RobustFileReader.read_file_to_pandas(
-                        content=sample_content,
-                        filename=filename,
-                        auto_detect_header=True,
-                        return_raw=False,
-                    )
-                    if isinstance(df_result, dict):
-                        df_result = list(df_result.values())[0]
-                    
-                    # Convert to Polars and get schema for type inference
-                    sample_pl = pl.from_pandas(df_result)
-                    # Get the schema from RobustFileReader result
-                    inferred_schema = sample_pl.schema
-                    
-                    # Ensure schema has enough columns (pad with Utf8 if needed for ragged lines)
-                    if max_cols > len(inferred_schema):
-                        # Extend schema with Utf8 for additional columns that might appear in later rows
-                        extended_schema = dict(inferred_schema)
-                        for i in range(len(inferred_schema), max_cols):
-                            extended_schema[f"col_{i}"] = pl.Utf8
+                # CRITICAL FIX: Extract original headers from first row to preserve column names
+                original_headers = None
+                has_header = CSV_READ_KWARGS.get("has_header", True)
+                if max_cols > 0 and has_header:
+                    try:
+                        import csv as csv_module
+                        text_content = content.decode(encoding, errors='ignore')
+                        csv_reader = csv_module.reader(io.StringIO(text_content), delimiter=delimiter)
+                        first_row = next(csv_reader, None)
+                        if first_row:
+                            original_headers = [str(h).strip() if h else "" for h in first_row]
+                            # Pad headers if needed to match max_cols
+                            while len(original_headers) < max_cols:
+                                original_headers.append(f"col_{len(original_headers)}")
+                            # Truncate if somehow we have more headers than max_cols
+                            original_headers = original_headers[:max_cols]
+                            logger.debug(f"save_dataframes: Extracted {len(original_headers)} headers from first row")
+                    except Exception as e:
+                        logger.warning(f"save_dataframes: Failed to extract headers: {e}, using generic names")
+                        original_headers = None
+                
+                # Create schema with all columns - use original headers if available
+                if max_cols > 0:
+                    if original_headers:
+                        schema = {header: pl.Utf8 for header in original_headers}
                         batched_kwargs = CSV_READ_KWARGS.copy()
-                        batched_kwargs["schema"] = extended_schema
+                        batched_kwargs["schema"] = schema
+                        batched_kwargs["has_header"] = False  # Headers already extracted
+                        batched_kwargs["skip_rows"] = 1  # CRITICAL: Skip the header row we already extracted
+                        batched_kwargs["truncate_ragged_lines"] = False
+                        batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                     else:
-                        batched_kwargs = CSV_READ_KWARGS.copy()
-                        batched_kwargs["schema"] = inferred_schema
-                    
-                    batched_kwargs["truncate_ragged_lines"] = False
-                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
-                except Exception as e:
-                    logger.warning(f"Failed to infer schema with RobustFileReader for batched reading, using fallback: {e}")
-                    # Fallback: Create schema with all columns as Utf8 (original behavior)
-                    if max_cols > 0:
                         schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
                         batched_kwargs = CSV_READ_KWARGS.copy()
                         batched_kwargs["schema"] = schema
                         batched_kwargs["truncate_ragged_lines"] = False
                         batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
-                    else:
-                        batched_kwargs = CSV_READ_KWARGS.copy()
-                        batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
+                else:
+                    batched_kwargs = CSV_READ_KWARGS.copy()
+                    batched_kwargs["ignore_errors"] = True  # Handle mixed dtype columns gracefully
                 
                 reader = pl.read_csv_batched(
                     csv_path, batch_size=1_000_000, **batched_kwargs

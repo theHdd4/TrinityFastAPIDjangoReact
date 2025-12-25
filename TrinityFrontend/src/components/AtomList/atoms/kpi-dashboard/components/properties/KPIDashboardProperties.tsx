@@ -66,9 +66,6 @@ const KPIDashboardProperties: React.FC<KPIDashboardPropertiesProps> = ({ atomId 
 
   const handleDataUpload = React.useCallback(
     (uploadedData: KPIDashboardData) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/c16dc138-1b27-4dba-8d9b-764693f664f3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'KPIDashboardProperties.tsx:55',message:'handleDataUpload called',data:{atomId,hasHeaders:!!uploadedData.headers,hasRows:!!uploadedData.rows,fileName:uploadedData.fileName},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'FIX'})}).catch(()=>{});
-      // #endregion
       updateSettings(atomId, {
         ...settings,
         data: uploadedData

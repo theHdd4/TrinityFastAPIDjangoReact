@@ -189,15 +189,43 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
         kwargs_polars["ignore_errors"] = True  # Handle parsing errors gracefully
         
         # Ensure has_header is set (default True, but be explicit)
-        if "has_header" not in kwargs_polars:
-            kwargs_polars["has_header"] = True
+        has_header = kwargs_polars.get("has_header", True)
+        
+        # CRITICAL FIX: Read header row first to preserve original column names
+        # If we need to use a schema, we must extract headers first
+        original_headers = None
+        if max_cols > 0 and has_header:
+            try:
+                # Read first row to get actual headers
+                import csv as csv_module
+                text_content = content.decode(encoding, errors='ignore')
+                csv_reader = csv_module.reader(io.StringIO(text_content), delimiter=delimiter)
+                first_row = next(csv_reader, None)
+                if first_row:
+                    original_headers = [str(h).strip() if h else "" for h in first_row]
+                    # Pad headers if needed to match max_cols
+                    while len(original_headers) < max_cols:
+                        original_headers.append(f"col_{len(original_headers)}")
+                    # Truncate if somehow we have more headers than max_cols
+                    original_headers = original_headers[:max_cols]
+                    logger.debug(f"_smart_csv_parse: Extracted {len(original_headers)} headers from first row")
+            except Exception as e:
+                logger.warning(f"_smart_csv_parse: Failed to extract headers: {e}, using generic names")
+                original_headers = None
         
         # If we found max columns, create schema to ensure all columns are read
         if max_cols > 0:
-            # Create schema with all columns as string to avoid type conflicts
-            schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
+            # Use original headers if available, otherwise use generic names
+            if original_headers:
+                schema = {header: pl.Utf8 for header in original_headers}
+                # When using schema, set has_header=False since we already extracted headers
+                # CRITICAL: Skip the first row (header row) when reading since we already extracted it
+                kwargs_polars["has_header"] = False
+                kwargs_polars["skip_rows"] = 1  # Skip the header row we already extracted
+            else:
+                schema = {f"col_{i}": pl.Utf8 for i in range(max_cols)}
             kwargs_polars["schema"] = schema
-            logger.debug(f"_smart_csv_parse: Using schema with {max_cols} columns")
+            logger.debug(f"_smart_csv_parse: Using schema with {max_cols} columns, has_header={kwargs_polars.get('has_header', False)}, skip_rows={kwargs_polars.get('skip_rows', 0)}")
         
         try:
             df = pl.read_csv(io.BytesIO(content), **kwargs_polars)

@@ -1871,6 +1871,20 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   collapsedKeys: [],
 };
 
+export interface VariableDecoderMapping {
+  index: number;
+  column: string;
+  dtype: 'string' | 'int' | 'category';
+}
+
+export interface VariableDecoderConfig {
+  enabled: boolean;
+  type: 'delimiter' | 'regex';
+  delimiter?: string;
+  regex?: string;
+  mappings: VariableDecoderMapping[];
+}
+
 export interface UnpivotSettings {
   atomId?: string;
   projectId?: string;
@@ -1885,6 +1899,7 @@ export interface UnpivotSettings {
   preFilters: Array<{ field: string; include?: string[]; exclude?: string[] }>;
   postFilters: Array<{ field: string; include?: string[]; exclude?: string[] }>;
   autoRefresh: boolean;
+  variableDecoder?: VariableDecoderConfig;
   unpivotResults: any[];
   unpivotStatus?: 'idle' | 'pending' | 'success' | 'failed';
   unpivotError?: string | null;
@@ -1897,6 +1912,11 @@ export interface UnpivotSettings {
     unpivoted_columns?: number;
     id_vars_count?: number;
     value_vars_count?: number;
+    decoder_enabled?: boolean;
+    decoder_type?: string;
+    decoder_matched_rows?: number;
+    decoder_failed_rows?: number;
+    decoder_match_rate?: number;
   };
   unpivotLastSavedPath?: string | null;
   unpivotLastSavedAt?: string | null;
@@ -1906,11 +1926,12 @@ export interface UnpivotSettings {
 export const DEFAULT_UNPIVOT_SETTINGS: UnpivotSettings = {
   idVars: [],
   valueVars: [],
-  variableColumnName: 'variable',
-  valueColumnName: 'value',
+  variableColumnName: '',
+  valueColumnName: '',
   preFilters: [],
   postFilters: [],
   autoRefresh: true,
+  variableDecoder: undefined,
   unpivotResults: [],
   unpivotStatus: 'idle',
   unpivotError: null,

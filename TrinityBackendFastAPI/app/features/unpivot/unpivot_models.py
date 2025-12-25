@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,22 @@ class UnpivotFilterConfig(BaseModel):
         default=None,
         description="List of values to exclude from the result.",
     )
+
+
+class VariableDecoderMapping(BaseModel):
+    """Mapping configuration for variable decoder segment extraction."""
+    index: int = Field(..., description="Segment index (0-based)")
+    column: str = Field(..., description="Output column name")
+    dtype: str = Field(..., description="Data type: string, int, category")
+
+
+class VariableDecoderConfig(BaseModel):
+    """Configuration for variable decoder that splits variable column into dimensions."""
+    enabled: bool = Field(default=False, description="Whether decoder is enabled")
+    type: Literal["delimiter", "regex"] = Field(default="delimiter", description="Decoder type")
+    delimiter: Optional[str] = Field(default=None, description="Delimiter for split (space, _, -)")
+    regex: Optional[str] = Field(default=None, description="Regex pattern with named groups")
+    mappings: List[VariableDecoderMapping] = Field(default_factory=list, description="Column mappings")
 
 
 class UnpivotCreateRequest(BaseModel):
@@ -67,6 +83,10 @@ class UnpivotPropertiesUpdate(BaseModel):
         default=True,
         description="Whether to automatically recompute when properties change"
     )
+    variable_decoder: Optional[VariableDecoderConfig] = Field(
+        default=None,
+        description="Configuration for variable decoder (splits variable column into dimensions)"
+    )
 
 
 class UnpivotMetadataResponse(BaseModel):
@@ -83,6 +103,7 @@ class UnpivotMetadataResponse(BaseModel):
     pre_filters: List[Dict[str, Any]] = Field(default_factory=list)
     post_filters: List[Dict[str, Any]] = Field(default_factory=list)
     auto_refresh: bool = True
+    variable_decoder: Optional[Dict[str, Any]] = Field(default=None, description="Variable decoder configuration")
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_computed_at: Optional[datetime] = None
@@ -93,6 +114,10 @@ class UnpivotComputeRequest(BaseModel):
     force_recompute: bool = Field(
         default=False,
         description="Force recomputation even if cached result exists"
+    )
+    preview_limit: Optional[int] = Field(
+        default=None,
+        description="If set, only compute first N rows for preview"
     )
 
 
