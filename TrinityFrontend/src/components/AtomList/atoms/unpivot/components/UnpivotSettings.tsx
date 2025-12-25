@@ -330,35 +330,10 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
     <div className="space-y-4">
       {/* ID Columns Section */}
       <Card className="border-l-4 border-l-blue-500">
-        <CardHeader className="py-3">
-          <CardTitle className="text-sm">Select identifier columns</CardTitle>
-        </CardHeader>
         <CardContent className="py-3">
-          <MultiSelectDropdown
-            identifierName="ID Variables"
-            placeholder="Select columns to keep"
-            options={idVarOptions}
-            selectedValues={data.idVars}
-            onSelectionChange={(selected) => onDataChange({ idVars: selected })}
-            showSelectAll={true}
-            showDeselectAll={true}
-            showTrigger={true}
-            triggerClassName="w-full justify-between"
-            maxHeight="300px"
-          />
-        </CardContent>
-      </Card>
-
-      {/* Value Columns Configuration Section */}
-      <Card className="border-l-4 border-l-green-500">
-        <CardHeader className="py-3">
-          <CardTitle className="text-sm">Select Columns to Unpivot</CardTitle>
-        </CardHeader>
-        <CardContent className="py-3 space-y-4">
-          {/* Value Variables Dropdown */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              {/* <Label className="text-xs font-medium">Select Columns to Unpivot</Label> */}
+              <Label className="text-xs font-medium">Identifier Columns</Label>
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -366,15 +341,51 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
                   </TooltipTrigger>
                   <TooltipContent>
                     <p className="text-xs max-w-xs">
-                      Select columns that will be unpivoted (converted from columns to rows)
+                      Columns that uniquely identify each row. These columns stay the same while other columns are converted into rows.
                     </p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             </div>
             <MultiSelectDropdown
-              identifierName="Value Variables"
-              placeholder="Select value variables..."
+              identifierName="Select columns"
+              placeholder="Select identifier columns"
+              options={idVarOptions}
+              selectedValues={data.idVars}
+              onSelectionChange={(selected) => onDataChange({ idVars: selected })}
+              showSelectAll={true}
+              showDeselectAll={true}
+              showTrigger={true}
+              triggerClassName="w-full justify-between"
+              maxHeight="300px"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Value Columns Configuration Section */}
+      <Card className="border-l-4 border-l-green-500">
+        <CardContent className="py-3 space-y-4">
+          {/* Value Variables Dropdown */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Label className="text-xs font-medium">Select Columns to Unpivot</Label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-3 w-3 text-gray-400 hover:text-gray-600 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-xs max-w-xs">
+                      Each selected column will be converted into rows under a single column name.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <MultiSelectDropdown
+              identifierName="Select columns"
+              placeholder="Select columns to convert into rows"
               options={valueVarOptions}
               selectedValues={data.valueVars}
               onSelectionChange={(selected) => onDataChange({ valueVars: selected })}
@@ -389,7 +400,7 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
           {/* Variable Column Name */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Label className="text-xs font-medium">Unpivoted Column Name</Label>
+              <Label className="text-xs font-medium">Label for unpivoted Column</Label>
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -406,11 +417,11 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
             <Input
               value={data.variableColumnName || ''}
               onChange={(e) => {
-                
+
                 const value = e.target.value.trim();
                 onDataChange({ variableColumnName: value || undefined });
               }}
-              placeholder="variable"
+              placeholder="e.g. metric, attribute, variable"
               className="w-full h-8 text-xs"
             />
           </div>
@@ -418,7 +429,7 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
           {/* Value Column Name */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Label className="text-xs font-medium">Value Column Name</Label>
+              <Label className="text-xs font-medium">Label for Values</Label>
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -438,7 +449,7 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
                 const value = e.target.value.trim();
                 onDataChange({ valueColumnName: value || undefined });
               }}
-              placeholder="value"
+              placeholder="e.g. value, amount, count"
               className="w-full h-8 text-xs"
             />
           </div>
@@ -694,7 +705,9 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
           disabled={
             isComputing || 
             !data.datasetPath || 
-            (data.idVars.length === 0 && data.valueVars.length === 0) ||
+            data.valueVars.length === 0 ||
+            !data.variableColumnName?.trim() ||
+            !data.valueColumnName?.trim() ||
             (decoderConfig.enabled && !decoderValidation.isValid)
           }
           className="w-full bg-[#1A73E8] hover:bg-[#1455ad] text-white"

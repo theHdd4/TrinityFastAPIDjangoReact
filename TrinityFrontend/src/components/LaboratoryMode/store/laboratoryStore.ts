@@ -1926,8 +1926,8 @@ export interface UnpivotSettings {
 export const DEFAULT_UNPIVOT_SETTINGS: UnpivotSettings = {
   idVars: [],
   valueVars: [],
-  variableColumnName: 'variable',
-  valueColumnName: 'value',
+  variableColumnName: '',
+  valueColumnName: '',
   preFilters: [],
   postFilters: [],
   autoRefresh: true,

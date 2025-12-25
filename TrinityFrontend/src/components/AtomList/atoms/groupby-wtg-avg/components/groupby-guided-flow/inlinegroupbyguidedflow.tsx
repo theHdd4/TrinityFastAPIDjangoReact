@@ -12,6 +12,7 @@ import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratory
 import { FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
+import { getActiveProjectContext } from '@/utils/projectEnv';
 
 interface InlineGroupByGuidedFlowProps {
   atomId: string;
@@ -46,12 +47,17 @@ export const InlineGroupByGuidedFlow: React.FC<InlineGroupByGuidedFlowProps> = (
   const [performLoading, setPerformLoading] = useState(false);
   
   // Step state: 1 = identifiers, 2 = measures
-  const [currentStep, setCurrentStep] = useState<1 | 2>(1);
+  // Initialize from atom settings for persistence
+  const [currentStep, setCurrentStep] = useState<1 | 2>((settings.groupbyGuidedFlowState?.currentStep as 1 | 2) || 1);
   
   const { toast } = useToast();
   
   // Track previous data source to detect changes
   const prevDataSourceRef = useRef<string>('');
+  
+  // Refs for persistence and debouncing
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isInitialMountRef = useRef(true);
   
   // Helper to normalize column names
   const normalizeColumnName = (value: string | undefined | null) => {
@@ -179,14 +185,41 @@ export const InlineGroupByGuidedFlow: React.FC<InlineGroupByGuidedFlowProps> = (
     fetchIdentifiers();
   }, [dataSource, atomId, updateSettings]);
   
-  // Initialize selected identifiers from flow state
+  // Initialize state from atom settings on mount (for persistence across sessions)
   useEffect(() => {
-    if (state.selectedIdentifiers && state.selectedIdentifiers.length > 0) {
+    if (isInitialMountRef.current) {
+      if (settings.groupbyGuidedFlowState) {
+        const persistedState = settings.groupbyGuidedFlowState;
+        
+        // Restore selected identifiers
+        if (Array.isArray(persistedState.selectedIdentifiers) && persistedState.selectedIdentifiers.length > 0) {
+          setSelectedIdentifiers(persistedState.selectedIdentifiers);
+          updateState({ selectedIdentifiers: persistedState.selectedIdentifiers });
+        }
+        
+        // Restore selected measures
+        if (Array.isArray(persistedState.selectedMeasures) && persistedState.selectedMeasures.length > 0) {
+          setSelectedMeasures(persistedState.selectedMeasures);
+        }
+        
+        // Restore current step
+        if (persistedState.currentStep === 1 || persistedState.currentStep === 2) {
+          setCurrentStep(persistedState.currentStep);
+        }
+      }
+      // Mark initial mount as complete
+      isInitialMountRef.current = false;
+    }
+  }, [settings.groupbyGuidedFlowState, updateState]);
+  
+  // Initialize selected identifiers from flow state (fallback)
+  useEffect(() => {
+    if (state.selectedIdentifiers && state.selectedIdentifiers.length > 0 && selectedIdentifiers.length === 0) {
       setSelectedIdentifiers(state.selectedIdentifiers);
     }
-  }, [state.selectedIdentifiers]);
+  }, [state.selectedIdentifiers, selectedIdentifiers.length]);
   
-  // Update dataSource in flow state when it changes
+  // Update dataSource in flow state when it changes, and reset persisted state if data source changes
   useEffect(() => {
     if (prevDataSourceRef.current && 
         settings.showGuidedMode && 
@@ -194,6 +227,17 @@ export const InlineGroupByGuidedFlow: React.FC<InlineGroupByGuidedFlowProps> = (
         dataSource !== prevDataSourceRef.current) {
       restartFlow();
       updateState({ dataSource });
+      // Clear persisted state when data source changes
+      setSelectedIdentifiers([]);
+      setSelectedMeasures([]);
+      setCurrentStep(1);
+      updateSettings(atomId, {
+        groupbyGuidedFlowState: {
+          currentStep: 1,
+          selectedIdentifiers: [],
+          selectedMeasures: [],
+        },
+      });
     }
     
     if (dataSource && flow.state.dataSource !== dataSource) {
@@ -201,13 +245,63 @@ export const InlineGroupByGuidedFlow: React.FC<InlineGroupByGuidedFlowProps> = (
     }
     
     prevDataSourceRef.current = dataSource;
-  }, [dataSource, settings.showGuidedMode, flow.state.dataSource, updateState, restartFlow]);
+  }, [dataSource, settings.showGuidedMode, flow.state.dataSource, updateState, restartFlow, atomId, updateSettings]);
+
+  // Persist guided flow state to atom settings (debounced, similar to MetricGuidedFlowInline)
+  useEffect(() => {
+    // Skip initial mount
+    if (isInitialMountRef.current) {
+      return;
+    }
+    
+    // Debounce writes to avoid thrashing atom settings
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    saveTimeoutRef.current = setTimeout(() => {
+      const guidedFlowState = {
+        currentStep,
+        selectedIdentifiers,
+        selectedMeasures,
+      };
+      
+      updateSettings(atomId, {
+        groupbyGuidedFlowState: guidedFlowState,
+      });
+      
+      saveTimeoutRef.current = null;
+    }, 300);
+    
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [currentStep, selectedIdentifiers, selectedMeasures, atomId, updateSettings]);
+  
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleReset = () => {
     restartFlow();
     setSelectedIdentifiers([]);
     setSelectedMeasures([]);
     setCurrentStep(1);
+    // Clear persisted state
+    updateSettings(atomId, {
+      groupbyGuidedFlowState: {
+        currentStep: 1,
+        selectedIdentifiers: [],
+        selectedMeasures: [],
+      },
+    });
   };
 
   // Toggle identifier selection

@@ -672,7 +672,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ format: 'parquet' }),
+          body: JSON.stringify({}),
         }
       );
       if (!response.ok) {
@@ -684,7 +684,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ format: 'parquet' }),
+              body: JSON.stringify({}),
             }
           );
           if (!retryResponse.ok) {
@@ -753,7 +753,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ format: 'parquet', filename: saveAsFileName.trim() }),
+          body: JSON.stringify({ filename: saveAsFileName.trim() }),
         }
       );
       if (!response.ok) {
@@ -765,7 +765,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ format: 'parquet', filename: saveAsFileName.trim() }),
+              body: JSON.stringify({ filename: saveAsFileName.trim() }),
             }
           );
           if (!retryResponse.ok) {
@@ -797,8 +797,37 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
       const result = await response.json().catch((err) => {
         throw new Error(`Failed to parse save response: ${err.message}`);
       });
-      const message = result?.minio_path
-        ? `Saved as ${result.minio_path}`
+      
+      // Extract path after project name
+      let displayPath = result?.minio_path || '';
+      if (displayPath) {
+        try {
+          const envStr = localStorage.getItem('env');
+          if (envStr) {
+            const env = JSON.parse(envStr);
+            const clientName = env.CLIENT_NAME || '';
+            const appName = env.APP_NAME || '';
+            const projectName = env.PROJECT_NAME || '';
+            
+            // Build project prefix: CLIENT_NAME/APP_NAME/PROJECT_NAME
+            const projectPrefix = [clientName, appName, projectName]
+              .filter(Boolean)
+              .join('/');
+            
+            // Extract path after project prefix
+            if (projectPrefix && displayPath.startsWith(projectPrefix + '/')) {
+              displayPath = displayPath.substring(projectPrefix.length + 1);
+            } else if (projectPrefix && displayPath.startsWith(projectPrefix)) {
+              displayPath = displayPath.substring(projectPrefix.length);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse project context for path display:', e);
+        }
+      }
+      
+      const message = displayPath
+        ? `Saved as ${displayPath}`
         : 'Unpivot result saved successfully';
       setSaveMessage(message);
       setShowSaveAsModal(false);
@@ -849,7 +878,32 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         saveMessage={
           saveMessage ||
           (settings.unpivotLastSavedPath
-            ? `Last saved: ${settings.unpivotLastSavedPath}`
+            ? (() => {
+                // Extract path after project name for last saved path too
+                let displayPath = settings.unpivotLastSavedPath;
+                try {
+                  const envStr = localStorage.getItem('env');
+                  if (envStr) {
+                    const env = JSON.parse(envStr);
+                    const clientName = env.CLIENT_NAME || '';
+                    const appName = env.APP_NAME || '';
+                    const projectName = env.PROJECT_NAME || '';
+                    
+                    const projectPrefix = [clientName, appName, projectName]
+                      .filter(Boolean)
+                      .join('/');
+                    
+                    if (projectPrefix && displayPath.startsWith(projectPrefix + '/')) {
+                      displayPath = displayPath.substring(projectPrefix.length + 1);
+                    } else if (projectPrefix && displayPath.startsWith(projectPrefix)) {
+                      displayPath = displayPath.substring(projectPrefix.length);
+                    }
+                  }
+                } catch (e) {
+                  console.warn('Failed to parse project context for path display:', e);
+                }
+                return `Last saved: ${displayPath}`;
+              })()
             : null)
         }
         onRefresh={handleRefresh}
@@ -878,7 +932,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
               }}
             />
             <p className="text-xs text-muted-foreground mt-2">
-              The file will be saved as a Parquet (.parquet) file.
+              The file will be saved as an Arrow (.arrow) file.
             </p>
           </div>
           <DialogFooter>

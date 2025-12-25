@@ -400,40 +400,6 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
         </div>
       )}
 
-      {/* Summary Card - Unpivoted data summary (always shown when available) */}
-      {data.unpivotSummary && Object.keys(data.unpivotSummary).length > 0 && (
-        <div className="mx-4 mt-4">
-          <Card className="p-3 bg-gray-50">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-              {data.unpivotSummary.original_rows !== undefined && (
-                <div>
-                  <div className="text-gray-500">Original Rows</div>
-                  <div className="font-semibold">{data.unpivotSummary.original_rows.toLocaleString()}</div>
-                </div>
-              )}
-              {data.unpivotSummary.original_columns !== undefined && (
-                <div>
-                  <div className="text-gray-500">Original Columns</div>
-                  <div className="font-semibold">{data.unpivotSummary.original_columns}</div>
-                </div>
-              )}
-              {data.unpivotSummary.unpivoted_rows !== undefined && (
-                <div>
-                  <div className="text-gray-500">Unpivoted Rows</div>
-                  <div className="font-semibold">{data.unpivotSummary.unpivoted_rows.toLocaleString()}</div>
-                </div>
-              )}
-              {data.unpivotSummary.unpivoted_columns !== undefined && (
-                <div>
-                  <div className="text-gray-500">Unpivoted Columns</div>
-                  <div className="font-semibold">{data.unpivotSummary.unpivoted_columns}</div>
-                </div>
-              )}
-            </div>
-          </Card>
-        </div>
-      )}
-
       {/* Loading State */}
       {isLoading && (
         <div className="flex-1 flex items-center justify-center">
@@ -447,6 +413,39 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
       {/* Data Table */}
       {!isLoading && results.length > 0 && (
         <div className="mt-0">
+          {/* Summary Card - Unpivoted data summary (shown only after successful save) */}
+          {data.unpivotSummary && Object.keys(data.unpivotSummary).length > 0 && data.unpivotLastSavedPath && (
+            <div className="mx-4 mb-4">
+              <Card className="p-3 bg-gray-50">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                  {data.unpivotSummary.original_rows !== undefined && (
+                    <div>
+                      <div className="text-gray-500">Original Rows</div>
+                      <div className="font-semibold">{data.unpivotSummary.original_rows.toLocaleString()}</div>
+                    </div>
+                  )}
+                  {data.unpivotSummary.original_columns !== undefined && (
+                    <div>
+                      <div className="text-gray-500">Original Columns</div>
+                      <div className="font-semibold">{data.unpivotSummary.original_columns}</div>
+                    </div>
+                  )}
+                  {data.unpivotSummary.unpivoted_rows !== undefined && (
+                    <div>
+                      <div className="text-gray-500">Unpivoted Rows</div>
+                      <div className="font-semibold">{data.unpivotSummary.unpivoted_rows.toLocaleString()}</div>
+                    </div>
+                  )}
+                  {data.unpivotSummary.unpivoted_columns !== undefined && (
+                    <div>
+                      <div className="text-gray-500">Unpivoted Columns</div>
+                      <div className="font-semibold">{data.unpivotSummary.unpivoted_columns}</div>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
+          )}
           <Table
             headers={columns.map((col) => renderHeaderWithSortFilter(col))}
             colClasses={columns.map(() => "w-auto")}

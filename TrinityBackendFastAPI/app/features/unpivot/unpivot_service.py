@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import logging
 import re
@@ -302,6 +303,7 @@ async def stream_full_unpivot_to_minio(
     value_vars: list[str],
     variable_col: str,
     value_col: str,
+    filename: Optional[str] = None,
 ) -> tuple[str, int]:
     """
     Stream full unpivot result to MinIO using chunked processing from source.
@@ -384,9 +386,22 @@ async def stream_full_unpivot_to_minio(
         prefix = f"{prefix}/"
     
     object_prefix = f"{prefix}unpivot/"
-    file_name = f"{atom_id}_full_result.arrow"
     
-    # Upload to MinIO
+    # Determine filename - always save as .arrow
+    if filename:
+        # User provided filename - use it, ensure .arrow extension
+        file_name = filename.strip()
+        # Remove any existing extension and add .arrow
+        if file_name.endswith(('.arrow', '.parquet', '.csv')):
+            file_name = file_name.rsplit('.', 1)[0] + '.arrow'
+        else:
+            file_name = f"{file_name}.arrow"
+    else:
+        # Generate unique filename with timestamp
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        file_name = f"{atom_id}_unpivot_{timestamp}.arrow"
+    
+    # Upload to MinIO (always as Arrow format)
     ensure_minio_bucket()
     upload_result = upload_to_minio(file_bytes, file_name, object_prefix)
     
@@ -1279,6 +1294,7 @@ async def save_unpivot_result(atom_id: str, payload: UnpivotSaveRequest) -> Unpi
         value_vars=value_vars,
         variable_col=variable_col,
         value_col=value_col,
+        filename=payload.filename,
     )
     
     timestamp = datetime.now(timezone.utc)
