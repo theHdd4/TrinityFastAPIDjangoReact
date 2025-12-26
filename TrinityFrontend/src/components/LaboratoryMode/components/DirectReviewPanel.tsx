@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, X, Maximize2, Minimize2 } from 'lucide-react';
+import { Loader2, X, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
+import { DATETIME_FORMAT_OPTIONS, formatLabelWithExample } from '@/utils/datetimeFormats';
 
 interface Frame {
   object_name: string;
@@ -143,7 +144,11 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
         });
         
         const cols: ProcessingColumnConfig[] = (data.columns || []).map((col: any) => {
-          const dtype = typeof col.dtype === 'string' && col.dtype ? col.dtype : 'object';
+          const rawDtype = typeof col.dtype === 'string' && col.dtype ? col.dtype : 'object';
+          // Normalize datetime64 variants to 'datetime64'
+          const dtype = rawDtype && (rawDtype.toLowerCase().includes('datetime64') || rawDtype.toLowerCase().includes('datetime'))
+            ? 'datetime64'
+            : rawDtype;
           return {
             name: col.name || '',
             newName: col.name || '',
@@ -156,7 +161,7 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
             missingPercentage: typeof col.missing_percentage === 'number' ? col.missing_percentage : 0,
             missingStrategy: 'none',
             missingCustomValue: '',
-            datetimeFormat: undefined,
+            datetimeFormat: col.datetime_format || undefined,
             formatDetecting: false,
             formatFailed: false,
             dropColumn: false,
@@ -191,8 +196,21 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
       { value: 'datetime64', label: 'DateTime' },
       { value: 'bool', label: 'Boolean' },
     ];
-    const exists = baseOptions.some(opt => opt.value === currentDtype);
-    if (!exists && currentDtype) {
+    
+    // Normalize datetime64 variants to 'datetime64' for matching
+    const normalizeDtype = (dtype: string): string => {
+      const lower = dtype.toLowerCase();
+      if (lower.includes('datetime64') || lower.includes('datetime')) {
+        return 'datetime64';
+      }
+      return lower;
+    };
+    
+    const normalizedCurrentDtype = normalizeDtype(currentDtype);
+    const exists = baseOptions.some(opt => normalizeDtype(opt.value) === normalizedCurrentDtype);
+    
+    // Don't add datetime64 variants to the dropdown - they should only appear as 'datetime64'
+    if (!exists && currentDtype && !currentDtype.toLowerCase().includes('datetime')) {
       return [{ value: currentDtype, label: currentDtype }, ...baseOptions];
     }
     return baseOptions;
@@ -466,7 +484,14 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
                     <tr
                       key={`col-${col.name}-${idx}`}
                       className={col.dropColumn ? 'bg-gray-50 opacity-60 hover:bg-gray-50' : 'hover:bg-gray-50'}
-                      style={{ height: '1.75rem' }}
+                      style={{ 
+                        minHeight: col.selectedDtype && (col.selectedDtype.toLowerCase().includes('datetime64') || col.selectedDtype.toLowerCase().includes('datetime'))
+                          ? 'auto'
+                          : '1.75rem',
+                        height: col.selectedDtype && (col.selectedDtype.toLowerCase().includes('datetime64') || col.selectedDtype.toLowerCase().includes('datetime'))
+                          ? 'auto'
+                          : '1.75rem'
+                      }}
                     >
                       <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={col.name}>
                         <div className="truncate">
@@ -503,35 +528,119 @@ export const DirectReviewPanel: React.FC<DirectReviewPanelProps> = ({ frame, onC
                           </span>
                         </div>
                       </td>
-                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
-                        <div 
-                          className="relative inline-block w-full max-w-[90px]" 
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <select
-                            value={col.selectedDtype}
-                            onChange={e => {
-                              e.stopPropagation();
-                              updateColumn(idx, { selectedDtype: e.target.value });
-                            }}
-                            disabled={inputsDisabled}
+                      <td className="px-0.5 py-0.5 border border-gray-300 text-[10px] leading-tight align-top">
+                        <div className="space-y-0.5">
+                          <div 
+                            className="relative inline-block w-full max-w-[90px]" 
                             onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed`}
-                            style={{
-                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                              backgroundSize: '1em 1em',
-                              backgroundPosition: 'right 0.25rem center',
-                              backgroundRepeat: 'no-repeat',
-                              paddingRight: '1.5rem'
-                            }}
                           >
-                            {dtypeOptions.map(opt => (
-                              <option key={`dtype-${col.name}-${opt.value}`} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
+                            <select
+                              value={(() => {
+                                // Normalize datetime64 variants to 'datetime64' for display
+                                if (col.selectedDtype && (col.selectedDtype.toLowerCase().includes('datetime64') || col.selectedDtype.toLowerCase().includes('datetime'))) {
+                                  return 'datetime64';
+                                }
+                                return col.selectedDtype;
+                              })()}
+                              onChange={e => {
+                                e.stopPropagation();
+                                const newDtype = e.target.value;
+                                updateColumn(idx, {
+                                  selectedDtype: newDtype,
+                                  ...(newDtype !== 'datetime64' ? { datetimeFormat: undefined } : {})
+                                });
+                              }}
+                              disabled={inputsDisabled}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed`}
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                backgroundSize: '1em 1em',
+                                backgroundPosition: 'right 0.25rem center',
+                                backgroundRepeat: 'no-repeat',
+                                paddingRight: '1.5rem'
+                              }}
+                            >
+                              {dtypeOptions.map(opt => (
+                                <option key={`dtype-${col.name}-${opt.value}`} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Format dropdown for datetime64 columns */}
+                          {(() => {
+                            const selectedDtype = col.selectedDtype && (col.selectedDtype.toLowerCase().includes('datetime64') || col.selectedDtype.toLowerCase().includes('datetime'))
+                              ? 'datetime64'
+                              : col.selectedDtype;
+                            if (selectedDtype !== 'datetime64') return null;
+                            
+                            return (
+                              <div className="space-y-0.5 mt-0.5">
+                                <div className="flex items-center space-x-0.5">
+                                  <div className="relative inline-block w-full max-w-[90px]">
+                                    <select
+                                      value={col.datetimeFormat || ''}
+                                      onChange={e => {
+                                        e.stopPropagation();
+                                        const format = e.target.value;
+                                        updateColumn(idx, { datetimeFormat: format });
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                      disabled={inputsDisabled}
+                                      className="w-full h-4 px-0.5 py-0 text-[9px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                      style={{
+                                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                        backgroundSize: '0.75em 0.75em',
+                                        backgroundPosition: 'right 0.15rem center',
+                                        backgroundRepeat: 'no-repeat',
+                                        paddingRight: '1rem'
+                                      }}
+                                    >
+                                      <option value="">Select format...</option>
+                                      {DATETIME_FORMAT_OPTIONS.map(format => (
+                                        <option key={format.value} value={format.value}>
+                                          {formatLabelWithExample(format)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  {col.datetimeFormat && (
+                                    <div 
+                                      className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-green-500"
+                                      title="Format selected manually"
+                                    />
+                                  )}
+                                  {col.datetimeFormat && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateColumn(idx, { datetimeFormat: undefined });
+                                      }}
+                                      className="flex-shrink-0 p-0.5 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700"
+                                      title="Clear format"
+                                      disabled={inputsDisabled}
+                                    >
+                                      <X className="w-2 h-2" />
+                                    </button>
+                                  )}
+                                </div>
+                                {col.datetimeFormat && (
+                                  <div className="text-[8px] text-gray-500 truncate flex items-center gap-1 max-w-[90px]">
+                                    <span className="truncate">{col.datetimeFormat}</span>
+                                    <div 
+                                      className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-green-500"
+                                      title="Format selected manually"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </td>
                       <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">

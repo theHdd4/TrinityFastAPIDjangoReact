@@ -995,7 +995,12 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                                                paddingRight: '2rem'
                                              }}
                                            >
-                                             {getDtypeOptions(column.dtype, column.suggested_types).map((opt) => (
+                                             {getDtypeOptions(
+                                               column.dtype && (column.dtype.toLowerCase().includes('datetime64') || column.dtype.toLowerCase().includes('datetime'))
+                                                 ? 'datetime64'
+                                                 : column.dtype,
+                                               column.suggested_types
+                                             ).map((opt) => (
                                                <option key={opt.value} value={opt.value}>
                                                  {opt.isSuggested ? `✨ ${opt.label}` : opt.label}
                                                </option>
@@ -1034,31 +1039,33 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                                                  </div>
                                                )}
                                                <div className="flex items-center space-x-0.5">
-                                                 <select
-                                                   value={currentFormat || ''}
-                                                   onChange={(e) => {
-                                                     e.stopPropagation();
-                                                     handleDatetimeFormatChange(file.name, column.name, e.target.value);
-                                                   }}
-                                                   onClick={(e) => e.stopPropagation()}
-                                                   onMouseDown={(e) => e.stopPropagation()}
-                                                   disabled={isDetecting}
-                                                   className="flex-1 h-4 px-0.5 py-0 text-[9px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                                                   style={{
-                                                     backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                                                     backgroundSize: '0.75em 0.75em',
-                                                     backgroundPosition: 'right 0.15rem center',
-                                                     backgroundRepeat: 'no-repeat',
-                                                     paddingRight: '1rem'
-                                                   }}
-                                                 >
-                                                   <option value="">Select format...</option>
-                                                   {DATETIME_FORMAT_OPTIONS.map(format => (
-                                                     <option key={format.value} value={format.value}>
-                                                       {formatLabelWithExample(format)}
-                                                     </option>
-                                                   ))}
-                                                 </select>
+                                                 <div className="relative inline-block w-full max-w-[90px]">
+                                                   <select
+                                                     value={currentFormat || ''}
+                                                     onChange={(e) => {
+                                                       e.stopPropagation();
+                                                       handleDatetimeFormatChange(file.name, column.name, e.target.value);
+                                                     }}
+                                                     onClick={(e) => e.stopPropagation()}
+                                                     onMouseDown={(e) => e.stopPropagation()}
+                                                     disabled={isDetecting}
+                                                     className="w-full h-4 px-0.5 py-0 text-[9px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                     style={{
+                                                       backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                                       backgroundSize: '0.75em 0.75em',
+                                                       backgroundPosition: 'right 0.15rem center',
+                                                       backgroundRepeat: 'no-repeat',
+                                                       paddingRight: '1rem'
+                                                     }}
+                                                   >
+                                                     <option value="">Select format...</option>
+                                                     {DATETIME_FORMAT_OPTIONS.map(format => (
+                                                       <option key={format.value} value={format.value}>
+                                                         {formatLabelWithExample(format)}
+                                                       </option>
+                                                     ))}
+                                                   </select>
+                                                 </div>
                                                  {currentFormat && !isDetecting && (
                                                    <div 
                                                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
@@ -1088,8 +1095,8 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                                                  )}
                                                </div>
                                                {currentFormat && !isDetecting && (
-                                                 <div className="text-[8px] text-gray-500 truncate flex items-center gap-1">
-                                                   <span>{currentFormat}</span>
+                                                 <div className="text-[8px] text-gray-500 truncate flex items-center gap-1 max-w-[90px]">
+                                                   <span className="truncate">{currentFormat}</span>
                                                    <div 
                                                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                                                        detectionMethod === 'manual' ? 'bg-green-500' : 
