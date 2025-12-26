@@ -12,6 +12,14 @@ import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useG
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { UPLOAD_API } from '@/lib/api';
+import { 
+  autoConfirmHeaders, 
+  autoKeepColumnNames, 
+  autoDetectDataTypes, 
+  autoApplyMissingValueStrategies,
+  autoFinalizeAndPrime 
+} from './autoPrimeUtils';
+import { toast } from '@/hooks/use-toast';
 
 interface GuidedUploadFlowInlineProps {
   atomId: string;
@@ -36,6 +44,8 @@ interface GuidedUploadFlowInlineProps {
   onClose?: () => void;
   /** Whether the flow is in maximization mode (shows 20 rows instead of 5) */
   isMaximized?: boolean;
+  /** Auto-prime mode: automatically progress through all stages without user interaction */
+  autoPrime?: boolean;
 }
 
 // Only U2-U6 are used now (U0, U1, and U7 removed)
@@ -91,6 +101,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   savedState,
   onClose,
   isMaximized = false,
+  autoPrime = false,
 }) => {
   // CRITICAL FIX: If existingDataframe is provided, merge its path into savedState BEFORE initializing the hook
   // This ensures the correct path (with folder structure) is used even if savedState has a wrong/stripped path
@@ -129,7 +140,7 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
   }, [existingDataframe, savedState]);
   
   const flow = useGuidedUploadFlow(mergedSavedState);
-  const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage, updateUploadedFilePath } = flow;
+  const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage, updateUploadedFilePath, setHeaderSelection, setColumnNameEdits, setDataTypeSelections, setMissingValueStrategies } = flow;
   const { saveState, markFileAsPrimed } = useGuidedFlowPersistence();
   const { setActiveGuidedFlow, updateGuidedFlowStage, removeActiveGuidedFlow } = useLaboratoryStore();
   
@@ -360,6 +371,134 @@ export const GuidedUploadFlowInline: React.FC<GuidedUploadFlowInlineProps> = ({
       }
     };
   }, []);
+
+  // Auto-prime: automatically progress through all stages
+  useEffect(() => {
+    if (!autoPrime || !state.uploadedFiles.length) return;
+
+    const autoProgress = async () => {
+      try {
+        const currentFile = state.uploadedFiles[state.selectedFileIndex || 0];
+        if (!currentFile?.path) return;
+
+        // U2: Auto-confirm headers
+        if (state.currentStage === 'U2') {
+          const result = await autoConfirmHeaders(currentFile.path);
+          if (result.success && result.data) {
+            setHeaderSelection(currentFile.name, {
+              headerRowIndex: result.data.headerRow,
+              headerRowCount: result.data.headerRowCount,
+              noHeader: false,
+            });
+            setTimeout(() => goToNextStage(), 500);
+          } else {
+            console.error('Auto-prime U2 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to confirm headers', variant: 'destructive' });
+          }
+        }
+        // U3: Auto-keep column names
+        else if (state.currentStage === 'U3') {
+          const result = await autoKeepColumnNames(currentFile.path);
+          if (result.success && result.data) {
+            setColumnNameEdits(currentFile.name, result.data.columnNameEdits);
+            setTimeout(() => goToNextStage(), 500);
+          } else {
+            console.error('Auto-prime U3 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to keep column names', variant: 'destructive' });
+          }
+        }
+        // U4: Auto-detect data types
+        else if (state.currentStage === 'U4') {
+          const columnEdits = state.columnNameEdits[currentFile.name] || [];
+          const columnNames = columnEdits.filter(e => e.keep !== false).map(e => e.editedName || e.originalName);
+          const result = await autoDetectDataTypes(currentFile.path, columnNames);
+          if (result.success && result.data) {
+            setDataTypeSelections(currentFile.name, result.data.dataTypeSelections);
+            setTimeout(() => goToNextStage(), 500);
+          } else {
+            console.error('Auto-prime U4 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to detect data types', variant: 'destructive' });
+          }
+        }
+        // U5: Auto-apply missing value strategies
+        else if (state.currentStage === 'U5') {
+          const columnEdits = state.columnNameEdits[currentFile.name] || [];
+          const dataTypes = state.dataTypeSelections[currentFile.name] || [];
+          const columnNames = columnEdits.filter(e => e.keep !== false).map(e => e.editedName || e.originalName);
+          const dataTypesForMissing = dataTypes.map(dt => ({
+            columnName: dt.columnName,
+            dataType: dt.updateType || dt.selectedType || 'string',
+            columnRole: dt.columnRole || 'identifier',
+          }));
+          const result = await autoApplyMissingValueStrategies(currentFile.path, columnNames, dataTypesForMissing);
+          if (result.success && result.data) {
+            setMissingValueStrategies(currentFile.name, result.data.missingValueStrategies);
+            setTimeout(() => goToNextStage(), 500);
+          } else {
+            console.error('Auto-prime U5 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to apply missing value strategies', variant: 'destructive' });
+          }
+        }
+        // U6: Auto-finalize and prime
+        else if (state.currentStage === 'U6') {
+          const columnEdits = state.columnNameEdits[currentFile.name] || [];
+          const dataTypes = state.dataTypeSelections[currentFile.name] || [];
+          const missingStrategies = state.missingValueStrategies[currentFile.name] || [];
+          const originalFilePath = currentFile.originalPath || currentFile.path;
+          
+          const result = await autoFinalizeAndPrime(
+            currentFile.path,
+            originalFilePath,
+            currentFile.name,
+            columnEdits,
+            dataTypes,
+            missingStrategies
+          );
+          
+          if (result.success) {
+            // Mark file as primed using the exact file path (same as U6FinalPreview)
+            await markFileAsPrimed(currentFile.path);
+            
+            toast({ title: 'File primed', description: `${currentFile.name} has been automatically primed.` });
+            
+            // Dispatch events to refresh UI (same as U6FinalPreview)
+            window.dispatchEvent(new CustomEvent('dataframe-saved', {
+              detail: { filePath: currentFile.path, fileName: currentFile.path },
+            }));
+            window.dispatchEvent(new CustomEvent('priming-status-changed', {
+              detail: { targetObjectName: currentFile.path, status: { isPrimed: true, isApproved: true } }
+            }));
+            window.dispatchEvent(new CustomEvent('force-refresh-priming-status', {
+              detail: { objectName: currentFile.path, isPrimed: true }
+            }));
+            
+            // Complete the flow
+            onComplete?.({
+              uploadedFiles: state.uploadedFiles,
+              headerSelections: state.headerSelections,
+              columnNameEdits: state.columnNameEdits,
+              dataTypeSelections: state.dataTypeSelections,
+              missingValueStrategies: state.missingValueStrategies,
+            });
+            onClose?.();
+          } else {
+            console.error('Auto-prime U6 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to finalize and prime file', variant: 'destructive' });
+          }
+        }
+      } catch (error: any) {
+        console.error('Auto-prime error:', error);
+        toast({ title: 'Auto-prime error', description: error.message || 'An error occurred during auto-prime', variant: 'destructive' });
+      }
+    };
+
+    // Small delay to ensure stage component is mounted
+    const timeoutId = setTimeout(() => {
+      void autoProgress();
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, [autoPrime, state.currentStage, state.uploadedFiles, state.selectedFileIndex, state.columnNameEdits, state.dataTypeSelections, state.missingValueStrategies, setHeaderSelection, setColumnNameEdits, setDataTypeSelections, setMissingValueStrategies, goToNextStage, markFileAsPrimed, onComplete, onClose]);
 
   // Sync with store's stage when right panel navigation occurs (EXTERNAL navigation only)
   // This allows clicking on steps in the right panel to navigate the canvas

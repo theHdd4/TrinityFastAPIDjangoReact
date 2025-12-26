@@ -12,6 +12,8 @@ import { useToast } from '@/hooks/use-toast';
 import { PartialPrimedCard } from '@/components/LaboratoryMode/LandingScreen/PartialPrimedCard';
 import { DirectReviewPanel } from '@/components/LaboratoryMode/components/DirectReviewPanel';
 import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
+import { openGuidedMode } from '@/components/LaboratoryMode/components/equalizer_icon/openGuidedMode';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import {
   Dialog,
   DialogContent,
@@ -44,6 +46,8 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
   const setDirectReviewTarget = useLaboratoryStore((state) => state.setDirectReviewTarget);
   const removeActiveGuidedFlow = useLaboratoryStore((state) => state.removeActiveGuidedFlow);
   const updateAtomSettings = useLaboratoryStore((state) => state.updateAtomSettings);
+  const setGlobalGuidedMode = useLaboratoryStore((state) => state.setGlobalGuidedMode);
+  const cards = useLaboratoryStore((state) => state.cards);
   
   const settings = useLaboratoryStore((state) => {
     const currentAtom = state.getAtom(atomId);
@@ -759,6 +763,44 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
               window.dispatchEvent(new CustomEvent('dataframe-saved', { 
                 detail: { filePath: objectName, fileName: upload.filename || meta.file_name } 
               }));
+              
+              // Auto-trigger guided mode with auto-prime enabled
+              const findOrCreateDataUploadAtom = () => {
+                // Look for existing data-upload atom
+                for (const card of cards) {
+                  if (card?.atoms && Array.isArray(card.atoms)) {
+                    for (const atom of card.atoms) {
+                      if (atom?.atomId === 'data-upload' && atom?.id) {
+                        return atom.id;
+                      }
+                    }
+                  }
+                }
+                // If not found, return current atomId
+                return atomId;
+              };
+              
+              // Auto-trigger guided mode with auto-prime
+              setTimeout(async () => {
+                try {
+                  await openGuidedMode({
+                    frame: {
+                      object_name: objectName,
+                      csv_name: upload.filename || meta.file_name,
+                      arrow_name: objectName.endsWith('.arrow') ? objectName : undefined,
+                      size: upload.size || meta.file_path ? 0 : undefined,
+                    },
+                    findOrCreateDataUploadAtom,
+                    setActiveGuidedFlow,
+                    setGlobalGuidedMode,
+                    cards,
+                    autoPrime: true, // Enable auto-prime
+                  });
+                  console.log(`[DataUploadAtom] Auto-triggered guided mode with auto-prime for ${objectName}`);
+                } catch (error) {
+                  console.error(`[DataUploadAtom] Failed to auto-trigger guided mode for ${objectName}:`, error);
+                }
+              }, 500); // Small delay to ensure file is saved
             }, index * 100); // Stagger events slightly
           }
         });
@@ -769,10 +811,45 @@ const DataUploadAtomContent: React.FC<DataUploadAtomProps> = ({ atomId }) => {
           window.dispatchEvent(new CustomEvent('dataframe-saved', { 
             detail: { filePath: meta.file_path, fileName: meta.file_name } 
           }));
+          
+          // Auto-trigger guided mode with auto-prime for fallback case
+          const findOrCreateDataUploadAtom = () => {
+            for (const card of cards) {
+              if (card?.atoms && Array.isArray(card.atoms)) {
+                for (const atom of card.atoms) {
+                  if (atom?.atomId === 'data-upload' && atom?.id) {
+                    return atom.id;
+                  }
+                }
+              }
+            }
+            return atomId;
+          };
+          
+          setTimeout(async () => {
+            try {
+              await openGuidedMode({
+                frame: {
+                  object_name: meta.file_path,
+                  csv_name: meta.file_name,
+                  arrow_name: meta.file_path.endsWith('.arrow') ? meta.file_path : undefined,
+                  size: 0,
+                },
+                findOrCreateDataUploadAtom,
+                setActiveGuidedFlow,
+                setGlobalGuidedMode,
+                cards,
+                autoPrime: true,
+              });
+              console.log(`[DataUploadAtom] Auto-triggered guided mode with auto-prime (fallback) for ${meta.file_name}`);
+            } catch (error) {
+              console.error(`[DataUploadAtom] Failed to auto-trigger guided mode (fallback) for ${meta.file_name}:`, error);
+            }
+          }, 500);
         }, 100);
       }
       
-      toast({ title: 'Dataframe saved', description: `${meta.file_name} uploaded successfully.` });
+      toast({ title: 'Dataframe saved', description: `${meta.file_name} uploaded successfully. Auto-priming in progress...` });
       resetUploadState();
       setReloadToken(prev => prev + 1);
       fetchSavedDataframes();

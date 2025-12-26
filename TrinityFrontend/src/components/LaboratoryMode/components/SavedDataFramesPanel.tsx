@@ -35,6 +35,7 @@ import { useLaboratoryStore, createDefaultDataUploadSettings, DroppedAtom } from
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { openGuidedMode } from './equalizer_icon';
 import { atoms as allAtoms } from '@/components/AtomList/data';
+import { TruncatedFileName } from '@/components/common/TruncatedFileName';
 
 interface Props {
   isOpen: boolean;
@@ -185,7 +186,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [excelFolders, setExcelFolders] = useState<ExcelFolder[]>([]);
   const [prefix, setPrefix] = useState('');
   const [filePrimingStatus, setFilePrimingStatus] = useState<Record<string, {
-    isApproved: boolean;  // Simple boolean: true = green (approved), false = red (not approved)
+    isApproved?: boolean;  // Simple boolean: true = green (approved), false = red (not approved)
+    isPrimed?: boolean;    // Auto-primed flag: true = auto approved (green), false = not auto-primed
   }>>({});
   const [openDirs, setOpenDirs] = useState<Record<string, boolean>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
@@ -1874,6 +1876,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           ...prev,
           [objectName]: {
             isApproved: isPrimed === true,
+            isPrimed: isPrimed === true,
           }
         }));
         
@@ -1895,11 +1898,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           // Immediately update the status for this specific file
           // If status is provided, use it; otherwise default to approved (since event means approval just happened)
           const isApproved = status?.isApproved === true || status?.isPrimed === true || (!status || Object.keys(status).length === 0);
+          const isPrimed = status?.isPrimed === true;
           
           setFilePrimingStatus(prev => ({
             ...prev,
             [targetObjectName]: {
               isApproved,
+              isPrimed,
             }
           }));
         }
@@ -2148,6 +2153,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               const metadataChecks: Record<string, boolean> = {};
               const approvalStatusChecks: Record<string, {
                 isApproved: boolean;
+                isPrimed?: boolean;
               }> = {};
               
               for (const f of filtered) {
@@ -2192,14 +2198,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                     );
 
                     let isApproved = false;
+                    let isPrimed = false;
                     if (primingRes.ok) {
                       const primingData = await primingRes.json();
                       // Simple check: if primed flag exists, file is approved
                       isApproved = primingData?.is_primed === true;
+                      isPrimed = primingData?.is_primed === true;
                     }
 
                     approvalStatusChecks[f.object_name] = {
                       isApproved,
+                      isPrimed,
                     };
                   }
                 } catch (err) {
@@ -2207,6 +2216,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   // Default to not approved (red) when status check fails
                   approvalStatusChecks[f.object_name] = {
                     isApproved: false,
+                    isPrimed: false,
                   };
                 }
               }
@@ -2235,14 +2245,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                         );
 
                         let isApproved = false;
+                        let isPrimed = false;
                         if (primingRes.ok) {
                           const primingData = await primingRes.json();
                           // Simple check: if primed flag exists, sheet is approved
                           isApproved = primingData?.is_primed === true;
+                          isPrimed = primingData?.is_primed === true;
                         }
 
                         approvalStatusChecks[sheet.object_name] = {
                           isApproved,
+                          isPrimed,
                         };
                       }
                     } catch (err) {
@@ -2250,6 +2263,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                       // Default to not approved (red) when status check fails
                       approvalStatusChecks[sheet.object_name] = {
                         isApproved: false,
+                        isPrimed: false,
                       };
                     }
                   }
@@ -2972,10 +2986,18 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   // Helper function to generate approval status tooltip content
   const getPrimingStatusTooltip = (status: {
     isApproved?: boolean;
-  }): string => {
-    return status.isApproved 
-      ? '✅ Approved - Ready for use'
-      : '❌ Not approved - Click equalizer icon to approve';
+    isPrimed?: boolean;
+  }): React.ReactNode => {
+    if (status.isApproved || status.isPrimed) {
+      return status.isPrimed 
+        ? '✅ Auto approved - File has been automatically primed'
+        : '✅ Approved - Ready for use';
+    }
+    return (
+      <span className="flex items-center gap-1">
+        <AlertCircle className="w-3 h-3 inline text-yellow-500" /> Auto approved - Click <SlidersHorizontal className="w-3 h-3 inline" /> to approve manually
+      </span>
+    );
   };
 
   const renderNode = (node: TreeNode, level = 0): React.ReactNode => {
@@ -3097,18 +3119,18 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                 });
                               }}
                               className={`text-xs hover:underline text-left flex-1 truncate overflow-hidden text-ellipsis whitespace-nowrap flex items-center gap-1 ${
-                                sheetStatus?.isApproved
+                                sheetStatus?.isApproved || sheetStatus?.isPrimed
                                   ? 'text-green-600 font-medium'
-                                  : 'text-red-600 font-medium'
+                                  : 'text-gray-900 font-medium'
                               }`}
                             >
                               <FileText className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                              <span>{sheet.sheet_name}</span>
+                              <TruncatedFileName fileName={sheet.sheet_name} className="inline" />
                               <span className="text-gray-400 font-normal">(.arrow)</span>
                             </button>
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs whitespace-pre-line text-xs">
-                            <div className="font-semibold mb-1">{sheet.sheet_name}</div>
+                            <div className="font-semibold mb-1 text-blue-600">{sheet.sheet_name}</div>
                             <div className="border-t pt-1 mt-1">{sheetTooltipContent}</div>
                           </TooltipContent>
                         </Tooltip>
@@ -3231,16 +3253,19 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                       onClick={() => handleOpen(f.object_name)}
                       onContextMenu={(e) => handleContextMenu(e, f)}
                       className={`text-xs hover:underline text-left flex-1 truncate overflow-hidden text-ellipsis whitespace-nowrap ${
-                        status?.isApproved
+                        status?.isApproved || status?.isPrimed
                           ? 'text-green-600 font-medium'
-                          : 'text-red-600 font-medium'
+                          : 'text-gray-900 font-medium'
                       }`}
                     >
-                      {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+                      <TruncatedFileName 
+                        fileName={f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+                        className="inline"
+                      />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs whitespace-pre-line text-xs">
-                    <div className="font-semibold mb-1">
+                    <div className="font-semibold mb-1 break-words text-blue-600">
                       {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
                     </div>
                     <div className="border-t pt-1 mt-1">
@@ -4766,7 +4791,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             <DialogHeader>
               <DialogTitle>Select Mode of Priming</DialogTitle>
               <DialogDescription>
-                Choose how you want to prime this file: {modeSelectionTarget.arrow_name || modeSelectionTarget.csv_name || modeSelectionTarget.object_name}
+                Choose how you want to prime this file:{' '}
+                <TruncatedFileName 
+                  fileName={modeSelectionTarget.arrow_name || modeSelectionTarget.csv_name || modeSelectionTarget.object_name}
+                  className="font-medium"
+                />
               </DialogDescription>
             </DialogHeader>
             

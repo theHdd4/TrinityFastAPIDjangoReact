@@ -62,6 +62,7 @@ import FormularBar from './FormularBar';
 import CollapsibleFormulaBar from './CollapsibleFormulaBar';
 import { DataSummaryView } from '@/components/shared/DataSummaryView';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
+import { TruncatedFileName } from '@/components/common/TruncatedFileName';
 import {
   PivotTableSettings as PivotSettings,
   DEFAULT_PIVOT_TABLE_SETTINGS,
@@ -5895,7 +5896,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               <div className="relative">
                 <div className="flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r border-slate-200 bg-white -mb-px shadow-lg">
                   <FileText className="w-4 h-4" />
-                  <span>{data.fileName.split('/').pop()}</span>
+                  <TruncatedFileName fileName={data.fileName.split('/').pop()} />
                 </div>
               </div>
             </div>

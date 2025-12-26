@@ -19,6 +19,8 @@ interface OpenGuidedModeParams {
   cards?: any[];
   updateCard?: (cardId: string, updates: Partial<any>) => void;
   setCards?: (cards: any[]) => void;
+  // Auto-prime mode: automatically progress through all stages without user interaction
+  autoPrime?: boolean;
 }
 
 export const openGuidedMode = async ({
@@ -29,6 +31,7 @@ export const openGuidedMode = async ({
   cards,
   updateCard,
   setCards,
+  autoPrime = false,
 }: OpenGuidedModeParams): Promise<void> => {
   try {
     console.log('[openGuidedMode] Starting with frame:', frame);
@@ -244,6 +247,8 @@ export const openGuidedMode = async ({
           dataTypeSelections: {},
           missingValueStrategies: {},
           fileMetadata: {},
+          // Auto-prime flag: when true, automatically progress through all stages
+          autoPrime: autoPrime,
         });
         console.log('[openGuidedMode] setActiveGuidedFlow called successfully');
       } else {

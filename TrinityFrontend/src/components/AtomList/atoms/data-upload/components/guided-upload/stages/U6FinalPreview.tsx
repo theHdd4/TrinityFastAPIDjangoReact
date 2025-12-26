@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, RefreshCw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -9,6 +9,7 @@ import type { ReturnTypeFromUseGuidedUploadFlow } from '../useGuidedUploadFlow';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useGuidedFlowPersistence';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { DATETIME_FORMAT_OPTIONS, formatLabelWithExample } from '@/utils/datetimeFormats';
 
 // Helper to extract filename from path
 const getFileName = (path: string): string => {
@@ -716,7 +717,7 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
                     <tr
                       key={`col-${col.name}-${idx}`}
                       className={col.dropColumn ? 'bg-gray-50 opacity-60 hover:bg-gray-50' : 'hover:bg-gray-50'}
-                      style={{ height: '1.75rem' }}
+                      style={{ minHeight: '1.75rem', height: col.selectedDtype === 'datetime64' ? 'auto' : '1.75rem' }}
                     >
                       <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden" title={col.name}>
                         <div className="truncate">
@@ -753,35 +754,104 @@ export const U6FinalPreview: React.FC<U6FinalPreviewProps> = ({ flow, onNext, on
                           </span>
                         </div>
                       </td>
-                      <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
-                        <div 
-                          className="relative inline-block w-full max-w-[90px]" 
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <select
-                            value={col.selectedDtype}
-                            onChange={e => {
-                              e.stopPropagation();
-                              updateColumn(idx, { selectedDtype: e.target.value });
-                            }}
-                            disabled={inputsDisabled}
+                      <td className="px-0.5 py-0.5 border border-gray-300 text-[10px] leading-tight align-top">
+                        <div className="space-y-0.5">
+                          <div 
+                            className="relative inline-block w-full max-w-[90px]" 
                             onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed`}
-                            style={{
-                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                              backgroundSize: '1em 1em',
-                              backgroundPosition: 'right 0.25rem center',
-                              backgroundRepeat: 'no-repeat',
-                              paddingRight: '1.5rem'
-                            }}
                           >
-                            {dtypeOptions.map(opt => (
-                              <option key={`dtype-${col.name}-${opt.value}`} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
+                            <select
+                              value={col.selectedDtype}
+                              onChange={e => {
+                                e.stopPropagation();
+                                const newDtype = e.target.value;
+                                updateColumn(idx, { 
+                                  selectedDtype: newDtype,
+                                  ...(newDtype !== 'datetime64' ? { datetimeFormat: undefined } : {})
+                                });
+                              }}
+                              disabled={inputsDisabled}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed`}
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                backgroundSize: '1em 1em',
+                                backgroundPosition: 'right 0.25rem center',
+                                backgroundRepeat: 'no-repeat',
+                                paddingRight: '1.5rem'
+                              }}
+                            >
+                              {dtypeOptions.map(opt => (
+                                <option key={`dtype-${col.name}-${opt.value}`} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          
+                          {/* Format dropdown for datetime64 columns */}
+                          {col.selectedDtype === 'datetime64' && (
+                            <div className="space-y-0.5 mt-0.5">
+                              <div className="flex items-center space-x-0.5">
+                                <select
+                                  value={col.datetimeFormat || ''}
+                                  onChange={e => {
+                                    e.stopPropagation();
+                                    const format = e.target.value;
+                                    updateColumn(idx, { datetimeFormat: format });
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  disabled={inputsDisabled}
+                                  className="flex-1 h-4 px-0.5 py-0 text-[9px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                  style={{
+                                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                    backgroundSize: '0.75em 0.75em',
+                                    backgroundPosition: 'right 0.15rem center',
+                                    backgroundRepeat: 'no-repeat',
+                                    paddingRight: '1rem'
+                                  }}
+                                >
+                                  <option value="">Select format...</option>
+                                  {DATETIME_FORMAT_OPTIONS.map(format => (
+                                    <option key={format.value} value={format.value}>
+                                      {formatLabelWithExample(format)}
+                                    </option>
+                                  ))}
+                                </select>
+                                {col.datetimeFormat && (
+                                  <div 
+                                    className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-green-500"
+                                    title="Format selected manually"
+                                  />
+                                )}
+                                {col.datetimeFormat && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      updateColumn(idx, { datetimeFormat: undefined });
+                                    }}
+                                    className="flex-shrink-0 p-0.5 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700"
+                                    title="Clear format"
+                                    disabled={inputsDisabled}
+                                  >
+                                    <X className="w-2 h-2" />
+                                  </button>
+                                )}
+                              </div>
+                              {col.datetimeFormat && (
+                                <div className="text-[8px] text-gray-500 truncate flex items-center gap-1">
+                                  <span>{col.datetimeFormat}</span>
+                                  <div 
+                                    className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-green-500"
+                                    title="Format selected manually"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">

@@ -13,6 +13,14 @@ import { useGuidedFlowPersistence } from '@/components/LaboratoryMode/hooks/useG
 import { GuidedUploadFlowState } from '../../../data-validate/components/guided-upload';
 import { UPLOAD_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import { 
+  autoConfirmHeaders, 
+  autoKeepColumnNames, 
+  autoDetectDataTypes, 
+  autoApplyMissingValueStrategies,
+  autoFinalizeAndPrime 
+} from './autoPrimeUtils';
+import { toast } from '@/hooks/use-toast';
 
 interface GuidedUploadFlowProps {
   open: boolean;
@@ -34,6 +42,8 @@ interface GuidedUploadFlowProps {
   initialStage?: UploadStage;
   /** Saved state to restore (for resuming) */
   savedState?: Partial<GuidedUploadFlowState>;
+  /** Auto-prime mode: automatically progress through all stages without user interaction */
+  autoPrime?: boolean;
 }
 
 // Only U2-U6 are used now (U0 handled by atom, U1 and U7 removed)
@@ -60,12 +70,14 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
   existingDataframe,
   initialStage,
   savedState,
+  autoPrime = false,
 }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isMaximized, setIsMaximized] = useState(true); // Start maximized (fullscreen)
   const flow = useGuidedUploadFlow(savedState);
-  const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage } = flow;
-  const { saveState } = useGuidedFlowPersistence();
+  const { state, goToNextStage, goToPreviousStage, restartFlow, addUploadedFiles, goToStage, setHeaderSelection, setColumnNameEdits, setDataTypeSelections, setMissingValueStrategies } = flow;
+  const currentFile = state.uploadedFiles[state.selectedFileIndex || 0];
+  const { saveState, markFileAsPrimed } = useGuidedFlowPersistence();
   
   // Track registered continue handlers from stage components
   const registeredContinueHandlerRef = useRef<(() => void | Promise<void>) | null>(null);
@@ -112,14 +124,6 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
       saveState(state);
     }
   }, [open, state, saveState]);
-
-  // No need to mark as primed here - U6FinalPreview handles it
-
-  // Reset registered handlers when stage changes
-  React.useEffect(() => {
-    registeredContinueHandlerRef.current = null;
-    continueDisabledRef.current = null;
-  }, [state.currentStage]);
 
   // Internal handler that actually moves to next stage (called by stage components after their work is done)
   const handleNextInternal = React.useCallback(async () => {
@@ -198,6 +202,141 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
     }
   }, [state.currentStage, state.uploadedFiles, state.selectedFileIndex, state.missingValueStrategies, goToNextStage, onComplete, onOpenChange]);
 
+  // Auto-prime: automatically progress through all stages
+  React.useEffect(() => {
+    if (!open || !autoPrime || !state.uploadedFiles.length) return;
+
+    const autoProgress = async () => {
+      try {
+        const currentFile = state.uploadedFiles[state.selectedFileIndex || 0];
+        if (!currentFile?.path) return;
+
+        // U2: Auto-confirm headers
+        if (state.currentStage === 'U2') {
+          const result = await autoConfirmHeaders(currentFile.path);
+          if (result.success && result.data) {
+            flow.setHeaderSelection(currentFile.name, {
+              headerRowIndex: result.data.headerRow,
+              headerRowCount: result.data.headerRowCount,
+              noHeader: false,
+            });
+            // Small delay before moving to next stage
+            setTimeout(() => handleNextInternal(), 500);
+          } else {
+            console.error('Auto-prime U2 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to confirm headers', variant: 'destructive' });
+          }
+        }
+        // U3: Auto-keep column names
+        else if (state.currentStage === 'U3') {
+          const result = await autoKeepColumnNames(currentFile.path);
+          if (result.success && result.data) {
+            flow.setColumnNameEdits(currentFile.name, result.data.columnNameEdits);
+            setTimeout(() => handleNextInternal(), 500);
+          } else {
+            console.error('Auto-prime U3 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to keep column names', variant: 'destructive' });
+          }
+        }
+        // U4: Auto-detect data types
+        else if (state.currentStage === 'U4') {
+          const columnEdits = state.columnNameEdits[currentFile.name] || [];
+          const columnNames = columnEdits.filter(e => e.keep !== false).map(e => e.editedName || e.originalName);
+          const result = await autoDetectDataTypes(currentFile.path, columnNames);
+          if (result.success && result.data) {
+            flow.setDataTypeSelections(currentFile.name, result.data.dataTypeSelections);
+            setTimeout(() => handleNextInternal(), 500);
+          } else {
+            console.error('Auto-prime U4 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to detect data types', variant: 'destructive' });
+          }
+        }
+        // U5: Auto-apply missing value strategies
+        else if (state.currentStage === 'U5') {
+          const columnEdits = state.columnNameEdits[currentFile.name] || [];
+          const dataTypes = state.dataTypeSelections[currentFile.name] || [];
+          const columnNames = columnEdits.filter(e => e.keep !== false).map(e => e.editedName || e.originalName);
+          const dataTypesForMissing = dataTypes.map(dt => ({
+            columnName: dt.columnName,
+            dataType: dt.updateType || dt.selectedType || 'string',
+            columnRole: dt.columnRole || 'identifier',
+          }));
+          const result = await autoApplyMissingValueStrategies(currentFile.path, columnNames, dataTypesForMissing);
+          if (result.success && result.data) {
+            flow.setMissingValueStrategies(currentFile.name, result.data.missingValueStrategies);
+            setTimeout(() => handleNextInternal(), 500);
+          } else {
+            console.error('Auto-prime U5 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to apply missing value strategies', variant: 'destructive' });
+          }
+        }
+        // U6: Auto-finalize and prime
+        else if (state.currentStage === 'U6') {
+          const columnEdits = state.columnNameEdits[currentFile.name] || [];
+          const dataTypes = state.dataTypeSelections[currentFile.name] || [];
+          const missingStrategies = state.missingValueStrategies[currentFile.name] || [];
+          const originalFilePath = currentFile.originalPath || currentFile.path;
+          
+          const result = await autoFinalizeAndPrime(
+            currentFile.path,
+            originalFilePath,
+            currentFile.name,
+            columnEdits,
+            dataTypes,
+            missingStrategies
+          );
+          
+          if (result.success) {
+            // Mark file as primed using the exact file path
+            await markFileAsPrimed(currentFile.path);
+            
+            toast({ title: 'File primed', description: `${currentFile.name} has been automatically primed.` });
+            
+            // Dispatch events to refresh UI (same as U6FinalPreview)
+            window.dispatchEvent(new CustomEvent('dataframe-saved', {
+              detail: { filePath: currentFile.path, fileName: currentFile.path },
+            }));
+            window.dispatchEvent(new CustomEvent('priming-status-changed', {
+              detail: { targetObjectName: currentFile.path, status: { isPrimed: true, isApproved: true } }
+            }));
+            window.dispatchEvent(new CustomEvent('force-refresh-priming-status', {
+              detail: { objectName: currentFile.path, isPrimed: true }
+            }));
+            
+            // Complete the flow
+            onComplete?.({
+              uploadedFiles: state.uploadedFiles,
+              headerSelections: state.headerSelections,
+              columnNameEdits: state.columnNameEdits,
+              dataTypeSelections: state.dataTypeSelections,
+              missingValueStrategies: state.missingValueStrategies,
+            });
+            onOpenChange(false);
+          } else {
+            console.error('Auto-prime U6 failed:', result.error);
+            toast({ title: 'Auto-prime failed', description: result.error || 'Failed to finalize and prime file', variant: 'destructive' });
+          }
+        }
+      } catch (error: any) {
+        console.error('Auto-prime error:', error);
+        toast({ title: 'Auto-prime error', description: error.message || 'An error occurred during auto-prime', variant: 'destructive' });
+      }
+    };
+
+    // Small delay to ensure stage component is mounted
+    const timeoutId = setTimeout(() => {
+      void autoProgress();
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, [open, autoPrime, state.currentStage, state.uploadedFiles, state.selectedFileIndex, state.columnNameEdits, state.dataTypeSelections, state.missingValueStrategies, flow, handleNextInternal, markFileAsPrimed, onComplete, onOpenChange]);
+
+  // Reset registered handlers when stage changes
+  React.useEffect(() => {
+    registeredContinueHandlerRef.current = null;
+    continueDisabledRef.current = null;
+  }, [state.currentStage]);
+
   // Public handleNext that checks for registered handlers first
   const handleNext = React.useCallback(async () => {
     // Check if there's a registered continue handler (e.g., from U2 stage)
@@ -248,44 +387,6 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
     setIsMinimized(false); // Can't be minimized and maximized at the same time
   };
 
-  const dialogClassName = isMinimized
-    ? "max-w-md h-auto max-h-[200px] bottom-4 right-4 top-auto left-auto translate-x-0 translate-y-0"
-    : isMaximized
-    ? "max-w-[100vw] max-h-[100vh] w-full h-full top-0 left-0 translate-x-0 translate-y-0 rounded-none"
-    : "max-w-6xl max-h-[95vh] w-[95vw] h-[95vh]";
-
-  const handleBack = () => {
-    // U2 is the first stage - if at U2, close the dialog
-    if (state.currentStage === 'U2') {
-      onOpenChange(false);
-    } else {
-      goToPreviousStage();
-    }
-  };
-
-  const handleRestart = () => {
-    restartFlow();
-  };
-
-  const handleCancel = () => {
-    onOpenChange(false);
-  };
-
-  const CurrentStageComponent = STAGE_COMPONENTS[state.currentStage];
-  // U2 is the first stage in the panel
-  const canGoBack = state.currentStage !== 'U2';
-  const isLastStage = state.currentStage === 'U6';
-  
-  // Only U2-U6 are visible (U0 handled by atom, U1 and U7 removed)
-  const visibleStages: UploadStage[] = ['U2', 'U3', 'U4', 'U5', 'U6'];
-
-  const toggleMinimize = () => {
-    setIsMinimized(!isMinimized);
-    if (isMinimized) {
-      setIsMaximized(true); // When restoring, go back to maximized
-    }
-  };
-
   // Callbacks to register/unregister continue handlers from stage components
   // We wrap the handler to prevent infinite loops: when the handler calls onNext,
   // we temporarily clear the registration so handleNext doesn't call it again
@@ -301,11 +402,6 @@ export const GuidedUploadFlow: React.FC<GuidedUploadFlowProps> = ({
   const registerContinueDisabled = React.useCallback((getDisabled: () => boolean) => {
     continueDisabledRef.current = getDisabled;
   }, []);
-
-  const toggleMaximize = () => {
-    setIsMaximized(!isMaximized);
-    setIsMinimized(false); // Can't be minimized and maximized at the same time
-  };
 
   const dialogClassName = isMinimized
     ? "max-w-md h-auto max-h-[200px] bottom-4 right-4 top-auto left-auto translate-x-0 translate-y-0"

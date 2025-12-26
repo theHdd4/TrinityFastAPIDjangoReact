@@ -352,16 +352,19 @@ export const PartialPrimedCard: React.FC<PartialPrimedCardProps> = ({
       {/* Priming Status Heading */}
       {primingStats.total > 0 && (
         <div className="px-6 pt-1 pb-0">
-          <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+          <h3 className="text-base font-semibold text-gray-800 flex flex-col gap-1">
             {primingStats.unprimed > 0 
               ? (
                   <>
-                    <span>Unprimed files detected. Click on</span>
-                    <SlidersHorizontal className="w-4 h-4 text-gray-700" />
-                    <span>icon to prime them</span>
+                    <span>Data has been auto-primed.</span>
+                    <span className="flex items-center gap-2">
+                      <span>Click on</span>
+                      <SlidersHorizontal className="w-4 h-4 text-gray-700" />
+                      <span>icon to validate manually (recommended).</span>
+                    </span>
                   </>
                 )
-              : `Status : All files primed`
+              : `Status : All files primed and manually validated.`
             }
           </h3>
         </div>

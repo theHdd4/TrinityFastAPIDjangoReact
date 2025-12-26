@@ -1275,6 +1275,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     // Get the initial file from the saved state (set by wrench icon in SavedDataFramesPanel)
     const flowState = activeGuidedFlows[atom.id];
     const existingDataframe = flowState?.state?.initialFile as { name: string; path: string; size?: number } | undefined;
+    const autoPrime = flowState?.state?.autoPrime || false;
     
     // Skip rendering the separate panel for U0 stage - the atom itself handles U0
     // The DataUploadAtom's upload area IS step 1 (U0)
@@ -1310,6 +1311,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           initialStage={activeGuidedFlows[atom.id]?.currentStage}
           existingDataframe={existingDataframe}
           isMaximized={isCardMaximized}
+          autoPrime={autoPrime}
         />
       </div>
     );

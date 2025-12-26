@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { UPLOAD_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { TruncatedFileName } from '@/components/common/TruncatedFileName';
+import { DATETIME_FORMAT_OPTIONS, formatLabelWithExample } from '@/utils/datetimeFormats';
 
 interface FileMetadata {
   columns: ColumnInfo[];
@@ -18,9 +20,14 @@ interface FileMetadata {
 interface ColumnInfo {
   name: string;
   dtype: string;
+  original_dtype?: string;
+  modified_dtype?: string;
+  suggested_types?: string[];
   missing_count: number;
   missing_percentage: number;
   sample_values: any[];
+  datetime_format?: string;
+  detection_method?: 'automatic' | 'manual' | 'none';
 }
 
 interface FileDataPreviewProps {
@@ -67,6 +74,7 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
   const [missingValueStrategies, setMissingValueStrategies] = useState<Record<string, Record<string, { strategy: string; value?: string }>>>(initialMissingValueStrategies);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [datetimeFormats, setDatetimeFormats] = useState<Record<string, Record<string, string>>>({});
+  const [formatDetectionMethods, setFormatDetectionMethods] = useState<Record<string, Record<string, 'automatic' | 'manual' | 'none'>>>({});
   const [formatDetectionStatus, setFormatDetectionStatus] = useState<Record<string, { detecting: boolean; failed: boolean }>>({});
   const { toast } = useToast();
 
@@ -203,6 +211,73 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
       if (response.ok) {
         const data = await response.json();
         setFilesMetadata(prev => ({ ...prev, [file.name]: data }));
+        
+        // Extract datetime formats and detection methods from metadata
+        if (data.columns) {
+          const formats: Record<string, string> = {};
+          const methods: Record<string, 'automatic' | 'manual' | 'none'> = {};
+          
+          data.columns.forEach((col: ColumnInfo) => {
+            // Check if this is a datetime column
+            const isDatetime = col.dtype && (
+              col.dtype.startsWith('datetime64') || 
+              col.dtype === 'datetime64[ns]' ||
+              col.dtype.includes('datetime')
+            );
+            
+            if (isDatetime) {
+              // If format is provided, use it
+              if (col.datetime_format) {
+                formats[col.name] = col.datetime_format;
+              }
+              
+              // Set detection method
+              if (col.detection_method) {
+                methods[col.name] = col.detection_method;
+              } else {
+                // If column was auto-detected as datetime64 but no detection_method specified,
+                // it means automatic detection succeeded but format detection may have failed
+                // We'll try manual detection if format is missing
+                methods[col.name] = 'automatic';
+                
+                // If format is missing, trigger manual detection
+                if (!col.datetime_format && file.path) {
+                  // Trigger format detection asynchronously
+                  setTimeout(() => {
+                    detectDatetimeFormat(file.name, col.name).then((detectedFormat) => {
+                      if (detectedFormat) {
+                        // Format was detected via manual detection
+                        setFormatDetectionMethods(prev => ({
+                          ...prev,
+                          [file.name]: {
+                            ...(prev[file.name] || {}),
+                            [col.name]: 'manual',
+                          },
+                        }));
+                      }
+                    }).catch(() => {
+                      // Silently fail - format detection will remain as automatic
+                    });
+                  }, 100);
+                }
+              }
+            }
+          });
+          
+          if (Object.keys(formats).length > 0) {
+            setDatetimeFormats(prev => ({
+              ...prev,
+              [file.name]: { ...(prev[file.name] || {}), ...formats },
+            }));
+          }
+          
+          if (Object.keys(methods).length > 0) {
+            setFormatDetectionMethods(prev => ({
+              ...prev,
+              [file.name]: { ...(prev[file.name] || {}), ...methods },
+            }));
+          }
+        }
       } else {
         console.error('Failed to fetch metadata for', file.name);
       }
@@ -381,10 +456,19 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
         }));
         
         if (data.can_detect && data.detected_format) {
+          const detectionMethod = data.detection_method || 'manual';
           toast({
             title: "Format Detected",
             description: `Auto-detected format: ${data.detected_format}`,
           });
+          // Store detection method
+          setFormatDetectionMethods(prev => ({
+            ...prev,
+            [fileName]: {
+              ...(prev[fileName] || {}),
+              [columnName]: detectionMethod,
+            },
+          }));
           return data.detected_format;
         } else {
           // Format detection failed - silently enable dropdown (no error message)
@@ -414,34 +498,81 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
 
   const handleDtypeChange = async (fileName: string, columnName: string, newDtype: string) => {
     if (newDtype === 'datetime64') {
-      // Auto-detect format when datetime is selected
-      const detectedFormat = await detectDatetimeFormat(fileName, columnName);
+      // Check if column was already datetime64 (automatic detection)
+      const file = uploadedFiles.find(f => f.name === fileName);
+      const metadata = filesMetadata[fileName];
+      const column = metadata?.columns?.find((col: ColumnInfo) => col.name === columnName);
+      const wasAutoDetected = column?.dtype && (
+        column.dtype.startsWith('datetime64') || 
+        column.dtype === 'datetime64[ns]' ||
+        column.dtype.includes('datetime')
+      );
       
-      if (detectedFormat) {
-        // Format detected successfully
+      // If column was auto-detected and already has format, use it
+      if (wasAutoDetected && column?.datetime_format) {
         setDtypeChanges(prev => ({
           ...prev,
           [fileName]: {
             ...(prev[fileName] || {}),
-            [columnName]: { dtype: 'datetime64', format: detectedFormat },
+            [columnName]: { dtype: 'datetime64', format: column.datetime_format },
           },
         }));
         setDatetimeFormats(prev => ({
           ...prev,
           [fileName]: {
             ...(prev[fileName] || {}),
-            [columnName]: detectedFormat,
+            [columnName]: column.datetime_format,
           },
         }));
+        // Set detection method from metadata
+        if (column.detection_method) {
+          setFormatDetectionMethods(prev => ({
+            ...prev,
+            [fileName]: {
+              ...(prev[fileName] || {}),
+              [columnName]: column.detection_method,
+            },
+          }));
+        }
       } else {
-        // Format detection failed - user needs to provide format
-        setDtypeChanges(prev => ({
-          ...prev,
-          [fileName]: {
-            ...(prev[fileName] || {}),
-            [columnName]: 'datetime64',
-          },
-        }));
+        // Auto-detect format when datetime is selected (manual detection)
+        const detectedFormat = await detectDatetimeFormat(fileName, columnName);
+        
+        if (detectedFormat) {
+          // Format detected successfully via manual detection
+          setDtypeChanges(prev => ({
+            ...prev,
+            [fileName]: {
+              ...(prev[fileName] || {}),
+              [columnName]: { dtype: 'datetime64', format: detectedFormat },
+            },
+          }));
+          setDatetimeFormats(prev => ({
+            ...prev,
+            [fileName]: {
+              ...(prev[fileName] || {}),
+              [columnName]: detectedFormat,
+            },
+          }));
+          // Detection method is already set in detectDatetimeFormat
+        } else {
+          // Format detection failed - user needs to provide format
+          setDtypeChanges(prev => ({
+            ...prev,
+            [fileName]: {
+              ...(prev[fileName] || {}),
+              [columnName]: 'datetime64',
+            },
+          }));
+          // Set detection method to none if format detection failed
+          setFormatDetectionMethods(prev => ({
+            ...prev,
+            [fileName]: {
+              ...(prev[fileName] || {}),
+              [columnName]: 'none',
+            },
+          }));
+        }
       }
     } else {
       // Non-datetime dtype change
@@ -511,7 +642,7 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
   };
 
 
-  const getDtypeOptions = (currentDtype: string) => {
+  const getDtypeOptions = (currentDtype: string, suggestedTypes?: string[]) => {
     const baseOptions = [
       { value: 'object', label: 'Object' },
       { value: 'int64', label: 'Integer' },
@@ -520,15 +651,71 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
       { value: 'bool', label: 'Boolean' },
     ];
     
-    // Add current dtype if it's not already in the list
-    const currentDtypeExists = baseOptions.some(opt => opt.value === currentDtype);
-    if (!currentDtypeExists && currentDtype) {
-      // Format the label nicely
-      const label = currentDtype;
-      return [{ value: currentDtype, label }, ...baseOptions];
+    // Create a map for quick lookup
+    const optionMap = new Map(baseOptions.map(opt => [opt.value, opt]));
+    
+    // Normalize datetime64 variants to 'datetime64' for matching
+    const normalizeDtype = (dtype: string): string => {
+      const lower = dtype.toLowerCase();
+      if (lower.includes('datetime64') || lower.includes('datetime')) {
+        return 'datetime64';
+      }
+      return lower;
+    };
+    
+    // Build suggested options first (if provided)
+    // Filter out datetime64 variants from suggested types - they should only appear as 'datetime64'
+    const suggestedOptions: Array<{ value: string; label: string; isSuggested: boolean }> = [];
+    if (suggestedTypes && suggestedTypes.length > 0) {
+      suggestedTypes.forEach(dtype => {
+        // Skip datetime64 variants - they should only appear as 'datetime64'
+        if (dtype && (dtype.toLowerCase().includes('datetime64') || dtype.toLowerCase().includes('datetime'))) {
+          // Map datetime variants to 'datetime64'
+          if (optionMap.has('datetime64')) {
+            suggestedOptions.push({ ...optionMap.get('datetime64')!, isSuggested: true });
+          }
+        } else {
+          const normalizedDtype = normalizeDtype(dtype);
+          if (optionMap.has(normalizedDtype)) {
+            suggestedOptions.push({ ...optionMap.get(normalizedDtype)!, isSuggested: true });
+          } else {
+            // Only add non-datetime types that aren't in base options
+            suggestedOptions.push({ value: dtype, label: dtype, isSuggested: true });
+          }
+        }
+      });
     }
     
-    return baseOptions;
+    // Remove duplicates from suggestedOptions (in case datetime64 appears multiple times)
+    const seenValues = new Set<string>();
+    const uniqueSuggestedOptions = suggestedOptions.filter(opt => {
+      const normalized = normalizeDtype(opt.value);
+      if (seenValues.has(normalized)) {
+        return false;
+      }
+      seenValues.add(normalized);
+      return true;
+    });
+    
+    // Add remaining base options (excluding already suggested ones)
+    const suggestedValues = new Set(uniqueSuggestedOptions.map(opt => normalizeDtype(opt.value)));
+    const remainingOptions: Array<{ value: string; label: string; isSuggested: boolean }> = baseOptions
+      .filter(opt => !suggestedValues.has(normalizeDtype(opt.value)))
+      .map(opt => ({ ...opt, isSuggested: false }));
+    
+    // Normalize currentDtype - if it's a datetime variant, map it to 'datetime64'
+    const normalizedCurrentDtype = normalizeDtype(currentDtype);
+    const currentDtypeExists = uniqueSuggestedOptions.some(opt => normalizeDtype(opt.value) === normalizedCurrentDtype) ||
+                               remainingOptions.some(opt => normalizeDtype(opt.value) === normalizedCurrentDtype);
+    
+    // Don't add datetime64 variants to the dropdown - they should only appear as 'datetime64'
+    // Only add non-datetime types that aren't already in the list
+    if (!currentDtypeExists && currentDtype && !currentDtype.toLowerCase().includes('datetime')) {
+      remainingOptions.unshift({ value: currentDtype, label: currentDtype, isSuggested: false });
+    }
+    
+    // Combine: suggested first, then remaining
+    return [...uniqueSuggestedOptions, ...remainingOptions];
   };
 
   const getMissingValueOptions = (dtype: string) => {
@@ -601,7 +788,9 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                         <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                       ))}
                       <div className="text-left flex-1 min-w-0">
-                        <p className="font-medium text-sm text-gray-900 truncate">{file.name}</p>
+                        <p className="font-medium text-sm text-gray-900">
+                          <TruncatedFileName fileName={file.name} />
+                        </p>
                         {metadata && (
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <p className="text-xs text-gray-500">
@@ -744,7 +933,7 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                                  const hasMissingValues = column.missing_count > 0;
 
                                  return (
-                                   <tr key={idx}>
+                                   <tr key={idx} style={{ minHeight: currentDtype === 'datetime64' ? 'auto' : 'auto' }}>
                                      {/* Column Name */}
                                      <td className="px-2 py-1.5">
                                        <div>
@@ -758,112 +947,166 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
 
                                      {/* Current Type */}
                                      <td className="px-2 py-1.5">
-                                       <Badge className={getDtypeBadgeColor(column.dtype) + " text-xs px-2 py-0.5"}>
-                                         {column.dtype}
-                                       </Badge>
+                                       <div className="flex items-center gap-1 flex-wrap">
+                                         <Badge className={getDtypeBadgeColor(column.original_dtype || column.dtype) + " text-xs px-2 py-0.5"}>
+                                           {column.original_dtype || column.dtype}
+                                         </Badge>
+                                         {column.modified_dtype && column.modified_dtype !== column.original_dtype && (
+                                           <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 text-xs px-1.5 py-0.5" title={`Modified to: ${column.modified_dtype}`}>
+                                             Modified
+                                           </Badge>
+                                         )}
+                                       </div>
                                      </td>
 
                                      {/* Change Type */}
-                                     <td className="px-2 py-1.5">
-                                       <div className="space-y-1">
-                                         <Select
-                                           value={currentDtype}
-                                           onValueChange={(val) => handleDtypeChange(file.name, column.name, val)}
+                                     <td className="px-2 py-1.5 align-top">
+                                       <div className="space-y-0.5">
+                                         <div 
+                                           className="relative inline-block w-full" 
+                                           onClick={(e) => e.stopPropagation()}
                                          >
-                                           <SelectTrigger className="w-full h-7 text-xs">
-                                             <SelectValue />
-                                           </SelectTrigger>
-                                           <SelectContent>
-                                             {getDtypeOptions(column.dtype).map(opt => (
-                                               <SelectItem key={opt.value} value={opt.value}>
-                                                 {opt.label}
-                                               </SelectItem>
-                                             ))}
-                                           </SelectContent>
-                                         </Select>
-                                         
-                                         {/* DateTime Format Dropdown - Only show for datetime64 */}
-                                         {currentDtype === 'datetime64' && (
-                                           <div className="space-y-1">
-                                             {(() => {
-                                               const formatKey = `${file.name}-${column.name}`;
-                                               const isDetecting = formatDetectionStatus[formatKey]?.detecting;
-                                               const detectionFailed = formatDetectionStatus[formatKey]?.failed;
-                                               const currentFormat = datetimeFormats[file.name]?.[column.name];
-                                               
-                                               const formatOptions = [
-                                                 { value: '%Y-%m-%d', label: '%Y-%m-%d (2024-12-31)' },
-                                                 { value: '%d/%m/%Y', label: '%d/%m/%Y (31/12/2024)' },
-                                                 { value: '%m/%d/%Y', label: '%m/%d/%Y (12/31/2024)' },
-                                                 { value: '%d-%m-%Y', label: '%d-%m-%Y (31-12-2024)' },
-                                                 { value: '%m-%d-%Y', label: '%m-%d-%Y (12-31-2024)' },
-                                                 { value: '%Y/%m/%d', label: '%Y/%m/%d (2024/12/31)' },
-                                                 { value: '%d/%m/%y', label: '%d/%m/%y (31/12/24)' },
-                                                 { value: '%m/%d/%y', label: '%m/%d/%y (12/31/24)' },
-                                                 { value: '%Y-%m-%d %H:%M:%S', label: '%Y-%m-%d %H:%M:%S (2024-12-31 23:59:59)' },
-                                                 { value: '%d/%m/%Y %H:%M:%S', label: '%d/%m/%Y %H:%M:%S (31/12/2024 23:59:59)' },
-                                                 { value: '%m/%d/%Y %H:%M:%S', label: '%m/%d/%Y %H:%M:%S (12/31/2024 23:59:59)' },
-                                                 { value: '%Y-%m-%dT%H:%M:%S', label: '%Y-%m-%dT%H:%M:%S (ISO 8601)' },
-                                               ];
-                                               
-                                               return (
-                                                 <div className="space-y-1">
-                                                   {/* Show sample values */}
-                                                   {/* {column.sample_values && column.sample_values.length > 0 && (
-                                                     <div className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">
-                                                       <span className="font-medium">Sample: </span>
-                                                       <span className="font-mono">{column.sample_values.slice(0, 2).join(', ')}</span>
-                                                     </div>
-                                                   )} */}
-                                                   
-                                                   {isDetecting && (
-                                                     <div className="flex items-center space-x-1 text-xs text-blue-600">
-                                                       <RefreshCw className="w-3 h-3 animate-spin" />
-                                                       <span>Detecting format...</span>
-                                                     </div>
-                                                   )}
-                                                   
-                                                   <div className="flex items-center space-x-1">
-                                                     <Select
-                                                       value={currentFormat || ''}
-                                                       onValueChange={(val) => handleDatetimeFormatChange(file.name, column.name, val)}
-                                                       disabled={currentFormat && !detectionFailed}
-                                                       className="flex-1"
-                                                     >
-                                                       <SelectTrigger className="w-full h-6 text-xs">
-                                                         <SelectValue placeholder="Select format" />
-                                                       </SelectTrigger>
-                                                       <SelectContent>
-                                                         {formatOptions.map(opt => (
-                                                           <SelectItem key={opt.value} value={opt.value}>
-                                                             {opt.label}
-                                                           </SelectItem>
-                                                         ))}
-                                                       </SelectContent>
-                                                     </Select>
-                                                     {currentFormat && !isDetecting && (
-                                                       <button
-                                                         type="button"
-                                                         onClick={() => handleDatetimeFormatChange(file.name, column.name, '')}
-                                                         className="flex-shrink-0 p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700 transition-colors"
-                                                         title="Clear format"
-                                                       >
-                                                         <X className="w-3 h-3" />
-                                                       </button>
-                                                     )}
-                                                   </div>
-                                                   
-                                                   {/* {currentFormat && !isDetecting && (
-                                                     <div className="text-xs text-green-600 flex items-center space-x-1">
-                                                       <Check className="w-3 h-3" />
-                                                       <span>Format: {currentFormat}</span>
-                                                     </div>
-                                                   )} */}
-                                                 </div>
-                                               );
+                                           <select
+                                             value={(() => {
+                                               const dtype = typeof currentDtype === 'string' ? currentDtype : (typeof currentDtype === 'object' && currentDtype !== null ? currentDtype.dtype : column.dtype);
+                                               // Normalize datetime64 variants to 'datetime64' for display
+                                               if (dtype && (dtype.toLowerCase().includes('datetime64') || dtype.toLowerCase().includes('datetime'))) {
+                                                 return 'datetime64';
+                                               }
+                                               return dtype;
                                              })()}
-                                           </div>
-                                         )}
+                                             onChange={(e) => {
+                                               e.stopPropagation();
+                                               const newDtype = e.target.value;
+                                               handleDtypeChange(file.name, column.name, newDtype);
+                                               // Clear format if changing away from datetime64
+                                               if (newDtype !== 'datetime64') {
+                                                 handleDatetimeFormatChange(file.name, column.name, '');
+                                               }
+                                             }}
+                                             onClick={(e) => e.stopPropagation()}
+                                             onMouseDown={(e) => e.stopPropagation()}
+                                             className="w-full h-7 px-2 py-0 text-xs rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900"
+                                             style={{
+                                               backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                               backgroundSize: '1em 1em',
+                                               backgroundPosition: 'right 0.5rem center',
+                                               backgroundRepeat: 'no-repeat',
+                                               paddingRight: '2rem'
+                                             }}
+                                           >
+                                             {getDtypeOptions(column.dtype, column.suggested_types).map((opt) => (
+                                               <option key={opt.value} value={opt.value}>
+                                                 {opt.isSuggested ? `✨ ${opt.label}` : opt.label}
+                                               </option>
+                                             ))}
+                                           </select>
+                                         </div>
+                                         
+                                         {/* DateTime Format Dropdown - Only show when datetime64 is explicitly selected */}
+                                         {(() => {
+                                           const rawDtype = typeof currentDtype === 'string' ? currentDtype : (typeof currentDtype === 'object' && currentDtype !== null ? currentDtype.dtype : column.dtype);
+                                           // Normalize datetime64 variants to 'datetime64' for checking
+                                           const selectedDtype = rawDtype && (rawDtype.toLowerCase().includes('datetime64') || rawDtype.toLowerCase().includes('datetime')) 
+                                             ? 'datetime64' 
+                                             : rawDtype;
+                                           const isDateTime = selectedDtype === 'datetime64';
+                                           
+                                           if (!isDateTime) return null;
+                                           
+                                           const formatKey = `${file.name}-${column.name}`;
+                                           const isDetecting = formatDetectionStatus[formatKey]?.detecting;
+                                           // Get format from state or from column metadata
+                                           const currentFormat = datetimeFormats[file.name]?.[column.name] || 
+                                                                 (column as ColumnInfo).datetime_format || 
+                                                                 '';
+                                           // Get detection method from state or from column metadata
+                                           const detectionMethod = formatDetectionMethods[file.name]?.[column.name] || 
+                                                                   (column as ColumnInfo).detection_method || 
+                                                                   (currentFormat ? 'manual' : 'none');
+                                           
+                                           return (
+                                             <div className="space-y-0.5 mt-0.5">
+                                               {isDetecting && (
+                                                 <div className="flex items-center space-x-1 text-[9px] text-blue-600">
+                                                   <RefreshCw className="w-2 h-2 animate-spin" />
+                                                   <span>Detecting...</span>
+                                                 </div>
+                                               )}
+                                               <div className="flex items-center space-x-0.5">
+                                                 <select
+                                                   value={currentFormat || ''}
+                                                   onChange={(e) => {
+                                                     e.stopPropagation();
+                                                     handleDatetimeFormatChange(file.name, column.name, e.target.value);
+                                                   }}
+                                                   onClick={(e) => e.stopPropagation()}
+                                                   onMouseDown={(e) => e.stopPropagation()}
+                                                   disabled={isDetecting}
+                                                   className="flex-1 h-4 px-0.5 py-0 text-[9px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                                   style={{
+                                                     backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                                     backgroundSize: '0.75em 0.75em',
+                                                     backgroundPosition: 'right 0.15rem center',
+                                                     backgroundRepeat: 'no-repeat',
+                                                     paddingRight: '1rem'
+                                                   }}
+                                                 >
+                                                   <option value="">Select format...</option>
+                                                   {DATETIME_FORMAT_OPTIONS.map(format => (
+                                                     <option key={format.value} value={format.value}>
+                                                       {formatLabelWithExample(format)}
+                                                     </option>
+                                                   ))}
+                                                 </select>
+                                                 {currentFormat && !isDetecting && (
+                                                   <div 
+                                                     className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                                       detectionMethod === 'manual' ? 'bg-green-500' : 
+                                                       detectionMethod === 'automatic' ? 'bg-red-500' : 
+                                                       'bg-gray-400'
+                                                     }`}
+                                                     title={
+                                                       detectionMethod === 'manual' ? 'Format detected via manual logic' :
+                                                       detectionMethod === 'automatic' ? 'Format detected automatically' :
+                                                       'Format not detected'
+                                                     }
+                                                   />
+                                                 )}
+                                                 {currentFormat && !isDetecting && (
+                                                   <button
+                                                     type="button"
+                                                     onClick={(e) => {
+                                                       e.stopPropagation();
+                                                       handleDatetimeFormatChange(file.name, column.name, '');
+                                                     }}
+                                                     className="flex-shrink-0 p-0.5 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700"
+                                                     title="Clear format"
+                                                   >
+                                                     <X className="w-2 h-2" />
+                                                   </button>
+                                                 )}
+                                               </div>
+                                               {currentFormat && !isDetecting && (
+                                                 <div className="text-[8px] text-gray-500 truncate flex items-center gap-1">
+                                                   <span>{currentFormat}</span>
+                                                   <div 
+                                                     className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                                       detectionMethod === 'manual' ? 'bg-green-500' : 
+                                                       detectionMethod === 'automatic' ? 'bg-red-500' : 
+                                                       'bg-gray-400'
+                                                     }`}
+                                                     title={
+                                                       detectionMethod === 'manual' ? 'Format detected via manual logic' :
+                                                       detectionMethod === 'automatic' ? 'Format detected automatically' :
+                                                       'Format not detected'
+                                                     }
+                                                   />
+                                                 </div>
+                                               )}
+                                             </div>
+                                           );
+                                         })()}
                                        </div>
                                      </td>
 

@@ -4107,21 +4107,44 @@ async def get_file_metadata(request: Request):
             missing_percentage = (missing_count / total_rows * 100) if total_rows > 0 else 0
             
             # Get sample values (non-null, converted to Python native types for JSON serialization)
-            sample_values = col_data.dropna().head(5).tolist()
-            # Convert numpy/pandas types to Python native types for JSON serialization
-            sample_values = [
-                float(val) if pd.api.types.is_numeric_dtype(col_data) and pd.notna(val) else
-                str(val) if pd.notna(val) else None
-                for val in sample_values
-            ]
+            sample_data = col_data.dropna().head(5)
+            
+            # Check if this is a datetime column - preserve datetime format as string
+            col_dtype_str = str(col_data.dtype)
+            is_datetime_col = col_dtype_str.startswith('datetime64') or col_dtype_str == 'datetime64[ns]'
+            
+            if is_datetime_col:
+                # For datetime columns, format as string BEFORE converting to list
+                # This prevents conversion to integer timestamps
+                sample_values = []
+                for val in sample_data:
+                    if pd.notna(val):
+                        if isinstance(val, pd.Timestamp):
+                            # Format as ISO string with space separator (matches U2 display)
+                            sample_values.append(val.strftime('%Y-%m-%d %H:%M:%S'))
+                        else:
+                            sample_values.append(str(val))
+                    else:
+                        sample_values.append(None)
+            else:
+                # For non-datetime columns, convert normally
+                sample_values = sample_data.tolist()
+                # Convert numpy/pandas types to Python native types for JSON serialization
+                sample_values = [
+                    float(val) if pd.api.types.is_numeric_dtype(col_data) and pd.notna(val) else
+                    str(val) if pd.notna(val) else None
+                    for val in sample_values
+                ]
             
             # Get current dtype (modified if exists, otherwise original from DataFrame)
             current_dtype = str(col_data.dtype)
             
+            # Always preserve original dtype: use DataFrame dtype as fallback if not in MongoDB
+            original_dtype = str(col_data.dtype)
+            modified_dtype = None
+            
             # Try to get saved dtypes from MongoDB for this file
             saved_dtypes = get_dtypes_from_mongo(file_path)
-            original_dtype = None
-            modified_dtype = None
             if saved_dtypes:
                 original_dtypes = saved_dtypes.get("original_dtypes", {})
                 modified_dtypes = saved_dtypes.get("modified_dtypes", {})
@@ -4132,15 +4155,129 @@ async def get_file_metadata(request: Request):
                     # Use modified dtype as current if it exists
                     current_dtype = modified_dtype
             
-            columns_info.append({
+            # Check if this is a datetime column and detect format/detection method
+            datetime_format = None
+            detection_method = None
+            is_datetime = (
+                current_dtype.startswith('datetime64') or 
+                current_dtype == 'datetime64[ns]' or
+                (original_dtype and (original_dtype.startswith('datetime64') or original_dtype == 'datetime64[ns]'))
+            )
+            
+            if is_datetime:
+                # Check if column was auto-detected as datetime by Pandas/Polars
+                original_is_datetime = (
+                    original_dtype and 
+                    (original_dtype.startswith('datetime64') or original_dtype == 'datetime64[ns]')
+                ) if original_dtype else (
+                    str(col_data.dtype).startswith('datetime64') or str(col_data.dtype) == 'datetime64[ns]'
+                )
+                
+                if original_is_datetime:
+                    # Column was auto-detected by Pandas/Polars - automatic detection
+                    detection_method = "automatic"
+                    # Try to detect format using manual detection endpoint logic
+                    try:
+                        # Use the same logic as detect_datetime_format endpoint
+                        all_values = col_data.dropna().astype(str).tolist()
+                        if len(all_values) > 0:
+                            # Try manual format detection
+                            normalized_all = [str(val).replace('/', '-').replace('.', '-') for val in all_values]
+                            # Test a few common formats
+                            common_formats = ['%Y-%m-%d', '%d-%m-%Y', '%m-%d-%Y', '%Y/%m/%d', '%d/%m/%Y', '%m/%d/%Y']
+                            for fmt in common_formats:
+                                try:
+                                    success_count = sum(1 for val in normalized_all[:10] if pd.to_datetime(val, format=fmt.replace('/', '-'), errors='coerce') is not pd.NaT)
+                                    if success_count >= min(10, len(normalized_all)):
+                                        datetime_format = fmt
+                                        detection_method = "manual"  # Format was detected via manual testing
+                                        break
+                                except:
+                                    continue
+                    except Exception:
+                        # If format detection fails, keep automatic detection method
+                        pass
+                else:
+                    # Column was manually set to datetime - check if format was detected
+                    detection_method = "manual"
+                    # Format would be set via detect-datetime-format endpoint
+            
+            # Analyze sample values to suggest better types
+            suggested_types = []
+            dtype_lower = current_dtype.lower()
+            
+            # Analyze sample values for type suggestions
+            if sample_values:
+                # Check if values look numeric but column is object/string
+                looks_numeric = all(
+                    isinstance(val, (int, float)) or 
+                    (isinstance(val, str) and val.strip() != '' and val.replace('.', '', 1).replace('-', '', 1).isdigit())
+                    for val in sample_values[:5] if val is not None
+                )
+                
+                # Check if values look like integers
+                looks_integer = looks_numeric and all(
+                    isinstance(val, int) or 
+                    (isinstance(val, float) and val.is_integer()) or
+                    (isinstance(val, str) and val.strip() != '' and val.replace('-', '', 1).isdigit())
+                    for val in sample_values[:5] if val is not None
+                )
+                
+                # Check if values look like dates/datetimes
+                looks_datetime = any(
+                    isinstance(val, str) and (
+                        '/' in val and any(c.isdigit() for c in val) or
+                        '-' in val and any(c.isdigit() for c in val) or
+                        len(val) >= 8 and any(c.isdigit() for c in val[:8])
+                    )
+                    for val in sample_values[:5] if val is not None
+                )
+                
+                # Check if values look boolean
+                looks_boolean = all(
+                    isinstance(val, bool) or 
+                    (isinstance(val, str) and val.lower() in ['true', 'false', 'yes', 'no', '1', '0', 't', 'f'])
+                    for val in sample_values[:5] if val is not None
+                )
+                
+                # Suggest types based on analysis
+                if dtype_lower == 'object' or dtype_lower == 'string':
+                    if looks_integer:
+                        suggested_types.append('int64')
+                    elif looks_numeric:
+                        suggested_types.append('float64')
+                    elif looks_datetime:
+                        suggested_types.append('datetime64')
+                    elif looks_boolean:
+                        suggested_types.append('bool')
+                
+                # If current type is numeric but values suggest it could be string
+                if (dtype_lower.startswith('int') or dtype_lower.startswith('float')) and not looks_numeric:
+                    suggested_types.append('object')
+            
+            # Always include common alternatives
+            common_types = ['object', 'int64', 'float64', 'datetime64', 'bool']
+            for dtype_option in common_types:
+                if dtype_option not in suggested_types and dtype_option != current_dtype.lower():
+                    suggested_types.append(dtype_option)
+            
+            column_info = {
                 "name": str(col),  # Column name (already processed/edited in guided mode for Arrow files)
                 "dtype": current_dtype,  # Current dtype (modified if exists, otherwise original)
-                "original_dtype": original_dtype,  # Original detected dtype from file
+                "original_dtype": original_dtype,  # Original detected dtype from file (always present)
                 "modified_dtype": modified_dtype,  # User-modified dtype (if exists)
+                "suggested_types": suggested_types[:5],  # Top 5 suggested types based on data analysis
                 "missing_count": missing_count,
                 "missing_percentage": round(missing_percentage, 2),
                 "sample_values": sample_values,
-            })
+            }
+            
+            # Add datetime format and detection method if this is a datetime column
+            if is_datetime:
+                column_info["datetime_format"] = datetime_format
+                column_info["detection_method"] = detection_method
+            
+            columns_info.append(column_info)
         
         return {
             "columns": columns_info,
@@ -5092,21 +5229,67 @@ async def apply_header_selection(
                 headers.append(val_str)
         
         # Now create DataFrame from data rows (skip header rows)
-        # CRITICAL: Create DataFrame from string rows and infer types properly to preserve dtypes
+        # CRITICAL: Keep all columns as strings/objects to preserve date formats
+        # Dates should remain as strings throughout U2-U3, users will set datetime type in U4
         data_rows_only = padded_data_rows[header_row + header_row_count:]
         df_data = pd.DataFrame(data_rows_only)
         
-        # Use dtype_handler to detect and apply types
-        logger.info(f"Starting type inference for {len(df_data.columns)} columns with {len(df_data)} rows")
-        detected_dtypes = detect_column_types(df_data)
+        # CRITICAL: DO NOT auto-detect datetime types - preserve dates as strings
+        # Only detect numeric types (int, float) and boolean, but keep dates as strings
+        # This prevents dates from being converted to integer timestamps in Arrow format
+        logger.info(f"Starting type inference for {len(df_data.columns)} columns with {len(df_data)} rows (dates preserved as strings)")
+        
+        # Custom type detection that skips datetime conversion
+        detected_dtypes = {}
+        for col_idx in range(len(df_data.columns)):
+            col_data = df_data.iloc[:, col_idx]
+            col_name = f"col_{col_idx}"
+            
+            # Skip if column is all empty
+            if col_data.astype(str).str.strip().eq('').all():
+                detected_dtypes[col_name] = 'object'
+                continue
+            
+            # Try to convert to numeric first (handles int and float)
+            try:
+                numeric_col = pd.to_numeric(col_data, errors='coerce')
+                non_null_count = numeric_col.notna().sum()
+                total_count = len(col_data)
+                if total_count > 0 and non_null_count >= total_count * 0.8:
+                    # Check if integers
+                    if numeric_col.dropna().apply(lambda x: x == int(x)).all():
+                        detected_dtypes[col_name] = 'Int64'
+                    else:
+                        detected_dtypes[col_name] = 'float64'
+                    continue
+            except Exception:
+                pass
+            
+            # Try to convert to boolean
+            try:
+                bool_col = col_data.astype(str).str.lower().str.strip()
+                bool_map = {'true': True, 'false': False, '1': True, '0': False, 'yes': True, 'no': False}
+                bool_col = bool_col.map(bool_map)
+                non_null_count = bool_col.notna().sum()
+                total_count = len(col_data)
+                if total_count > 0 and non_null_count >= total_count * 0.9:
+                    detected_dtypes[col_name] = 'boolean'
+                    continue
+            except Exception:
+                pass
+            
+            # Keep as object/string (including dates) - DO NOT convert to datetime
+            detected_dtypes[col_name] = 'object'
+        
+        # Apply detected dtypes (excluding datetime)
         df_data = apply_dtypes_to_dataframe(df_data, detected_dtypes)
         
         # Log final dtypes for verification
         dtype_summary = {col: str(df_data[col].dtype) for col in df_data.columns}
-        logger.info(f"Type inference complete. Final dtypes: {dtype_summary}")
+        logger.info(f"Type inference complete. Final dtypes: {dtype_summary} (dates preserved as strings)")
         
-        # df_data now has proper dtypes (int, float, datetime, boolean, or object/string)
-        # df_data already contains only data rows (header rows were excluded above)
+        # df_data now has proper dtypes (int, float, boolean, or object/string)
+        # Dates remain as strings/objects - users will set datetime type in U4
         df_processed = df_data.copy()
         
         # Ensure we have enough column names (pad if needed)
@@ -5246,8 +5429,33 @@ async def get_file_columns(
         
         for col in columns:
             # Get sample values (non-null, first 5)
-            samples = df[col].dropna().head(5).tolist()
-            sample_values.append([str(s) for s in samples])
+            col_data = df[col].dropna().head(5)
+            
+            # Check if this is a datetime column - only format datetime columns, not numeric columns
+            col_dtype = str(df[col].dtype)
+            is_datetime = col_dtype.startswith('datetime64') or col_dtype == 'datetime64[ns]'
+            
+            if is_datetime:
+                # For datetime columns, format as string BEFORE converting to list
+                # This prevents conversion to integer timestamps
+                formatted_samples = []
+                for val in col_data:
+                    if pd.notna(val):
+                        if isinstance(val, pd.Timestamp):
+                            # Format as ISO string with space separator (matches U2 display)
+                            formatted_samples.append(val.strftime('%Y-%m-%d %H:%M:%S'))
+                        else:
+                            # Only convert if it's already a datetime-like object, not numeric values
+                            # Don't try to convert integers/floats to timestamps - they might be regular numbers
+                            formatted_samples.append(str(val))
+                    else:
+                        formatted_samples.append('')
+            else:
+                # For non-datetime columns (including numeric), convert to string normally
+                # Don't try to interpret numeric values as timestamps - preserve them as numbers
+                formatted_samples = [str(s) for s in col_data.tolist()]
+            
+            sample_values.append(formatted_samples)
             
             # Rule-based column name cleaning
             cleaned = str(col).strip()
@@ -5325,13 +5533,18 @@ async def detect_datetime_format(request: Request):
         if column_name not in df.columns:
             raise HTTPException(status_code=400, detail=f"Column '{column_name}' not found")
         
+        # Check if column was already detected as datetime by Pandas/Polars (automatic detection)
+        column_dtype = str(df[column_name].dtype)
+        is_auto_detected = column_dtype.startswith('datetime64') or column_dtype == 'datetime64[ns]'
+        
         # Get non-null values from entire column
         column_data = df[column_name].dropna()
         if len(column_data) == 0:
             return {
                 "detected_format": None,
                 "can_detect": False,
-                "sample_values": []
+                "sample_values": [],
+                "detection_method": "none"
             }
         
         # Use entire column for detection (not just sample values)
@@ -5439,10 +5652,28 @@ async def detect_datetime_format(request: Request):
             except:
                 continue
         
+        # Determine detection method
+        # If format was detected via manual testing (this endpoint), it's manual
+        # If column was already datetime64 from Pandas/Polars, it was automatic
+        detection_method = "manual" if detected_format else "none"
+        if is_auto_detected and not detected_format:
+            # Column was auto-detected as datetime but format wasn't found via manual testing
+            # Try to infer format from the actual datetime values
+            try:
+                # Sample a datetime value and try to infer its format
+                sample_dt = column_data.iloc[0]
+                if pd.notna(sample_dt) and isinstance(sample_dt, pd.Timestamp):
+                    # For auto-detected datetime columns, we don't have the original format
+                    # So we mark it as automatic detection without specific format
+                    detection_method = "automatic"
+            except:
+                pass
+        
         return {
             "detected_format": detected_format,
             "can_detect": detected_format is not None,
-            "sample_values": sample_values
+            "sample_values": sample_values,
+            "detection_method": detection_method
         }
         
     except Exception as e:

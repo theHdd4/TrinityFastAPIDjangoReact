@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { AlertTriangle, Lightbulb, History, Pencil } from 'lucide-react';
+import { AlertTriangle, Lightbulb, History, Pencil, RefreshCw, X } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { UPLOAD_API } from '@/lib/api';
 import { StageLayout } from '../components/StageLayout';
 import type { ReturnTypeFromUseGuidedUploadFlow, DataTypeSelection } from '../useGuidedUploadFlow';
+import { DATETIME_FORMAT_OPTIONS, formatLabelWithExample } from '@/utils/datetimeFormats';
 
 interface U4ReviewDataTypesProps {
   flow: ReturnTypeFromUseGuidedUploadFlow;
@@ -27,6 +28,9 @@ interface ColumnTypeInfo {
   suggestedDataType?: string; // Suggested backend data type from warnings (renamed from suggestedUpdateType)
   historicalType?: string;
   historicalRole?: 'identifier' | 'measure';
+  datetimeFormat?: string; // Detected or selected datetime format
+  detectionMethod?: 'automatic' | 'manual' | 'none'; // How format was detected
+  formatDetecting?: boolean; // Whether format detection is in progress
 }
 
 // Backend data types (matches backend dtype system) - This is now the main "Data Type" column
@@ -177,6 +181,55 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
   const [error, setError] = useState<string>('');
   const loadedFileRef = useRef<string | null>(null);
   const isFetchingRef = useRef(false);
+  
+  // Format detection function
+  const detectDatetimeFormat = async (columnName: string, filePath: string) => {
+    if (!filePath) return null;
+    
+    setColumns(prev => prev.map(col => 
+      col.columnName === columnName 
+        ? { ...col, formatDetecting: true }
+        : col
+    ));
+    
+    try {
+      const response = await fetch(`${UPLOAD_API}/detect-datetime-format`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_path: filePath,
+          column_name: columnName
+        }),
+        credentials: 'include',
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.can_detect && data.detected_format) {
+          setColumns(prev => prev.map(col => 
+            col.columnName === columnName 
+              ? { 
+                  ...col, 
+                  datetimeFormat: data.detected_format,
+                  detectionMethod: data.detection_method || 'manual',
+                  formatDetecting: false 
+                }
+              : col
+          ));
+          return data.detected_format;
+        }
+      }
+    } catch (error) {
+      console.error('Error detecting datetime format:', error);
+    } finally {
+      setColumns(prev => prev.map(col => 
+        col.columnName === columnName 
+          ? { ...col, formatDetecting: false }
+          : col
+      ));
+    }
+    return null;
+  };
 
   const currentColumnEdits = currentFile ? (columnNameEdits[currentFile.name] || []) : [];
 
@@ -315,20 +368,33 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
               return val !== '' && isNaN(Number(val));
             });
 
-          if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str' || dtypeLower === 'category') && looksNumeric) {
+          // AUTO-DETECT: If object column looks like dates, automatically set to datetime
+          let autoDetectedDataType = detectedDataType;
+          if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str' || dtypeLower === 'category') && looksDate) {
+            // Automatically change dataType to datetime (not just suggest)
+            autoDetectedDataType = 'datetime';
+            suggestedDataType = 'datetime';
+            warning = 'These values look like dates. Automatically set to DateTime.';
+          } else if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str' || dtypeLower === 'category') && looksNumeric) {
             warning = 'These values look numeric. Consider converting to number.';
             suggestedDataType = looksInteger ? 'int' : 'float';
           } else if (hasNonNumericInNumeric) {
             warning = 'Some values include letters. Consider converting to text.';
             suggestedDataType = 'string';
-          } else if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str') && looksDate) {
-            warning = 'These values look like dates. Consider setting type to Date.';
-            suggestedDataType = 'date';
           }
 
+          // Extract datetime format and detection method from metadata
+          const datetimeFormat = col.datetime_format || existingSelection?.format;
+          const detectionMethod = col.detection_method;
+          
+          // If column is datetime/date (detected or auto-detected), mark it as datetime column
+          const isDatetimeColumn = (autoDetectedDataType === 'datetime' || autoDetectedDataType === 'date') ||
+                                   (detectedDataType === 'datetime' || detectedDataType === 'date') ||
+                                   (existingSelection?.updateType === 'datetime' || existingSelection?.updateType === 'date');
+          
           return {
             columnName: editedName,
-            dataType: existingSelection?.updateType || detectedDataType,
+            dataType: existingSelection?.updateType || autoDetectedDataType, // Use auto-detected type
             columnRole: (existingSelection?.columnRole as 'identifier' | 'measure') || detectedRole,
             detectedRole,
             sampleValues: col.sample_values || [],
@@ -339,6 +405,8 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
             historicalType: col.historical_type,
             historicalRole: col.historical_role,
             suggestedDataType,
+            datetimeFormat: isDatetimeColumn ? datetimeFormat : undefined,
+            detectionMethod: isDatetimeColumn ? detectionMethod : undefined,
           };
         });
 
@@ -347,13 +415,30 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
 
         setColumns(keptColumns);
         
+        // Auto-trigger format detection for datetime/date columns that don't have format yet
+        // This includes both originally detected datetime columns and auto-detected ones
+        if (currentFile?.path) {
+          keptColumns.forEach(col => {
+            const isDatetime = (col.dataType === 'datetime' || col.dataType === 'date') ||
+                              (col.suggestedDataType === 'datetime' || col.suggestedDataType === 'date');
+            if (isDatetime && !col.datetimeFormat) {
+              // Trigger format detection asynchronously for auto-detected datetime columns
+              setTimeout(() => {
+                detectDatetimeFormat(col.columnName, currentFile.path);
+              }, 100);
+            }
+          });
+        }
+        
         // 🔥 AUTO-SAVE: Save initial suggested types immediately so they're available even if user doesn't interact
+        // Use auto-detected datetime type if available
         if (currentFile && keptColumns.length > 0) {
           const initialSelections: DataTypeSelection[] = keptColumns.map(col => ({
             columnName: col.columnName,
-            updateType: col.suggestedDataType || col.dataType, // Use suggested type as source of truth
+            updateType: col.suggestedDataType || col.dataType, // Use suggested type (includes auto-detected datetime) or dataType
             format: ((col.suggestedDataType || col.dataType) === 'date' || 
-                     (col.suggestedDataType || col.dataType) === 'datetime') ? col.dtype : undefined,
+                     (col.suggestedDataType || col.dataType) === 'datetime') 
+                     ? (col.datetimeFormat || col.dtype) : undefined,
             columnRole: col.columnRole,
           }));
           
@@ -396,8 +481,14 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
     handleSave();
   };
 
-  const handleSuggestedTypeChange = (columnName: string, newType: string) => {
+  const handleSuggestedTypeChange = async (columnName: string, newType: string) => {
     console.log('🔧 handleSuggestedTypeChange called:', { columnName, newType });
+    
+    // If changing to datetime/date, trigger format detection
+    if ((newType === 'datetime' || newType === 'date') && currentFile?.path) {
+      await detectDatetimeFormat(columnName, currentFile.path);
+    }
+    
     setColumns(prev => prev.map(col => {
       if (col.columnName === columnName) {
         const newRole = classifyRoleFromDataType(newType);
@@ -407,6 +498,9 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
           suggestedDataType: newType, // Only update the suggested type
           columnRole: newRole,
           tag: 'edited_by_user' as const,
+          // Clear format if changing away from datetime/date
+          datetimeFormat: (newType === 'datetime' || newType === 'date') ? col.datetimeFormat : undefined,
+          detectionMethod: (newType === 'datetime' || newType === 'date') ? col.detectionMethod : undefined,
         };
         console.log('🔧 Updated column:', updatedCol);
         return updatedCol;
@@ -422,7 +516,8 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
           columnName: col.columnName,
           updateType: col.suggestedDataType || col.dataType,
           format: ((col.suggestedDataType || col.dataType) === 'date' || 
-                   (col.suggestedDataType || col.dataType) === 'datetime') ? col.dtype : undefined,
+                   (col.suggestedDataType || col.dataType) === 'datetime') 
+                   ? (col.datetimeFormat || col.dtype) : undefined,
           columnRole: col.columnRole,
         }));
         
@@ -541,7 +636,8 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
       columnName: col.columnName,
       updateType: col.suggestedDataType || col.dataType, // Use suggested type as source of truth
       format: ((col.suggestedDataType || col.dataType) === 'date' || 
-               (col.suggestedDataType || col.dataType) === 'datetime') ? col.dtype : undefined,
+               (col.suggestedDataType || col.dataType) === 'datetime') 
+               ? (col.datetimeFormat || col.dtype) : undefined,
       columnRole: col.columnRole,
     }));
     
@@ -738,34 +834,130 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
                         </div>
                       </td>
                       <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">
-                        <div 
-                          className="relative inline-block w-full max-w-[140px]" 
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <select
-                            value={column.suggestedDataType || column.dataType}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              const value = e.target.value;
-                              handleSuggestedTypeChange(column.columnName, value);
-                            }}
+                        <div className="space-y-0.5">
+                          <div 
+                            className="relative inline-block w-full max-w-[140px]" 
                             onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900`}
-                            style={{
-                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                              backgroundSize: '1em 1em',
-                              backgroundPosition: 'right 0.25rem center',
-                              backgroundRepeat: 'no-repeat',
-                              paddingRight: '1.5rem'
-                            }}
                           >
-                            {DATA_TYPES.map(type => (
-                              <option key={type.value} value={type.value}>
-                                {type.label}
-                              </option>
-                            ))}
-                          </select>
+                            <select
+                              value={column.suggestedDataType || column.dataType}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                const value = e.target.value;
+                                handleSuggestedTypeChange(column.columnName, value);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              className={`w-full h-5 px-1 py-0 text-[10px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900`}
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                backgroundSize: '1em 1em',
+                                backgroundPosition: 'right 0.25rem center',
+                                backgroundRepeat: 'no-repeat',
+                                paddingRight: '1.5rem'
+                              }}
+                            >
+                              {DATA_TYPES.map(type => (
+                                <option key={type.value} value={type.value}>
+                                  {type.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          
+                          {/* Format dropdown for datetime/date columns */}
+                          {((column.suggestedDataType || column.dataType) === 'datetime' || 
+                            (column.suggestedDataType || column.dataType) === 'date') && (
+                            <div className="space-y-0.5">
+                              {column.formatDetecting && (
+                                <div className="flex items-center space-x-1 text-[9px] text-blue-600">
+                                  <RefreshCw className="w-2 h-2 animate-spin" />
+                                  <span>Detecting...</span>
+                                </div>
+                              )}
+                              <div className="flex items-center space-x-0.5">
+                                <select
+                                  value={column.datetimeFormat || ''}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    const format = e.target.value;
+                                    setColumns(prev => prev.map(col => 
+                                      col.columnName === column.columnName
+                                        ? { ...col, datetimeFormat: format, detectionMethod: 'manual', tag: 'edited_by_user' as const }
+                                        : col
+                                    ));
+                                    handleSave();
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  className="flex-1 h-4 px-0.5 py-0 text-[9px] rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-[#458EE2] focus:border-[#458EE2] cursor-pointer appearance-none text-gray-900"
+                                  style={{
+                                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                    backgroundSize: '0.75em 0.75em',
+                                    backgroundPosition: 'right 0.15rem center',
+                                    backgroundRepeat: 'no-repeat',
+                                    paddingRight: '1rem'
+                                  }}
+                                >
+                                  <option value="">Select format...</option>
+                                  {DATETIME_FORMAT_OPTIONS.map(format => (
+                                    <option key={format.value} value={format.value}>
+                                      {formatLabelWithExample(format)}
+                                    </option>
+                                  ))}
+                                </select>
+                                {column.datetimeFormat && (
+                                  <div 
+                                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                      column.detectionMethod === 'manual' ? 'bg-green-500' : 
+                                      column.detectionMethod === 'automatic' ? 'bg-red-500' : 
+                                      'bg-gray-400'
+                                    }`}
+                                    title={
+                                      column.detectionMethod === 'manual' ? 'Format detected via manual logic' :
+                                      column.detectionMethod === 'automatic' ? 'Format detected automatically' :
+                                      'Format not detected'
+                                    }
+                                  />
+                                )}
+                                {column.datetimeFormat && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setColumns(prev => prev.map(col => 
+                                        col.columnName === column.columnName
+                                          ? { ...col, datetimeFormat: undefined, detectionMethod: undefined }
+                                          : col
+                                      ));
+                                      handleSave();
+                                    }}
+                                    className="flex-shrink-0 p-0.5 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700"
+                                    title="Clear format"
+                                  >
+                                    <X className="w-2 h-2" />
+                                  </button>
+                                )}
+                              </div>
+                              {column.datetimeFormat && !column.formatDetecting && (
+                                <div className="text-[8px] text-gray-500 truncate flex items-center gap-1">
+                                  <span>{column.datetimeFormat}</span>
+                                  <div 
+                                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                      column.detectionMethod === 'manual' ? 'bg-green-500' : 
+                                      column.detectionMethod === 'automatic' ? 'bg-red-500' : 
+                                      'bg-gray-400'
+                                    }`}
+                                    title={
+                                      column.detectionMethod === 'manual' ? 'Format detected via manual logic' :
+                                      column.detectionMethod === 'automatic' ? 'Format detected automatically' :
+                                      'Format not detected'
+                                    }
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="px-0.5 py-0 border border-gray-300 text-[10px] leading-tight whitespace-nowrap overflow-hidden">

@@ -26,6 +26,9 @@ interface ColumnTypeInfo {
   suggestedDataType?: string; // Suggested backend data type from warnings (renamed from suggestedUpdateType)
   historicalType?: string;
   historicalRole?: 'identifier' | 'measure';
+  datetimeFormat?: string; // Detected or selected datetime format
+  detectionMethod?: 'automatic' | 'manual' | 'none'; // How format was detected
+  formatDetecting?: boolean; // Whether format detection is in progress
 }
 
 // Backend data types (matches backend dtype system) - This is now the main "Data Type" column
@@ -176,6 +179,55 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
   const [error, setError] = useState<string>('');
   const loadedFileRef = useRef<string | null>(null);
   const isFetchingRef = useRef(false);
+  
+  // Format detection function
+  const detectDatetimeFormat = async (columnName: string, filePath: string) => {
+    if (!filePath) return null;
+    
+    setColumns(prev => prev.map(col => 
+      col.columnName === columnName 
+        ? { ...col, formatDetecting: true }
+        : col
+    ));
+    
+    try {
+      const response = await fetch(`${VALIDATE_API}/detect-datetime-format`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_path: filePath,
+          column_name: columnName
+        }),
+        credentials: 'include',
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.can_detect && data.detected_format) {
+          setColumns(prev => prev.map(col => 
+            col.columnName === columnName 
+              ? { 
+                  ...col, 
+                  datetimeFormat: data.detected_format,
+                  detectionMethod: data.detection_method || 'manual',
+                  formatDetecting: false 
+                }
+              : col
+          ));
+          return data.detected_format;
+        }
+      }
+    } catch (error) {
+      console.error('Error detecting datetime format:', error);
+    } finally {
+      setColumns(prev => prev.map(col => 
+        col.columnName === columnName 
+          ? { ...col, formatDetecting: false }
+          : col
+      ));
+    }
+    return null;
+  };
 
   const currentColumnEdits = currentFile ? (columnNameEdits[currentFile.name] || []) : [];
 
@@ -314,20 +366,33 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
               return val !== '' && isNaN(Number(val));
             });
 
-          if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str' || dtypeLower === 'category') && looksNumeric) {
+          // AUTO-DETECT: If object column looks like dates, automatically set to datetime
+          let autoDetectedDataType = detectedDataType;
+          if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str' || dtypeLower === 'category') && looksDate) {
+            // Automatically change dataType to datetime (not just suggest)
+            autoDetectedDataType = 'datetime';
+            suggestedDataType = 'datetime';
+            warning = 'These values look like dates. Automatically set to DateTime.';
+          } else if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str' || dtypeLower === 'category') && looksNumeric) {
             warning = 'These values look numeric. Consider converting to number.';
             suggestedDataType = looksInteger ? 'int' : 'float';
           } else if (hasNonNumericInNumeric) {
             warning = 'Some values include letters. Consider converting to text.';
             suggestedDataType = 'string';
-          } else if ((dtypeLower === 'object' || dtypeLower === 'string' || dtypeLower === 'str') && looksDate) {
-            warning = 'These values look like dates. Consider setting type to Date.';
-            suggestedDataType = 'date';
           }
+
+          // Extract datetime format and detection method from metadata
+          const datetimeFormat = col.datetime_format || existingSelection?.format;
+          const detectionMethod = col.detection_method;
+          
+          // If column is datetime/date (detected or auto-detected), mark it as datetime column
+          const isDatetimeColumn = (autoDetectedDataType === 'datetime' || autoDetectedDataType === 'date') ||
+                                   (detectedDataType === 'datetime' || detectedDataType === 'date') ||
+                                   (existingSelection?.updateType === 'datetime' || existingSelection?.updateType === 'date');
 
           return {
             columnName: editedName,
-            dataType: existingSelection?.updateType || detectedDataType,
+            dataType: existingSelection?.updateType || autoDetectedDataType, // Use auto-detected type
             columnRole: (existingSelection?.columnRole as 'identifier' | 'measure') || detectedRole,
             detectedRole,
             sampleValues: col.sample_values || [],
@@ -338,6 +403,8 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
             historicalType: col.historical_type,
             historicalRole: col.historical_role,
             suggestedDataType,
+            datetimeFormat: isDatetimeColumn ? datetimeFormat : undefined,
+            detectionMethod: isDatetimeColumn ? detectionMethod : undefined,
           };
         });
 
@@ -346,13 +413,30 @@ export const U4ReviewDataTypes: React.FC<U4ReviewDataTypesProps> = ({ flow, onNe
 
         setColumns(keptColumns);
         
+        // Auto-trigger format detection for datetime/date columns that don't have format yet
+        // This includes both originally detected datetime columns and auto-detected ones
+        if (currentFile?.path) {
+          keptColumns.forEach(col => {
+            const isDatetime = (col.dataType === 'datetime' || col.dataType === 'date') ||
+                              (col.suggestedDataType === 'datetime' || col.suggestedDataType === 'date');
+            if (isDatetime && !col.datetimeFormat) {
+              // Trigger format detection asynchronously for auto-detected datetime columns
+              setTimeout(() => {
+                detectDatetimeFormat(col.columnName, currentFile.path);
+              }, 100);
+            }
+          });
+        }
+        
         // 🔥 AUTO-SAVE: Save initial suggested types immediately so they're available even if user doesn't interact
+        // Use auto-detected datetime type if available
         if (currentFile && keptColumns.length > 0) {
           const initialSelections: DataTypeSelection[] = keptColumns.map(col => ({
             columnName: col.columnName,
-            updateType: col.suggestedDataType || col.dataType, // Use suggested type as source of truth
+            updateType: col.suggestedDataType || col.dataType, // Use suggested type (includes auto-detected datetime) or dataType
             format: ((col.suggestedDataType || col.dataType) === 'date' || 
-                     (col.suggestedDataType || col.dataType) === 'datetime') ? col.dtype : undefined,
+                     (col.suggestedDataType || col.dataType) === 'datetime') 
+                     ? (col.datetimeFormat || col.dtype) : undefined,
             columnRole: col.columnRole,
           }));
           

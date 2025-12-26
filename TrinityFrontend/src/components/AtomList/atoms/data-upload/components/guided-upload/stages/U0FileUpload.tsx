@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
+import { TruncatedFileName } from '@/components/common/TruncatedFileName';
 
 // Upload progress state interface
 interface UploadProgress {
@@ -945,8 +946,8 @@ export const U0FileUpload: React.FC<U0FileUploadProps> = ({ flow, onNext }) => {
                   <FileText className={`w-4 h-4 ${iconColor} mt-0.5 flex-shrink-0`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className={`text-sm font-medium truncate ${!isProcessed ? 'text-amber-900' : 'text-gray-900'}`}>
-                        {file.name}
+                      <p className={`text-sm font-medium ${!isProcessed ? 'text-amber-900' : 'text-gray-900'}`}>
+                        <TruncatedFileName fileName={file.name} />
                       </p>
                       {!isProcessed && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 whitespace-nowrap">
