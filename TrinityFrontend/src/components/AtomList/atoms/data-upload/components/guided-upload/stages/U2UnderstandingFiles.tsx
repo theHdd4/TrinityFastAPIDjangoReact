@@ -369,29 +369,127 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
       // Update flow state with processed file path
       if (result.file_path && currentFile) {
         const oldFilePath = currentFile.path;
+        const backendFilePath = result.file_path;
 
-        // Detect Excel-sheet-in-folder paths – they contain '/sheets/'
-        const isExcelFolderFile =
-          (oldFilePath && oldFilePath.includes('/sheets/')) ||
-          (result.file_path && result.file_path.includes('/sheets/'));
+        // CRITICAL: Detect files in folders - check both old path and new path from backend
+        // Files in folders have structure like: "folder_name/sheets/Sheet1.arrow" or "folder_name/file.arrow"
+        // Standard prefix is typically: "client_name/app_name/project_name" (3 parts)
+        // If path has more than 4 parts total, it's likely in a folder structure
+        const hasFolderStructure = (path: string) => {
+          if (!path) return false;
+          const parts = path.split('/').filter(p => p.length > 0);
+          // Standard prefix is 3 parts (client/app/project), so if we have more than 4 parts,
+          // there's likely a folder structure beyond the standard prefix
+          // Example: "client/app/project/folder/sheets/file.arrow" = 6 parts (has folder)
+          // Example: "client/app/project/concatenated-data/file.arrow" = 5 parts (has folder)
+          // Example: "client/app/project/file.arrow" = 4 parts (no folder)
+          return parts.length > 4;
+        };
+
+        // Extract folder structure from old path if it exists
+        const extractFolderFromPath = (path: string): string | null => {
+          if (!path) return null;
+          const parts = path.split('/').filter(p => p.length > 0);
+          // If path has more than 4 parts, extract the folder part (parts[3] onwards except the filename)
+          if (parts.length > 4) {
+            // Return folder path: parts[3] to parts[length-2] (everything except prefix and filename)
+            const folderParts = parts.slice(3, -1);
+            return folderParts.length > 0 ? folderParts.join('/') : null;
+          }
+          return null;
+        };
+
+        // Check if file is in a folder structure (either Excel sheets folder or custom folder)
+        // CRITICAL: If OLD path has folder structure, we MUST preserve it
+        const oldPathHasFolder = oldFilePath && (oldFilePath.includes('/sheets/') || hasFolderStructure(oldFilePath));
+        const backendPathHasFolder = backendFilePath && (backendFilePath.includes('/sheets/') || hasFolderStructure(backendFilePath));
+        const isExcelFolderFile = oldPathHasFolder || backendPathHasFolder;
+
+        console.log('🔍 [U2] Path preservation check:', {
+          oldFilePath,
+          backendFilePath,
+          isExcelFolderFile,
+          oldHasFolder: oldPathHasFolder,
+          backendHasFolder: backendPathHasFolder,
+          oldFolderParts: extractFolderFromPath(oldFilePath),
+          backendFolderParts: extractFolderFromPath(backendFilePath),
+        });
 
         if (isExcelFolderFile) {
-          // ✅ Existing Excel sheet in a folder: do NOT re-save via save_dataframes.
-          // Keep using the exact path so the sheet stays inside its folder.
-          const newPath = result.file_path || oldFilePath;
+          // ✅ File in folder structure: preserve the folder structure
+          // CRITICAL: Always preserve folder structure from old path if backend doesn't have it
+          let newPath = backendFilePath || oldFilePath;
+          
+          // CRITICAL FIX: If old path has folder but backend path doesn't, reconstruct it
+          if (oldPathHasFolder && oldFilePath) {
+            if (!backendPathHasFolder && backendFilePath) {
+              // Backend path doesn't have folder - reconstruct from old path
+              const oldFolder = extractFolderFromPath(oldFilePath);
+              if (oldFolder) {
+                // Reconstruct path with folder structure
+                const backendParts = backendFilePath.split('/').filter(p => p.length > 0);
+                if (backendParts.length >= 4) {
+                  // Insert folder between project and filename
+                  const prefix = backendParts.slice(0, 3).join('/'); // client/app/project
+                  const filename = backendParts[backendParts.length - 1]; // filename
+                  newPath = `${prefix}/${oldFolder}/${filename}`;
+                  console.log('🔧 [U2] Reconstructing path with folder structure:', {
+                    oldPath: oldFilePath,
+                    backendPath: backendFilePath,
+                    reconstructedPath: newPath,
+                    folder: oldFolder,
+                  });
+                }
+              }
+            } else {
+              // Backend path has folder - use it directly
+              newPath = backendFilePath;
+              console.log('✅ [U2] Backend path has folder structure, using it directly:', newPath);
+            }
+          } else if (backendPathHasFolder) {
+            // Only backend has folder - use it
+            newPath = backendFilePath;
+            console.log('✅ [U2] Only backend path has folder structure, using it:', newPath);
+          }
+          
+          // Final verification: ensure newPath has folder structure if oldPath had it
+          if (oldPathHasFolder && newPath) {
+            const newPathHasFolder = hasFolderStructure(newPath) || newPath.includes('/sheets/');
+            if (!newPathHasFolder) {
+              // Still missing folder - use old path as fallback
+              console.warn('⚠️ [U2] New path missing folder structure, using old path as fallback');
+              newPath = oldFilePath;
+            }
+          }
+          
+          console.log('✅ [U2] Preserving folder structure, updating path:', {
+            fileName: currentFile.name,
+            oldPath: oldFilePath,
+            backendPath: backendFilePath,
+            finalPath: newPath,
+            oldHasFolder: oldPathHasFolder,
+            backendHasFolder: backendPathHasFolder,
+            finalHasFolder: hasFolderStructure(newPath) || newPath.includes('/sheets/'),
+          });
           updateUploadedFilePath(currentFile.name, newPath);
         } else {
-          // Regular files: save processed file to Saved DataFrames as before
+          // Regular files (not in folders): save processed file to Saved DataFrames
+          console.log('📁 [U2] Regular file (not in folder), saving to Saved DataFrames:', {
+            fileName: currentFile.name,
+            filePath: backendFilePath,
+          });
           const savedPath = await saveFileToSavedDataFrames(
-            result.file_path,
+            backendFilePath,
             currentFile.name,
             oldFilePath
           );
           
           if (savedPath) {
+            console.log('✅ [U2] File saved to Saved DataFrames:', savedPath);
             updateUploadedFilePath(currentFile.name, savedPath);
           } else {
-            updateUploadedFilePath(currentFile.name, result.file_path);
+            console.warn('⚠️ [U2] Failed to save to Saved DataFrames, using backend path:', backendFilePath);
+            updateUploadedFilePath(currentFile.name, backendFilePath);
             toast({
               title: 'Warning',
               description: 'File processed but may not be visible in Saved DataFrames panel.',
@@ -405,6 +503,17 @@ export const U2UnderstandingFiles: React.FC<U2UnderstandingFilesProps> = ({
           headerRowIndex: relativeHeaderIndex,
           headerRowCount: finalHeaderRowCount,
           noHeader: false,
+        });
+        
+        // CRITICAL: Verify path was updated correctly before moving to next stage
+        // Wait a brief moment to ensure state update propagates
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Log the final path that will be used in next stage
+        console.log('✅ [U2] Path update complete, moving to U3. Final path:', {
+          fileName: currentFile.name,
+          finalPath: result.file_path,
+          isExcelFolderFile,
         });
       }
       
