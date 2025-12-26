@@ -49,6 +49,7 @@ import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataValidateAtom from '@/components/AtomList/atoms/data-validate/DataValidateAtom';
 import DataUploadAtom from '@/components/AtomList/atoms/data-upload/DataUploadAtom';
 import { GuidedUploadFlowInline } from '@/components/AtomList/atoms/data-upload/components/guided-upload/GuidedUploadFlowInline';
+import { MetricGuidedFlowInline } from '@/components/LaboratoryMode/components/SettingsPanel/metricstabs/metricguildeflow/MetricGuidedFlowInline';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
@@ -4305,6 +4306,13 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     });
 
     if (card) {
+      // Check if this is a metric guided flow card and close it if so
+      if (card.isMetricGuidedFlowCard) {
+        const store = useLaboratoryStore.getState();
+        store.closeMetricGuidedFlow();
+        console.log('[CanvasArea] Metric guided flow card deleted, closing metric guided flow');
+      }
+      
       // Track card deletion for cross-collection sync
       if (card.moleculeId) {
         // If card belongs to a molecule, track all atoms in this card for deletion
@@ -5664,7 +5672,22 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                                         </div>
 
                           <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
-                                          {card.atoms.length === 0 ? (
+                                          {card.isMetricGuidedFlowCard ? (
+                                            <div className="flex-1 flex flex-col p-4">
+                                              <MetricGuidedFlowInline
+                                                onComplete={(result) => {
+                                                  // Handle completion - the flow will close itself via onClose
+                                                  console.log('[CanvasArea] Metric guided flow completed', result);
+                                                }}
+                                                onClose={() => {
+                                                  // Close the metric guided flow card
+                                                  const store = useLaboratoryStore.getState();
+                                                  store.closeMetricGuidedFlow();
+                                                }}
+                                                contextAtomId={useLaboratoryStore.getState().metricsInputs.contextAtomId}
+                                              />
+                                            </div>
+                                          ) : card.atoms.length === 0 ? (
                                             <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                                               <AtomSuggestion
                                                 cardId={card.id}
@@ -5977,7 +6000,22 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                         </div>
 
                       <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
-                          {card.atoms.length === 0 ? (
+                          {card.isMetricGuidedFlowCard ? (
+                            <div className="flex-1 flex flex-col p-4">
+                              <MetricGuidedFlowInline
+                                onComplete={(result) => {
+                                  // Handle completion - the flow will close itself via onClose
+                                  console.log('[CanvasArea] Metric guided flow completed', result);
+                                }}
+                                onClose={() => {
+                                  // Close the metric guided flow card
+                                  const store = useLaboratoryStore.getState();
+                                  store.closeMetricGuidedFlow();
+                                }}
+                                contextAtomId={useLaboratoryStore.getState().metricsInputs.contextAtomId}
+                              />
+                            </div>
+                          ) : card.atoms.length === 0 ? (
                             <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                               <AtomSuggestion
                                 cardId={card.id}
@@ -6515,7 +6553,22 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
                     {/* Card Content */}
             <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
-                      {card.atoms.length === 0 ? (
+                      {card.isMetricGuidedFlowCard ? (
+                        <div className="flex-1 flex flex-col p-4">
+                          <MetricGuidedFlowInline
+                            onComplete={(result) => {
+                              // Handle completion - the flow will close itself via onClose
+                              console.log('[CanvasArea] Metric guided flow completed', result);
+                            }}
+                            onClose={() => {
+                              // Close the metric guided flow card
+                              const store = useLaboratoryStore.getState();
+                              store.closeMetricGuidedFlow();
+                            }}
+                            contextAtomId={useLaboratoryStore.getState().metricsInputs.contextAtomId}
+                          />
+                        </div>
+                      ) : card.atoms.length === 0 ? (
                         <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                           <AtomSuggestion
                             cardId={card.id}

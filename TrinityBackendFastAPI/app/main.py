@@ -1,10 +1,12 @@
 import logging
 import os
 import socket
+import traceback
 from typing import Iterable, List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.router import api_router, text_router
 from DataStorageRetrieval.arrow_client import load_env_from_redis
@@ -157,6 +159,41 @@ app.add_middleware(
     allow_headers=["*"],
     allow_origin_regex=allowed_origin_regex,
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global exception handler that logs unhandled exceptions and returns 
+    CORS-friendly error responses with proper headers.
+    """
+    error_logger = logging.getLogger("uvicorn.error")
+    error_logger.error(
+        "Unhandled exception on %s %s: %s\n%s",
+        request.method,
+        request.url.path,
+        str(exc),
+        traceback.format_exc(),
+    )
+    
+    # Get origin from request headers for CORS
+    origin = request.headers.get("origin", "")
+    
+    response = JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"Internal server error: {str(exc)}",
+            "path": str(request.url.path),
+        },
+    )
+    
+    # Add CORS headers to error response
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
+
 
 app.include_router(api_router, prefix="/api")
 # Include the text router under /api/text
